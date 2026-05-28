@@ -14,7 +14,10 @@
     "jsx": "preserve",
     "baseUrl": ".",
     "paths": {
+      "@/*": ["apps/web/src/*"],
+      "@production-manager/domain": ["packages/domain/src/index.ts"],
       "@production-manager/domain/*": ["packages/domain/src/*"],
+      "@production-manager/db": ["packages/db/src/index.ts"],
       "@production-manager/db/*": ["packages/db/src/*"],
       "@production-manager/ui/*": ["packages/ui/src/*"],
       "@production-manager/integrations/*": ["packages/integrations/src/*"]

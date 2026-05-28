@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export default function HomePage() {
   return (
     <main
@@ -5,7 +7,8 @@ export default function HomePage() {
         minHeight: "100vh",
         display: "grid",
         placeItems: "center",
-        padding: "40px"
+        padding: "40px",
+        background: "#f6f8fb"
       }}
     >
       <div
@@ -19,74 +22,26 @@ export default function HomePage() {
           boxShadow: "0 10px 30px rgba(0,0,0,0.04)"
         }}
       >
-        <p
-          style={{
-            margin: 0,
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: "0.08em",
-            textTransform: "uppercase",
-            color: "#4f46e5"
-          }}
-        >
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>
           Production Manager
         </p>
 
-        <h1
-          style={{
-            marginTop: 12,
-            marginBottom: 12,
-            fontSize: 40,
-            lineHeight: 1.1
-          }}
-        >
+        <h1 style={{ marginTop: 12, marginBottom: 12, fontSize: 40, lineHeight: 1.1 }}>
           Fresh rebuild, clean architecture, multi-tenant from day one.
         </h1>
 
-        <p
-          style={{
-            margin: 0,
-            fontSize: 18,
-            lineHeight: 1.6,
-            color: "#475467",
-            maxWidth: 760
-          }}
-        >
-          This codebase is being rebuilt around Next.js, Postgres, Supabase, and
-          Cloud Run with a server-first architecture for quoting, configurators,
-          proofs, purchasing, stock, jobs, suppliers, users, and MYOB
-          integration.
+        <p style={{ margin: 0, fontSize: 18, lineHeight: 1.6, color: "#475467", maxWidth: 760 }}>
+          The tenant-aware app shell is now live with bootstrap, company settings, users, and active tenant switching.
         </p>
 
-        <div
-          style={{
-            marginTop: 24,
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: 16
-          }}
-        >
-          {[
-            "Auth + tenancy",
-            "Configurator engine",
-            "Quote snapshots",
-            "Proof approvals",
-            "Purchasing + stock",
-            "MYOB sync"
-          ].map((item) => (
-            <div
-              key={item}
-              style={{
-                border: "1px solid #e5e7eb",
-                borderRadius: 16,
-                padding: 16,
-                background: "#fafafa",
-                fontWeight: 600
-              }}
-            >
-              {item}
-            </div>
-          ))}
+        <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
+          <Link href="/sign-in" style={{ textDecoration: "none", padding: "12px 16px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 600 }}>
+            Go to sign in
+          </Link>
+
+          <Link href="/dashboard" style={{ textDecoration: "none", padding: "12px 16px", borderRadius: 12, background: "#fff", color: "#111827", fontWeight: 600, border: "1px solid #d0d5dd" }}>
+            Open dashboard
+          </Link>
         </div>
       </div>
     </main>
