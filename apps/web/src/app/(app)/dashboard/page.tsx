@@ -19,6 +19,20 @@ function cardStyle() {
   } as const;
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+}
+
 export default async function DashboardPage() {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -47,7 +61,7 @@ export default async function DashboardPage() {
     { label: "Products", value: String(products.length), note: "Tenant product records" },
     { label: "Configurators", value: String(configurators.length), note: "Template definitions" },
     { label: "MYOB", value: myobConnection?.status ?? "disconnected", note: myobConnection?.companyName ?? "No company selected yet" },
-    { label: "Token", value: myobToken ? "stored" : "missing", note: myobToken?.expiresAt ?? "No OAuth token stored yet" },
+    { label: "Token", value: myobToken ? "stored" : "missing", note: formatDateTime(myobToken?.expiresAt) ?? "No OAuth token stored yet" },
     { label: "Mappings", value: String(mappings.length), note: "Local ↔ MYOB IDs" },
     { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" }
   ];

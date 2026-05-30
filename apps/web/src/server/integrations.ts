@@ -77,6 +77,13 @@ function parseJsonObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function toIsoOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return String(value);
+}
+
 export async function getMyobConnectionByTenantId(
   tenantId: string
 ): Promise<MyobConnectionRecord | null> {
@@ -101,7 +108,18 @@ export async function getMyobConnectionByTenantId(
     [tenantId]
   );
 
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+
+  return row
+    ? {
+        ...row,
+        connectedAt: toIsoOrNull(row.connectedAt),
+        disconnectedAt: toIsoOrNull(row.disconnectedAt),
+        lastSuccessfulSyncAt: toIsoOrNull(row.lastSuccessfulSyncAt),
+        createdAt: toIsoOrNull(row.createdAt) ?? "",
+        updatedAt: toIsoOrNull(row.updatedAt) ?? ""
+      }
+    : null;
 }
 
 export async function upsertMyobConnectionByTenantId(
@@ -188,7 +206,16 @@ export async function getMyobOauthTokenByTenantId(
     [tenantId]
   );
 
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+
+  return row
+    ? {
+        ...row,
+        expiresAt: toIsoOrNull(row.expiresAt),
+        createdAt: toIsoOrNull(row.createdAt) ?? "",
+        updatedAt: toIsoOrNull(row.updatedAt) ?? ""
+      }
+    : null;
 }
 
 export async function upsertMyobOauthTokenByTenantId(
@@ -294,6 +321,9 @@ export async function listExternalMappingsByTenantId(
 
   return result.rows.map((row) => ({
     ...row,
+    lastSyncedAt: toIsoOrNull(row.lastSyncedAt),
+    createdAt: toIsoOrNull(row.createdAt) ?? "",
+    updatedAt: toIsoOrNull(row.updatedAt) ?? "",
     payloadJson: parseJsonObject(row.payloadJson)
   }));
 }
@@ -326,6 +356,10 @@ export async function listSyncRunsByTenantId(
 
   return result.rows.map((row) => ({
     ...row,
+    startedAt: toIsoOrNull(row.startedAt),
+    finishedAt: toIsoOrNull(row.finishedAt),
+    createdAt: toIsoOrNull(row.createdAt) ?? "",
+    updatedAt: toIsoOrNull(row.updatedAt) ?? "",
     summaryJson: parseJsonObject(row.summaryJson)
   }));
 }

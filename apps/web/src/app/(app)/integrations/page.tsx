@@ -35,6 +35,20 @@ function maskToken(token: string | null | undefined) {
   return `${token.slice(0, 6)}••••••${token.slice(-4)}`;
 }
 
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
+}
+
 export default async function IntegrationsPage({
   searchParams
 }: {
@@ -115,7 +129,7 @@ export default async function IntegrationsPage({
             <div style={{ display: "grid", gap: 8 }}>
               <span style={{ fontWeight: 600 }}>Last successful sync</span>
               <div style={{ minHeight: 42, borderRadius: 12, border: "1px solid #e5e7eb", background: "#fafafa", padding: "10px 12px", color: "#667085" }}>
-                {connection?.lastSuccessfulSyncAt ?? "Not synced yet"}
+                {connection?.lastSuccessfulSyncAt ? formatDateTime(connection.lastSuccessfulSyncAt) : "Not synced yet"}
               </div>
             </div>
           </div>
@@ -187,7 +201,7 @@ export default async function IntegrationsPage({
           </div>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, background: "#fafafa" }}>
             <div style={{ fontWeight: 700 }}>Token expiry</div>
-            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{tokenRecord?.expiresAt ?? "No expiry stored yet"}</div>
+            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{tokenRecord?.expiresAt ? formatDateTime(tokenRecord.expiresAt) : "No expiry stored yet"}</div>
           </div>
         </div>
       </div>
@@ -233,8 +247,8 @@ export default async function IntegrationsPage({
                 <div key={run.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fafafa" }}>
                   <div style={{ fontWeight: 700 }}>{run.jobType}</div>
                   <div style={{ fontSize: 13, color: "#667085", marginTop: 4 }}>Status: {run.status}</div>
-                  <div style={{ fontSize: 13, color: "#667085" }}>Started: {run.startedAt ?? "—"}</div>
-                  <div style={{ fontSize: 13, color: "#667085" }}>Finished: {run.finishedAt ?? "—"}</div>
+                  <div style={{ fontSize: 13, color: "#667085" }}>Started: {formatDateTime(run.startedAt)}</div>
+                  <div style={{ fontSize: 13, color: "#667085" }}>Finished: {formatDateTime(run.finishedAt)}</div>
                   {run.errorMessage ? <div style={{ fontSize: 12, color: "#b42318", marginTop: 6 }}>{run.errorMessage}</div> : null}
                 </div>
               ))
