@@ -64,12 +64,12 @@ export async function listProductsForTenant(tenantId: string): Promise<ProductRe
   return result.rows;
 }
 
-export async function createProduct(input: ProductCreateInput): Promise<void> {
+export async function createProduct(input: ProductCreateInput): Promise<{ id: string }> {
   if (!process.env.DATABASE_URL) {
-    return;
+    throw new Error('DATABASE_URL is not configured.');
   }
 
-  await pool.query(
+  const result = await pool.query<{ id: string }>(
     `
       INSERT INTO catalog.products (
         tenant_id,
@@ -83,6 +83,7 @@ export async function createProduct(input: ProductCreateInput): Promise<void> {
         tax_code
       )
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+      RETURNING id
     `,
     [
       input.tenantId,
@@ -96,6 +97,8 @@ export async function createProduct(input: ProductCreateInput): Promise<void> {
       input.taxCode
     ]
   );
+
+  return result.rows[0];
 }
 
 export async function upsertImportedProduct(tenantId: string, input: {
@@ -243,6 +246,8 @@ export async function updateProduct(tenantId: string, productId: string, input: 
       input.taxCode
     ]
   );
+
+  return;
 }
 
 export async function listProductsByTenantId(tenantId: string): Promise<ProductRecord[]> {
