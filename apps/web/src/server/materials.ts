@@ -55,7 +55,10 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       p.name AS "sourceProductName",
       m.name,
       m.sku,
-      COALESCE(m.material_type::text, m.type) AS "materialType",
+      CASE
+        WHEN m.material_type IS NOT NULL THEN m.material_type::text
+        ELSE m.type
+      END AS "materialType",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
       m.stock_quantity::text AS "stockQuantity",
