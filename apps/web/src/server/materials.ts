@@ -109,7 +109,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $3::uuid,
       $4::varchar,
       $5::varchar,
-      $6::varchar,
+      $6::material_type,
       NULL,
       $7::varchar,
       $8::varchar,
