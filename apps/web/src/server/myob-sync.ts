@@ -4,10 +4,13 @@ import {
   createSyncRunForTenant,
   getMyobConnectionByTenantId,
   getMyobOauthTokenByTenantId,
+  markMyobConnectionHealthy,
+  upsertExternalMappingByTenantId,
   upsertMyobConnectionByTenantId,
   upsertMyobOauthTokenByTenantId
 } from "@/server/integrations";
 import { env } from "@/lib/env";
+import { upsertImportedCustomer } from "@/server/customers";
 
 export type MyobReadOnlySyncSummary = {
   companyFileId: string;
@@ -84,7 +87,7 @@ async function refreshMyobAccessToken(refreshToken: string) {
   return tokenResponse as MyobTokenResponse;
 }
 
-async function getValidAccessToken(tenantId: string, forceRefresh = false) {
+export async function getValidAccessToken(tenantId: string) {
   const token = await getMyobOauthTokenByTenantId(tenantId);
 
   if (!token) {
@@ -92,7 +95,7 @@ async function getValidAccessToken(tenantId: string, forceRefresh = false) {
   }
 
   const expiresAtMs = token.expiresAt ? new Date(token.expiresAt).getTime() : null;
-  const shouldRefresh = forceRefresh || !expiresAtMs || Number.isNaN(expiresAtMs) || expiresAtMs - Date.now() < 5 * 60 * 1000;
+  const shouldRefresh = !expiresAtMs || Number.isNaN(expiresAtMs) || expiresAtMs - Date.now() < 5 * 60 * 1000;
 
   if (!shouldRefresh) {
     return { accessToken: token.accessToken, refreshed: false };
@@ -110,7 +113,7 @@ async function getValidAccessToken(tenantId: string, forceRefresh = false) {
   return { accessToken: refreshed.access_token, refreshed: true };
 }
 
-async function fetchMyobJson(accessToken: string, companyFileId: string, endpoint: string) {
+export async function fetchMyobJson(accessToken: string, companyFileId: string, endpoint: string) {
   const url = new URL(`${companyFileId}${endpoint}`, `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`);
   const response = await fetch(url.toString(), {
     method: "GET",
@@ -154,16 +157,14 @@ function countCollection(data: unknown) {
 export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnlySyncSummary> {
   const connection = await getMyobConnectionByTenantId(tenantId);
 
-  if (!connection || !connection.companyFileId) {
+  if (!connection?.companyFileId) {
     throw new Error("No MYOB company file is linked to this tenant yet.");
   }
 
-  const companyFileId = connection.companyFileId;
-
-  let { accessToken, refreshed } = await getValidAccessToken(tenantId, true);
+  const { accessToken, refreshed } = await getValidAccessToken(tenantId);
 
   const summary: MyobReadOnlySyncSummary = {
-    companyFileId,
+    companyFileId: connection.companyFileId,
     companyName: connection.companyName,
     tokenRefreshed: refreshed,
     companyInfo: { ok: false, endpoint: "/Company/Preferences" },
@@ -172,26 +173,8 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     items: { ok: false, endpoint: "/Inventory/Item?$top=50", count: 0 }
   };
 
-  async function fetchWithRetry(endpoint: string) {
-    try {
-      return await fetchMyobJson(accessToken, companyFileId, endpoint);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      const needsRefreshRetry = message.includes("OAuthTokenIsInvalid") || message.includes("401:");
-
-      if (!needsRefreshRetry) {
-        throw error;
-      }
-
-      const refreshedToken = await getValidAccessToken(tenantId, true);
-      accessToken = refreshedToken.accessToken;
-      refreshed = refreshed || refreshedToken.refreshed;
-      return await fetchMyobJson(accessToken, companyFileId, endpoint);
-    }
-  }
-
   try {
-    const result = await fetchWithRetry("/Company/Preferences");
+    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences");
     const data = result.data as Record<string, unknown> | null;
     summary.companyInfo = {
       ok: true,
@@ -209,7 +192,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
 
   for (const [key, endpoint] of [["customers", "/Contact/Customer?$top=50"], ["suppliers", "/Contact/Supplier?$top=50"], ["items", "/Inventory/Item?$top=50"]] as const) {
     try {
-      const result = await fetchWithRetry(endpoint);
+      const result = await fetchMyobJson(accessToken, connection.companyFileId, endpoint);
       summary[key] = { ok: true, endpoint: result.url, count: countCollection(result.data) } as any;
     } catch (error) {
       summary[key] = { ok: false, endpoint, count: 0, error: error instanceof Error ? error.message : "Unknown error" } as any;
@@ -218,15 +201,25 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
 
   const hadErrors = !summary.companyInfo.ok || !summary.customers.ok || !summary.suppliers.ok || !summary.items.ok;
 
-  await upsertMyobConnectionByTenantId(tenantId, {
-    environment: connection.environment,
-    companyFileId,
-    companyName: summary.companyInfo.displayName ?? connection.companyName,
-    status: hadErrors ? "error" : "connected",
-    connectedAt: connection.connectedAt,
-    disconnectedAt: connection.disconnectedAt,
-    lastSuccessfulSyncAt: hadErrors ? connection.lastSuccessfulSyncAt : new Date().toISOString()
-  });
+  if (hadErrors) {
+    await upsertMyobConnectionByTenantId(tenantId, {
+      environment: connection.environment,
+      companyFileId: connection.companyFileId,
+      companyName: summary.companyInfo.displayName ?? connection.companyName,
+      status: "error",
+      connectedAt: connection.connectedAt,
+      disconnectedAt: connection.disconnectedAt,
+      lastSuccessfulSyncAt: connection.lastSuccessfulSyncAt
+    });
+  } else {
+    await markMyobConnectionHealthy(tenantId, {
+      environment: connection.environment,
+      companyFileId: connection.companyFileId,
+      companyName: summary.companyInfo.displayName ?? connection.companyName,
+      connectedAt: connection.connectedAt,
+      lastSuccessfulSyncAt: new Date().toISOString()
+    });
+  }
 
   await createSyncRunForTenant(
     tenantId,
@@ -235,6 +228,104 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     { source: "runMyobReadOnlySync", ...summary },
     hadErrors ? [summary.companyInfo, summary.customers, summary.suppliers, summary.items].find((item) => !item.ok)?.error ?? "Read-only sync failed." : null
   );
+
+  return summary;
+}
+
+
+export type MyobCustomerImportSummary = {
+  importedCount: number;
+  mappedCount: number;
+  sample: Array<{ myobUid: string; displayName: string; localId: string }>;
+};
+
+function normaliseCustomerDisplayName(customer: Record<string, unknown>) {
+  const companyName = typeof customer.CompanyName === "string" ? customer.CompanyName : null;
+  const displayID = typeof customer.DisplayID === "string" ? customer.DisplayID : null;
+  const firstName = typeof customer.FirstName === "string" ? customer.FirstName : null;
+  const lastName = typeof customer.LastName === "string" ? customer.LastName : null;
+  const personName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  return companyName || personName || displayID || "Imported MYOB customer";
+}
+
+export async function importMyobCustomersAndCreateMappings(tenantId: string): Promise<MyobCustomerImportSummary> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+
+  if (!connection?.companyFileId) {
+    throw new Error("No MYOB company file is linked to this tenant yet.");
+  }
+
+  const companyFileId = connection.companyFileId;
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const result = await fetchMyobJson(accessToken, companyFileId, "/Contact/Customer?$top=50");
+  const payload = result.data as Record<string, unknown> | null;
+  const customers = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? result.data as unknown[] : [];
+  const imported: Array<{ myobUid: string; displayName: string; localId: string }> = [];
+
+  for (const raw of customers) {
+    if (!raw || typeof raw !== "object") continue;
+    const customer = raw as Record<string, unknown>;
+    const myobUid = typeof customer.UID === "string" ? customer.UID : null;
+    if (!myobUid) continue;
+
+    const displayName = normaliseCustomerDisplayName(customer);
+    const companyName = typeof customer.CompanyName === "string" ? customer.CompanyName : null;
+    const firstName = typeof customer.FirstName === "string" ? customer.FirstName : null;
+    const lastName = typeof customer.LastName === "string" ? customer.LastName : null;
+    const email = customer.Email && typeof customer.Email === "object" && customer.Email && "Address" in customer.Email
+      ? String((customer.Email as Record<string, unknown>).Address ?? "") || null
+      : null;
+    const phone = customer.Phone1 && typeof customer.Phone1 === "object" && customer.Phone1 && "Number" in customer.Phone1
+      ? String((customer.Phone1 as Record<string, unknown>).Number ?? "") || null
+      : null;
+    const isActive = customer.IsActive !== false;
+
+    const saved = await upsertImportedCustomer(tenantId, {
+      myobUid,
+      displayName,
+      companyName,
+      firstName,
+      lastName,
+      email,
+      phone,
+      isActive,
+      payloadJson: customer
+    });
+
+    await upsertExternalMappingByTenantId(tenantId, {
+      entityType: "customer",
+      localId: saved.id,
+      externalId: myobUid,
+      syncState: "synced",
+      lastSyncedAt: new Date().toISOString(),
+      payloadJson: { displayName, companyName }
+    });
+
+    imported.push({ myobUid, displayName, localId: saved.id });
+  }
+
+  await markMyobConnectionHealthy(tenantId, {
+    environment: connection.environment,
+    companyFileId: connection.companyFileId,
+    companyName: connection.companyName,
+    connectedAt: connection.connectedAt,
+    lastSuccessfulSyncAt: new Date().toISOString()
+  });
+
+  const summary: MyobCustomerImportSummary = {
+    importedCount: imported.length,
+    mappedCount: imported.length,
+    sample: imported.slice(0, 5)
+  };
+
+  await createSyncRunForTenant(tenantId, "incremental_import", "success", {
+    source: "importMyobCustomersAndCreateMappings",
+    companyFileId,
+    companyName: connection.companyName,
+    customersImported: summary.importedCount,
+    mappingsCreated: summary.mappedCount,
+    sample: summary.sample
+  }, null);
 
   return summary;
 }

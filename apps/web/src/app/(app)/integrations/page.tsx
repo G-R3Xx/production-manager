@@ -3,7 +3,8 @@ import {
   disconnectMyobConnectionAction,
   queueMyobSyncAction,
   runMyobReadOnlySyncAction,
-  saveMyobConnectionAction
+  saveMyobConnectionAction,
+  importMyobCustomersAction
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
@@ -14,6 +15,7 @@ import {
   type SyncRunRecord
 } from "@/server/integrations";
 import { getRequiredSessionUser } from "@/server/auth/session";
+import { listCustomersForTenant } from "@/server/customers";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 
 function cardStyle() {
@@ -73,11 +75,12 @@ export default async function IntegrationsPage({
     );
   }
 
-  const [connection, tokenRecord, mappings, syncRuns] = await Promise.all([
+  const [connection, tokenRecord, mappings, syncRuns, localCustomers] = await Promise.all([
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
-    listSyncRunsByTenantId(activeTenant.tenantId)
+    listSyncRunsByTenantId(activeTenant.tenantId),
+    listCustomersForTenant(activeTenant.tenantId)
   ]);
 
   return (
@@ -179,6 +182,14 @@ export default async function IntegrationsPage({
             </button>
           </form>
 
+
+
+          <form action={importMyobCustomersAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
+              Import customers + create mappings
+            </button>
+          </form>
+
           <form action={queueMyobSyncAction}>
             <input type="hidden" name="jobType" value="incremental_import" />
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
@@ -253,6 +264,29 @@ export default async function IntegrationsPage({
           </div>
         </div>
       ) : null}
+
+
+
+      <div style={cardStyle()}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#4f46e5", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Customer import
+        </div>
+        <h2 style={{ marginTop: 10 }}>Local customer import + mapping</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Local customers</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localCustomers.length}</div>
+          </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Customer mappings</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{mappings.filter((mapping) => mapping.entityType === "customer").length}</div>
+          </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Latest company status</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{connection?.status ?? "disconnected"}</div>
+          </div>
+        </div>
+      </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
         <div style={cardStyle()}>

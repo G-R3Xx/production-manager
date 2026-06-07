@@ -8,6 +8,7 @@ import {
   listExternalMappingsByTenantId,
   listSyncRunsByTenantId
 } from "@/server/integrations";
+import { listCustomersForTenant } from "@/server/customers";
 
 function cardStyle() {
   return {
@@ -48,21 +49,23 @@ export default async function DashboardPage() {
     );
   }
 
-  const [products, configurators, myobConnection, myobToken, mappings, syncRuns] = await Promise.all([
+  const [products, configurators, myobConnection, myobToken, mappings, syncRuns, customers] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
     listConfiguratorTemplatesForTenant(activeTenant.tenantId),
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
-    listSyncRunsByTenantId(activeTenant.tenantId)
+    listSyncRunsByTenantId(activeTenant.tenantId),
+    listCustomersForTenant(activeTenant.tenantId)
   ]);
 
   const cards = [
     { label: "Products", value: String(products.length), note: "Tenant product records" },
     { label: "Configurators", value: String(configurators.length), note: "Template definitions" },
-    { label: "MYOB", value: myobConnection?.status ?? "disconnected", note: myobConnection?.companyName ?? "No company selected yet" },
+    { label: "MYOB", value: myobConnection?.lastSuccessfulSyncAt ? "connected" : myobConnection?.status ?? "disconnected", note: myobConnection?.companyName ?? "No company selected yet" },
     { label: "Token", value: myobToken ? "stored" : "missing", note: formatDateTime(myobToken?.expiresAt) ?? "No OAuth token stored yet" },
     { label: "Mappings", value: String(mappings.length), note: "Local ↔ MYOB IDs" },
+    { label: "Customers", value: String(customers.length), note: "Imported local customers" },
     { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" },
     { label: "Read-only Sync", value: typeof syncRuns[0]?.summaryJson?.customers === "object" ? String((syncRuns[0].summaryJson.customers as Record<string, unknown>).count ?? 0) : "—", note: "Latest customer count from MYOB" }
   ];
