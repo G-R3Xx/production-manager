@@ -164,14 +164,14 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     companyFileId: connection.companyFileId,
     companyName: connection.companyName,
     tokenRefreshed: refreshed,
-    companyInfo: { ok: false, endpoint: "/Company/Preferences/Company" },
+    companyInfo: { ok: false, endpoint: "/Company/Preferences" },
     customers: { ok: false, endpoint: "/Contact/Customer?$top=50", count: 0 },
     suppliers: { ok: false, endpoint: "/Contact/Supplier?$top=50", count: 0 },
     items: { ok: false, endpoint: "/Inventory/Item?$top=50", count: 0 }
   };
 
   try {
-    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences/Company");
+    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences");
     const data = result.data as Record<string, unknown> | null;
     summary.companyInfo = {
       ok: true,
@@ -182,7 +182,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
   } catch (error) {
     summary.companyInfo = {
       ok: false,
-      endpoint: "/Company/Preferences/Company",
+      endpoint: "/Company/Preferences",
       error: error instanceof Error ? error.message : "Unknown error"
     };
   }
