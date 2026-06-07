@@ -63,7 +63,8 @@ export default async function DashboardPage() {
     { label: "MYOB", value: myobConnection?.status ?? "disconnected", note: myobConnection?.companyName ?? "No company selected yet" },
     { label: "Token", value: myobToken ? "stored" : "missing", note: formatDateTime(myobToken?.expiresAt) ?? "No OAuth token stored yet" },
     { label: "Mappings", value: String(mappings.length), note: "Local ↔ MYOB IDs" },
-    { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" }
+    { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" },
+    { label: "Read-only Sync", value: typeof syncRuns[0]?.summaryJson?.customers === "object" ? String((syncRuns[0].summaryJson.customers as Record<string, unknown>).count ?? 0) : "—", note: "Latest customer count from MYOB" }
   ];
 
   return (

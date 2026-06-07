@@ -8,6 +8,7 @@ import {
   startMyobConnectScaffold,
   upsertMyobConnectionByTenantId
 } from "@/server/integrations";
+import { runMyobReadOnlySync } from "@/server/myob-sync";
 
 type SyncRunJobType =
   | "full_import"
@@ -91,6 +92,16 @@ export async function disconnectMyobConnectionAction() {
   const tenantId = await requireReadyTenant();
 
   await disconnectMyobConnectionByTenantId(tenantId);
+
+  revalidatePath("/integrations");
+  revalidatePath("/dashboard");
+}
+
+
+export async function runMyobReadOnlySyncAction() {
+  const tenantId = await requireReadyTenant();
+
+  await runMyobReadOnlySync(tenantId);
 
   revalidatePath("/integrations");
   revalidatePath("/dashboard");

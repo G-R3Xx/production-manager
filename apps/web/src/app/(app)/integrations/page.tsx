@@ -2,6 +2,7 @@ import Link from "next/link";
 import {
   disconnectMyobConnectionAction,
   queueMyobSyncAction,
+  runMyobReadOnlySyncAction,
   saveMyobConnectionAction
 } from "./actions";
 import {
@@ -205,6 +206,47 @@ export default async function IntegrationsPage({
           </div>
         </div>
       </div>
+
+      {syncRuns[0]?.summaryJson ? (
+        <div style={cardStyle()}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#4f46e5", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            Latest read-only sync
+          </div>
+          <h2 style={{ marginTop: 10 }}>MYOB read summary</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Customers</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.customers === "object" && syncRuns[0].summaryJson.customers && "count" in (syncRuns[0].summaryJson.customers as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.customers as Record<string, unknown>).count ?? 0)
+                  : "—"}
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Suppliers</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.suppliers === "object" && syncRuns[0].summaryJson.suppliers && "count" in (syncRuns[0].summaryJson.suppliers as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.suppliers as Record<string, unknown>).count ?? 0)
+                  : "—"}
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Items</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.items === "object" && syncRuns[0].summaryJson.items && "count" in (syncRuns[0].summaryJson.items as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.items as Record<string, unknown>).count ?? 0)
+                  : "—"}
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Company</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.companyName === "string" ? syncRuns[0].summaryJson.companyName : connection?.companyName ?? "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
         <div style={cardStyle()}>

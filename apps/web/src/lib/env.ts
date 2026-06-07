@@ -38,7 +38,8 @@ const serverEnvSchema = publicEnvSchema.extend({
   MYOB_CLIENT_ID: optionalString,
   MYOB_CLIENT_SECRET: optionalString,
   MYOB_REDIRECT_URI: optionalUrl,
-  MYOB_API_BASE_URL: optionalUrl
+  MYOB_API_BASE_URL: optionalUrl,
+  MYOB_BUSINESS_API_BASE_URL: optionalUrl.default("https://api.myob.com/accountright")
 });
 
 export type PublicEnv = z.infer<typeof publicEnvSchema>;
@@ -68,7 +69,8 @@ export function getServerEnv(): ServerEnv {
     MYOB_CLIENT_ID: process.env.MYOB_CLIENT_ID,
     MYOB_CLIENT_SECRET: process.env.MYOB_CLIENT_SECRET,
     MYOB_REDIRECT_URI: process.env.MYOB_REDIRECT_URI,
-    MYOB_API_BASE_URL: process.env.MYOB_API_BASE_URL
+    MYOB_API_BASE_URL: process.env.MYOB_API_BASE_URL,
+    MYOB_BUSINESS_API_BASE_URL: process.env.MYOB_BUSINESS_API_BASE_URL
   });
 }
 
