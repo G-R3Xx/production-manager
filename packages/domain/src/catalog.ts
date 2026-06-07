@@ -36,6 +36,13 @@ export const materialTypeSchema = z.enum([
   "other"
 ]);
 
+
+export const labourUnitSchema = z.enum(["hour", "setup", "item"]);
+
+export const recipeComponentTypeSchema = z.enum(["material", "labour"]);
+
+export const recipeStatusSchema = z.enum(["draft", "active", "archived"]);
+
 export const productSchema = z.object({
   id: z.string().uuid(),
   tenantId: z.string().uuid(),
@@ -76,5 +83,58 @@ export type ProductFamily = z.infer<typeof productFamilySchema>;
 export type ProductStatus = z.infer<typeof productStatusSchema>;
 export type CalculatorType = z.infer<typeof calculatorTypeSchema>;
 export type MaterialType = z.infer<typeof materialTypeSchema>;
+export type LabourUnit = z.infer<typeof labourUnitSchema>;
+export type RecipeComponentType = z.infer<typeof recipeComponentTypeSchema>;
+export type RecipeStatus = z.infer<typeof recipeStatusSchema>;
 export type Product = z.infer<typeof productSchema>;
 export type Material = z.infer<typeof materialSchema>;
+export type LabourRate = z.infer<typeof labourRateSchema>;
+export type ProductRecipe = z.infer<typeof productRecipeSchema>;
+export type ProductRecipeComponent = z.infer<typeof productRecipeComponentSchema>;
+
+
+export const labourRateSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  unit: labourUnitSchema,
+  costRate: z.number(),
+  sellRate: z.number(),
+  active: z.boolean(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
+export const productRecipeSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  productId: z.string().uuid(),
+  name: z.string().min(1).max(200),
+  version: z.number().int().positive(),
+  status: recipeStatusSchema,
+  yieldQty: z.number(),
+  yieldUom: z.string().min(1).max(50),
+  notes: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+
+export const productRecipeComponentSchema = z.object({
+  id: z.string().uuid(),
+  tenantId: z.string().uuid(),
+  recipeId: z.string().uuid(),
+  sortOrder: z.number().int(),
+  componentType: recipeComponentTypeSchema,
+  materialId: z.string().uuid().nullable(),
+  labourRateId: z.string().uuid().nullable(),
+  supplierId: z.string().uuid().nullable(),
+  name: z.string().min(1).max(200),
+  qty: z.number(),
+  uom: z.string().min(1).max(50),
+  wastePercent: z.number(),
+  costOverride: z.number().nullable(),
+  notes: z.string().nullable(),
+  createdAt: z.string().datetime(),
+  updatedAt: z.string().datetime()
+});
+

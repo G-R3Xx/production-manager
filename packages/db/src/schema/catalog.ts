@@ -61,6 +61,24 @@ export const templateStatusEnum = pgEnum("template_status", [
   "archived"
 ]);
 
+
+export const labourUnitEnum = pgEnum("labour_unit", [
+  "hour",
+  "setup",
+  "item"
+]);
+
+export const recipeComponentTypeEnum = pgEnum("recipe_component_type", [
+  "material",
+  "labour"
+]);
+
+export const recipeStatusEnum = pgEnum("recipe_status", [
+  "draft",
+  "active",
+  "archived"
+]);
+
 export const products = catalogSchema.table("products", {
   id: uuid("id").defaultRandom().primaryKey(),
   tenantId: uuid("tenant_id")
@@ -118,6 +136,62 @@ export const materials = catalogSchema.table("materials", {
   finish: varchar("finish", { length: 100 }),
   costJson: jsonb("cost_json").notNull().default({}),
   active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+
+export const labourRates = catalogSchema.table("labour_rates", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  unit: labourUnitEnum("unit").notNull().default("hour"),
+  costRate: numeric("cost_rate", { precision: 12, scale: 2 }).notNull().default("0"),
+  sellRate: numeric("sell_rate", { precision: 12, scale: 2 }).notNull().default("0"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const productRecipes = catalogSchema.table("product_recipes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  productId: uuid("product_id")
+    .notNull()
+    .references(() => products.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  version: integer("version").notNull().default(1),
+  status: recipeStatusEnum("status").notNull().default("draft"),
+  yieldQty: numeric("yield_qty", { precision: 12, scale: 2 }).notNull().default("1"),
+  yieldUom: varchar("yield_uom", { length: 50 }).notNull().default("item"),
+  notes: varchar("notes", { length: 500 }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const productRecipeComponents = catalogSchema.table("product_recipe_components", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  recipeId: uuid("recipe_id")
+    .notNull()
+    .references(() => productRecipes.id, { onDelete: "cascade" }),
+  sortOrder: integer("sort_order").notNull().default(0),
+  componentType: recipeComponentTypeEnum("component_type").notNull(),
+  materialId: uuid("material_id"),
+  labourRateId: uuid("labour_rate_id"),
+  supplierId: uuid("supplier_id"),
+  name: varchar("name", { length: 200 }).notNull(),
+  qty: numeric("qty", { precision: 12, scale: 4 }).notNull().default("0"),
+  uom: varchar("uom", { length: 50 }).notNull(),
+  wastePercent: numeric("waste_percent", { precision: 8, scale: 2 }).notNull().default("0"),
+  costOverride: numeric("cost_override", { precision: 12, scale: 2 }),
+  notes: varchar("notes", { length: 500 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

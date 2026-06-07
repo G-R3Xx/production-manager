@@ -15,6 +15,7 @@ const navItems = [
   { href: "/users", label: "Users" },
   { href: "/products", label: "Products" },
   { href: "/configurators", label: "Configurators" },
+  { href: "/recipes", label: "Recipes" },
   { href: "/quotes", label: "Quotes" },
   { href: "/integrations", label: "Integrations" },
   { href: "/bootstrap", label: "Bootstrap" }

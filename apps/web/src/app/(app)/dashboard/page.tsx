@@ -10,6 +10,8 @@ import {
 } from "@/server/integrations";
 import { listCustomersForTenant } from "@/server/customers";
 import { listSuppliersForTenant } from "@/server/suppliers";
+import { listQuotesForTenant } from "@/server/quotes";
+import { listProductRecipesForTenant } from "@/server/recipes";
 
 function cardStyle() {
   return {
@@ -50,7 +52,7 @@ export default async function DashboardPage() {
     );
   }
 
-  const [products, configurators, myobConnection, myobToken, mappings, syncRuns, customers, suppliers] = await Promise.all([
+  const [products, configurators, myobConnection, myobToken, mappings, syncRuns, customers, suppliers, quotes, recipes] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
     listConfiguratorTemplatesForTenant(activeTenant.tenantId),
     getMyobConnectionByTenantId(activeTenant.tenantId),
@@ -58,7 +60,9 @@ export default async function DashboardPage() {
     listExternalMappingsByTenantId(activeTenant.tenantId),
     listSyncRunsByTenantId(activeTenant.tenantId),
     listCustomersForTenant(activeTenant.tenantId),
-    listSuppliersForTenant(activeTenant.tenantId)
+    listSuppliersForTenant(activeTenant.tenantId),
+    listQuotesForTenant(activeTenant.tenantId),
+    listProductRecipesForTenant(activeTenant.tenantId)
   ]);
 
   const latestReadOnlySummary = syncRuns.find((run) => {
@@ -79,6 +83,8 @@ export default async function DashboardPage() {
     { label: "Mappings", value: String(mappings.length), note: "Local ↔ MYOB IDs" },
     { label: "Customers", value: String(customers.length), note: "Imported local customers" },
     { label: "Suppliers", value: String(suppliers.length), note: "Imported local suppliers" },
+    { label: "Quotes", value: String(quotes.length), note: "Local quote groundwork" },
+    { label: "Recipes", value: String(recipes.length), note: "Product BOM / labour foundations" },
     { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" },
     { label: "Read-only Sync", value: latestReadOnlyCustomerCount, note: "Latest customer count from MYOB" }
   ];
