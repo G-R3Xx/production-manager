@@ -193,12 +193,6 @@ export default async function IntegrationsPage({
             </button>
           </form>
 
-          <form action={importMyobItemsAction}>
-            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
-              Import items + create mappings
-            </button>
-          </form>
-
           <form action={queueMyobSyncAction}>
             <input type="hidden" name="jobType" value="incremental_import" />
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
