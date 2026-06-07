@@ -8,7 +8,7 @@ import {
   startMyobConnectScaffold,
   upsertMyobConnectionByTenantId
 } from "@/server/integrations";
-import { importMyobCustomersAndCreateMappings, runMyobReadOnlySync } from "@/server/myob-sync";
+import { importMyobCustomersAndCreateMappings, importMyobItemsAndCreateMappings, runMyobReadOnlySync } from "@/server/myob-sync";
 
 type SyncRunJobType =
   | "full_import"
@@ -115,4 +115,15 @@ export async function importMyobCustomersAction() {
 
   revalidatePath("/integrations");
   revalidatePath("/dashboard");
+}
+
+
+export async function importMyobItemsAction() {
+  const tenantId = await requireReadyTenant();
+
+  await importMyobItemsAndCreateMappings(tenantId);
+
+  revalidatePath("/integrations");
+  revalidatePath("/dashboard");
+  revalidatePath("/products");
 }

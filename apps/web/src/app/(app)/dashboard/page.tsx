@@ -59,6 +59,16 @@ export default async function DashboardPage() {
     listCustomersForTenant(activeTenant.tenantId)
   ]);
 
+  const latestReadOnlySummary = syncRuns.find((run) => {
+    const source = run.summaryJson?.source;
+    return source === "runMyobReadOnlySync";
+  });
+
+  const latestReadOnlyCustomerCount =
+    latestReadOnlySummary && typeof latestReadOnlySummary.summaryJson?.customers === "object"
+      ? String(((latestReadOnlySummary.summaryJson.customers as Record<string, unknown>).count ?? "—"))
+      : "—";
+
   const cards = [
     { label: "Products", value: String(products.length), note: "Tenant product records" },
     { label: "Configurators", value: String(configurators.length), note: "Template definitions" },
@@ -67,7 +77,7 @@ export default async function DashboardPage() {
     { label: "Mappings", value: String(mappings.length), note: "Local ↔ MYOB IDs" },
     { label: "Customers", value: String(customers.length), note: "Imported local customers" },
     { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" },
-    { label: "Read-only Sync", value: typeof syncRuns[0]?.summaryJson?.customers === "object" ? String((syncRuns[0].summaryJson.customers as Record<string, unknown>).count ?? 0) : "—", note: "Latest customer count from MYOB" }
+    { label: "Read-only Sync", value: latestReadOnlyCustomerCount, note: "Latest customer count from MYOB" }
   ];
 
   return (

@@ -16,6 +16,7 @@ export type ProductRecord = {
   createdAt: string;
   updatedAt: string;
   templateName: string | null;
+  myobUid: string | null;
 };
 
 export type ProductCreateInput = {
@@ -50,7 +51,8 @@ export async function listProductsForTenant(tenantId: string): Promise<ProductRe
         p.tax_code AS "taxCode",
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
-        ct.name AS "templateName"
+        ct.name AS "templateName",
+        p.myob_uid AS "myobUid"
       FROM catalog.products p
       LEFT JOIN catalog.configurator_templates ct ON ct.id = p.default_template_id
       WHERE p.tenant_id = $1
@@ -96,6 +98,78 @@ export async function createProduct(input: ProductCreateInput): Promise<void> {
   );
 }
 
+export async function upsertImportedProduct(tenantId: string, input: {
+  myobUid: string;
+  sku?: string | null;
+  name: string;
+  taxCode?: string | null;
+  status?: string;
+  department?: string;
+  productFamily?: string;
+  calculatorType?: string;
+  payloadJson?: Record<string, unknown>;
+}): Promise<{ id: string }> {
+  const result = await pool.query<{ id: string }>(
+    `
+      INSERT INTO catalog.products (
+        tenant_id,
+        myob_uid,
+        sku,
+        name,
+        department,
+        product_family,
+        status,
+        calculator_type,
+        default_template_id,
+        tax_code,
+        payload_json,
+        created_at,
+        updated_at
+      )
+      VALUES (
+        $1::uuid,
+        $2::varchar,
+        $3::varchar,
+        $4::varchar,
+        $5::varchar,
+        $6::varchar,
+        $7::varchar,
+        $8::varchar,
+        null,
+        $9::varchar,
+        $10::jsonb,
+        now(),
+        now()
+      )
+      ON CONFLICT (tenant_id, myob_uid)
+      DO UPDATE SET
+        sku = EXCLUDED.sku,
+        name = EXCLUDED.name,
+        department = EXCLUDED.department,
+        product_family = EXCLUDED.product_family,
+        status = EXCLUDED.status,
+        calculator_type = EXCLUDED.calculator_type,
+        tax_code = EXCLUDED.tax_code,
+        payload_json = EXCLUDED.payload_json,
+        updated_at = now()
+      RETURNING id
+    `,
+    [
+      tenantId,
+      input.myobUid,
+      input.sku ?? null,
+      input.name,
+      input.department ?? "general",
+      input.productFamily ?? "general",
+      input.status ?? "active",
+      input.calculatorType ?? "configurator_template",
+      input.taxCode ?? null,
+      JSON.stringify(input.payloadJson ?? {})
+    ]
+  );
+
+  return result.rows[0];
+}
 
 export async function listProductsByTenantId(tenantId: string): Promise<ProductRecord[]> {
   return listProductsForTenant(tenantId);

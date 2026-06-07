@@ -4,7 +4,8 @@ import {
   queueMyobSyncAction,
   runMyobReadOnlySyncAction,
   saveMyobConnectionAction,
-  importMyobCustomersAction
+  importMyobCustomersAction,
+  importMyobItemsAction
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
@@ -16,6 +17,7 @@ import {
 } from "@/server/integrations";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { listCustomersForTenant } from "@/server/customers";
+import { listProductsForTenant } from "@/server/products";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 
 function cardStyle() {
@@ -75,12 +77,13 @@ export default async function IntegrationsPage({
     );
   }
 
-  const [connection, tokenRecord, mappings, syncRuns, localCustomers] = await Promise.all([
+  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts] = await Promise.all([
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
     listSyncRunsByTenantId(activeTenant.tenantId),
-    listCustomersForTenant(activeTenant.tenantId)
+    listCustomersForTenant(activeTenant.tenantId),
+    listProductsForTenant(activeTenant.tenantId)
   ]);
 
   return (

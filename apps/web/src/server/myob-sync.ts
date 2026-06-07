@@ -11,6 +11,7 @@ import {
 } from "@/server/integrations";
 import { env } from "@/lib/env";
 import { upsertImportedCustomer } from "@/server/customers";
+import { upsertImportedProduct } from "@/server/products";
 
 export type MyobReadOnlySyncSummary = {
   companyFileId: string;
@@ -326,6 +327,117 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
     mappingsCreated: summary.mappedCount,
     sample: summary.sample
   }, null);
+
+  return summary;
+}
+
+
+export type MyobItemImportSummary = {
+  importedCount: number;
+  mappedCount: number;
+  sample: Array<{ myobUid: string; name: string; sku: string | null; localId: string }>;
+};
+
+function normaliseItemName(item: Record<string, unknown>) {
+  const name = typeof item.Name === "string" ? item.Name : null;
+  const number = typeof item.Number === "string" ? item.Number : null;
+  const description = typeof item.Description === "string" ? item.Description : null;
+  return name || description || number || "Imported MYOB item";
+}
+
+function readNestedTaxCode(item: Record<string, unknown>) {
+  const candidates = [item.BuyingDetails, item.SellingDetails];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === "object") {
+      const code = (candidate as Record<string, unknown>).TaxCode;
+      if (code && typeof code === "object" && "Code" in code) {
+        const value = (code as Record<string, unknown>).Code;
+        if (typeof value === "string" && value.trim()) {
+          return value.trim();
+        }
+      }
+    }
+  }
+  return null;
+}
+
+export async function importMyobItemsAndCreateMappings(tenantId: string): Promise<MyobItemImportSummary> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+
+  if (!connection?.companyFileId) {
+    throw new Error("No MYOB company file is linked to this tenant yet.");
+  }
+
+  const companyFileId = connection.companyFileId;
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const result = await fetchMyobJson(accessToken, companyFileId, "/Inventory/Item?$top=50");
+  const payload = result.data as Record<string, unknown> | null;
+  const items = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? (result.data as unknown[]) : [];
+  const imported: Array<{ myobUid: string; name: string; sku: string | null; localId: string }> = [];
+
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const item = raw as Record<string, unknown>;
+    const myobUid = typeof item.UID === "string" ? item.UID : null;
+    if (!myobUid) continue;
+
+    const sku = typeof item.Number === "string" && item.Number.trim() ? item.Number.trim() : null;
+    const name = normaliseItemName(item);
+    const taxCode = readNestedTaxCode(item);
+    const isActive = item.IsInactive === true ? false : item.IsActive !== false;
+
+    const saved = await upsertImportedProduct(tenantId, {
+      myobUid,
+      sku,
+      name,
+      taxCode,
+      status: isActive ? "active" : "draft",
+      department: "general",
+      productFamily: "general",
+      calculatorType: "configurator_template",
+      payloadJson: item
+    });
+
+    await upsertExternalMappingByTenantId(tenantId, {
+      entityType: "product",
+      localId: saved.id,
+      externalId: myobUid,
+      syncState: "synced",
+      lastSyncedAt: new Date().toISOString(),
+      payloadJson: { name, sku, taxCode }
+    });
+
+    imported.push({ myobUid, name, sku, localId: saved.id });
+  }
+
+  await markMyobConnectionHealthy(tenantId, {
+    environment: connection.environment,
+    companyFileId: connection.companyFileId,
+    companyName: connection.companyName,
+    connectedAt: connection.connectedAt,
+    lastSuccessfulSyncAt: new Date().toISOString()
+  });
+
+  const summary: MyobItemImportSummary = {
+    importedCount: imported.length,
+    mappedCount: imported.length,
+    sample: imported.slice(0, 5)
+  };
+
+  await createSyncRunForTenant(
+    tenantId,
+    "incremental_import",
+    "success",
+    {
+      source: "importMyobItemsAndCreateMappings",
+      companyFileId,
+      companyName: connection.companyName,
+      itemsImported: summary.importedCount,
+      mappingsCreated: summary.mappedCount,
+      sample: summary.sample
+    },
+    null
+  );
 
   return summary;
 }
