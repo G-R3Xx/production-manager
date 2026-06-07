@@ -10,7 +10,7 @@ export type ConfiguratorTemplateRecord = {
   productFamily: string;
   version: number;
   status: string;
-  definitionJson: Record<string, any>;
+  definitionJson: Record<string, unknown>;
   pricingJson: Record<string, unknown>;
   constraintsJson: Record<string, unknown>;
   createdAt: string;
@@ -28,13 +28,10 @@ export type ConfiguratorTemplateCreateInput = {
   constraintsJson: Record<string, unknown>;
 };
 
-function parseJson(value: unknown): Record<string, any> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, any>;
-}
-
-function normalizeFields(definitionJson: Record<string, any>) {
-  return Array.isArray(definitionJson.fields) ? definitionJson.fields : [];
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
 }
 
 export async function listConfiguratorTemplatesForTenant(
@@ -66,22 +63,17 @@ export async function listConfiguratorTemplatesForTenant(
     [tenantId]
   );
 
-  return result.rows.map((row) => ({
-    ...row,
-    definitionJson: parseJson(row.definitionJson),
-    pricingJson: parseJson(row.pricingJson),
-    constraintsJson: parseJson(row.constraintsJson)
-  }));
+  return result.rows;
 }
 
 export async function createConfiguratorTemplate(
   input: ConfiguratorTemplateCreateInput
-): Promise<void> {
+): Promise<string> {
   if (!process.env.DATABASE_URL) {
-    return;
+    return "";
   }
 
-  await pool.query(
+  const result = await pool.query<{ id: string }>(
     `
       INSERT INTO catalog.configurator_templates (
         tenant_id,
@@ -93,7 +85,8 @@ export async function createConfiguratorTemplate(
         pricing_json,
         constraints_json
       )
-      VALUES ($1,$2,$3::department,$4::product_family,$5::product_status,$6::jsonb,$7::jsonb,$8::jsonb)
+      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb)
+      RETURNING id
     `,
     [
       input.tenantId,
@@ -106,6 +99,8 @@ export async function createConfiguratorTemplate(
       JSON.stringify(input.constraintsJson)
     ]
   );
+
+  return result.rows[0]?.id ?? "";
 }
 
 export async function addConfiguratorField(input: {
@@ -115,45 +110,48 @@ export async function addConfiguratorField(input: {
   key: string;
   type: string;
   required: boolean;
-  options: Array<{ id: string; label: string; value: string; priceAdjustment: number; costAdjustment: number }>;
-}) {
-  const result = await pool.query<{ definitionJson: Record<string, any> }>(
-    `
-      SELECT definition_json AS "definitionJson"
-      FROM catalog.configurator_templates
-      WHERE id = $1::uuid AND tenant_id = $2::uuid
-      LIMIT 1
-    `,
-    [input.templateId, input.tenantId]
+  defaultValue?: string | null;
+  optionsCsv?: string | null;
+}): Promise<void> {
+  const currentResult = await pool.query<{ definitionJson: unknown }>(
+    `SELECT definition_json AS "definitionJson" FROM catalog.configurator_templates WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1`,
+    [input.tenantId, input.templateId]
   );
 
-  const existing = result.rows[0]?.definitionJson ? parseJson(result.rows[0].definitionJson) : {};
-  const fields = normalizeFields(existing);
-  const next = {
-    ...existing,
-    version: typeof existing.version === "number" ? existing.version : 1,
-    fields: [
-      ...fields,
-      {
-        id: `${input.key}-${Date.now()}`,
-        key: input.key,
-        label: input.label,
-        type: input.type,
-        required: input.required,
-        options: input.type === "select" ? input.options : undefined,
-        defaultValue: input.type === "quantity" ? 1 : undefined
-      }
-    ]
+  const current = asObject(currentResult.rows[0]?.definitionJson);
+  const existingFields = Array.isArray(current.fields) ? current.fields : [];
+
+  const parsedOptions = (input.optionsCsv ?? "")
+    .split(",")
+    .map((option) => option.trim())
+    .filter(Boolean)
+    .map((option, index) => ({
+      id: `${input.key}-opt-${index + 1}`,
+      label: option,
+      value: option,
+      priceAdjustment: 0,
+      costAdjustment: 0
+    }));
+
+  const nextField = {
+    id: `${input.key}-${existingFields.length + 1}`,
+    key: input.key,
+    label: input.label,
+    type: input.type,
+    required: input.required,
+    defaultValue: input.defaultValue ?? undefined,
+    options: input.type === "select" ? parsedOptions : undefined
+  };
+
+  const nextDefinition = {
+    ...current,
+    version: Number(current.version ?? 1),
+    fields: [...existingFields, nextField]
   };
 
   await pool.query(
-    `
-      UPDATE catalog.configurator_templates
-      SET definition_json = $3::jsonb,
-          updated_at = now()
-      WHERE id = $1::uuid AND tenant_id = $2::uuid
-    `,
-    [input.templateId, input.tenantId, JSON.stringify(next)]
+    `UPDATE catalog.configurator_templates SET definition_json = $3::jsonb, updated_at = now() WHERE tenant_id = $1::uuid AND id = $2::uuid`,
+    [input.tenantId, input.templateId, JSON.stringify(nextDefinition)]
   );
 }
 
