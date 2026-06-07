@@ -12,6 +12,7 @@ import { listCustomersForTenant } from "@/server/customers";
 import { listSuppliersForTenant } from "@/server/suppliers";
 import { listQuotesForTenant } from "@/server/quotes";
 import { listProductRecipesForTenant } from "@/server/recipes";
+import { listMaterialsForTenant } from "@/server/materials";
 
 function cardStyle() {
   return {
@@ -52,8 +53,9 @@ export default async function DashboardPage() {
     );
   }
 
-  const [products, configurators, myobConnection, myobToken, mappings, syncRuns, customers, suppliers, quotes, recipes] = await Promise.all([
+  const [products, materials, configurators, myobConnection, myobToken, mappings, syncRuns, customers, suppliers, quotes, recipes] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
+    listMaterialsForTenant(activeTenant.tenantId),
     listConfiguratorTemplatesForTenant(activeTenant.tenantId),
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
@@ -77,6 +79,7 @@ export default async function DashboardPage() {
 
   const cards = [
     { label: "Products", value: String(products.length), note: "Tenant product records" },
+    { label: "Materials", value: String(materials.length), note: "Purchased raw stock records" },
     { label: "Configurators", value: String(configurators.length), note: "Template definitions" },
     { label: "MYOB", value: myobConnection?.lastSuccessfulSyncAt ? "connected" : myobConnection?.status ?? "disconnected", note: myobConnection?.companyName ?? "No company selected yet" },
     { label: "Token", value: myobToken ? "stored" : "missing", note: formatDateTime(myobToken?.expiresAt) ?? "No OAuth token stored yet" },
