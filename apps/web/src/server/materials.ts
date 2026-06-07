@@ -44,6 +44,45 @@ export type CreateMaterialInput = {
   notes: string | null;
 };
 
+
+function normalizeMaterialType(value: string): string {
+  switch (value) {
+    case "sheet":
+      return "sheet_media";
+    case "roll":
+      return "roll_media";
+    case "paper":
+      return "paper_stock";
+    case "hardware":
+      return "fixing";
+    case "consumable":
+      return "item";
+    default:
+      return value || "other";
+  }
+}
+
+function presentMaterialType(value: string): string {
+  switch (value) {
+    case "sheet_media":
+      return "sheet";
+    case "roll_media":
+      return "roll";
+    case "paper_stock":
+      return "paper";
+    case "card_stock":
+      return "card stock";
+    case "roll_laminate":
+      return "roll laminate";
+    case "fixing":
+      return "hardware";
+    case "item":
+      return "consumable";
+    default:
+      return value;
+  }
+}
+
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
   const result = await pool.query<MaterialRecord>(`
     SELECT
@@ -78,7 +117,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
     ORDER BY m.name ASC, m.created_at DESC
   `, [tenantId]);
 
-  return result.rows;
+  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType) }));
 }
 
 export async function createMaterial(input: CreateMaterialInput): Promise<void> {
@@ -130,7 +169,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.sourceProductId,
     input.name,
     input.sku,
-    input.materialType,
+    normalizeMaterialType(input.materialType),
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,

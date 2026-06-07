@@ -23,7 +23,7 @@ export async function createMaterialAction(formData: FormData) {
     sourceProductId: readString(formData, 'sourceProductId') || null,
     name,
     sku: readString(formData, 'sku') || null,
-    materialType: readString(formData, 'materialType') || 'sheet',
+    materialType: readString(formData, 'materialType') || 'sheet_media',
     stockUom: readString(formData, 'stockUom') || 'sheet',
     purchaseUom: readString(formData, 'purchaseUom') || 'sheet',
     stockQuantity: readString(formData, 'stockQuantity') || '0',

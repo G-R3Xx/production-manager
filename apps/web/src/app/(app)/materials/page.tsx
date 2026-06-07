@@ -65,7 +65,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Supplier SKU</span><input name="sku" placeholder="ACM-3-2440" style={inputStyle} /></label>
-            <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Material type</span><select name="materialType" defaultValue="sheet" style={inputStyle}><option value="sheet">sheet</option><option value="roll">roll</option><option value="paper">paper</option><option value="hardware">hardware</option><option value="consumable">consumable</option><option value="other">other</option></select></label>
+            <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Material type</span><select name="materialType" defaultValue="sheet_media" style={inputStyle}><option value="sheet_media">sheet</option><option value="roll_media">roll</option><option value="paper_stock">paper</option><option value="card_stock">card stock</option><option value="roll_laminate">roll laminate</option><option value="fixing">hardware / fixing</option><option value="item">consumable / item</option><option value="other">other</option></select></label>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Stock UOM</span><input name="stockUom" defaultValue="sheet" style={inputStyle} /></label>
