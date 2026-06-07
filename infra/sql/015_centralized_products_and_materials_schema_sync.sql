@@ -14,15 +14,14 @@ ALTER TABLE IF EXISTS catalog.materials
   ADD COLUMN IF NOT EXISTS roll_width_mm numeric NULL,
   ADD COLUMN IF NOT EXISTS gsm numeric NULL,
   ADD COLUMN IF NOT EXISTS notes varchar NULL,
-  ADD COLUMN IF NOT EXISTS stock_uom varchar NULL DEFAULT ''sheet'',
-  ADD COLUMN IF NOT EXISTS purchase_uom varchar NULL DEFAULT ''sheet'',
+  ADD COLUMN IF NOT EXISTS stock_uom varchar NULL DEFAULT 'sheet',
+  ADD COLUMN IF NOT EXISTS purchase_uom varchar NULL DEFAULT 'sheet',
   ADD COLUMN IF NOT EXISTS active boolean NOT NULL DEFAULT true,
   ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
-UPDATE catalog.materials
-SET material_type = COALESCE(material_type, type, ''sheet'')
-WHERE material_type IS NULL;
+-- Leave material_type nullable for compatibility with existing enum-based installs.
+-- The app now reads COALESCE(material_type::text, type) and writes to legacy type safely.
 
 ALTER TABLE IF EXISTS catalog.materials
   ALTER COLUMN type DROP NOT NULL;
