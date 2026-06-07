@@ -57,7 +57,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.sku,
       CASE
         WHEN m.material_type IS NOT NULL THEN m.material_type::text
-        ELSE m.type
+        ELSE m.type::text
       END AS "materialType",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
