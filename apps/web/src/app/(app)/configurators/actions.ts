@@ -63,7 +63,7 @@ export async function createConfiguratorTemplateAction(formData: FormData) {
   const status = readString(formData, "status") || "draft";
 
   if (!name) {
-    redirect("/products?error=Template%20name%20is%20required");
+    redirect("/configurators?error=Template%20name%20is%20required");
   }
 
   await createConfiguratorTemplate({
@@ -83,7 +83,7 @@ export async function createConfiguratorTemplateAction(formData: FormData) {
     }
   });
 
-  redirect("/products?message=Options%20template%20created");
+  redirect("/configurators?message=Configurator%20template%20created");
 }
 
 export async function addConfiguratorFieldAction(formData: FormData) {
@@ -95,7 +95,7 @@ export async function addConfiguratorFieldAction(formData: FormData) {
   const required = readString(formData, "required") === "on";
 
   if (!templateId || !label) {
-    redirect("/products?error=Template%20and%20field%20label%20are%20required");
+    redirect("/configurators?error=Template%20and%20field%20label%20are%20required");
   }
 
   const key = slugify(readString(formData, "key") || label);
@@ -119,5 +119,5 @@ export async function addConfiguratorFieldAction(formData: FormData) {
     options
   });
 
-  redirect("/products?message=Option%20field%20added");
+  redirect("/configurators?message=Configurator%20field%20added");
 }
