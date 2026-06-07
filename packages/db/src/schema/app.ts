@@ -48,15 +48,6 @@ export const quoteStatusEnum = pgEnum("quote_status", [
   "converted"
 ]);
 
-
-export const invoiceStatusEnum = pgEnum("invoice_status", [
-  "draft",
-  "issued",
-  "part_paid",
-  "paid",
-  "void"
-]);
-
 export const tenants = appSchema.table("tenants", {
   id: uuid("id").defaultRandom().primaryKey(),
   slug: varchar("slug", { length: 120 }).notNull().unique(),
@@ -130,24 +121,6 @@ export const customers = appSchema.table("customers", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
 
-export const suppliers = appSchema.table("suppliers", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: uuid("tenant_id")
-    .notNull()
-    .references(() => tenants.id, { onDelete: "cascade" }),
-  myobUid: varchar("myob_uid", { length: 255 }).notNull(),
-  displayName: varchar("display_name", { length: 255 }).notNull(),
-  companyName: varchar("company_name", { length: 255 }),
-  firstName: varchar("first_name", { length: 120 }),
-  lastName: varchar("last_name", { length: 120 }),
-  email: varchar("email", { length: 255 }),
-  phone: varchar("phone", { length: 80 }),
-  isActive: boolean("is_active").notNull().default(true),
-  payloadJson: jsonb("payload_json").notNull().default({}),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-});
-
 export const quotes = appSchema.table("quotes", {
   id: uuid("id").defaultRandom().primaryKey(),
   tenantId: uuid("tenant_id")
@@ -191,49 +164,6 @@ export const quoteLines = appSchema.table("quote_lines", {
   resolvedConfig: jsonb("resolved_config").notNull().default({}),
   pricingBreakdown: jsonb("pricing_breakdown").notNull().default([]),
   notes: text("notes"),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-});
-
-
-export const invoices = appSchema.table("invoices", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: uuid("tenant_id")
-    .notNull()
-    .references(() => tenants.id, { onDelete: "cascade" }),
-  customerId: uuid("customer_id"),
-  quoteId: uuid("quote_id"),
-  invoiceNumber: varchar("invoice_number", { length: 50 }).notNull(),
-  status: invoiceStatusEnum("status").notNull().default("draft"),
-  issueDate: timestamp("issue_date", { withTimezone: true }),
-  dueDate: timestamp("due_date", { withTimezone: true }),
-  subtotal: numeric("subtotal", { precision: 12, scale: 2 }).notNull().default("0"),
-  taxTotal: numeric("tax_total", { precision: 12, scale: 2 }).notNull().default("0"),
-  grandTotal: numeric("grand_total", { precision: 12, scale: 2 }).notNull().default("0"),
-  myobUid: varchar("myob_uid", { length: 255 }),
-  payloadJson: jsonb("payload_json").notNull().default({}),
-  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
-});
-
-export const invoiceLines = appSchema.table("invoice_lines", {
-  id: uuid("id").defaultRandom().primaryKey(),
-  tenantId: uuid("tenant_id")
-    .notNull()
-    .references(() => tenants.id, { onDelete: "cascade" }),
-  invoiceId: uuid("invoice_id")
-    .notNull()
-    .references(() => invoices.id, { onDelete: "cascade" }),
-  quoteLineId: uuid("quote_line_id"),
-  productId: uuid("product_id"),
-  sortOrder: integer("sort_order").notNull().default(0),
-  qty: numeric("qty", { precision: 12, scale: 2 }).notNull(),
-  unitPrice: numeric("unit_price", { precision: 12, scale: 2 }).notNull().default("0"),
-  lineTotal: numeric("line_total", { precision: 12, scale: 2 }).notNull().default("0"),
-  displayTitle: varchar("display_title", { length: 255 }).notNull(),
-  displaySubtitle: text("display_subtitle"),
-  selectionSummary: text("selection_summary"),
-  payloadJson: jsonb("payload_json").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });

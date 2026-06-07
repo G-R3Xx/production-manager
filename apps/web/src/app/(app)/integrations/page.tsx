@@ -5,8 +5,7 @@ import {
   runMyobReadOnlySyncAction,
   saveMyobConnectionAction,
   importMyobCustomersAction,
-  importMyobItemsAction,
-  importMyobSuppliersAction
+  importMyobItemsAction
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
@@ -19,7 +18,6 @@ import {
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { listCustomersForTenant } from "@/server/customers";
 import { listProductsForTenant } from "@/server/products";
-import { listSuppliersForTenant } from "@/server/suppliers";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 
 function cardStyle() {
@@ -79,17 +77,14 @@ export default async function IntegrationsPage({
     );
   }
 
-  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts, localSuppliers] = await Promise.all([
+  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts] = await Promise.all([
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
     listSyncRunsByTenantId(activeTenant.tenantId),
     listCustomersForTenant(activeTenant.tenantId),
-    listProductsForTenant(activeTenant.tenantId),
-    listSuppliersForTenant(activeTenant.tenantId)
+    listProductsForTenant(activeTenant.tenantId)
   ]);
-
-  const latestReadOnlyRun = syncRuns.find((run) => run.summaryJson?.source === "runMyobReadOnlySync") ?? null;
 
   return (
     <div style={{ display: "grid", gap: 24 }}>
@@ -198,18 +193,6 @@ export default async function IntegrationsPage({
             </button>
           </form>
 
-          <form action={importMyobItemsAction}>
-            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
-              Import items + create mappings
-            </button>
-          </form>
-
-          <form action={importMyobSuppliersAction}>
-            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
-              Import suppliers + create mappings
-            </button>
-          </form>
-
           <form action={queueMyobSyncAction}>
             <input type="hidden" name="jobType" value="incremental_import" />
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
@@ -242,24 +225,9 @@ export default async function IntegrationsPage({
             <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{tokenRecord?.expiresAt ? formatDateTime(tokenRecord.expiresAt) : "No expiry stored yet"}</div>
           </div>
         </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-            <div style={{ fontWeight: 700 }}>Local customers</div>
-            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{localCustomers.length}</div>
-          </div>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-            <div style={{ fontWeight: 700 }}>Local products</div>
-            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{localProducts.length}</div>
-          </div>
-          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, background: "#fafafa" }}>
-            <div style={{ fontWeight: 700 }}>Local suppliers</div>
-            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{localSuppliers.length}</div>
-          </div>
-        </div>
       </div>
 
-      {latestReadOnlyRun?.summaryJson ? (
+      {syncRuns[0]?.summaryJson ? (
         <div style={cardStyle()}>
           <div style={{ fontSize: 12, fontWeight: 700, color: "#4f46e5", letterSpacing: "0.08em", textTransform: "uppercase" }}>
             Latest read-only sync
@@ -269,31 +237,31 @@ export default async function IntegrationsPage({
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
               <div style={{ fontWeight: 700 }}>Customers</div>
               <div style={{ color: "#667085", marginTop: 6 }}>
-                {typeof latestReadOnlyRun.summaryJson.customers === "object" && latestReadOnlyRun.summaryJson.customers && "count" in (latestReadOnlyRun.summaryJson.customers as Record<string, unknown>)
-                  ? String((latestReadOnlyRun.summaryJson.customers as Record<string, unknown>).count ?? 0)
+                {typeof syncRuns[0].summaryJson.customers === "object" && syncRuns[0].summaryJson.customers && "count" in (syncRuns[0].summaryJson.customers as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.customers as Record<string, unknown>).count ?? 0)
                   : "—"}
               </div>
             </div>
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
               <div style={{ fontWeight: 700 }}>Suppliers</div>
               <div style={{ color: "#667085", marginTop: 6 }}>
-                {typeof latestReadOnlyRun.summaryJson.suppliers === "object" && latestReadOnlyRun.summaryJson.suppliers && "count" in (latestReadOnlyRun.summaryJson.suppliers as Record<string, unknown>)
-                  ? String((latestReadOnlyRun.summaryJson.suppliers as Record<string, unknown>).count ?? 0)
+                {typeof syncRuns[0].summaryJson.suppliers === "object" && syncRuns[0].summaryJson.suppliers && "count" in (syncRuns[0].summaryJson.suppliers as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.suppliers as Record<string, unknown>).count ?? 0)
                   : "—"}
               </div>
             </div>
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
               <div style={{ fontWeight: 700 }}>Items</div>
               <div style={{ color: "#667085", marginTop: 6 }}>
-                {typeof latestReadOnlyRun.summaryJson.items === "object" && latestReadOnlyRun.summaryJson.items && "count" in (latestReadOnlyRun.summaryJson.items as Record<string, unknown>)
-                  ? String((latestReadOnlyRun.summaryJson.items as Record<string, unknown>).count ?? 0)
+                {typeof syncRuns[0].summaryJson.items === "object" && syncRuns[0].summaryJson.items && "count" in (syncRuns[0].summaryJson.items as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.items as Record<string, unknown>).count ?? 0)
                   : "—"}
               </div>
             </div>
             <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
               <div style={{ fontWeight: 700 }}>Company</div>
               <div style={{ color: "#667085", marginTop: 6 }}>
-                {typeof latestReadOnlyRun.summaryJson.companyName === "string" ? latestReadOnlyRun.summaryJson.companyName : connection?.companyName ?? "—"}
+                {typeof syncRuns[0].summaryJson.companyName === "string" ? syncRuns[0].summaryJson.companyName : connection?.companyName ?? "—"}
               </div>
             </div>
           </div>

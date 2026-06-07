@@ -11,10 +11,12 @@ type AppLayoutProps = {
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard" },
+  { href: "/clients", label: "Clients" },
+  { href: "/suppliers", label: "Suppliers" },
   { href: "/company", label: "Company" },
   { href: "/users", label: "Users" },
   { href: "/products", label: "Products" },
-  { href: "/materials", label: "Materials" },
+  { href: "/configurators", label: "Configurators" },
   { href: "/quotes", label: "Quotes" },
   { href: "/integrations", label: "Integrations" },
   { href: "/bootstrap", label: "Bootstrap" }
