@@ -173,6 +173,12 @@ export default async function IntegrationsPage({
             </span>
           </Link>
 
+          <form action={runMyobReadOnlySyncAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
+              Run read-only MYOB sync
+            </button>
+          </form>
+
           <form action={queueMyobSyncAction}>
             <input type="hidden" name="jobType" value="incremental_import" />
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
