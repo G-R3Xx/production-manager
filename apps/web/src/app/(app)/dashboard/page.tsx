@@ -9,6 +9,7 @@ import {
   listSyncRunsByTenantId
 } from "@/server/integrations";
 import { listCustomersForTenant } from "@/server/customers";
+import { listSuppliersForTenant } from "@/server/suppliers";
 
 function cardStyle() {
   return {
@@ -49,14 +50,15 @@ export default async function DashboardPage() {
     );
   }
 
-  const [products, configurators, myobConnection, myobToken, mappings, syncRuns, customers] = await Promise.all([
+  const [products, configurators, myobConnection, myobToken, mappings, syncRuns, customers, suppliers] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
     listConfiguratorTemplatesForTenant(activeTenant.tenantId),
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
     listSyncRunsByTenantId(activeTenant.tenantId),
-    listCustomersForTenant(activeTenant.tenantId)
+    listCustomersForTenant(activeTenant.tenantId),
+    listSuppliersForTenant(activeTenant.tenantId)
   ]);
 
   const latestReadOnlySummary = syncRuns.find((run) => {
@@ -76,6 +78,7 @@ export default async function DashboardPage() {
     { label: "Token", value: myobToken ? "stored" : "missing", note: formatDateTime(myobToken?.expiresAt) ?? "No OAuth token stored yet" },
     { label: "Mappings", value: String(mappings.length), note: "Local ↔ MYOB IDs" },
     { label: "Customers", value: String(customers.length), note: "Imported local customers" },
+    { label: "Suppliers", value: String(suppliers.length), note: "Imported local suppliers" },
     { label: "Sync Runs", value: String(syncRuns.length), note: syncRuns[0]?.status ?? "No sync history yet" },
     { label: "Read-only Sync", value: latestReadOnlyCustomerCount, note: "Latest customer count from MYOB" }
   ];

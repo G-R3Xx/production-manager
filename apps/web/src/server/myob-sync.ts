@@ -12,6 +12,7 @@ import {
 import { env } from "@/lib/env";
 import { upsertImportedCustomer } from "@/server/customers";
 import { upsertImportedProduct } from "@/server/products";
+import { upsertImportedSupplier } from "@/server/suppliers";
 
 export type MyobReadOnlySyncSummary = {
   companyFileId: string;
@@ -433,6 +434,110 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
       companyFileId,
       companyName: connection.companyName,
       itemsImported: summary.importedCount,
+      mappingsCreated: summary.mappedCount,
+      sample: summary.sample
+    },
+    null
+  );
+
+  return summary;
+}
+
+
+export type MyobSupplierImportSummary = {
+  importedCount: number;
+  mappedCount: number;
+  sample: Array<{ myobUid: string; displayName: string; localId: string }>;
+};
+
+function normaliseSupplierDisplayName(supplier: Record<string, unknown>) {
+  const companyName = typeof supplier.CompanyName === "string" ? supplier.CompanyName : null;
+  const displayID = typeof supplier.DisplayID === "string" ? supplier.DisplayID : null;
+  const firstName = typeof supplier.FirstName === "string" ? supplier.FirstName : null;
+  const lastName = typeof supplier.LastName === "string" ? supplier.LastName : null;
+  const personName = [firstName, lastName].filter(Boolean).join(" ").trim();
+  return companyName || personName || displayID || "Imported MYOB supplier";
+}
+
+export async function importMyobSuppliersAndCreateMappings(tenantId: string): Promise<MyobSupplierImportSummary> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+
+  if (!connection?.companyFileId) {
+    throw new Error("No MYOB company file is linked to this tenant yet.");
+  }
+
+  const companyFileId = connection.companyFileId;
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const result = await fetchMyobJson(accessToken, companyFileId, "/Contact/Supplier?$top=50");
+  const payload = result.data as Record<string, unknown> | null;
+  const suppliers = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? (result.data as unknown[]) : [];
+  const imported: Array<{ myobUid: string; displayName: string; localId: string }> = [];
+
+  for (const raw of suppliers) {
+    if (!raw || typeof raw !== "object") continue;
+    const supplier = raw as Record<string, unknown>;
+    const myobUid = typeof supplier.UID === "string" ? supplier.UID : null;
+    if (!myobUid) continue;
+
+    const displayName = normaliseSupplierDisplayName(supplier);
+    const companyName = typeof supplier.CompanyName === "string" ? supplier.CompanyName : null;
+    const firstName = typeof supplier.FirstName === "string" ? supplier.FirstName : null;
+    const lastName = typeof supplier.LastName === "string" ? supplier.LastName : null;
+    const email = supplier.Email && typeof supplier.Email === "object" && supplier.Email && "Address" in supplier.Email
+      ? String((supplier.Email as Record<string, unknown>).Address ?? "") || null
+      : null;
+    const phone = supplier.Phone1 && typeof supplier.Phone1 === "object" && supplier.Phone1 && "Number" in supplier.Phone1
+      ? String((supplier.Phone1 as Record<string, unknown>).Number ?? "") || null
+      : null;
+    const isActive = supplier.IsActive !== false;
+
+    const saved = await upsertImportedSupplier(tenantId, {
+      myobUid,
+      displayName,
+      companyName,
+      firstName,
+      lastName,
+      email,
+      phone,
+      isActive,
+      payloadJson: supplier
+    });
+
+    await upsertExternalMappingByTenantId(tenantId, {
+      entityType: "supplier",
+      localId: saved.id,
+      externalId: myobUid,
+      syncState: "synced",
+      lastSyncedAt: new Date().toISOString(),
+      payloadJson: { displayName, companyName }
+    });
+
+    imported.push({ myobUid, displayName, localId: saved.id });
+  }
+
+  await markMyobConnectionHealthy(tenantId, {
+    environment: connection.environment,
+    companyFileId: connection.companyFileId,
+    companyName: connection.companyName,
+    connectedAt: connection.connectedAt,
+    lastSuccessfulSyncAt: new Date().toISOString()
+  });
+
+  const summary: MyobSupplierImportSummary = {
+    importedCount: imported.length,
+    mappedCount: imported.length,
+    sample: imported.slice(0, 5)
+  };
+
+  await createSyncRunForTenant(
+    tenantId,
+    "incremental_import",
+    "success",
+    {
+      source: "importMyobSuppliersAndCreateMappings",
+      companyFileId,
+      companyName: connection.companyName,
+      suppliersImported: summary.importedCount,
       mappingsCreated: summary.mappedCount,
       sample: summary.sample
     },
