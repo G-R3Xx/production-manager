@@ -10,7 +10,7 @@ export type ConfiguratorTemplateRecord = {
   productFamily: string;
   version: number;
   status: string;
-  definitionJson: Record<string, unknown>;
+  definitionJson: Record<string, any>;
   pricingJson: Record<string, unknown>;
   constraintsJson: Record<string, unknown>;
   createdAt: string;
@@ -27,6 +27,15 @@ export type ConfiguratorTemplateCreateInput = {
   pricingJson: Record<string, unknown>;
   constraintsJson: Record<string, unknown>;
 };
+
+function parseJson(value: unknown): Record<string, any> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return value as Record<string, any>;
+}
+
+function normalizeFields(definitionJson: Record<string, any>) {
+  return Array.isArray(definitionJson.fields) ? definitionJson.fields : [];
+}
 
 export async function listConfiguratorTemplatesForTenant(
   tenantId: string
@@ -57,7 +66,12 @@ export async function listConfiguratorTemplatesForTenant(
     [tenantId]
   );
 
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    definitionJson: parseJson(row.definitionJson),
+    pricingJson: parseJson(row.pricingJson),
+    constraintsJson: parseJson(row.constraintsJson)
+  }));
 }
 
 export async function createConfiguratorTemplate(
@@ -79,7 +93,7 @@ export async function createConfiguratorTemplate(
         pricing_json,
         constraints_json
       )
-      VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb)
+      VALUES ($1,$2,$3::department,$4::product_family,$5::product_status,$6::jsonb,$7::jsonb,$8::jsonb)
     `,
     [
       input.tenantId,
@@ -94,6 +108,54 @@ export async function createConfiguratorTemplate(
   );
 }
 
+export async function addConfiguratorField(input: {
+  tenantId: string;
+  templateId: string;
+  label: string;
+  key: string;
+  type: string;
+  required: boolean;
+  options: Array<{ id: string; label: string; value: string; priceAdjustment: number; costAdjustment: number }>;
+}) {
+  const result = await pool.query<{ definitionJson: Record<string, any> }>(
+    `
+      SELECT definition_json AS "definitionJson"
+      FROM catalog.configurator_templates
+      WHERE id = $1::uuid AND tenant_id = $2::uuid
+      LIMIT 1
+    `,
+    [input.templateId, input.tenantId]
+  );
+
+  const existing = result.rows[0]?.definitionJson ? parseJson(result.rows[0].definitionJson) : {};
+  const fields = normalizeFields(existing);
+  const next = {
+    ...existing,
+    version: typeof existing.version === "number" ? existing.version : 1,
+    fields: [
+      ...fields,
+      {
+        id: `${input.key}-${Date.now()}`,
+        key: input.key,
+        label: input.label,
+        type: input.type,
+        required: input.required,
+        options: input.type === "select" ? input.options : undefined,
+        defaultValue: input.type === "quantity" ? 1 : undefined
+      }
+    ]
+  };
+
+  await pool.query(
+    `
+      UPDATE catalog.configurator_templates
+      SET definition_json = $3::jsonb,
+          updated_at = now()
+      WHERE id = $1::uuid AND tenant_id = $2::uuid
+    `,
+    [input.templateId, input.tenantId, JSON.stringify(next)]
+  );
+}
 
 export async function listConfiguratorTemplatesByTenantId(tenantId: string): Promise<ConfiguratorTemplateRecord[]> {
   return listConfiguratorTemplatesForTenant(tenantId);

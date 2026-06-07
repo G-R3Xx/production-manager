@@ -3,10 +3,17 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createConfiguratorTemplate } from "@/server/configurators";
+import { addConfiguratorField, createConfiguratorTemplate } from "@/server/configurators";
 
 function readString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
+}
+
+function slugify(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || `field-${Date.now()}`;
 }
 
 function createStarterDefinitionJson(label: string) {
@@ -26,17 +33,6 @@ function createStarterDefinitionJson(label: string) {
         ]
       },
       {
-        id: "sides",
-        key: "sides",
-        label: "Sides",
-        type: "select",
-        required: true,
-        options: [
-          { id: "single", label: "Single sided", value: "single", priceAdjustment: 0, costAdjustment: 0 },
-          { id: "double", label: "Double sided", value: "double", priceAdjustment: 20, costAdjustment: 10 }
-        ]
-      },
-      {
         id: "qty",
         key: "qty",
         label: "Quantity",
@@ -51,13 +47,15 @@ function createStarterDefinitionJson(label: string) {
   };
 }
 
-export async function createConfiguratorTemplateAction(formData: FormData) {
+async function requireTenant() {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
+  if (!activeTenant) redirect("/bootstrap");
+  return activeTenant;
+}
 
-  if (!activeTenant) {
-    redirect("/bootstrap");
-  }
+export async function createConfiguratorTemplateAction(formData: FormData) {
+  const activeTenant = await requireTenant();
 
   const name = readString(formData, "name");
   const department = readString(formData, "department") || "signage";
@@ -86,4 +84,40 @@ export async function createConfiguratorTemplateAction(formData: FormData) {
   });
 
   redirect("/configurators?message=Configurator%20template%20created");
+}
+
+export async function addConfiguratorFieldAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const templateId = readString(formData, "templateId");
+  const label = readString(formData, "label");
+  const type = readString(formData, "type") || "select";
+  const optionsRaw = readString(formData, "optionsCsv");
+  const required = readString(formData, "required") === "on";
+
+  if (!templateId || !label) {
+    redirect("/configurators?error=Template%20and%20field%20label%20are%20required");
+  }
+
+  const key = slugify(readString(formData, "key") || label);
+  const options = type === "select"
+    ? optionsRaw.split(",").map((part) => part.trim()).filter(Boolean).map((value) => ({
+        id: `${key}-${slugify(value)}`,
+        label: value,
+        value,
+        priceAdjustment: 0,
+        costAdjustment: 0
+      }))
+    : [];
+
+  await addConfiguratorField({
+    tenantId: activeTenant.tenantId,
+    templateId,
+    label,
+    key,
+    type,
+    required,
+    options
+  });
+
+  redirect("/configurators?message=Configurator%20field%20added");
 }
