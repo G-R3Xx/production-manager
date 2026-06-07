@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
-export default function RecipesPageRedirect() {
+export default async function RecipesPage() {
   redirect("/products");
 }

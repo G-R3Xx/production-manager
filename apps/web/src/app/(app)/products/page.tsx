@@ -70,7 +70,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
         </p>
         <h1 style={{ marginTop: 12, marginBottom: 12 }}>Products</h1>
         <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
-          Manage sellable products in one place. Select a product to edit its details, then use <strong>Components</strong> and <strong>Options</strong> as the next workflow steps.
+          Manage sellable products in one place. Create a product, find a product, then work on that selected product's <strong>Components</strong> and <strong>Options</strong> below.
         </p>
       </section>
 
@@ -267,11 +267,11 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                   <section style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fafafa" }}>
                     <div style={{ fontWeight: 700 }}>Components</div>
-                    <p style={{ margin: "8px 0 0", color: "#475467", lineHeight: 1.5 }}>Materials and labour should be managed as the per-product build structure here next, instead of on a separate Recipes workflow page.</p>
+                    <p style={{ margin: "8px 0 0", color: "#475467", lineHeight: 1.5 }}>Build this product from purchased materials and labour here. This is the per-product component structure that will later drive cost, stock allocation and quoting.</p>
                   </section>
                   <section style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fafafa" }}>
                     <div style={{ fontWeight: 700 }}>Options</div>
-                    <p style={{ margin: "8px 0 0", color: "#475467", lineHeight: 1.5 }}>Use the linked option set as the variable configuration layer for this product. Separate Configurators pages are now secondary and redirect here.</p>
+                    <p style={{ margin: "8px 0 0", color: "#475467", lineHeight: 1.5 }}>Define what can vary for this product here, such as size, sides, laminate, eyelets or finish options. Keep setup inside Products so it stays easy to follow.</p>
                   </section>
                 </div>
               </>
