@@ -16,6 +16,7 @@ const navItems = [
   { href: "/company", label: "Company" },
   { href: "/users", label: "Users" },
   { href: "/products", label: "Products" },
+  { href: "/materials", label: "Materials" },
   { href: "/quotes", label: "Quotes" },
   { href: "/integrations", label: "Integrations" },
   { href: "/bootstrap", label: "Bootstrap" }
