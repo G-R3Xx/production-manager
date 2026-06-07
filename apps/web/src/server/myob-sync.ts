@@ -393,7 +393,7 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
       taxCode,
       status: isActive ? "active" : "draft",
       department: "general",
-      productFamily: "general",
+      productFamily: "display_products",
       calculatorType: "configurator_template",
       payloadJson: item
     });
