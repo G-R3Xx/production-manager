@@ -84,7 +84,7 @@ async function refreshMyobAccessToken(refreshToken: string) {
   return tokenResponse as MyobTokenResponse;
 }
 
-async function getValidAccessToken(tenantId: string) {
+async function getValidAccessToken(tenantId: string, forceRefresh = false) {
   const token = await getMyobOauthTokenByTenantId(tenantId);
 
   if (!token) {
@@ -92,7 +92,7 @@ async function getValidAccessToken(tenantId: string) {
   }
 
   const expiresAtMs = token.expiresAt ? new Date(token.expiresAt).getTime() : null;
-  const shouldRefresh = !expiresAtMs || Number.isNaN(expiresAtMs) || expiresAtMs - Date.now() < 5 * 60 * 1000;
+  const shouldRefresh = forceRefresh || !expiresAtMs || Number.isNaN(expiresAtMs) || expiresAtMs - Date.now() < 5 * 60 * 1000;
 
   if (!shouldRefresh) {
     return { accessToken: token.accessToken, refreshed: false };
@@ -154,14 +154,16 @@ function countCollection(data: unknown) {
 export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnlySyncSummary> {
   const connection = await getMyobConnectionByTenantId(tenantId);
 
-  if (!connection?.companyFileId) {
+  if (!connection || !connection.companyFileId) {
     throw new Error("No MYOB company file is linked to this tenant yet.");
   }
 
-  const { accessToken, refreshed } = await getValidAccessToken(tenantId);
+  const companyFileId = connection.companyFileId;
+
+  let { accessToken, refreshed } = await getValidAccessToken(tenantId, true);
 
   const summary: MyobReadOnlySyncSummary = {
-    companyFileId: connection.companyFileId,
+    companyFileId,
     companyName: connection.companyName,
     tokenRefreshed: refreshed,
     companyInfo: { ok: false, endpoint: "/Company/Preferences" },
@@ -170,8 +172,26 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     items: { ok: false, endpoint: "/Inventory/Item?$top=50", count: 0 }
   };
 
+  async function fetchWithRetry(endpoint: string) {
+    try {
+      return await fetchMyobJson(accessToken, companyFileId, endpoint);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const needsRefreshRetry = message.includes("OAuthTokenIsInvalid") || message.includes("401:");
+
+      if (!needsRefreshRetry) {
+        throw error;
+      }
+
+      const refreshedToken = await getValidAccessToken(tenantId, true);
+      accessToken = refreshedToken.accessToken;
+      refreshed = refreshed || refreshedToken.refreshed;
+      return await fetchMyobJson(accessToken, companyFileId, endpoint);
+    }
+  }
+
   try {
-    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences");
+    const result = await fetchWithRetry("/Company/Preferences");
     const data = result.data as Record<string, unknown> | null;
     summary.companyInfo = {
       ok: true,
@@ -189,7 +209,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
 
   for (const [key, endpoint] of [["customers", "/Contact/Customer?$top=50"], ["suppliers", "/Contact/Supplier?$top=50"], ["items", "/Inventory/Item?$top=50"]] as const) {
     try {
-      const result = await fetchMyobJson(accessToken, connection.companyFileId, endpoint);
+      const result = await fetchWithRetry(endpoint);
       summary[key] = { ok: true, endpoint: result.url, count: countCollection(result.data) } as any;
     } catch (error) {
       summary[key] = { ok: false, endpoint, count: 0, error: error instanceof Error ? error.message : "Unknown error" } as any;
@@ -200,7 +220,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
 
   await upsertMyobConnectionByTenantId(tenantId, {
     environment: connection.environment,
-    companyFileId: connection.companyFileId,
+    companyFileId,
     companyName: summary.companyInfo.displayName ?? connection.companyName,
     status: hadErrors ? "error" : "connected",
     connectedAt: connection.connectedAt,
