@@ -1,8 +1,8 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
-import { requireAuthenticatedUser } from "@/lib/supabase/server";
+import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
+import { AppNavLink } from "@/components/AppNavLink";
 import { signOutAction, switchTenantAction } from "./actions";
 
 type AppLayoutProps = {
@@ -19,9 +19,11 @@ const navItems = [
 ];
 
 export default async function AppLayout({ children }: AppLayoutProps) {
-  const user = await requireAuthenticatedUser("/dashboard");
-  const memberships = await listMembershipsForAuthUser(user.id);
-  const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
+  const user = await getRequiredSessionUser();
+  const [memberships, activeTenant] = await Promise.all([
+    listMembershipsForAuthUser(user.id),
+    resolveActiveTenantForAuthUserId(user.id)
+  ]);
 
   return (
     <div
@@ -122,22 +124,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
 
         <nav style={{ display: "grid", gap: 10, alignContent: "start" }}>
           {navItems.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              style={{
-                display: "block",
-                padding: "12px 14px",
-                borderRadius: 12,
-                border: "1px solid #e5e7eb",
-                background: "#fafafa",
-                color: "#111827",
-                fontWeight: 700,
-                textDecoration: "none"
-              }}
-            >
-              {item.label}
-            </Link>
+            <AppNavLink key={item.href} href={item.href} label={item.label} />
           ))}
         </nav>
 

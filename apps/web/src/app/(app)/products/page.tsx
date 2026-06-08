@@ -136,17 +136,17 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const selectedId = readParam(params, "selected");
   const query = readParam(params, "q");
 
-  const [products, materials, suppliers] = await Promise.all([
+  const [products, materials, suppliers, selectedProduct] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
     listMaterialsForTenant(activeTenant.tenantId),
-    listSuppliersForTenant(activeTenant.tenantId)
+    listSuppliersForTenant(activeTenant.tenantId),
+    selectedId ? getProductById(activeTenant.tenantId, selectedId) : Promise.resolve(null)
   ]);
 
   const filteredProducts = query
     ? products.filter((product) => matchesQuery(product.name, query) || matchesQuery(product.sku, query) || matchesQuery(product.productFamily, query))
     : products;
 
-  const selectedProduct = selectedId ? await getProductById(activeTenant.tenantId, selectedId) : null;
   const editorTemplate = selectedProduct?.defaultTemplateId
     ? await getConfiguratorTemplateById(activeTenant.tenantId, selectedProduct.defaultTemplateId)
     : null;

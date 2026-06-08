@@ -1,18 +1,19 @@
 import "server-only";
 
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { getTenantMembershipsByAuthUserId, type TenantMembershipRecord } from "@production-manager/db";
 import { ACTIVE_TENANT_COOKIE } from "@/server/bootstrap/constants";
 
 export type ActiveTenantContext = TenantMembershipRecord | null;
 
-export async function getMembershipsForAuthUserId(authUserId: string): Promise<TenantMembershipRecord[]> {
+export const getMembershipsForAuthUserId = cache(async function getMembershipsForAuthUserId(authUserId: string): Promise<TenantMembershipRecord[]> {
   if (!process.env.DATABASE_URL) {
     return [];
   }
 
   return getTenantMembershipsByAuthUserId(authUserId);
-}
+});
 
 export async function getStoredActiveTenantId(): Promise<string | null> {
   const cookieStore = await cookies();
