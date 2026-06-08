@@ -213,6 +213,162 @@ function presetDefaults(preset: string) {
   }
 }
 
+
+type ComponentPresetDefaults = {
+  componentKind: string;
+  label: string;
+  ruleType: string;
+  quantity: string;
+  unit: string;
+  wastePercent: string;
+  dimensionSource: string;
+  usageOptionKey: string;
+  triggerOptionKey: string;
+  triggerOptionValuesCsv: string;
+  labourRateName: string;
+  notes: string;
+};
+
+function componentPresetDefaults(preset: string): ComponentPresetDefaults {
+  switch (preset) {
+    case "sheet_substrate":
+      return {
+        componentKind: "material",
+        label: "Sheet substrate / board",
+        ruleType: "per_sheet",
+        quantity: "1",
+        unit: "sheet",
+        wastePercent: "10",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Allocates purchased parent sheet stock behind the finished product size. Use parts-per-sheet later when sheet yield is known."
+      };
+    case "print_area":
+      return {
+        componentKind: "material",
+        label: "Print / ink coverage",
+        ruleType: "per_sqm",
+        quantity: "1",
+        unit: "sqm",
+        wastePercent: "5",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "Print labour",
+        notes: "Uses finished size to estimate printed area. Sides options can later multiply this component."
+      };
+    case "roll_media":
+      return {
+        componentKind: "material",
+        label: "Roll media meterage",
+        ruleType: "per_linear_metre",
+        quantity: "1",
+        unit: "lm",
+        wastePercent: "10",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Consumes purchased roll media by finished length, with allowance for waste."
+      };
+    case "laminate":
+      return {
+        componentKind: "material",
+        label: "Laminate / cello coverage",
+        ruleType: "per_sqm",
+        quantity: "1",
+        unit: "sqm",
+        wastePercent: "10",
+        dimensionSource: "finished_size",
+        usageOptionKey: "laminate",
+        triggerOptionKey: "laminate",
+        triggerOptionValuesCsv: "matte_laminate,gloss_laminate,anti_graffiti,whiteboard,matte_cello,gloss_cello",
+        labourRateName: "Laminating",
+        notes: "Only consumes laminate or cello when the matching quote option is selected."
+      };
+    case "eyelets":
+      return {
+        componentKind: "finishing",
+        label: "Eyelets / fixings",
+        ruleType: "selected_by_option",
+        quantity: "4",
+        unit: "each",
+        wastePercent: "0",
+        dimensionSource: "quantity_only",
+        usageOptionKey: "eyelets",
+        triggerOptionKey: "eyelets",
+        triggerOptionValuesCsv: "yes",
+        labourRateName: "Finishing",
+        notes: "Applies only when eyelets are selected. Adjust quantity for default eyelet count."
+      };
+    case "paper_stock":
+      return {
+        componentKind: "material",
+        label: "Paper / card sheet usage",
+        ruleType: "yield_based",
+        quantity: "1",
+        unit: "sheet",
+        wastePercent: "5",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Uses finished size and quantity to allocate paper or card parent sheets. Set parts-per-sheet when known."
+      };
+    case "binding":
+      return {
+        componentKind: "finishing",
+        label: "Binding / tape consumable",
+        ruleType: "selected_by_option",
+        quantity: "1",
+        unit: "each",
+        wastePercent: "0",
+        dimensionSource: "quantity_only",
+        usageOptionKey: "binding_type",
+        triggerOptionKey: "binding_type",
+        triggerOptionValuesCsv: "saddle_stitch,perfect_bind,wire_bind,pad_binding,carbon_book_tape",
+        labourRateName: "Bindery",
+        notes: "Applies when a binding type is selected. Can represent wire, staples, tape, glue or bindery labour."
+      };
+    case "labour_time":
+      return {
+        componentKind: "labour",
+        label: "Labour time",
+        ruleType: "per_unit",
+        quantity: "10",
+        unit: "min",
+        wastePercent: "0",
+        dimensionSource: "quantity_only",
+        usageOptionKey: "quantity",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "General labour",
+        notes: "General production time allowance. Quantity is minutes per unit unless changed."
+      };
+    default:
+      return {
+        componentKind: "material",
+        label: "Material component",
+        ruleType: "fixed",
+        quantity: "1",
+        unit: "each",
+        wastePercent: "0",
+        dimensionSource: "manual",
+        usageOptionKey: "",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: ""
+      };
+  }
+}
+
 function starterField(key: string, label: string, type: string, defaultValue: string, optionsCsv: string, helpText: string) {
   return {
     id: randomUUID(),
@@ -335,32 +491,36 @@ export async function addProductComponentAction(formData: FormData) {
   if (!productId) redirect("/products?error=No%20product%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const componentPreset = readString(formData, "componentPreset") || "custom";
+  const defaults = componentPresetDefaults(componentPreset);
 
-  const componentKind = readString(formData, "componentKind") || "material";
-  const label = readString(formData, "label") || (componentKind === "material" ? "Material component" : "Labour component");
-  const triggerOptionKey = readString(formData, "triggerOptionKey") || null;
+  const componentKind = readString(formData, "componentKind") || defaults.componentKind || "material";
+  const label = readString(formData, "label") || defaults.label || (componentKind === "material" ? "Material component" : "Labour component");
+  const triggerOptionKey = readString(formData, "triggerOptionKey") || defaults.triggerOptionKey || null;
   const triggerOptionValue = readString(formData, "triggerOptionValue") || null;
-  const optionValues = splitCsv(readString(formData, "triggerOptionValuesCsv"));
-  const ruleType = readString(formData, "ruleType") || "fixed";
+  const optionValues = splitCsv(readString(formData, "triggerOptionValuesCsv") || defaults.triggerOptionValuesCsv);
+  const ruleType = readString(formData, "ruleType") || defaults.ruleType || "fixed";
+  const usageOptionKey = readString(formData, "usageOptionKey") || defaults.usageOptionKey || null;
 
   const components = [
     ...definition.components,
     {
       id: randomUUID(),
+      preset: componentPreset,
       kind: componentKind,
       materialId: readString(formData, "materialId") || null,
       supplierId: readString(formData, "supplierId") || null,
-      labourRateName: readString(formData, "labourRateName") || null,
+      labourRateName: readString(formData, "labourRateName") || defaults.labourRateName || null,
       label,
-      quantity: safeNumberString(readString(formData, "quantity"), "1"),
-      unit: readString(formData, "unit") || "each",
-      notes: readString(formData, "notes") || null,
+      quantity: safeNumberString(readString(formData, "quantity") || defaults.quantity, "1"),
+      unit: readString(formData, "unit") || defaults.unit || "each",
+      notes: readString(formData, "notes") || defaults.notes || null,
       ruleType,
-      wastePercent: safeNumberString(readString(formData, "wastePercent"), "0"),
+      wastePercent: safeNumberString(readString(formData, "wastePercent") || defaults.wastePercent, "0"),
       stockUsage: {
         usageBasis: ruleType,
-        dimensionSource: readString(formData, "dimensionSource") || "manual",
-        optionKey: readString(formData, "usageOptionKey") || null,
+        dimensionSource: readString(formData, "dimensionSource") || defaults.dimensionSource || "manual",
+        optionKey: usageOptionKey,
         optionValues,
         widthMm: readString(formData, "widthMm") || null,
         heightMm: readString(formData, "heightMm") || null,
