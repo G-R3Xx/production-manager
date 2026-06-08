@@ -27,7 +27,7 @@ export async function createProductAction(formData: FormData) {
   const productFamily = readString(formData, "productFamily") || "rigid_signage";
   const status = readString(formData, "status") || "draft";
   const calculatorType = "configurator_template";
-  const taxCode = 'GST';
+  const taxCode = "GST";
 
   if (!name) redirect("/products?error=Product%20name%20is%20required");
 
@@ -43,13 +43,11 @@ export async function createProductAction(formData: FormData) {
     taxCode
   });
 
-  const productId = created.id;
-  redirect(`/products?selected=${productId}&message=Product%20created`);
+  redirect(`/products?selected=${created.id}&message=Product%20created`);
 }
 
 export async function updateProductAction(formData: FormData) {
   const activeTenant = await requireTenant();
-
   const productId = readString(formData, "productId");
   const name = readString(formData, "name");
   const sku = readString(formData, "sku");
@@ -57,7 +55,6 @@ export async function updateProductAction(formData: FormData) {
   const productFamily = readString(formData, "productFamily") || "rigid_signage";
   const status = readString(formData, "status") || "draft";
   const defaultTemplateId = readString(formData, "defaultTemplateId");
-  const taxCode = 'GST';
 
   if (!productId || !name) redirect("/products?error=Product%20selection%20and%20name%20are%20required");
 
@@ -68,7 +65,7 @@ export async function updateProductAction(formData: FormData) {
     productFamily,
     status,
     defaultTemplateId: defaultTemplateId || null,
-    taxCode
+    taxCode: "GST"
   });
 
   redirect(`/products?selected=${productId}&message=Product%20updated`);
@@ -80,10 +77,15 @@ export async function addProductComponentAction(formData: FormData) {
   const componentKind = readString(formData, "componentKind") || "material";
   const materialId = readString(formData, "materialId") || null;
   const supplierId = readString(formData, "supplierId") || null;
+  const labourRateName = readString(formData, "labourRateName") || null;
   const label = readString(formData, "label");
   const quantity = readString(formData, "quantity") || "1";
   const unit = readString(formData, "unit") || "each";
   const notes = readString(formData, "notes") || null;
+  const ruleType = readString(formData, "ruleType") || "fixed";
+  const wastePercent = readString(formData, "wastePercent") || "0";
+  const triggerOptionKey = readString(formData, "triggerOptionKey") || null;
+  const triggerOptionValue = readString(formData, "triggerOptionValue") || null;
 
   if (!productId) redirect("/products?error=No%20product%20selected");
 
@@ -107,10 +109,17 @@ export async function addProductComponentAction(formData: FormData) {
     kind: componentKind,
     materialId,
     supplierId,
-    label: label || (componentKind === 'material' ? 'Material component' : 'Labour component'),
+    labourRateName,
+    label: label || (componentKind === "material" ? "Material component" : "Labour component"),
     quantity,
     unit,
-    notes
+    notes,
+    ruleType,
+    wastePercent,
+    trigger: {
+      optionKey: triggerOptionKey,
+      optionValue: triggerOptionValue
+    }
   });
 
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
@@ -129,6 +138,12 @@ export async function addProductOptionAction(formData: FormData) {
   const fieldType = readString(formData, "fieldType") || "text";
   const optionsCsv = readString(formData, "optionsCsv");
   const required = readString(formData, "required") === "yes";
+  const defaultValue = readString(formData, "defaultValue") || null;
+  const helpText = readString(formData, "helpText") || null;
+  const effectType = readString(formData, "effectType") || "none";
+  const effectTarget = readString(formData, "effectTarget") || null;
+  const effectValue = readString(formData, "effectValue") || null;
+  const effectUnit = readString(formData, "effectUnit") || null;
 
   if (!productId) redirect("/products?error=No%20product%20selected");
 
@@ -147,8 +162,8 @@ export async function addProductOptionAction(formData: FormData) {
   const definition = template.definitionJson as any;
   const fields = Array.isArray(definition.fields) ? [...definition.fields] : [];
   const normalizedKey = key || label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  const options = fieldType === 'select'
-    ? optionsCsv.split(',').map((entry) => entry.trim()).filter(Boolean).map((value) => ({ id: randomUUID(), label: value, value }))
+  const options = ["select", "binding", "color"].includes(fieldType)
+    ? optionsCsv.split(",").map((entry) => entry.trim()).filter(Boolean).map((value) => ({ id: randomUUID(), label: value, value }))
     : [];
 
   fields.push({
@@ -157,7 +172,15 @@ export async function addProductOptionAction(formData: FormData) {
     label: label || normalizedKey,
     type: fieldType,
     required,
-    options
+    defaultValue,
+    helpText,
+    options,
+    rule: {
+      effectType,
+      effectTarget,
+      effectValue,
+      effectUnit
+    }
   });
 
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
