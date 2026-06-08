@@ -1,14 +1,87 @@
 "use server";
 
+import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
-import { randomUUID } from "crypto";
+import { createProduct, getProductById, updateProduct } from "@/server/products";
 
 function readString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
+}
+
+function safeNumberString(value: string, fallback: string): string {
+  if (!value) return fallback;
+  const normalized = value.replace(/,/g, "").trim();
+  return Number.isFinite(Number(normalized)) ? normalized : fallback;
+}
+
+function keyFromLabel(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_|_$/g, "") || "option";
+}
+
+function splitCsv(value: string): string[] {
+  return value
+    .split(",")
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
+function labelFromValue(value: string): string {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .replace(/(\d+)x(\d+)/i, "$1 × $2 mm");
+}
+
+function parseChoice(entry: string) {
+  const [rawLabel, rawValue] = entry.includes("=") ? entry.split("=").map((part) => part.trim()) : [entry.trim(), entry.trim()];
+  const value = rawValue || keyFromLabel(rawLabel);
+  const sizeMatch = value.match(/^(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*mm)?$/i);
+
+  return {
+    id: randomUUID(),
+    label: rawLabel.includes("x") || rawLabel.includes("×") ? labelFromValue(rawLabel) : rawLabel || labelFromValue(value),
+    value: keyFromLabel(value) === "option" ? value : value.replace(/\s+/g, "_"),
+    widthMm: sizeMatch ? sizeMatch[1] : null,
+    heightMm: sizeMatch ? sizeMatch[2] : null
+  };
+}
+
+type ProductEditorTemplateInput = {
+  productId: string;
+  tenantId: string;
+};
+
+async function getEditableDefinition(input: ProductEditorTemplateInput) {
+  const product = await getProductById(input.tenantId, input.productId);
+  if (!product) redirect("/products?error=Product%20not%20found");
+
+  const template = await ensureProductEditorTemplate({
+    tenantId: input.tenantId,
+    productId: product.id,
+    currentTemplateId: product.defaultTemplateId,
+    productName: product.name,
+    department: product.department,
+    productFamily: product.productFamily
+  });
+
+  const definition = template.definitionJson as Record<string, any>;
+  return {
+    product,
+    template,
+    definition: {
+      version: 2,
+      ...definition,
+      fields: Array.isArray(definition.fields) ? [...definition.fields] : [],
+      components: Array.isArray(definition.components) ? [...definition.components] : []
+    }
+  };
 }
 
 async function requireTenant() {
@@ -16,6 +89,192 @@ async function requireTenant() {
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!activeTenant) redirect("/bootstrap");
   return activeTenant;
+}
+
+function presetDefaults(preset: string) {
+  switch (preset) {
+    case "finished_size":
+      return {
+        key: "finished_size",
+        label: "Finished size",
+        fieldType: "size_select",
+        defaultValue: "600x900",
+        optionsCsv: "600x900,450x600,300x450",
+        helpText: "Selectable finished sizes. Size values can drive sheet, sqm, ink and laminate component rules."
+      };
+    case "sides":
+      return {
+        key: "sides",
+        label: "Sides",
+        fieldType: "select",
+        defaultValue: "single_sided",
+        optionsCsv: "Single sided=single_sided,Double sided=double_sided",
+        helpText: "Use this to multiply print faces, ink, labour or laminate rules."
+      };
+    case "laminate":
+      return {
+        key: "laminate",
+        label: "Laminate",
+        fieldType: "select",
+        defaultValue: "none",
+        optionsCsv: "None=none,Matte laminate=matte_laminate,Gloss laminate=gloss_laminate,Anti graffiti=anti_graffiti,Whiteboard=whiteboard",
+        helpText: "Choose laminate type and trigger roll laminate usage."
+      };
+    case "cello":
+      return {
+        key: "cello",
+        label: "Celloglaze",
+        fieldType: "select",
+        defaultValue: "none",
+        optionsCsv: "None=none,Matte cello=matte_cello,Gloss cello=gloss_cello",
+        helpText: "Small-format celloglaze choice. Can trigger cello meterage."
+      };
+    case "binding_type":
+      return {
+        key: "binding_type",
+        label: "Binding type",
+        fieldType: "binding",
+        defaultValue: "none",
+        optionsCsv: "None=none,Saddle stitch=saddle_stitch,Perfect bind=perfect_bind,Wire bind=wire_bind,Pad binding=pad_binding,Carbon book tape=carbon_book_tape",
+        helpText: "Book and carbon book binding selection."
+      };
+    case "copy_set":
+      return {
+        key: "copy_set",
+        label: "Duplicate / triplicate",
+        fieldType: "select",
+        defaultValue: "duplicate",
+        optionsCsv: "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate",
+        helpText: "Carbon book copy set. Use this to multiply sheet and copy colour components."
+      };
+    case "copy_colours":
+      return {
+        key: "copy_colours",
+        label: "Copy colours",
+        fieldType: "select",
+        defaultValue: "white_yellow",
+        optionsCsv: "White / Yellow=white_yellow,White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue,Custom=custom",
+        helpText: "Carbon copy paper colour set."
+      };
+    case "cover_colour":
+      return {
+        key: "cover_colour",
+        label: "Cover colour",
+        fieldType: "color",
+        defaultValue: "none",
+        optionsCsv: "None=none,White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow",
+        helpText: "Cover colour for books and carbon books."
+      };
+    case "tape_colour":
+      return {
+        key: "tape_colour",
+        label: "Tape colour",
+        fieldType: "color",
+        defaultValue: "black",
+        optionsCsv: "Black=black,White=white,Blue=blue,Red=red,Green=green",
+        helpText: "Binding tape colour for carbon books and pads."
+      };
+    case "quantity":
+      return {
+        key: "quantity",
+        label: "Quantity",
+        fieldType: "quantity",
+        defaultValue: "1",
+        optionsCsv: "",
+        helpText: "Quoted quantity. Components can use this as per-unit usage."
+      };
+    case "page_count":
+      return {
+        key: "page_count",
+        label: "Page count",
+        fieldType: "quantity",
+        defaultValue: "50",
+        optionsCsv: "",
+        helpText: "Book page count. Use this to drive paper/card usage."
+      };
+    case "material_choice":
+      return {
+        key: "material_choice",
+        label: "Material choice",
+        fieldType: "select",
+        defaultValue: "",
+        optionsCsv: "",
+        helpText: "Selectable stock choice. Link components to this option when different materials are available."
+      };
+    default:
+      return {
+        key: "",
+        label: "",
+        fieldType: "select",
+        defaultValue: "",
+        optionsCsv: "",
+        helpText: ""
+      };
+  }
+}
+
+function starterField(key: string, label: string, type: string, defaultValue: string, optionsCsv: string, helpText: string) {
+  return {
+    id: randomUUID(),
+    key,
+    label,
+    type,
+    required: true,
+    defaultValue,
+    helpText,
+    options: splitCsv(optionsCsv).map(parseChoice),
+    rule: {
+      effectType: "none",
+      effectTarget: null,
+      effectValue: null,
+      effectUnit: null,
+      componentLinkMode: "none"
+    }
+  };
+}
+
+function starterComponent(label: string, ruleType: string, unit: string, quantity: string, notes: string, overrides: Record<string, unknown> = {}) {
+  return {
+    id: randomUUID(),
+    kind: "material",
+    materialId: null,
+    supplierId: null,
+    labourRateName: null,
+    label,
+    quantity,
+    unit,
+    notes,
+    ruleType,
+    wastePercent: "10",
+    stockUsage: {
+      usageBasis: ruleType,
+      dimensionSource: "finished_size",
+      optionKey: null,
+      optionValues: [],
+      widthMm: null,
+      heightMm: null,
+      rollWidthMm: null,
+      partsPerSheet: null,
+      metresPerUnit: null,
+      sheetsPerUnit: null
+    },
+    trigger: {
+      optionKey: null,
+      optionValue: null,
+      optionValues: []
+    },
+    ...overrides
+  };
+}
+
+function mergeByKey(existingFields: Array<Record<string, any>>, incomingFields: Array<Record<string, any>>) {
+  const existingKeys = new Set(existingFields.map((field) => field.key));
+  return [...existingFields, ...incomingFields.filter((field) => !existingKeys.has(field.key))];
+}
+
+function mergeByLabel(existingComponents: Array<Record<string, any>>, incomingComponents: Array<Record<string, any>>) {
+  const existingLabels = new Set(existingComponents.map((component) => component.label));
+  return [...existingComponents, ...incomingComponents.filter((component) => !existingLabels.has(component.label))];
 }
 
 export async function createProductAction(formData: FormData) {
@@ -26,8 +285,6 @@ export async function createProductAction(formData: FormData) {
   const department = readString(formData, "department") || "signage";
   const productFamily = readString(formData, "productFamily") || "rigid_signage";
   const status = readString(formData, "status") || "draft";
-  const calculatorType = "configurator_template";
-  const taxCode = "GST";
 
   if (!name) redirect("/products?error=Product%20name%20is%20required");
 
@@ -38,9 +295,9 @@ export async function createProductAction(formData: FormData) {
     department,
     productFamily,
     status,
-    calculatorType,
+    calculatorType: "configurator_template",
     defaultTemplateId: null,
-    taxCode
+    taxCode: "GST"
   });
 
   redirect(`/products?selected=${created.id}&message=Product%20created`);
@@ -74,119 +331,220 @@ export async function updateProductAction(formData: FormData) {
 export async function addProductComponentAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
-  const componentKind = readString(formData, "componentKind") || "material";
-  const materialId = readString(formData, "materialId") || null;
-  const supplierId = readString(formData, "supplierId") || null;
-  const labourRateName = readString(formData, "labourRateName") || null;
-  const label = readString(formData, "label");
-  const quantity = readString(formData, "quantity") || "1";
-  const unit = readString(formData, "unit") || "each";
-  const notes = readString(formData, "notes") || null;
-  const ruleType = readString(formData, "ruleType") || "fixed";
-  const wastePercent = readString(formData, "wastePercent") || "0";
-  const triggerOptionKey = readString(formData, "triggerOptionKey") || null;
-  const triggerOptionValue = readString(formData, "triggerOptionValue") || null;
 
   if (!productId) redirect("/products?error=No%20product%20selected");
 
-  const product = await getProductById(activeTenant.tenantId, productId);
-  if (!product) redirect("/products?error=Product%20not%20found");
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
 
-  const template = await ensureProductEditorTemplate({
-    tenantId: activeTenant.tenantId,
-    productId: product.id,
-    currentTemplateId: product.defaultTemplateId,
-    productName: product.name,
-    department: product.department,
-    productFamily: product.productFamily
-  });
+  const componentKind = readString(formData, "componentKind") || "material";
+  const label = readString(formData, "label") || (componentKind === "material" ? "Material component" : "Labour component");
+  const triggerOptionKey = readString(formData, "triggerOptionKey") || null;
+  const triggerOptionValue = readString(formData, "triggerOptionValue") || null;
+  const optionValues = splitCsv(readString(formData, "triggerOptionValuesCsv"));
+  const ruleType = readString(formData, "ruleType") || "fixed";
 
-  const definition = template.definitionJson as any;
-  const components = Array.isArray(definition.components) ? [...definition.components] : [];
-
-  components.push({
-    id: randomUUID(),
-    kind: componentKind,
-    materialId,
-    supplierId,
-    labourRateName,
-    label: label || (componentKind === "material" ? "Material component" : "Labour component"),
-    quantity,
-    unit,
-    notes,
-    ruleType,
-    wastePercent,
-    trigger: {
-      optionKey: triggerOptionKey,
-      optionValue: triggerOptionValue
+  const components = [
+    ...definition.components,
+    {
+      id: randomUUID(),
+      kind: componentKind,
+      materialId: readString(formData, "materialId") || null,
+      supplierId: readString(formData, "supplierId") || null,
+      labourRateName: readString(formData, "labourRateName") || null,
+      label,
+      quantity: safeNumberString(readString(formData, "quantity"), "1"),
+      unit: readString(formData, "unit") || "each",
+      notes: readString(formData, "notes") || null,
+      ruleType,
+      wastePercent: safeNumberString(readString(formData, "wastePercent"), "0"),
+      stockUsage: {
+        usageBasis: ruleType,
+        dimensionSource: readString(formData, "dimensionSource") || "manual",
+        optionKey: readString(formData, "usageOptionKey") || null,
+        optionValues,
+        widthMm: readString(formData, "widthMm") || null,
+        heightMm: readString(formData, "heightMm") || null,
+        rollWidthMm: readString(formData, "rollWidthMm") || null,
+        partsPerSheet: readString(formData, "partsPerSheet") || null,
+        metresPerUnit: readString(formData, "metresPerUnit") || null,
+        sheetsPerUnit: readString(formData, "sheetsPerUnit") || null
+      },
+      trigger: {
+        optionKey: triggerOptionKey,
+        optionValue: triggerOptionValue,
+        optionValues
+      }
     }
-  });
+  ];
 
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     components
   });
 
-  redirect(`/products?selected=${productId}&message=Component%20added`);
+  redirect(`/products?selected=${productId}&message=Component%20rule%20added`);
 }
 
 export async function addProductOptionAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
-  const key = readString(formData, "key");
-  const label = readString(formData, "label");
-  const fieldType = readString(formData, "fieldType") || "text";
-  const optionsCsv = readString(formData, "optionsCsv");
-  const required = readString(formData, "required") === "yes";
-  const defaultValue = readString(formData, "defaultValue") || null;
-  const helpText = readString(formData, "helpText") || null;
-  const effectType = readString(formData, "effectType") || "none";
-  const effectTarget = readString(formData, "effectTarget") || null;
-  const effectValue = readString(formData, "effectValue") || null;
-  const effectUnit = readString(formData, "effectUnit") || null;
 
   if (!productId) redirect("/products?error=No%20product%20selected");
 
-  const product = await getProductById(activeTenant.tenantId, productId);
-  if (!product) redirect("/products?error=Product%20not%20found");
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const preset = readString(formData, "optionPreset") || "custom";
+  const defaults = presetDefaults(preset);
 
-  const template = await ensureProductEditorTemplate({
-    tenantId: activeTenant.tenantId,
-    productId: product.id,
-    currentTemplateId: product.defaultTemplateId,
-    productName: product.name,
-    department: product.department,
-    productFamily: product.productFamily
-  });
+  const label = readString(formData, "label") || defaults.label;
+  const key = readString(formData, "key") || defaults.key || keyFromLabel(label);
+  const fieldType = readString(formData, "fieldType") || defaults.fieldType || "text";
+  const optionsCsv = readString(formData, "optionsCsv") || defaults.optionsCsv;
+  const required = readString(formData, "required") !== "no";
+  const defaultValue = readString(formData, "defaultValue") || defaults.defaultValue || null;
+  const helpText = readString(formData, "helpText") || defaults.helpText || null;
 
-  const definition = template.definitionJson as any;
-  const fields = Array.isArray(definition.fields) ? [...definition.fields] : [];
-  const normalizedKey = key || label.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  const options = ["select", "binding", "color"].includes(fieldType)
-    ? optionsCsv.split(",").map((entry) => entry.trim()).filter(Boolean).map((value) => ({ id: randomUUID(), label: value, value }))
-    : [];
-
-  fields.push({
-    id: randomUUID(),
-    key: normalizedKey,
-    label: label || normalizedKey,
-    type: fieldType,
-    required,
-    defaultValue,
-    helpText,
-    options,
-    rule: {
-      effectType,
-      effectTarget,
-      effectValue,
-      effectUnit
+  const fields = [
+    ...definition.fields,
+    {
+      id: randomUUID(),
+      key: keyFromLabel(key),
+      label: label || keyFromLabel(key),
+      type: fieldType,
+      required,
+      defaultValue,
+      helpText,
+      preset,
+      options: splitCsv(optionsCsv).map(parseChoice),
+      rule: {
+        effectType: readString(formData, "effectType") || "none",
+        effectTarget: readString(formData, "effectTarget") || null,
+        effectValue: readString(formData, "effectValue") || null,
+        effectUnit: readString(formData, "effectUnit") || null,
+        componentLinkMode: readString(formData, "componentLinkMode") || "none",
+        appliesWhenValues: splitCsv(readString(formData, "appliesWhenValuesCsv"))
+      }
     }
-  });
+  ];
 
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     fields
   });
 
-  redirect(`/products?selected=${productId}&message=Option%20added`);
+  redirect(`/products?selected=${productId}&message=Option%20rule%20added`);
+}
+
+export async function addStarterRulesAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const starterType = readString(formData, "starterType") || "rigid_signage";
+
+  if (!productId) redirect("/products?error=No%20product%20selected");
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+
+  let starterFields: Array<Record<string, any>> = [];
+  let starterComponents: Array<Record<string, any>> = [];
+
+  if (starterType === "rigid_signage") {
+    starterFields = [
+      starterField("finished_size", "Finished size", "size_select", "600x900", "600x900,450x600,300x450", "Finished sign size used for sheet, print, ink and laminate calculations."),
+      starterField("sides", "Sides", "select", "single_sided", "Single sided=single_sided,Double sided=double_sided", "Double-sided work can multiply print faces and finishing."),
+      starterField("laminate", "Laminate", "select", "none", "None=none,Matte laminate=matte_laminate,Gloss laminate=gloss_laminate", "Trigger roll laminate only when selected."),
+      starterField("eyelets", "Eyelets", "yes_no", "no", "No=no,Yes=yes", "Optional hardware/finishing component."),
+      starterField("quantity", "Quantity", "quantity", "1", "", "Quoted quantity.")
+    ];
+    starterComponents = [
+      starterComponent("Parent sheet substrate", "per_sheet", "sheet", "1", "Allocate purchased parent sheet stock. Set parts-per-sheet once nesting/yield is known."),
+      starterComponent("Print face / ink coverage", "per_sqm", "sqm", "1", "Uses finished size and sides to estimate print area."),
+      starterComponent("Roll laminate coverage", "per_sqm", "sqm", "1", "Triggered only when laminate is selected.", {
+        trigger: { optionKey: "laminate", optionValue: null, optionValues: ["matte_laminate", "gloss_laminate"] },
+        stockUsage: { usageBasis: "per_sqm", dimensionSource: "finished_size", optionKey: "laminate", optionValues: ["matte_laminate", "gloss_laminate"], widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null }
+      }),
+      starterComponent("Eyelets / fixings", "selected_by_option", "each", "4", "Only applies when eyelets are selected.", {
+        trigger: { optionKey: "eyelets", optionValue: "yes", optionValues: ["yes"] },
+        stockUsage: { usageBasis: "selected_by_option", dimensionSource: "manual", optionKey: "eyelets", optionValues: ["yes"], widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null }
+      })
+    ];
+  }
+
+  if (starterType === "roll_print") {
+    starterFields = [
+      starterField("finished_size", "Finished size", "size_select", "1000x1000", "1000x1000,1200x2400,1500x3000", "Finished width × length used for roll media and laminate meterage."),
+      starterField("laminate", "Laminate", "select", "none", "None=none,Matte laminate=matte_laminate,Gloss laminate=gloss_laminate", "Optional overlaminate."),
+      starterField("quantity", "Quantity", "quantity", "1", "", "Quoted quantity.")
+    ];
+    starterComponents = [
+      starterComponent("Print media roll meterage", "per_linear_metre", "lm", "1", "Uses finished length and roll width to consume purchased roll media."),
+      starterComponent("Ink coverage", "per_sqm", "sqm", "1", "Uses finished size for ink/print area."),
+      starterComponent("Laminate roll meterage", "per_linear_metre", "lm", "1", "Triggered only when laminate is selected.", {
+        trigger: { optionKey: "laminate", optionValue: null, optionValues: ["matte_laminate", "gloss_laminate"] }
+      })
+    ];
+  }
+
+  if (starterType === "cards") {
+    starterFields = [
+      starterField("finished_size", "Finished size", "size_select", "90x55", "90x55,85x55,100x150,105x148", "Card or flyer finished size."),
+      starterField("sides", "Sides", "select", "double_sided", "Single sided=single_sided,Double sided=double_sided", "Controls print faces."),
+      starterField("cello", "Celloglaze", "select", "none", "None=none,Matte cello=matte_cello,Gloss cello=gloss_cello", "Optional cello meterage."),
+      starterField("gsm", "GSM", "select", "350", "250gsm=250,300gsm=300,350gsm=350,420gsm=420", "Paper/card stock weight."),
+      starterField("quantity", "Quantity", "quantity", "250", "", "Quoted quantity.")
+    ];
+    starterComponents = [
+      starterComponent("Card / paper sheet usage", "yield_based", "sheet", "1", "Use parts-per-sheet to calculate parent sheet usage from finished size and quantity."),
+      starterComponent("Print faces", "per_unit", "face", "2", "Multiply by sides and quantity."),
+      starterComponent("Celloglaze meterage", "per_linear_metre", "lm", "1", "Triggered when matte or gloss cello is selected.", {
+        trigger: { optionKey: "cello", optionValue: null, optionValues: ["matte_cello", "gloss_cello"] }
+      })
+    ];
+  }
+
+  if (starterType === "books") {
+    starterFields = [
+      starterField("finished_size", "Finished size", "size_select", "A4", "A4=A4,A5=A5,DL=DL", "Book finished size."),
+      starterField("page_count", "Page count", "quantity", "50", "", "Internal page count."),
+      starterField("cover_colour", "Cover colour", "color", "white", "White=white,Black=black,Blue=blue,Green=green,Red=red", "Cover stock colour."),
+      starterField("binding_type", "Binding type", "binding", "saddle_stitch", "Saddle stitch=saddle_stitch,Perfect bind=perfect_bind,Wire bind=wire_bind,Pad binding=pad_binding", "Binding method."),
+      starterField("quantity", "Quantity", "quantity", "25", "", "Quoted quantity.")
+    ];
+    starterComponents = [
+      starterComponent("Internal paper stock", "yield_based", "sheet", "1", "Use page count and finished size to estimate paper sheet usage."),
+      starterComponent("Cover stock", "per_unit", "cover", "1", "One cover set per book."),
+      starterComponent("Binding labour / consumable", "selected_by_option", "each", "1", "Triggered by binding type.", {
+        trigger: { optionKey: "binding_type", optionValue: null, optionValues: ["saddle_stitch", "perfect_bind", "wire_bind", "pad_binding"] }
+      })
+    ];
+  }
+
+  if (starterType === "carbon_books") {
+    starterFields = [
+      starterField("finished_size", "Finished size", "size_select", "A5", "A4=A4,A5=A5,DL=DL", "Carbon book finished size."),
+      starterField("copy_set", "Duplicate / triplicate", "select", "duplicate", "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate", "Copy count per set."),
+      starterField("copy_colours", "Copy colours", "select", "white_yellow", "White / Yellow=white_yellow,White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue", "Copy paper colour set."),
+      starterField("cover_colour", "Cover colour", "color", "blue", "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", "Cover stock colour."),
+      starterField("tape_colour", "Tape colour", "color", "black", "Black=black,White=white,Blue=blue,Red=red,Green=green", "Binding tape colour."),
+      starterField("sequential_numbering", "Sequential numbering", "yes_no", "yes", "No=no,Yes=yes", "Numbered carbon books."),
+      starterField("quantity", "Quantity", "quantity", "10", "", "Book quantity.")
+    ];
+    starterComponents = [
+      starterComponent("Carbonless paper stock", "yield_based", "sheet", "1", "Uses finished size, copy set and quantity."),
+      starterComponent("Cover card", "per_unit", "cover", "1", "Cover stock per book."),
+      starterComponent("Binding tape", "per_linear_metre", "lm", "1", "Tape meterage by book spine length."),
+      starterComponent("Sequential numbering labour", "selected_by_option", "each", "1", "Applies when numbering is selected.", {
+        kind: "labour",
+        trigger: { optionKey: "sequential_numbering", optionValue: "yes", optionValues: ["yes"] }
+      })
+    ];
+  }
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    version: 2,
+    fields: mergeByKey(definition.fields, starterFields),
+    components: mergeByLabel(definition.components, starterComponents),
+    setupPreset: starterType
+  });
+
+  redirect(`/products?selected=${productId}&message=Starter%20rules%20added`);
 }

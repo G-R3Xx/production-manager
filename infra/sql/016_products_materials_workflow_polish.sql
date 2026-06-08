@@ -1,7 +1,12 @@
--- Centralized products workflow + materials schema sync
+-- Products/materials workflow polish and compatibility guardrails.
+-- This migration is intentionally additive/idempotent for projects that already ran the earlier schema sync.
 
-ALTER TABLE IF EXISTS app.suppliers
-  ALTER COLUMN myob_uid DROP NOT NULL;
+ALTER TABLE IF EXISTS catalog.products
+  ADD COLUMN IF NOT EXISTS tax_code varchar(50) NULL;
+
+UPDATE catalog.products
+SET tax_code = 'GST'
+WHERE tax_code IS NULL;
 
 ALTER TABLE IF EXISTS catalog.materials
   ADD COLUMN IF NOT EXISTS source_product_id uuid NULL REFERENCES catalog.products(id) ON DELETE SET NULL,
@@ -20,18 +25,9 @@ ALTER TABLE IF EXISTS catalog.materials
   ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
   ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
--- Leave material_type nullable for compatibility with existing enum-based installs.
--- The app now reads COALESCE(material_type::text, type) and writes to legacy type safely.
-
 ALTER TABLE IF EXISTS catalog.materials
   ALTER COLUMN type DROP NOT NULL;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_indexes
-    WHERE schemaname = 'catalog' AND indexname = 'materials_source_product_idx'
-  ) THEN
-    CREATE INDEX materials_source_product_idx ON catalog.materials(source_product_id);
-  END IF;
-END $$;
+CREATE INDEX IF NOT EXISTS materials_tenant_supplier_idx ON catalog.materials(tenant_id, supplier_id);
+CREATE INDEX IF NOT EXISTS materials_source_product_idx ON catalog.materials(source_product_id);
+CREATE INDEX IF NOT EXISTS products_tenant_family_idx ON catalog.products(tenant_id, product_family);

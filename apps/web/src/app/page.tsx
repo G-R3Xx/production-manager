@@ -27,11 +27,11 @@ export default function HomePage() {
         </p>
 
         <h1 style={{ marginTop: 12, marginBottom: 12, fontSize: 40, lineHeight: 1.1 }}>
-          Fresh rebuild, clean architecture, multi-tenant from day one.
+          Production workflow, stock-first product setup.
         </h1>
 
         <p style={{ margin: 0, fontSize: 18, lineHeight: 1.6, color: "#475467", maxWidth: 760 }}>
-          The tenant-aware app shell is now live with bootstrap, company settings, users, and active tenant switching.
+          Clients, suppliers, materials, products, quotes and integrations now form the main workflow. Materials are purchased stock; products are sellable items built from components and options.
         </p>
 
         <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap" }}>
@@ -39,8 +39,8 @@ export default function HomePage() {
             Go to sign in
           </Link>
 
-          <Link href="/dashboard" style={{ textDecoration: "none", padding: "12px 16px", borderRadius: 12, background: "#fff", color: "#111827", fontWeight: 600, border: "1px solid #d0d5dd" }}>
-            Open dashboard
+          <Link href="/products" style={{ textDecoration: "none", padding: "12px 16px", borderRadius: 12, background: "#fff", color: "#111827", fontWeight: 600, border: "1px solid #d0d5dd" }}>
+            Open products
           </Link>
         </div>
       </div>
