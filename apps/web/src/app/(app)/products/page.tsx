@@ -73,7 +73,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
         <p style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Catalog</p>
         <h1 style={{ marginTop: 12, marginBottom: 12 }}>Products</h1>
         <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
-          Create a product, select it, then complete setup on the same page. <strong>Components</strong> describe what the product uses. <strong>Options</strong> describe what can vary.
+          Create a product, select it, then complete setup on the same page. <strong>Components</strong> describe what the product uses. <strong>Options</strong> describe what can vary. Tax code defaults to GST.
         </p>
       </section>
 
@@ -88,7 +88,6 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
               <label style={{ display: "grid", gap: 8 }}><span style={{ fontWeight: 600 }}>Status</span><select name="status" defaultValue="draft" style={inputStyle}><option value="draft">Draft</option><option value="active">Active</option><option value="archived">Archived</option></select></label>
             </div>
             <label style={{ display: "grid", gap: 8 }}><span style={{ fontWeight: 600 }}>Product family</span><select name="productFamily" defaultValue="rigid_signage" style={inputStyle}><option value="rigid_signage">Rigid signage</option><option value="roll_media">Roll media</option><option value="banners">Banners</option><option value="stickers_labels">Stickers / labels</option><option value="window_wall_graphics">Window / wall graphics</option><option value="vehicle_graphics">Vehicle graphics</option><option value="display_products">Display products</option><option value="small_format_print">Small format print</option></select></label>
-            <label style={{ display: "grid", gap: 8 }}><span style={{ fontWeight: 600 }}>Tax code</span><input name="taxCode" placeholder="GST" style={inputStyle} /></label>
             <button type="submit" style={{ minHeight: 46, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, cursor: "pointer" }}>Create product</button>
           </form>
 
@@ -145,7 +144,6 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                     <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Product family</span><select name="productFamily" defaultValue={selectedProduct.productFamily} style={inputStyle}><option value="rigid_signage">Rigid signage</option><option value="roll_media">Roll media</option><option value="banners">Banners</option><option value="stickers_labels">Stickers / labels</option><option value="window_wall_graphics">Window / wall graphics</option><option value="vehicle_graphics">Vehicle graphics</option><option value="display_products">Display products</option><option value="small_format_print">Small format print</option></select></label>
                     <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Status</span><select name="status" defaultValue={selectedProduct.status} style={inputStyle}><option value="draft">Draft</option><option value="active">Active</option><option value="archived">Archived</option></select></label>
                   </div>
-                  <label style={{ display: 'grid', gap: 8 }}><span style={{ fontWeight: 600 }}>Tax code</span><input name="taxCode" defaultValue={selectedProduct.taxCode ?? ''} style={inputStyle} /></label>
                   <button type="submit" style={{ minHeight: 46, borderRadius: 12, border: 'none', background: '#111827', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>Save product</button>
                 </form>
               </>

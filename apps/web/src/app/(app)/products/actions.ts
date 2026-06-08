@@ -27,7 +27,7 @@ export async function createProductAction(formData: FormData) {
   const productFamily = readString(formData, "productFamily") || "rigid_signage";
   const status = readString(formData, "status") || "draft";
   const calculatorType = "configurator_template";
-  const taxCode = readString(formData, "taxCode");
+  const taxCode = 'GST';
 
   if (!name) redirect("/products?error=Product%20name%20is%20required");
 
@@ -40,10 +40,10 @@ export async function createProductAction(formData: FormData) {
     status,
     calculatorType,
     defaultTemplateId: null,
-    taxCode: taxCode || null
+    taxCode
   });
 
-  const productId = typeof created === 'string' ? created : (created as any).id ?? "";
+  const productId = created.id;
   redirect(`/products?selected=${productId}&message=Product%20created`);
 }
 
@@ -57,7 +57,7 @@ export async function updateProductAction(formData: FormData) {
   const productFamily = readString(formData, "productFamily") || "rigid_signage";
   const status = readString(formData, "status") || "draft";
   const defaultTemplateId = readString(formData, "defaultTemplateId");
-  const taxCode = readString(formData, "taxCode");
+  const taxCode = 'GST';
 
   if (!productId || !name) redirect("/products?error=Product%20selection%20and%20name%20are%20required");
 
@@ -68,7 +68,7 @@ export async function updateProductAction(formData: FormData) {
     productFamily,
     status,
     defaultTemplateId: defaultTemplateId || null,
-    taxCode: taxCode || null
+    taxCode
   });
 
   redirect(`/products?selected=${productId}&message=Product%20updated`);

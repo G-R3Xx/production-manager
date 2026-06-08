@@ -66,7 +66,7 @@ export async function listProductsForTenant(tenantId: string): Promise<ProductRe
 
 export async function createProduct(input: ProductCreateInput): Promise<{ id: string }> {
   if (!process.env.DATABASE_URL) {
-    throw new Error('DATABASE_URL is not configured.');
+    throw new Error('DATABASE_URL is not configured');
   }
 
   const result = await pool.query<{ id: string }>(
@@ -98,7 +98,7 @@ export async function createProduct(input: ProductCreateInput): Promise<{ id: st
     ]
   );
 
-  return result.rows[0];
+  return result.rows[0] ?? { id: '' };
 }
 
 export async function upsertImportedProduct(tenantId: string, input: {
@@ -163,7 +163,7 @@ export async function upsertImportedProduct(tenantId: string, input: {
       input.sku ?? null,
       input.name,
       input.department ?? "general",
-      input.productFamily ?? "general",
+      input.productFamily ?? "display_products",
       input.status ?? "active",
       input.calculatorType ?? "configurator_template",
       input.taxCode ?? null,
@@ -171,7 +171,7 @@ export async function upsertImportedProduct(tenantId: string, input: {
     ]
   );
 
-  return result.rows[0];
+  return result.rows[0] ?? { id: "" };
 }
 
 export async function getProductById(tenantId: string, productId: string): Promise<ProductRecord | null> {
@@ -246,8 +246,6 @@ export async function updateProduct(tenantId: string, productId: string, input: 
       input.taxCode
     ]
   );
-
-  return;
 }
 
 export async function listProductsByTenantId(tenantId: string): Promise<ProductRecord[]> {
