@@ -617,7 +617,7 @@ export async function addProductComponentAction(formData: FormData) {
     components
   });
 
-  redirect(`/products?selected=${productId}&message=Component%20rule%20added`);
+  redirect(`/products?selected=${productId}&message=Material%20row%20added`);
 }
 
 export async function addProductOptionAction(formData: FormData) {
@@ -630,43 +630,60 @@ export async function addProductOptionAction(formData: FormData) {
   const preset = readString(formData, "optionPreset") || "custom";
   const defaults = presetDefaults(preset);
 
-  const label = readString(formData, "label") || defaults.label;
+  const questionLabel = readString(formData, "questionLabel");
+  const defaultAnswer = readString(formData, "defaultAnswer");
+  const otherOptionsCsv = readString(formData, "otherOptionsCsv");
+  const label = questionLabel || readString(formData, "label") || defaults.label || "Question";
   const key = readString(formData, "key") || defaults.key || keyFromLabel(label);
-  const fieldType = readString(formData, "fieldType") || defaults.fieldType || "text";
-  const optionsCsv = readString(formData, "optionsCsv") || defaults.optionsCsv;
+  const fieldType = readString(formData, "fieldType") || defaults.fieldType || "select";
   const required = readString(formData, "required") !== "no";
-  const defaultValue = readString(formData, "defaultValue") || defaults.defaultValue || null;
+  let optionsCsv = readString(formData, "optionsCsv") || defaults.optionsCsv;
+  let defaultValue: string | null = readString(formData, "defaultValue") || defaults.defaultValue || null;
+
+  if (defaultAnswer) {
+    const parsedDefault = parseChoice(defaultAnswer);
+    defaultValue = parsedDefault.value;
+
+    const otherAnswers = splitCsv(otherOptionsCsv);
+    if (otherAnswers.length > 0 || ["select", "size_select", "yes_no", "color", "binding"].includes(fieldType)) {
+      optionsCsv = [defaultAnswer, ...otherAnswers].join(",");
+    }
+  }
+
   const helpText = readString(formData, "helpText") || defaults.helpText || null;
 
-  const fields = [
-    ...definition.fields,
-    {
-      id: randomUUID(),
-      key: keyFromLabel(key),
-      label: label || keyFromLabel(key),
-      type: fieldType,
-      required,
-      defaultValue,
-      helpText,
-      preset,
-      options: splitCsv(optionsCsv).map(parseChoice),
-      rule: {
-        effectType: readString(formData, "effectType") || "none",
-        effectTarget: readString(formData, "effectTarget") || null,
-        effectValue: readString(formData, "effectValue") || null,
-        effectUnit: readString(formData, "effectUnit") || null,
-        componentLinkMode: readString(formData, "componentLinkMode") || "none",
-        appliesWhenValues: splitCsv(readString(formData, "appliesWhenValuesCsv"))
-      }
+  const normalizedKey = keyFromLabel(key);
+  const nextField = {
+    id: randomUUID(),
+    key: normalizedKey,
+    label,
+    type: fieldType,
+    required,
+    defaultValue,
+    helpText,
+    preset,
+    options: splitCsv(optionsCsv).map(parseChoice),
+    rule: {
+      effectType: readString(formData, "effectType") || "none",
+      effectTarget: readString(formData, "effectTarget") || null,
+      effectValue: readString(formData, "effectValue") || null,
+      effectUnit: readString(formData, "effectUnit") || null,
+      componentLinkMode: readString(formData, "componentLinkMode") || "none",
+      appliesWhenValues: splitCsv(readString(formData, "appliesWhenValuesCsv"))
     }
-  ];
+  };
+
+  const existingIndex = definition.fields.findIndex((field: Record<string, any>) => field.key === normalizedKey);
+  const fields = existingIndex >= 0
+    ? definition.fields.map((field: Record<string, any>, index: number) => index === existingIndex ? { ...nextField, id: field.id ?? nextField.id } : field)
+    : [...definition.fields, nextField];
 
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     fields
   });
 
-  redirect(`/products?selected=${productId}&message=Option%20rule%20added`);
+  redirect(`/products?selected=${productId}&message=Quoting%20question%20saved`);
 }
 
 export async function addStarterRulesAction(formData: FormData) {
@@ -782,5 +799,5 @@ export async function addStarterRulesAction(formData: FormData) {
     setupPreset: starterType
   });
 
-  redirect(`/products?selected=${productId}&message=Starter%20rules%20added`);
+  redirect(`/products?selected=${productId}&message=Product%20starting%20point%20added`);
 }
