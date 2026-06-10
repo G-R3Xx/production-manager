@@ -5,34 +5,125 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getConfiguratorTemplateById } from "@/server/configurators";
 import { listMaterialsForTenant } from "@/server/materials";
 import { getProductById, listProductsForTenant } from "@/server/products";
-import { addProductComponentAction, addProductOptionAction, addStarterRulesAction, createProductAction, updateProductAction } from "./actions";
+import { addProductComponentAction, addProductOptionAction, applyQuoteBehaviourPresetAction, createProductAction, updateProductAction } from "./actions";
 
 type ProductsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type EditorDefinition = {
-  setupPreset?: string | null;
-  components: Array<Record<string, any>>;
-  fields: Array<Record<string, any>>;
-};
-
-type StarterCard = {
+type ProductTypeCard = {
   value: string;
   title: string;
-  plainName: string;
-  description: string;
-  defaultChoices: string;
-  defaultMaterials: string;
+  example: string;
+  baseMaterialHint: string;
+  quoteOptions: string;
+  department: string;
+  family: string;
+  baseUsage: string;
 };
 
-type ChoiceCard = {
-  preset: string;
-  title: string;
-  defaultAnswer: string;
-  otherAnswers: string;
-  description: string;
-};
+const productTypes: ProductTypeCard[] = [
+  {
+    value: "sign_acm",
+    title: "ACM sheet sign",
+    example: "Sign - ACM - 3mm",
+    baseMaterialHint: "3mm ACM sheet",
+    quoteOptions: "Size, print type, roll stock type, laminate, finishing, quantity",
+    department: "signage",
+    family: "rigid_signage",
+    baseUsage: "part_sheet"
+  },
+  {
+    value: "sign_corflute",
+    title: "Corflute sign",
+    example: "Sign - Corflute - 5mm",
+    baseMaterialHint: "3mm / 5mm corflute sheet",
+    quoteOptions: "Size, print type, laminate if needed, finishing, quantity",
+    department: "signage",
+    family: "rigid_signage",
+    baseUsage: "part_sheet"
+  },
+  {
+    value: "sign_acrylic",
+    title: "Acrylic sign",
+    example: "Sign - Acrylic - 4.5mm Opal",
+    baseMaterialHint: "clear / opal / coloured acrylic sheet",
+    quoteOptions: "Size, print type, laminate, router/CNC, holes, quantity",
+    department: "signage",
+    family: "rigid_signage",
+    baseUsage: "part_sheet"
+  },
+  {
+    value: "sign_pvc",
+    title: "PVC / foamboard sign",
+    example: "Sign - PVC - 3mm",
+    baseMaterialHint: "PVC or foamboard sheet",
+    quoteOptions: "Size, print type, laminate, cutting, quantity",
+    department: "signage",
+    family: "rigid_signage",
+    baseUsage: "part_sheet"
+  },
+  {
+    value: "banner",
+    title: "Banner",
+    example: "Banner - 510gsm",
+    baseMaterialHint: "banner roll stock",
+    quoteOptions: "Size, hem/eyelets/pockets, laminate if needed, quantity",
+    department: "signage",
+    family: "banners",
+    baseUsage: "roll_metres"
+  },
+  {
+    value: "roll_print",
+    title: "Roll print / vinyl",
+    example: "Roll Print - White Vinyl",
+    baseMaterialHint: "white / clear / etch roll media",
+    quoteOptions: "Size, roll stock type, laminate, quantity",
+    department: "signage",
+    family: "roll_media",
+    baseUsage: "roll_metres"
+  },
+  {
+    value: "business_cards",
+    title: "Business cards",
+    example: "Business Cards - 350gsm",
+    baseMaterialHint: "card stock / parent sheet",
+    quoteOptions: "Size, front/back, gloss/matt/no cello, quantity",
+    department: "small_format",
+    family: "small_format_print",
+    baseUsage: "paper_yield"
+  },
+  {
+    value: "flyers",
+    title: "Flyers",
+    example: "Flyers - 150gsm",
+    baseMaterialHint: "paper stock / parent sheet",
+    quoteOptions: "Size, front/back, gloss/matt/no cello, quantity",
+    department: "small_format",
+    family: "small_format_print",
+    baseUsage: "paper_yield"
+  },
+  {
+    value: "books",
+    title: "Books / pads",
+    example: "Book - A5 Pad",
+    baseMaterialHint: "paper stock, cover stock, binding consumables",
+    quoteOptions: "Size, pages, cover colour, binding, quantity",
+    department: "small_format",
+    family: "display_products",
+    baseUsage: "paper_yield"
+  },
+  {
+    value: "carbon_books",
+    title: "Duplicate / triplicate books",
+    example: "Carbon Book - Duplicate - A5",
+    baseMaterialHint: "NCR paper, cover card, tape, numbering",
+    quoteOptions: "Pages, copies, copy colours, cover colour, tape colour, numbering, quantity",
+    department: "small_format",
+    family: "display_products",
+    baseUsage: "paper_yield"
+  }
+];
 
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
   const value = params[key];
@@ -44,16 +135,27 @@ function matchesQuery(value: string | null | undefined, query: string): boolean 
   return String(value ?? "").toLowerCase().includes(query.toLowerCase());
 }
 
-function formatFamily(value: string | null | undefined): string {
-  return String(value ?? "general").replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function labelFromValue(value: string | null | undefined): string {
+function humanize(value: string | null | undefined): string {
   if (!value) return "Not set";
   return String(value)
     .replace(/_/g, " ")
     .replace(/\b\w/g, (letter) => letter.toUpperCase())
     .replace(/(\d+)x(\d+)/i, "$1 × $2 mm");
+}
+
+function selectedProductUrl(productId: string, query: string): string {
+  const q = query ? `&q=${encodeURIComponent(query)}` : "";
+  return `/products?selected=${productId}${q}`;
+}
+
+function statusTone(value: string): CSSProperties {
+  if (value === "active") return { background: "#ecfdf3", color: "#067647", borderColor: "#abefc6" };
+  if (value === "archived") return { background: "#f2f4f7", color: "#475467", borderColor: "#d0d5dd" };
+  return { background: "#fffaeb", color: "#b54708", borderColor: "#fedf89" };
+}
+
+function setupName(value: string | null | undefined): string {
+  return productTypes.find((type) => type.value === value)?.title ?? "Custom product";
 }
 
 function choiceLabel(option: any): string {
@@ -69,10 +171,9 @@ function defaultChoiceLabel(field: Record<string, any>): string {
   const options = Array.isArray(field.options) ? field.options : [];
   const match = options.find((option: any) => choiceValue(option) === defaultValue || choiceLabel(option) === defaultValue);
   if (match) return choiceLabel(match);
-  if (defaultValue) return labelFromValue(defaultValue);
-  if (options[0]) return choiceLabel(options[0]);
-  if (field.type === "quantity" || field.type === "number") return "Entered while quoting";
-  return "Not set";
+  if (defaultValue) return humanize(defaultValue);
+  if (field.type === "quantity" || field.type === "number") return "Entered on quote";
+  return "No default";
 }
 
 function otherChoiceLabels(field: Record<string, any>): string {
@@ -80,86 +181,39 @@ function otherChoiceLabels(field: Record<string, any>): string {
   const options = Array.isArray(field.options) ? field.options : [];
   const others = options.filter((option: any) => choiceValue(option) !== defaultValue && choiceLabel(option) !== defaultValue);
   if (others.length === 0) {
-    if (field.type === "quantity" || field.type === "number") return "Staff enters the number when quoting.";
-    if (field.type === "text") return "Staff types the answer when quoting.";
-    return "No other answers added yet.";
+    if (field.type === "quantity" || field.type === "number") return "Staff enters this number while quoting.";
+    return "No alternatives yet.";
   }
   return others.map(choiceLabel).join(", ");
 }
 
-function friendlyFieldType(value: string | null | undefined): string {
-  switch (value) {
-    case "yes_no":
-      return "Yes / no";
-    case "select":
-      return "Pick one";
-    case "size_select":
-      return "Size list";
-    case "quantity":
-      return "Number / quantity";
-    case "number":
-      return "Number";
-    case "color":
-      return "Colour list";
-    case "binding":
-      return "Binding list";
-    case "text":
-      return "Typed answer";
-    default:
-      return "Pick one";
-  }
-}
-
-function friendlyUsage(component: Record<string, any>): string {
-  const usage = component.stockUsage ?? {};
-  const ruleType = String(component.ruleType ?? usage.usageBasis ?? "fixed");
-  const quantity = component.quantity ?? "1";
+function usageSummary(component: Record<string, any>): string {
+  const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "fixed");
   const unit = component.unit ?? "each";
+  const qty = component.quantity ?? "1";
+  const parts = component.stockUsage?.partsPerSheet;
 
-  if (ruleType === "per_sheet") return `Uses ${quantity} ${unit} from purchased sheet stock`;
-  if (ruleType === "yield_based") return `Uses parent sheet yield${usage.partsPerSheet ? ` (${usage.partsPerSheet} up)` : ""}`;
-  if (ruleType === "per_linear_metre") return `Uses ${quantity} ${unit} from a purchased roll`;
-  if (ruleType === "per_sqm") return `Uses ${quantity} ${unit} by square metre / printed area`;
-  if (ruleType === "per_unit") return `Uses ${quantity} ${unit} per quoted unit`;
-  if (ruleType === "selected_by_option") return `Only used when a customer answer turns it on`;
-  return `Uses ${quantity} ${unit}`;
+  if (ruleType === "yield_based") return parts ? `Part sheet / parent yield (${parts} up)` : "Part sheet / parent sheet yield";
+  if (ruleType === "per_linear_metre") return `Metres from roll (${qty} ${unit})`;
+  if (ruleType === "per_sqm") return `Area based (${qty} ${unit})`;
+  if (ruleType === "per_unit") return `Per quoted unit (${qty} ${unit})`;
+  if (ruleType === "selected_by_option") return "Only when selected while quoting";
+  if (ruleType === "per_sheet") return "Sheet allocation";
+  return humanize(ruleType);
 }
 
 function triggerSummary(component: Record<string, any>): string {
   const trigger = component.trigger ?? {};
   const optionKey = trigger.optionKey ?? component.stockUsage?.optionKey;
   const values = Array.isArray(trigger.optionValues) && trigger.optionValues.length > 0 ? trigger.optionValues : component.stockUsage?.optionValues;
+  if (!optionKey || (Array.isArray(values) && values.length === 0 && component.role === "base_material")) return "Always part of the base product";
   if (!optionKey) return "Always used";
-  const friendlyValues = Array.isArray(values) && values.length > 0 ? values.map(labelFromValue).join(", ") : "selected";
-  return `Only when ${labelFromValue(optionKey)} is ${friendlyValues}`;
+  const friendlyValues = Array.isArray(values) && values.length > 0 ? values.map(humanize).join(", ") : "selected";
+  return `Only when ${humanize(optionKey)} is ${friendlyValues}`;
 }
 
-function selectedProductUrl(productId: string, query: string): string {
-  const q = query ? `&q=${encodeURIComponent(query)}` : "";
-  return `/products?selected=${productId}${q}`;
-}
-
-function statusTone(value: string): CSSProperties {
-  if (value === "active") return { background: "#ecfdf3", color: "#067647", borderColor: "#abefc6" };
-  if (value === "archived") return { background: "#f2f4f7", color: "#475467", borderColor: "#d0d5dd" };
-  return { background: "#fffaeb", color: "#b54708", borderColor: "#fedf89" };
-}
-
-function setupName(value: string | null | undefined): string {
-  switch (value) {
-    case "rigid_signage":
-      return "Sheet sign / board sign";
-    case "roll_print":
-      return "Roll print / vinyl / banner";
-    case "cards":
-      return "Business cards / flyers";
-    case "books":
-      return "Books / pads";
-    case "carbon_books":
-      return "Duplicate / triplicate books";
-    default:
-      return "No starting point selected";
-  }
+function productTypeFromPreset(preset: string | null | undefined): ProductTypeCard {
+  return productTypes.find((type) => type.value === preset) ?? productTypes[0];
 }
 
 const cardStyle: CSSProperties = {
@@ -174,13 +228,6 @@ const softCardStyle: CSSProperties = {
   background: "#f8fafc",
   border: "1px solid #e5e7eb",
   borderRadius: 18,
-  padding: 16
-};
-
-const compactCardStyle: CSSProperties = {
-  background: "#fff",
-  border: "1px solid #e5e7eb",
-  borderRadius: 16,
   padding: 16
 };
 
@@ -212,66 +259,8 @@ const gridThreeStyle: CSSProperties = { display: "grid", gridTemplateColumns: "r
 const buttonStyle: CSSProperties = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 900, cursor: "pointer", padding: "0 16px" };
 const secondaryButtonStyle: CSSProperties = { minHeight: 42, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 900, cursor: "pointer", padding: "0 14px" };
 const pillStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "5px 10px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" };
-const defaultPillStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#ecfdf3", color: "#067647", padding: "5px 10px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" };
+const greenPillStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#ecfdf3", color: "#067647", padding: "5px 10px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" };
 const mutedTextStyle: CSSProperties = { color: "#667085", fontSize: 13, lineHeight: 1.5 };
-const sectionAnchorStyle: CSSProperties = { scrollMarginTop: 24 };
-
-const starterCards: StarterCard[] = [
-  {
-    value: "rigid_signage",
-    title: "Sheet sign / board sign",
-    plainName: "eg ACM sign, corflute sign, foamboard sign",
-    description: "Best for signs made from a purchased sheet or board, including part-sheet sizes such as 600 × 900 or 450 × 600.",
-    defaultChoices: "Size, front/back, laminate, eyelets, quantity",
-    defaultMaterials: "Parent sheet, print/ink area, laminate if selected, eyelets if selected"
-  },
-  {
-    value: "roll_print",
-    title: "Roll print / vinyl / banner",
-    plainName: "eg vinyl print, banner, sticker roll work",
-    description: "Best for products consumed from a purchased roll by metres or square metres.",
-    defaultChoices: "Finished size, laminate, quantity",
-    defaultMaterials: "Roll media metres, ink area, laminate metres if selected"
-  },
-  {
-    value: "cards",
-    title: "Business cards / flyers",
-    plainName: "eg business cards, postcards, flyers",
-    description: "Best for small format sheet work with size, sides, GSM and cello choices.",
-    defaultChoices: "Size, front/back, cello, GSM, quantity",
-    defaultMaterials: "Paper/card sheet yield, print faces, cello if selected"
-  },
-  {
-    value: "books",
-    title: "Books / pads",
-    plainName: "eg pads, booklets, printed books",
-    description: "Best for books or pads with pages, cover stock and binding.",
-    defaultChoices: "Size, pages, cover colour, binding, quantity",
-    defaultMaterials: "Internal paper, cover card, binding consumables/labour"
-  },
-  {
-    value: "carbon_books",
-    title: "Duplicate / triplicate books",
-    plainName: "eg invoice books, docket books, NCR books",
-    description: "Best for carbonless books with pages, duplicate/triplicate, copy colours, cover colour, tape colour and numbering.",
-    defaultChoices: "Size, pages, copies, copy colours, cover, tape, numbering, quantity",
-    defaultMaterials: "Carbonless paper, cover card, tape, numbering labour"
-  }
-];
-
-const choiceCards: ChoiceCard[] = [
-  { preset: "finished_size", title: "Size", defaultAnswer: "600x900", otherAnswers: "450x600,300x450", description: "Finished product size. Used for sheet, roll, ink, laminate and cello usage." },
-  { preset: "sides", title: "Front / back", defaultAnswer: "Front only=single_sided", otherAnswers: "Front and back=double_sided", description: "Single or double-sided print selection." },
-  { preset: "laminate", title: "Laminate", defaultAnswer: "None=none", otherAnswers: "Matte laminate=matte_laminate,Gloss laminate=gloss_laminate", description: "Signage laminate choice." },
-  { preset: "cello", title: "Celloglaze", defaultAnswer: "None=none", otherAnswers: "Matte cello=matte_cello,Gloss cello=gloss_cello", description: "Small format cello choice." },
-  { preset: "page_count", title: "Pages", defaultAnswer: "50", otherAnswers: "", description: "Pages per book or pad." },
-  { preset: "copy_set", title: "Copies", defaultAnswer: "Duplicate=duplicate", otherAnswers: "Triplicate=triplicate,Quadruplicate=quadruplicate", description: "Copy set for carbon books." },
-  { preset: "copy_colours", title: "Copy colours", defaultAnswer: "White / Yellow=white_yellow", otherAnswers: "White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue", description: "Carbonless sheet colour set." },
-  { preset: "cover_colour", title: "Cover colour", defaultAnswer: "Blue=blue", otherAnswers: "White=white,Black=black,Green=green,Red=red,Yellow=yellow", description: "Cover card colour." },
-  { preset: "tape_colour", title: "Tape colour", defaultAnswer: "Black=black", otherAnswers: "White=white,Blue=blue,Red=red,Green=green", description: "Binding tape colour." },
-  { preset: "binding_type", title: "Binding", defaultAnswer: "Pad binding=pad_binding", otherAnswers: "Saddle stitch=saddle_stitch,Wire bind=wire_bind,Perfect bind=perfect_bind,Carbon book tape=carbon_book_tape", description: "Binding method." },
-  { preset: "quantity", title: "Quantity", defaultAnswer: "1", otherAnswers: "", description: "Quantity staff enter while quoting." }
-];
 
 function StepHeading({ number, title, children }: { number: string; title: string; children: ReactNode }) {
   return (
@@ -289,61 +278,76 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <div style={{ border: "1px dashed #d0d5dd", borderRadius: 16, padding: 16, color: "#667085", background: "#fcfcfd" }}>{children}</div>;
 }
 
-function StarterButton({ productId, card }: { productId: string; card: StarterCard }) {
+function FieldPreview({ field }: { field: Record<string, any> }) {
   return (
-    <form action={addStarterRulesAction} style={{ minWidth: 0 }}>
-      <input type="hidden" name="productId" value={productId} />
-      <input type="hidden" name="starterType" value={card.value} />
-      <button type="submit" style={{ ...compactCardStyle, textAlign: "left", width: "100%", cursor: "pointer", minHeight: 210 }}>
-        <span style={defaultPillStyle}>Recommended setup</span>
-        <strong style={{ display: "block", marginTop: 12, fontSize: 18 }}>{card.title}</strong>
-        <span style={{ display: "block", marginTop: 6, color: "#475467", lineHeight: 1.45 }}>{card.plainName}</span>
-        <span style={{ display: "block", marginTop: 10, color: "#667085", fontSize: 13, lineHeight: 1.45 }}>{card.description}</span>
-        <span style={{ display: "block", marginTop: 12, color: "#344054", fontSize: 12, lineHeight: 1.5 }}><strong>Creates questions:</strong> {card.defaultChoices}</span>
-        <span style={{ display: "block", marginTop: 4, color: "#344054", fontSize: 12, lineHeight: 1.5 }}><strong>Creates material rows:</strong> {card.defaultMaterials}</span>
-      </button>
-    </form>
-  );
-}
-
-function QuickChoiceButton({ productId, choice }: { productId: string; choice: ChoiceCard }) {
-  return (
-    <form action={addProductOptionAction}>
-      <input type="hidden" name="productId" value={productId} />
-      <input type="hidden" name="optionPreset" value={choice.preset} />
-      <input type="hidden" name="defaultAnswer" value={choice.defaultAnswer} />
-      <input type="hidden" name="otherOptionsCsv" value={choice.otherAnswers} />
-      <button type="submit" style={{ ...compactCardStyle, textAlign: "left", width: "100%", cursor: "pointer", minHeight: 145 }}>
-        <strong style={{ display: "block", fontSize: 15 }}>{choice.title}</strong>
-        <span style={{ display: "block", marginTop: 7, color: "#067647", fontSize: 12, fontWeight: 900 }}>Default: {choice.defaultAnswer.split("=")[0]}</span>
-        <span style={{ display: "block", marginTop: 8, color: "#667085", fontSize: 13, lineHeight: 1.45 }}>{choice.description}</span>
-      </button>
-    </form>
-  );
-}
-
-function FieldCard({ field }: { field: Record<string, any> }) {
-  return (
-    <article style={{ ...compactCardStyle, display: "grid", gap: 12 }}>
+    <article style={{ ...softCardStyle, display: "grid", gap: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
-          <strong style={{ fontSize: 17 }}>{field.label}</strong>
-          <div style={{ marginTop: 4, ...mutedTextStyle }}>{friendlyFieldType(field.type)} · {field.required ? "Required" : "Optional"}</div>
+          <strong style={{ fontSize: 16 }}>{field.label}</strong>
+          <div style={{ marginTop: 4, ...mutedTextStyle }}>{field.helpText ?? "Shown after this product is selected on a quote."}</div>
         </div>
-        <span style={pillStyle}>{field.key}</span>
+        <span style={pillStyle}>{humanize(field.type)}</span>
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 0.7fr) minmax(220px, 1.3fr)", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 0.75fr) minmax(220px, 1.25fr)", gap: 10 }}>
         <div style={{ ...softCardStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
-          <div style={{ ...labelTextStyle, color: "#067647" }}>Default answer</div>
+          <div style={{ ...labelTextStyle, color: "#067647" }}>Default when quoting</div>
           <div style={{ marginTop: 5, fontSize: 16, fontWeight: 900, color: "#064e3b" }}>{defaultChoiceLabel(field)}</div>
         </div>
-        <div style={softCardStyle}>
-          <div style={labelTextStyle}>Other answers staff can choose</div>
+        <div style={{ ...softCardStyle, background: "#fff" }}>
+          <div style={labelTextStyle}>Other choices</div>
           <div style={{ marginTop: 5, ...mutedTextStyle }}>{otherChoiceLabels(field)}</div>
         </div>
       </div>
-      {field.helpText ? <div style={mutedTextStyle}>{field.helpText}</div> : null}
+      {field.showWhen?.optionKey ? <div style={mutedTextStyle}>Only appears when {humanize(field.showWhen.optionKey)} is {(field.showWhen.optionValues ?? []).map(humanize).join(", ")}</div> : null}
     </article>
+  );
+}
+
+function MaterialRow({ component, materialMap }: { component: Record<string, any>; materialMap: Map<string, any> }) {
+  const material = component.materialId ? materialMap.get(component.materialId) : null;
+  return (
+    <article style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div>
+          <strong style={{ fontSize: 17 }}>{component.label || material?.name || "Material"}</strong>
+          <div style={{ marginTop: 4, ...mutedTextStyle }}>{material?.name ? `Linked material: ${material.name}` : "No purchased material linked yet"}</div>
+        </div>
+        <span style={component.role === "base_material" ? greenPillStyle : pillStyle}>{component.role === "base_material" ? "Base material" : component.kind === "labour" ? "Quote labour" : "Quote material"}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <div style={softCardStyle}>
+          <div style={labelTextStyle}>Stock usage</div>
+          <div style={{ marginTop: 5, ...mutedTextStyle }}>{usageSummary(component)}</div>
+        </div>
+        <div style={softCardStyle}>
+          <div style={labelTextStyle}>When used</div>
+          <div style={{ marginTop: 5, ...mutedTextStyle }}>{triggerSummary(component)}</div>
+        </div>
+        <div style={softCardStyle}>
+          <div style={labelTextStyle}>Waste</div>
+          <div style={{ marginTop: 5, ...mutedTextStyle }}>{component.wastePercent ?? "0"}%</div>
+        </div>
+      </div>
+      {component.notes ? <div style={mutedTextStyle}>{component.notes}</div> : null}
+    </article>
+  );
+}
+
+function PresetButton({ productId, type, activeMaterials }: { productId: string; type: ProductTypeCard; activeMaterials: Array<any> }) {
+  return (
+    <form action={applyQuoteBehaviourPresetAction} style={{ minWidth: 0 }}>
+      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="starterType" value={type.value} />
+      <input type="hidden" name="baseUsage" value={type.baseUsage} />
+      <button type="submit" style={{ width: "100%", textAlign: "left", border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", padding: 16, cursor: "pointer", minHeight: 190 }}>
+        <span style={greenPillStyle}>Quote preset</span>
+        <strong style={{ display: "block", marginTop: 12, fontSize: 17 }}>{type.title}</strong>
+        <span style={{ display: "block", marginTop: 7, ...mutedTextStyle }}>Example: {type.example}</span>
+        <span style={{ display: "block", marginTop: 9, color: "#344054", fontSize: 13, lineHeight: 1.45 }}><strong>Base material:</strong> {type.baseMaterialHint}</span>
+        <span style={{ display: "block", marginTop: 5, color: "#344054", fontSize: 13, lineHeight: 1.45 }}><strong>On quote:</strong> {type.quoteOptions}</span>
+        {activeMaterials.length > 0 ? <span style={{ display: "block", marginTop: 8, color: "#667085", fontSize: 12 }}>Base material can be linked separately below.</span> : null}
+      </button>
+    </form>
   );
 }
 
@@ -372,15 +376,15 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     ? await getConfiguratorTemplateById(activeTenant.tenantId, selectedProduct.defaultTemplateId)
     : null;
 
-  const editorDefinition: EditorDefinition = {
-    setupPreset: String(editorTemplate?.definitionJson?.setupPreset ?? "") || null,
-    components: Array.isArray(editorTemplate?.definitionJson?.components) ? editorTemplate.definitionJson.components : [],
-    fields: Array.isArray(editorTemplate?.definitionJson?.fields) ? editorTemplate.definitionJson.fields : []
-  };
-
+  const definition = editorTemplate?.definitionJson ?? {};
+  const fields = Array.isArray(definition.fields) ? definition.fields : [];
+  const components = Array.isArray(definition.components) ? definition.components : [];
+  const setupPreset = String(definition.setupPreset ?? "") || null;
+  const currentType = productTypeFromPreset(setupPreset);
   const materialMap = new Map(materials.map((material) => [material.id, material]));
   const activeMaterials = materials.filter((material) => material.active);
-  const hasSetup = editorDefinition.components.length > 0 || editorDefinition.fields.length > 0;
+  const baseComponents = components.filter((item) => item.role === "base_material" || (!item.trigger?.optionKey && item.kind !== "labour"));
+  const quoteComponents = components.filter((item) => !baseComponents.includes(item));
 
   return (
     <div style={{ maxWidth: 1440, margin: "0 auto", display: "grid", gap: 16, minWidth: 0 }}>
@@ -392,8 +396,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           <div>
             <p style={{ margin: 0, fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Catalog</p>
             <h1 style={{ margin: "10px 0 8px", fontSize: 34 }}>Products</h1>
-            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6, maxWidth: 960 }}>
-              Create products in plain production language: choose what you sell, add the purchased materials it consumes, then set the default answers staff see when quoting.
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6, maxWidth: 980 }}>
+              Products are the base sellable items staff choose on a quote. A product has a base material, like “Sign - ACM - 3mm” using ACM. Size, print method, laminate and finishing happen later on the quote.
             </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -404,49 +408,50 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
         </div>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(280px, 350px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 380px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         <aside style={{ display: "grid", gap: 16, position: "sticky", top: 16 }}>
           <details open style={{ ...cardStyle }}>
-            <summary style={{ cursor: "pointer", fontSize: 20, fontWeight: 900 }}>Create product</summary>
+            <summary style={{ cursor: "pointer", fontSize: 20, fontWeight: 900 }}>Create base product</summary>
             <form action={createProductAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
               <label style={labelStyle}>
-                <span style={labelTextStyle}>Product name</span>
-                <input name="name" required placeholder="Business cards / 5mm corflute sign" style={inputStyle} />
+                <span style={labelTextStyle}>Base product name</span>
+                <input name="name" required placeholder="Sign - ACM - 3mm" style={inputStyle} />
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Product type</span>
+                <select name="starterType" defaultValue="sign_acm" style={inputStyle}>
+                  {productTypes.map((type) => <option key={type.value} value={type.value}>{type.title}</option>)}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Base purchased material</span>
+                <select name="baseMaterialId" defaultValue="" style={inputStyle}>
+                  <option value="">Link later</option>
+                  {activeMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>How stock is allocated</span>
+                <select name="baseUsage" defaultValue="part_sheet" style={inputStyle}>
+                  <option value="part_sheet">Part sheet / nested from parent sheet</option>
+                  <option value="whole_sheet">Whole sheet per item</option>
+                  <option value="roll_metres">Metres from roll</option>
+                  <option value="paper_yield">Paper/card parent sheet yield</option>
+                </select>
               </label>
               <label style={labelStyle}>
                 <span style={labelTextStyle}>SKU</span>
                 <input name="sku" placeholder="Optional" style={inputStyle} />
               </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Product type</span>
-                <select name="productFamily" defaultValue="rigid_signage" style={inputStyle}>
-                  <option value="rigid_signage">Sheet sign / board sign</option>
-                  <option value="roll_media">Roll print / vinyl / banner</option>
-                  <option value="small_format_print">Business cards / flyers</option>
-                  <option value="display_products">Books / pads / carbon books</option>
-                  <option value="installation">Installation / labour</option>
-                  <option value="general">General product</option>
-                </select>
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Department</span>
-                <select name="department" defaultValue="signage" style={inputStyle}>
-                  <option value="signage">Signage</option>
-                  <option value="small_format">Small format</option>
-                  <option value="installation">Installation</option>
-                  <option value="general">General</option>
-                </select>
-              </label>
-              <input type="hidden" name="status" value="draft" />
+              <p style={{ margin: 0, ...mutedTextStyle }}>This creates the base product and the quote behaviour staff will see later. Tax is GST automatically.</p>
               <button type="submit" style={buttonStyle}>Create product</button>
-              <p style={{ margin: 0, ...mutedTextStyle }}>Tax code is saved as GST automatically.</p>
             </form>
           </details>
 
           <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <div>
               <h2 style={{ margin: 0, fontSize: 20 }}>Open product</h2>
-              <p style={{ margin: "6px 0 0", color: "#475467", fontSize: 14 }}>Search and continue setup.</p>
+              <p style={{ margin: "6px 0 0", color: "#475467", fontSize: 14 }}>Search and edit base products.</p>
             </div>
             <form method="GET" action="/products" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 8 }}>
               <input type="text" name="q" defaultValue={query} placeholder="Search products" style={inputStyle} />
@@ -473,8 +478,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                       <strong>{product.name}</strong>
                       <span style={{ border: "1px solid", borderRadius: 999, padding: "3px 8px", fontSize: 11, fontWeight: 900, ...statusTone(product.status) }}>{product.status}</span>
                     </div>
-                    <div style={{ marginTop: 5, fontSize: 13, color: "#475467" }}>{product.sku || "No SKU"} · {formatFamily(product.productFamily)}</div>
-                    <div style={{ marginTop: 5, fontSize: 12, color: "#667085" }}>{product.templateName ? "setup started" : "needs setup"}</div>
+                    <div style={{ marginTop: 5, fontSize: 13, color: "#475467" }}>{product.sku || "No SKU"} · {humanize(product.productFamily)}</div>
+                    <div style={{ marginTop: 5, fontSize: 12, color: "#667085" }}>{product.templateName ? "quote behaviour ready" : "needs setup"}</div>
                   </a>
                 );
               })}
@@ -487,7 +492,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
               <h2 style={{ margin: 0 }}>Select or create a product</h2>
               <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
-                The new setup flow is designed for staff: choose a product starting point, add materials, then set default answers for quoting questions.
+                Use Products to create base sellable items only. Example: create “Sign - ACM - 3mm”, link the ACM material, then go to Quotes to choose size, print type, laminate and finishing.
               </p>
             </section>
           ) : (
@@ -495,25 +500,27 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
               <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
                   <div>
-                    <p style={{ margin: 0, fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Selected product</p>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Selected base product</p>
                     <h2 style={{ margin: "8px 0 0", fontSize: 30 }}>{selectedProduct.name}</h2>
-                    <p style={{ margin: "6px 0 0", color: "#667085" }}>{selectedProduct.sku || "No SKU"} · {formatFamily(selectedProduct.productFamily)} · GST</p>
+                    <p style={{ margin: "6px 0 0", color: "#667085" }}>{selectedProduct.sku || "No SKU"} · {humanize(selectedProduct.productFamily)} · GST</p>
                   </div>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span style={pillStyle}>{editorDefinition.components.length} material / work rows</span>
-                    <span style={pillStyle}>{editorDefinition.fields.length} quoting questions</span>
-                    <span style={defaultPillStyle}>{setupName(editorDefinition.setupPreset)}</span>
+                    <span style={greenPillStyle}>{baseComponents.length} base material rows</span>
+                    <span style={pillStyle}>{fields.length} quote choices</span>
+                    <span style={pillStyle}>{setupName(setupPreset)}</span>
                   </div>
                 </div>
-                <div style={{ ...softCardStyle, display: "grid", gap: 8 }}>
-                  <strong>Simple setup order</strong>
-                  <div style={{ color: "#475467", lineHeight: 1.55 }}>1. Pick the closest product starting point. 2. Swap/add purchased materials. 3. Set the default answer for each quoting question. Staff can quote from defaults without understanding the calculation rules.</div>
+                <div style={{ ...softCardStyle, background: "#fffaeb", borderColor: "#fedf89" }}>
+                  <strong style={{ color: "#b54708" }}>Important split</strong>
+                  <p style={{ margin: "6px 0 0", color: "#7a2e0e", lineHeight: 1.55 }}>
+                    This is not a quote. This product only defines the base item and stock it can consume. Staff choose size, print type, laminate, finishing and quantity on the Quotes page.
+                  </p>
                 </div>
               </section>
 
-              <section id="product-details" style={{ ...cardStyle, ...sectionAnchorStyle, display: "grid", gap: 16 }}>
-                <StepHeading number="1" title="What are we selling?">
-                  Keep this section simple. This is the sellable item staff select on a quote.
+              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
+                <StepHeading number="1" title="Base product details">
+                  Keep this as the simple sellable product name staff will recognise in a quote.
                 </StepHeading>
                 <form action={updateProductAction} style={{ display: "grid", gap: 12 }}>
                   <input type="hidden" name="productId" value={selectedProduct.id} />
@@ -547,14 +554,16 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                       </select>
                     </label>
                     <label style={labelStyle}>
-                      <span style={labelTextStyle}>Product type</span>
+                      <span style={labelTextStyle}>Product family</span>
                       <select name="productFamily" defaultValue={selectedProduct.productFamily} style={inputStyle}>
-                        <option value="rigid_signage">Sheet sign / board sign</option>
-                        <option value="roll_media">Roll print / vinyl / banner</option>
-                        <option value="small_format_print">Business cards / flyers</option>
-                        <option value="display_products">Books / pads / carbon books</option>
-                        <option value="installation">Installation / labour</option>
-                        <option value="general">General product</option>
+                        <option value="rigid_signage">Rigid signage / sheet signs</option>
+                        <option value="roll_media">Roll media / vinyl print</option>
+                        <option value="banners">Banners</option>
+                        <option value="stickers_labels">Stickers / labels</option>
+                        <option value="window_wall_graphics">Window / wall graphics</option>
+                        <option value="vehicle_graphics">Vehicle graphics</option>
+                        <option value="small_format_print">Small format print</option>
+                        <option value="display_products">Books / display products</option>
                       </select>
                     </label>
                   </div>
@@ -565,66 +574,20 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
               </section>
 
               <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-                <StepHeading number="2" title="Pick the closest starting point">
-                  This creates sensible default questions and material rows. You can still change the materials and default answers afterwards.
+                <StepHeading number="2" title="Base material / stock used by this product">
+                  Link the purchased material behind the base product. This is where stock allocation begins: ACM sheet, banner roll, card stock, paper, carbonless paper, cover card or tape.
                 </StepHeading>
-                {hasSetup ? (
-                  <div style={{ ...softCardStyle, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                    <div>
-                      <strong>Current starting point: {setupName(editorDefinition.setupPreset)}</strong>
-                      <div style={{ marginTop: 4, ...mutedTextStyle }}>Click another setup below only if this product should use a different starter set.</div>
-                    </div>
-                    <span style={defaultPillStyle}>Setup started</span>
+
+                {baseComponents.length === 0 ? (
+                  <EmptyState>No base material linked yet. Add the purchased material that this product is built from.</EmptyState>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {baseComponents.map((item, index) => <MaterialRow key={item.id ?? `${item.label}-${index}`} component={item} materialMap={materialMap} />)}
                   </div>
-                ) : null}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
-                  {starterCards.map((card) => <StarterButton key={card.value} productId={selectedProduct.id} card={card} />)}
-                </div>
-              </section>
+                )}
 
-              <section id="product-materials" style={{ ...cardStyle, ...sectionAnchorStyle, display: "grid", gap: 16 }}>
-                <StepHeading number="3" title="What materials / work does it use?">
-                  Add the purchased stock consumed by this product: whole sheets, part sheets, metres from a roll, cello, laminate, carbon paper, covers, tape, numbering or labour.
-                </StepHeading>
-
-                <div style={{ display: "grid", gap: 10 }}>
-                  {editorDefinition.components.length === 0 ? (
-                    <EmptyState>No material rows yet. Pick a starting point above or add the first material below.</EmptyState>
-                  ) : (
-                    editorDefinition.components.map((component, index) => {
-                      const material = component.materialId ? materialMap.get(component.materialId) : null;
-                      return (
-                        <article key={component.id ?? `${component.label}-${index}`} style={{ ...compactCardStyle, display: "grid", gap: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
-                            <div>
-                              <strong style={{ fontSize: 17 }}>{component.label || material?.name || "Material row"}</strong>
-                              <div style={{ marginTop: 4, ...mutedTextStyle }}>{material?.name ? `Purchased material: ${material.name}` : "No purchased material linked yet"}</div>
-                            </div>
-                            <span style={pillStyle}>{component.kind === "labour" ? "Work / labour" : "Material"}</span>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-                            <div style={softCardStyle}>
-                              <div style={labelTextStyle}>How it is used</div>
-                              <div style={{ marginTop: 5, ...mutedTextStyle }}>{friendlyUsage(component)}</div>
-                            </div>
-                            <div style={softCardStyle}>
-                              <div style={labelTextStyle}>When it is used</div>
-                              <div style={{ marginTop: 5, ...mutedTextStyle }}>{triggerSummary(component)}</div>
-                            </div>
-                            <div style={softCardStyle}>
-                              <div style={labelTextStyle}>Waste allowance</div>
-                              <div style={{ marginTop: 5, ...mutedTextStyle }}>{component.wastePercent ?? "0"}%</div>
-                            </div>
-                          </div>
-                          {component.notes ? <div style={mutedTextStyle}>{component.notes}</div> : null}
-                        </article>
-                      );
-                    })
-                  )}
-                </div>
-
-                <details open={!hasSetup} style={{ ...softCardStyle }}>
-                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Add a material / work row</summary>
+                <details open={baseComponents.length === 0} style={softCardStyle}>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Add or link a base material</summary>
                   <form action={addProductComponentAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
                     <input type="hidden" name="productId" value={selectedProduct.id} />
                     <div style={gridTwoStyle}>
@@ -636,155 +599,115 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                         </select>
                       </label>
                       <label style={labelStyle}>
-                        <span style={labelTextStyle}>Used as</span>
-                        <select name="componentPreset" defaultValue="part_sheet_material" style={inputStyle}>
-                          <option value="part_sheet_material">Part sheet from parent sheet</option>
-                          <option value="full_sheet_material">Whole sheet / board</option>
-                          <option value="roll_metres_material">Metres from a roll</option>
-                          <option value="area_coverage_material">Area coverage: ink / laminate / cello</option>
-                          <option value="paper_stock">Paper/card parent sheet yield</option>
-                          <option value="each_material">Each item: eyelets / screws / boxes</option>
-                          <option value="binding">Binding / tape consumable</option>
-                          <option value="labour_time">Labour or machine time</option>
+                        <span style={labelTextStyle}>How this stock is consumed</span>
+                        <select name="baseUsage" defaultValue={currentType.baseUsage} style={inputStyle}>
+                          <option value="part_sheet">Part sheet / nested from parent sheet</option>
+                          <option value="whole_sheet">Whole sheet per item</option>
+                          <option value="roll_metres">Metres from roll</option>
+                          <option value="paper_yield">Paper/card parent sheet yield</option>
+                          <option value="area">Square metres</option>
+                          <option value="each">Each / box / item</option>
                         </select>
                       </label>
                     </div>
                     <div style={gridThreeStyle}>
                       <label style={labelStyle}>
                         <span style={labelTextStyle}>Friendly name</span>
-                        <input name="label" placeholder="eg 5mm ACM, matte cello, yellow copy paper" style={inputStyle} />
+                        <input name="label" placeholder="eg 3mm ACM sheet / 510gsm banner roll" style={inputStyle} />
                       </label>
                       <label style={labelStyle}>
                         <span style={labelTextStyle}>Default amount</span>
-                        <input name="quantity" placeholder="Leave blank for normal default" style={inputStyle} />
+                        <input name="quantity" placeholder="Usually 1" style={inputStyle} />
                       </label>
                       <label style={labelStyle}>
                         <span style={labelTextStyle}>Waste %</span>
-                        <input name="wastePercent" placeholder="Leave blank for normal default" style={inputStyle} />
+                        <input name="wastePercent" placeholder="Usually 10" style={inputStyle} />
                       </label>
                     </div>
-                    <details style={{ borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
-                      <summary style={{ cursor: "pointer", fontWeight: 900 }}>Only used for special cases</summary>
-                      <div style={{ display: "grid", gap: 12, marginTop: 12 }}>
-                        <div style={gridThreeStyle}>
-                          <label style={labelStyle}>
-                            <span style={labelTextStyle}>Parts per parent sheet</span>
-                            <input name="partsPerSheet" placeholder="eg 8 up" style={inputStyle} />
-                          </label>
-                          <label style={labelStyle}>
-                            <span style={labelTextStyle}>Only when question is</span>
-                            <input name="triggerOptionKey" placeholder="eg cello / laminate / copy_set" style={inputStyle} />
-                          </label>
-                          <label style={labelStyle}>
-                            <span style={labelTextStyle}>Only when answer is</span>
-                            <input name="triggerOptionValuesCsv" placeholder="eg matte_cello,triplicate,black" style={inputStyle} />
-                          </label>
-                        </div>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Notes for staff</span>
-                          <textarea name="notes" rows={3} placeholder="Example: part sheet from 2440 × 1220 ACM, allow 10% waste." style={textareaStyle} />
-                        </label>
-                      </div>
-                    </details>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                      <p style={{ margin: 0, ...mutedTextStyle }}>Most staff should only need material, used as, friendly name and default amount.</p>
-                      <button type="submit" style={buttonStyle}>Add material / work row</button>
-                    </div>
+                    <label style={labelStyle}>
+                      <span style={labelTextStyle}>Notes</span>
+                      <textarea name="notes" rows={3} placeholder="Example: allocate part of a 2440 × 1220 ACM sheet from quote size." style={textareaStyle} />
+                    </label>
+                    <button type="submit" style={buttonStyle}>Add base material</button>
                   </form>
                 </details>
               </section>
 
-              <section id="product-options" style={{ ...cardStyle, ...sectionAnchorStyle, display: "grid", gap: 16 }}>
-                <StepHeading number="4" title="What questions should quoting staff answer?">
-                  Each question has a default answer. The default is what staff see first when quoting, and alternatives are only there when the job changes.
+              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
+                <StepHeading number="3" title="Quote behaviour for this product">
+                  These are not product creation fields. They are the choices staff see after selecting this product on a quote.
                 </StepHeading>
 
                 <div style={{ ...softCardStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
-                  <strong style={{ color: "#067647" }}>How defaults work</strong>
+                  <strong style={{ color: "#067647" }}>Example flow</strong>
                   <p style={{ margin: "6px 0 0", color: "#064e3b", lineHeight: 1.55 }}>
-                    Example: for business cards, create the question “Celloglaze”, set the default answer to “None”, then add “Matt cello” and “Gloss cello” as other answers. Quoting staff can leave it at the default unless the client asks for cello.
+                    Product: <strong>{selectedProduct.name}</strong>. Quote choices: size, print type, laminate and finishing. If size is 600 × 900, the app allocates part of the base material. If roll stock is chosen, it also allocates roll stock. If laminate is chosen, it allocates laminate.
                   </p>
                 </div>
 
-                <div style={{ display: "grid", gap: 10 }}>
-                  {editorDefinition.fields.length === 0 ? (
-                    <EmptyState>No quoting questions yet. Pick a starting point above or add the first question below.</EmptyState>
-                  ) : (
-                    editorDefinition.fields.map((field, index) => <FieldCard key={field.id ?? `${field.key}-${index}`} field={field} />)
-                  )}
-                </div>
+                {fields.length === 0 ? (
+                  <EmptyState>No quote choices yet. Apply a preset below so this product knows what to ask when quoted.</EmptyState>
+                ) : (
+                  <div style={{ display: "grid", gap: 10 }}>
+                    {fields.map((field, index) => <FieldPreview key={field.id ?? `${field.key}-${index}`} field={field} />)}
+                  </div>
+                )}
 
-                <details open={!hasSetup} style={{ ...softCardStyle }}>
-                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Add a simple quoting question</summary>
+                {quoteComponents.length > 0 ? (
+                  <section style={{ display: "grid", gap: 10 }}>
+                    <h3 style={{ margin: 0, fontSize: 18 }}>Materials added by quote choices</h3>
+                    {quoteComponents.map((item, index) => <MaterialRow key={item.id ?? `${item.label}-${index}`} component={item} materialMap={materialMap} />)}
+                  </section>
+                ) : null}
+
+                <details style={softCardStyle}>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Apply a different quote behaviour preset</summary>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginTop: 14 }}>
+                    {productTypes.map((type) => <PresetButton key={type.value} productId={selectedProduct.id} type={type} activeMaterials={activeMaterials} />)}
+                  </div>
+                </details>
+
+                <details style={softCardStyle}>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Advanced: add a custom quote choice</summary>
                   <form action={addProductOptionAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
                     <input type="hidden" name="productId" value={selectedProduct.id} />
                     <div style={gridTwoStyle}>
                       <label style={labelStyle}>
-                        <span style={labelTextStyle}>Question type</span>
-                        <select name="optionPreset" defaultValue="custom" style={inputStyle}>
-                          <option value="custom">Custom question</option>
-                          <option value="finished_size">Size</option>
-                          <option value="sides">Front / back</option>
-                          <option value="laminate">Laminate</option>
-                          <option value="cello">Celloglaze</option>
-                          <option value="page_count">Pages</option>
-                          <option value="copy_set">Copies</option>
-                          <option value="copy_colours">Copy colours</option>
-                          <option value="cover_colour">Cover colour</option>
-                          <option value="tape_colour">Tape colour</option>
-                          <option value="binding_type">Binding</option>
-                          <option value="quantity">Quantity</option>
-                        </select>
+                        <span style={labelTextStyle}>Choice shown on quote</span>
+                        <input name="label" placeholder="eg Laminate / Finishing / Cover colour" style={inputStyle} />
                       </label>
                       <label style={labelStyle}>
-                        <span style={labelTextStyle}>Question shown to staff</span>
-                        <input name="questionLabel" placeholder="eg Celloglaze / Finished size / Copy colours" style={inputStyle} />
+                        <span style={labelTextStyle}>Answer style</span>
+                        <select name="fieldType" defaultValue="select" style={inputStyle}>
+                          <option value="select">Pick one from list</option>
+                          <option value="size_select">Size list</option>
+                          <option value="quantity">Number / quantity</option>
+                          <option value="color">Colour list</option>
+                          <option value="text">Typed answer</option>
+                        </select>
                       </label>
                     </div>
                     <div style={gridTwoStyle}>
                       <label style={labelStyle}>
                         <span style={labelTextStyle}>Default answer</span>
-                        <input name="defaultAnswer" placeholder="eg None / 600x900 / Duplicate / White-yellow" style={inputStyle} />
+                        <input name="defaultAnswer" placeholder="eg None / 600x900 / Duplicate" style={inputStyle} />
                       </label>
                       <label style={labelStyle}>
                         <span style={labelTextStyle}>Other answers</span>
-                        <input name="otherOptionsCsv" placeholder="eg Matt cello,Gloss cello or 450x600,300x450" style={inputStyle} />
+                        <input name="otherOptionsCsv" placeholder="eg Gloss laminate,Matt laminate" style={inputStyle} />
                       </label>
                     </div>
-                    <div style={gridTwoStyle}>
-                      <label style={labelStyle}>
-                        <span style={labelTextStyle}>Answer style</span>
-                        <select name="fieldType" defaultValue="select" style={inputStyle}>
-                          <option value="select">Pick one from a list</option>
-                          <option value="size_select">Size list</option>
-                          <option value="yes_no">Yes / no</option>
-                          <option value="quantity">Number / quantity</option>
-                          <option value="text">Typed answer</option>
-                          <option value="color">Colour list</option>
-                        </select>
-                      </label>
-                      <label style={labelStyle}>
-                        <span style={labelTextStyle}>Help text</span>
-                        <input name="helpText" placeholder="Optional note for quoting staff" style={inputStyle} />
-                      </label>
-                    </div>
-                    <input type="hidden" name="required" value="yes" />
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                      <p style={{ margin: 0, ...mutedTextStyle }}>The default answer is saved first. Other answers are optional.</p>
-                      <button type="submit" style={buttonStyle}>Add quoting question</button>
-                    </div>
+                    <label style={labelStyle}>
+                      <span style={labelTextStyle}>Help text</span>
+                      <input name="helpText" placeholder="Optional note for quoting staff" style={inputStyle} />
+                    </label>
+                    <button type="submit" style={buttonStyle}>Add custom quote choice</button>
                   </form>
                 </details>
 
-                <section style={{ display: "grid", gap: 12 }}>
-                  <div>
-                    <h3 style={{ margin: 0, fontSize: 18 }}>One-click common questions</h3>
-                    <p style={{ margin: "6px 0 0", ...mutedTextStyle }}>These add a question with a sensible default answer already set.</p>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-                    {choiceCards.map((choice) => <QuickChoiceButton key={choice.preset} productId={selectedProduct.id} choice={choice} />)}
-                  </div>
-                </section>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <a href={`/quotes?product=${selectedProduct.id}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Preview on quote page</a>
+                </div>
               </section>
             </>
           )}
