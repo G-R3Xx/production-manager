@@ -105,11 +105,11 @@ function presetDefaults(preset: string) {
     case "sides":
       return {
         key: "sides",
-        label: "Sides",
+        label: "Front / back",
         fieldType: "select",
         defaultValue: "single_sided",
-        optionsCsv: "Single sided=single_sided,Double sided=double_sided",
-        helpText: "Use this to multiply print faces, ink, labour or laminate rules."
+        optionsCsv: "Front only=single_sided,Front and back=double_sided",
+        helpText: "Business cards, flyers and signs use this to control print faces, ink, labour and laminate/cello rules."
       };
     case "laminate":
       return {
@@ -141,11 +141,11 @@ function presetDefaults(preset: string) {
     case "copy_set":
       return {
         key: "copy_set",
-        label: "Duplicate / triplicate",
+        label: "Copies per set",
         fieldType: "select",
         defaultValue: "duplicate",
         optionsCsv: "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate",
-        helpText: "Carbon book copy set. Use this to multiply sheet and copy colour components."
+        helpText: "Duplicate/triplicate selection. This controls how many carbonless copy sheets are used per written set."
       };
     case "copy_colours":
       return {
@@ -231,6 +231,81 @@ type ComponentPresetDefaults = {
 
 function componentPresetDefaults(preset: string): ComponentPresetDefaults {
   switch (preset) {
+    case "full_sheet_material":
+      return {
+        componentKind: "material",
+        label: "Full sheet / board",
+        ruleType: "per_unit",
+        quantity: "1",
+        unit: "sheet",
+        wastePercent: "0",
+        dimensionSource: "quantity_only",
+        usageOptionKey: "quantity",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Consumes one full purchased sheet or board per unit unless changed."
+      };
+    case "part_sheet_material":
+      return {
+        componentKind: "material",
+        label: "Part sheet / nested from parent sheet",
+        ruleType: "yield_based",
+        quantity: "1",
+        unit: "sheet",
+        wastePercent: "10",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Consumes part of a purchased parent sheet. Set parts-per-sheet when known, or use finished size to calculate area later."
+      };
+    case "roll_metres_material":
+      return {
+        componentKind: "material",
+        label: "Metres from roll",
+        ruleType: "per_linear_metre",
+        quantity: "1",
+        unit: "lm",
+        wastePercent: "10",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Consumes purchased roll stock by linear metres from the finished size or entered length."
+      };
+    case "area_coverage_material":
+      return {
+        componentKind: "material",
+        label: "Area coverage material",
+        ruleType: "per_sqm",
+        quantity: "1",
+        unit: "sqm",
+        wastePercent: "10",
+        dimensionSource: "finished_size",
+        usageOptionKey: "finished_size",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Consumes material by square metres, useful for ink, laminate, cello, application tape or coatings."
+      };
+    case "each_material":
+      return {
+        componentKind: "material",
+        label: "Each / fixed material",
+        ruleType: "per_unit",
+        quantity: "1",
+        unit: "each",
+        wastePercent: "0",
+        dimensionSource: "quantity_only",
+        usageOptionKey: "quantity",
+        triggerOptionKey: "",
+        triggerOptionValuesCsv: "",
+        labourRateName: "",
+        notes: "Consumes a simple quantity of purchased stock per quoted unit, such as eyelets, screws, bindery items or boxes."
+      };
     case "sheet_substrate":
       return {
         componentKind: "material",
@@ -609,7 +684,7 @@ export async function addStarterRulesAction(formData: FormData) {
   if (starterType === "rigid_signage") {
     starterFields = [
       starterField("finished_size", "Finished size", "size_select", "600x900", "600x900,450x600,300x450", "Finished sign size used for sheet, print, ink and laminate calculations."),
-      starterField("sides", "Sides", "select", "single_sided", "Single sided=single_sided,Double sided=double_sided", "Double-sided work can multiply print faces and finishing."),
+      starterField("sides", "Front / back", "select", "single_sided", "Front only=single_sided,Front and back=double_sided", "Controls print faces and finishing for single or double-sided work."),
       starterField("laminate", "Laminate", "select", "none", "None=none,Matte laminate=matte_laminate,Gloss laminate=gloss_laminate", "Trigger roll laminate only when selected."),
       starterField("eyelets", "Eyelets", "yes_no", "no", "No=no,Yes=yes", "Optional hardware/finishing component."),
       starterField("quantity", "Quantity", "quantity", "1", "", "Quoted quantity.")
@@ -646,7 +721,7 @@ export async function addStarterRulesAction(formData: FormData) {
   if (starterType === "cards") {
     starterFields = [
       starterField("finished_size", "Finished size", "size_select", "90x55", "90x55,85x55,100x150,105x148", "Card or flyer finished size."),
-      starterField("sides", "Sides", "select", "double_sided", "Single sided=single_sided,Double sided=double_sided", "Controls print faces."),
+      starterField("sides", "Front / back", "select", "double_sided", "Front only=single_sided,Front and back=double_sided", "Controls whether the job prints front only or front and back."),
       starterField("cello", "Celloglaze", "select", "none", "None=none,Matte cello=matte_cello,Gloss cello=gloss_cello", "Optional cello meterage."),
       starterField("gsm", "GSM", "select", "350", "250gsm=250,300gsm=300,350gsm=350,420gsm=420", "Paper/card stock weight."),
       starterField("quantity", "Quantity", "quantity", "250", "", "Quoted quantity.")
@@ -680,7 +755,8 @@ export async function addStarterRulesAction(formData: FormData) {
   if (starterType === "carbon_books") {
     starterFields = [
       starterField("finished_size", "Finished size", "size_select", "A5", "A4=A4,A5=A5,DL=DL", "Carbon book finished size."),
-      starterField("copy_set", "Duplicate / triplicate", "select", "duplicate", "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate", "Copy count per set."),
+      starterField("page_count", "Pages per book", "quantity", "50", "", "Number of numbered sets/pages in each carbon book."),
+      starterField("copy_set", "Copies per set", "select", "duplicate", "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate", "Duplicate/triplicate copy count per written set."),
       starterField("copy_colours", "Copy colours", "select", "white_yellow", "White / Yellow=white_yellow,White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue", "Copy paper colour set."),
       starterField("cover_colour", "Cover colour", "color", "blue", "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", "Cover stock colour."),
       starterField("tape_colour", "Tape colour", "color", "black", "Black=black,White=white,Blue=blue,Red=red,Green=green", "Binding tape colour."),
