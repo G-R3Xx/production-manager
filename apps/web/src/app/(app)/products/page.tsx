@@ -5,7 +5,7 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getConfiguratorTemplateById } from "@/server/configurators";
 import { listMaterialsForTenant } from "@/server/materials";
 import { getProductById, listProductsForTenant } from "@/server/products";
-import { addProductComponentAction, addProductOptionAction, applyQuoteBehaviourPresetAction, createProductAction, updateProductAction } from "./actions";
+import { addProductComponentAction, addProductOptionAction, applyQuoteBehaviourPresetAction, createProductAction, deleteProductComponentAction, deleteProductOptionAction, moveProductOptionAction, updateProductAction, updateProductComponentAction, updateProductOptionAction } from "./actions";
 
 type ProductsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -278,7 +278,53 @@ function EmptyState({ children }: { children: ReactNode }) {
   return <div style={{ border: "1px dashed #d0d5dd", borderRadius: 16, padding: 16, color: "#667085", background: "#fcfcfd" }}>{children}</div>;
 }
 
-function FieldPreview({ field }: { field: Record<string, any> }) {
+function optionCsvForInput(field: Record<string, any>, includeDefault: boolean): string {
+  const defaultValue = String(field.defaultValue ?? "");
+  const options = Array.isArray(field.options) ? field.options : [];
+  return options
+    .filter((option: Record<string, any>) => includeDefault || (String(option.value ?? option.label ?? "") !== defaultValue && String(option.label ?? option.value ?? "") !== defaultValue))
+    .map((option: Record<string, any>) => {
+      const label = String(option.label ?? option.value ?? "").trim();
+      const value = String(option.value ?? label).trim();
+      if (!label) return value;
+      return label === value ? label : `${label}=${value}`;
+    })
+    .filter(Boolean)
+    .join(",");
+}
+
+function rawDefaultAnswer(field: Record<string, any>): string {
+  const defaultValue = String(field.defaultValue ?? "");
+  const options = Array.isArray(field.options) ? field.options : [];
+  const match = options.find((option: Record<string, any>) => choiceValue(option) === defaultValue || choiceLabel(option) === defaultValue);
+  if (match) {
+    const label = choiceLabel(match);
+    const value = choiceValue(match);
+    return label === value ? label : `${label}=${value}`;
+  }
+  return defaultValue;
+}
+
+function usagePresetForComponent(component: Record<string, any>): string {
+  const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
+  if (ruleType === "per_linear_metre") return "roll_metres";
+  if (ruleType === "per_sqm") return "area";
+  if (ruleType === "per_unit" && String(component.unit ?? "") === "sheet") return "whole_sheet";
+  if (ruleType === "per_unit") return "each";
+  if (ruleType === "yield_based" && String(component.role ?? "") !== "base_material") return "paper_yield";
+  return "part_sheet";
+}
+
+function triggerValuesCsv(component: Record<string, any>): string {
+  const values = Array.isArray(component.trigger?.optionValues) && component.trigger.optionValues.length > 0
+    ? component.trigger.optionValues
+    : Array.isArray(component.stockUsage?.optionValues)
+      ? component.stockUsage.optionValues
+      : [];
+  return values.join(",");
+}
+
+function FieldPreview({ field, index, total, productId }: { field: Record<string, any>; index: number; total: number; productId: string }) {
   return (
     <article style={{ ...softCardStyle, display: "grid", gap: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -286,7 +332,21 @@ function FieldPreview({ field }: { field: Record<string, any> }) {
           <strong style={{ fontSize: 16 }}>{field.label}</strong>
           <div style={{ marginTop: 4, ...mutedTextStyle }}>{field.helpText ?? "Shown after this product is selected on a quote."}</div>
         </div>
-        <span style={pillStyle}>{humanize(field.type)}</span>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+          <span style={pillStyle}>{humanize(field.type)}</span>
+          <form action={moveProductOptionAction}>
+            <input type="hidden" name="productId" value={productId} />
+            <input type="hidden" name="fieldId" value={field.id ?? ""} />
+            <input type="hidden" name="direction" value="up" />
+            <button type="submit" disabled={index === 0} style={{ ...secondaryButtonStyle, minHeight: 34, padding: "0 10px", opacity: index === 0 ? 0.4 : 1 }}>↑</button>
+          </form>
+          <form action={moveProductOptionAction}>
+            <input type="hidden" name="productId" value={productId} />
+            <input type="hidden" name="fieldId" value={field.id ?? ""} />
+            <input type="hidden" name="direction" value="down" />
+            <button type="submit" disabled={index >= total - 1} style={{ ...secondaryButtonStyle, minHeight: 34, padding: "0 10px", opacity: index >= total - 1 ? 0.4 : 1 }}>↓</button>
+          </form>
+        </div>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 0.75fr) minmax(220px, 1.25fr)", gap: 10 }}>
         <div style={{ ...softCardStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
@@ -299,18 +359,93 @@ function FieldPreview({ field }: { field: Record<string, any> }) {
         </div>
       </div>
       {field.showWhen?.optionKey ? <div style={mutedTextStyle}>Only appears when {humanize(field.showWhen.optionKey)} is {(field.showWhen.optionValues ?? []).map(humanize).join(", ")}</div> : null}
+
+      <details style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "#fff" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 900 }}>Edit this quote choice</summary>
+        <form action={updateProductOptionAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
+          <input type="hidden" name="productId" value={productId} />
+          <input type="hidden" name="fieldId" value={field.id ?? ""} />
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Choice shown on quote</span>
+              <input name="label" defaultValue={field.label ?? ""} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Internal key</span>
+              <input name="key" defaultValue={field.key ?? ""} style={inputStyle} />
+            </label>
+          </div>
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Answer style</span>
+              <select name="fieldType" defaultValue={field.type ?? "select"} style={inputStyle}>
+                <option value="select">Pick one from list</option>
+                <option value="size_select">Size list</option>
+                <option value="quantity">Number / quantity</option>
+                <option value="number">Number</option>
+                <option value="color">Colour list</option>
+                <option value="text">Typed answer</option>
+              </select>
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Required?</span>
+              <select name="required" defaultValue={field.required === false ? "no" : "yes"} style={inputStyle}>
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </label>
+          </div>
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Default answer</span>
+              <input name="defaultAnswer" defaultValue={rawDefaultAnswer(field)} placeholder="eg None / 600x900 / Duplicate" style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Other answers</span>
+              <input name="otherOptionsCsv" defaultValue={optionCsvForInput(field, false)} placeholder="eg Gloss laminate,Matt laminate" style={inputStyle} />
+            </label>
+          </div>
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Only show after choice</span>
+              <input name="showWhenOptionKey" defaultValue={field.showWhen?.optionKey ?? ""} placeholder="eg print_method" style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Only show when answer is</span>
+              <input name="showWhenOptionValuesCsv" defaultValue={(field.showWhen?.optionValues ?? []).join(",")} placeholder="eg roll_stock" style={inputStyle} />
+            </label>
+          </div>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Help text for staff</span>
+            <input name="helpText" defaultValue={field.helpText ?? ""} style={inputStyle} />
+          </label>
+          <div style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+            <button type="submit" style={buttonStyle}>Save quote choice</button>
+          </div>
+        </form>
+        <form action={deleteProductOptionAction} style={{ display: "grid", gap: 8, marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
+          <input type="hidden" name="productId" value={productId} />
+          <input type="hidden" name="fieldId" value={field.id ?? ""} />
+          <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, color: "#475467" }}>
+            <input type="checkbox" name="deleteLinkedMaterials" value="yes" />
+            Also remove material/labour rows triggered by this choice
+          </label>
+          <button type="submit" style={{ ...secondaryButtonStyle, color: "#b42318", borderColor: "#fda29b", justifySelf: "start" }}>Remove quote choice</button>
+        </form>
+      </details>
     </article>
   );
 }
 
-function MaterialRow({ component, materialMap }: { component: Record<string, any>; materialMap: Map<string, any> }) {
+function MaterialRow({ component, materialMap, productId, activeMaterials, fields }: { component: Record<string, any>; materialMap: Map<string, any>; productId: string; activeMaterials: Array<any>; fields: Array<Record<string, any>> }) {
   const material = component.materialId ? materialMap.get(component.materialId) : null;
+  const triggerKey = component.trigger?.optionKey ?? (component.role === "base_material" ? "" : component.stockUsage?.optionKey ?? "");
   return (
     <article style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
           <strong style={{ fontSize: 17 }}>{component.label || material?.name || "Material"}</strong>
-          <div style={{ marginTop: 4, ...mutedTextStyle }}>{material?.name ? `Linked material: ${material.name}` : "No purchased material linked yet"}</div>
+          <div style={{ marginTop: 4, ...mutedTextStyle }}>{material?.name ? `Linked material: ${material.name}` : component.kind === "labour" ? "Labour / machine time row" : "No purchased material linked yet"}</div>
         </div>
         <span style={component.role === "base_material" ? greenPillStyle : pillStyle}>{component.role === "base_material" ? "Base material" : component.kind === "labour" ? "Quote labour" : "Quote material"}</span>
       </div>
@@ -329,6 +464,85 @@ function MaterialRow({ component, materialMap }: { component: Record<string, any
         </div>
       </div>
       {component.notes ? <div style={mutedTextStyle}>{component.notes}</div> : null}
+
+      <details style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "#fafafa" }}>
+        <summary style={{ cursor: "pointer", fontWeight: 900 }}>Edit this material row</summary>
+        <form action={updateProductComponentAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
+          <input type="hidden" name="productId" value={productId} />
+          <input type="hidden" name="componentId" value={component.id ?? ""} />
+          <input type="hidden" name="role" value={component.role ?? "base_material"} />
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Purchased material</span>
+              <select name="materialId" defaultValue={component.materialId ?? ""} style={inputStyle}>
+                <option value="">No material linked</option>
+                {activeMaterials.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Row type</span>
+              <select name="kind" defaultValue={component.kind ?? "material"} style={inputStyle}>
+                <option value="material">Purchased material</option>
+                <option value="labour">Labour / machine time</option>
+              </select>
+            </label>
+          </div>
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Friendly name</span>
+              <input name="label" defaultValue={component.label ?? ""} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>How this is consumed</span>
+              <select name="baseUsage" defaultValue={usagePresetForComponent(component)} style={inputStyle}>
+                <option value="part_sheet">Part sheet / nested from parent sheet</option>
+                <option value="whole_sheet">Whole sheet per item</option>
+                <option value="roll_metres">Metres from roll</option>
+                <option value="paper_yield">Paper/card parent sheet yield</option>
+                <option value="area">Square metres</option>
+                <option value="each">Each / box / item / labour unit</option>
+              </select>
+            </label>
+          </div>
+          <div style={gridThreeStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Default amount</span>
+              <input name="quantity" defaultValue={component.quantity ?? "1"} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Waste %</span>
+              <input name="wastePercent" defaultValue={component.wastePercent ?? "10"} style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Labour rate name</span>
+              <input name="labourRateName" defaultValue={component.labourRateName ?? ""} placeholder="eg Cutting / Bindery" style={inputStyle} />
+            </label>
+          </div>
+          <div style={gridTwoStyle}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Only used when quote choice is</span>
+              <select name="triggerOptionKey" defaultValue={triggerKey} style={inputStyle}>
+                <option value="">Always used / base material</option>
+                {fields.map((field) => <option key={field.id ?? field.key} value={field.key}>{field.label}</option>)}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Only used for these answers</span>
+              <input name="triggerOptionValuesCsv" defaultValue={triggerValuesCsv(component)} placeholder="eg gloss_laminate,matt_laminate" style={inputStyle} />
+            </label>
+          </div>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Notes</span>
+            <textarea name="notes" rows={3} defaultValue={component.notes ?? ""} style={textareaStyle} />
+          </label>
+          <button type="submit" style={buttonStyle}>Save material row</button>
+        </form>
+        <form action={deleteProductComponentAction} style={{ marginTop: 12, borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
+          <input type="hidden" name="productId" value={productId} />
+          <input type="hidden" name="componentId" value={component.id ?? ""} />
+          <button type="submit" style={{ ...secondaryButtonStyle, color: "#b42318", borderColor: "#fda29b" }}>Remove material row</button>
+        </form>
+      </details>
     </article>
   );
 }
@@ -340,7 +554,7 @@ function PresetButton({ productId, type, activeMaterials }: { productId: string;
       <input type="hidden" name="starterType" value={type.value} />
       <input type="hidden" name="baseUsage" value={type.baseUsage} />
       <button type="submit" style={{ width: "100%", textAlign: "left", border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", padding: 16, cursor: "pointer", minHeight: 190 }}>
-        <span style={greenPillStyle}>Quote preset</span>
+        <span style={greenPillStyle}>Starter</span>
         <strong style={{ display: "block", marginTop: 12, fontSize: 17 }}>{type.title}</strong>
         <span style={{ display: "block", marginTop: 7, ...mutedTextStyle }}>Example: {type.example}</span>
         <span style={{ display: "block", marginTop: 9, color: "#344054", fontSize: 13, lineHeight: 1.45 }}><strong>Base material:</strong> {type.baseMaterialHint}</span>
@@ -582,7 +796,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   <EmptyState>No base material linked yet. Add the purchased material that this product is built from.</EmptyState>
                 ) : (
                   <div style={{ display: "grid", gap: 10 }}>
-                    {baseComponents.map((item, index) => <MaterialRow key={item.id ?? `${item.label}-${index}`} component={item} materialMap={materialMap} />)}
+                    {baseComponents.map((item, index) => <MaterialRow key={item.id ?? `${item.label}-${index}`} component={item} materialMap={materialMap} productId={selectedProduct.id} activeMaterials={activeMaterials} fields={fields} />)}
                   </div>
                 )}
 
@@ -646,29 +860,29 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                 </div>
 
                 {fields.length === 0 ? (
-                  <EmptyState>No quote choices yet. Apply a preset below so this product knows what to ask when quoted.</EmptyState>
+                  <EmptyState>No quote choices yet. Add quote choices below, or use a product type starter and then edit/remove anything you do not want.</EmptyState>
                 ) : (
                   <div style={{ display: "grid", gap: 10 }}>
-                    {fields.map((field, index) => <FieldPreview key={field.id ?? `${field.key}-${index}`} field={field} />)}
+                    {fields.map((field, index) => <FieldPreview key={field.id ?? `${field.key}-${index}`} field={field} index={index} total={fields.length} productId={selectedProduct.id} />)}
                   </div>
                 )}
 
                 {quoteComponents.length > 0 ? (
                   <section style={{ display: "grid", gap: 10 }}>
                     <h3 style={{ margin: 0, fontSize: 18 }}>Materials added by quote choices</h3>
-                    {quoteComponents.map((item, index) => <MaterialRow key={item.id ?? `${item.label}-${index}`} component={item} materialMap={materialMap} />)}
+                    {quoteComponents.map((item, index) => <MaterialRow key={item.id ?? `${item.label}-${index}`} component={item} materialMap={materialMap} productId={selectedProduct.id} activeMaterials={activeMaterials} fields={fields} />)}
                   </section>
                 ) : null}
 
                 <details style={softCardStyle}>
-                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Apply a different quote behaviour preset</summary>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Optional: start from another product type</summary>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, marginTop: 14 }}>
                     {productTypes.map((type) => <PresetButton key={type.value} productId={selectedProduct.id} type={type} activeMaterials={activeMaterials} />)}
                   </div>
                 </details>
 
                 <details style={softCardStyle}>
-                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Advanced: add a custom quote choice</summary>
+                  <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Add a quote choice</summary>
                   <form action={addProductOptionAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
                     <input type="hidden" name="productId" value={selectedProduct.id} />
                     <div style={gridTwoStyle}>
@@ -701,7 +915,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                       <span style={labelTextStyle}>Help text</span>
                       <input name="helpText" placeholder="Optional note for quoting staff" style={inputStyle} />
                     </label>
-                    <button type="submit" style={buttonStyle}>Add custom quote choice</button>
+                    <button type="submit" style={buttonStyle}>Add quote choice</button>
                   </form>
                 </details>
 

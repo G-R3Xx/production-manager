@@ -616,3 +616,279 @@ export async function addProductOptionAction(formData: FormData) {
 
 // Backwards-compatible export for older form names used by previous zips.
 export const addStarterRulesAction = applyQuoteBehaviourPresetAction;
+
+function fieldOptionCsv(field: Record<string, any>, includeDefault: boolean): string {
+  const defaultValue = String(field.defaultValue ?? "");
+  const options = Array.isArray(field.options) ? field.options : [];
+  return options
+    .filter((option: Record<string, any>) => includeDefault || (String(option.value ?? option.label ?? "") !== defaultValue && String(option.label ?? option.value ?? "") !== defaultValue))
+    .map((option: Record<string, any>) => {
+      const label = String(option.label ?? option.value ?? "").trim();
+      const value = String(option.value ?? label).trim();
+      if (!label) return value;
+      return label === value ? label : `${label}=${value}`;
+    })
+    .filter(Boolean)
+    .join(",");
+}
+
+function buildFieldFromForm(formData: FormData, existingField?: Record<string, any>) {
+  const label = readString(formData, "label") || readString(formData, "questionLabel") || existingField?.label || "Quote choice";
+  const key = keyFromLabel(readString(formData, "key") || existingField?.key || label);
+  const fieldType = readString(formData, "fieldType") || existingField?.type || "select";
+  const defaultAnswer = readString(formData, "defaultAnswer");
+  const otherOptionsCsv = readString(formData, "otherOptionsCsv");
+  const helpText = readString(formData, "helpText") || existingField?.helpText || "Shown after this product is selected on a quote.";
+  const required = readString(formData, "required") !== "no";
+  const showWhenKey = keyFromLabel(readString(formData, "showWhenOptionKey"));
+  const showWhenValues = splitCsv(readString(formData, "showWhenOptionValuesCsv")).map((value) => keyFromLabel(value) === "option" ? value : value.replace(/\s+/g, "_"));
+
+  let defaultValue: string | null = null;
+  let options: Array<Record<string, any>> = [];
+
+  if (["select", "size_select", "color"].includes(fieldType)) {
+    if (defaultAnswer) {
+      const parsedDefault = parseChoice(defaultAnswer);
+      defaultValue = parsedDefault.value;
+      options = [parsedDefault, ...splitCsv(otherOptionsCsv).map(parseChoice)];
+    } else if (existingField?.defaultValue) {
+      defaultValue = String(existingField.defaultValue);
+      options = Array.isArray(existingField.options) ? existingField.options : [];
+    }
+  } else {
+    defaultValue = defaultAnswer || String(existingField?.defaultValue ?? "") || null;
+    options = [];
+  }
+
+  return {
+    id: existingField?.id ?? randomUUID(),
+    key,
+    label,
+    type: fieldType,
+    required,
+    defaultValue,
+    helpText,
+    quoteOnly: true,
+    showWhen: showWhenKey && showWhenKey !== "option" ? { optionKey: showWhenKey, optionValues: showWhenValues } : null,
+    options,
+    rule: existingField?.rule ?? {
+      effectType: "none",
+      effectTarget: null,
+      effectValue: null,
+      effectUnit: null,
+      componentLinkMode: "none"
+    }
+  };
+}
+
+function usagePresetFromComponent(item: Record<string, any>): string {
+  const ruleType = String(item.ruleType ?? item.stockUsage?.usageBasis ?? "yield_based");
+  if (ruleType === "per_linear_metre") return "roll_metres";
+  if (ruleType === "per_sqm") return "area";
+  if (ruleType === "per_unit" && String(item.unit ?? "") === "sheet") return "whole_sheet";
+  if (ruleType === "per_unit") return "each";
+  if (ruleType === "yield_based" && String(item.role ?? "") !== "base_material") return "paper_yield";
+  return "part_sheet";
+}
+
+function buildComponentFromForm(formData: FormData, existingComponent?: Record<string, any>) {
+  const materialId = readString(formData, "materialId") || null;
+  const baseUsage = readString(formData, "baseUsage") || usagePresetFromComponent(existingComponent ?? {});
+  const label = readString(formData, "label") || existingComponent?.label || "Material";
+  const triggerOptionKeyRaw = readString(formData, "triggerOptionKey");
+  const triggerOptionKey = triggerOptionKeyRaw ? keyFromLabel(triggerOptionKeyRaw) : null;
+  const triggerOptionValues = splitCsv(readString(formData, "triggerOptionValuesCsv")).map((value) => keyFromLabel(value) === "option" ? value : value.replace(/\s+/g, "_"));
+  const kind = readString(formData, "kind") || existingComponent?.kind || "material";
+  const role = triggerOptionKey
+    ? (kind === "labour" ? "quote_finishing" : "quote_selected_material")
+    : (readString(formData, "role") || existingComponent?.role || "base_material");
+
+  let ruleType = "yield_based";
+  let unit = "sheet";
+  let dimensionSource = "finished_size";
+  let usageOptionKey = "finished_size";
+
+  if (baseUsage === "whole_sheet") {
+    ruleType = "per_unit";
+    unit = "sheet";
+    dimensionSource = "quantity_only";
+    usageOptionKey = "quantity";
+  }
+
+  if (baseUsage === "roll_metres") {
+    ruleType = "per_linear_metre";
+    unit = "lm";
+  }
+
+  if (baseUsage === "area") {
+    ruleType = "per_sqm";
+    unit = "sqm";
+  }
+
+  if (baseUsage === "paper_yield") {
+    ruleType = "yield_based";
+    unit = "sheet";
+  }
+
+  if (baseUsage === "each") {
+    ruleType = "per_unit";
+    unit = readString(formData, "unit") || existingComponent?.unit || "each";
+    dimensionSource = "quantity_only";
+    usageOptionKey = "quantity";
+  }
+
+  return {
+    id: existingComponent?.id ?? randomUUID(),
+    kind,
+    role,
+    materialId,
+    supplierId: existingComponent?.supplierId ?? null,
+    labourRateName: readString(formData, "labourRateName") || existingComponent?.labourRateName || null,
+    label,
+    quantity: safeNumberString(readString(formData, "quantity"), String(existingComponent?.quantity ?? "1")),
+    unit,
+    notes: readString(formData, "notes") || existingComponent?.notes || "Material linked to this product.",
+    ruleType,
+    wastePercent: safeNumberString(readString(formData, "wastePercent"), String(existingComponent?.wastePercent ?? "10")),
+    stockUsage: {
+      ...(existingComponent?.stockUsage ?? {}),
+      usageBasis: ruleType,
+      dimensionSource,
+      optionKey: triggerOptionKey ?? usageOptionKey,
+      optionValues: triggerOptionValues,
+      widthMm: existingComponent?.stockUsage?.widthMm ?? null,
+      heightMm: existingComponent?.stockUsage?.heightMm ?? null,
+      rollWidthMm: existingComponent?.stockUsage?.rollWidthMm ?? null,
+      partsPerSheet: existingComponent?.stockUsage?.partsPerSheet ?? null,
+      metresPerUnit: existingComponent?.stockUsage?.metresPerUnit ?? null,
+      sheetsPerUnit: existingComponent?.stockUsage?.sheetsPerUnit ?? null
+    },
+    trigger: {
+      optionKey: triggerOptionKey,
+      optionValue: null,
+      optionValues: triggerOptionValues
+    }
+  };
+}
+
+export async function updateProductOptionAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const fieldId = readString(formData, "fieldId");
+
+  if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const existingField = definition.fields.find((field: Record<string, any>) => String(field.id ?? "") === fieldId);
+
+  if (!existingField) redirect(`/products?selected=${productId}&error=Quote%20choice%20not%20found`);
+
+  const nextField = buildFieldFromForm(formData, existingField);
+  const oldKey = String(existingField.key ?? "");
+  const nextKey = String(nextField.key ?? "");
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    version: 3,
+    fields: definition.fields.map((field: Record<string, any>) => String(field.id ?? "") === fieldId ? nextField : field),
+    components: definition.components.map((item: Record<string, any>) => {
+      const trigger = item.trigger ?? {};
+      const stockUsage = item.stockUsage ?? {};
+      return {
+        ...item,
+        trigger: trigger.optionKey === oldKey ? { ...trigger, optionKey: nextKey } : trigger,
+        stockUsage: stockUsage.optionKey === oldKey ? { ...stockUsage, optionKey: nextKey } : stockUsage
+      };
+    })
+  });
+
+  redirect(`/products?selected=${productId}&message=Quote%20choice%20updated`);
+}
+
+export async function deleteProductOptionAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const fieldId = readString(formData, "fieldId");
+
+  if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const field = definition.fields.find((item: Record<string, any>) => String(item.id ?? "") === fieldId);
+  const deletedKey = String(field?.key ?? "");
+  const deleteLinked = readString(formData, "deleteLinkedMaterials") === "yes";
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    fields: definition.fields.filter((item: Record<string, any>) => String(item.id ?? "") !== fieldId),
+    components: deleteLinked
+      ? definition.components.filter((item: Record<string, any>) => item.trigger?.optionKey !== deletedKey && item.stockUsage?.optionKey !== deletedKey)
+      : definition.components
+  });
+
+  redirect(`/products?selected=${productId}&message=Quote%20choice%20removed`);
+}
+
+export async function moveProductOptionAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const fieldId = readString(formData, "fieldId");
+  const direction = readString(formData, "direction");
+
+  if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const fields = [...definition.fields];
+  const index = fields.findIndex((item: Record<string, any>) => String(item.id ?? "") === fieldId);
+  const target = direction === "down" ? index + 1 : index - 1;
+
+  if (index >= 0 && target >= 0 && target < fields.length) {
+    const [field] = fields.splice(index, 1);
+    fields.splice(target, 0, field);
+  }
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    fields
+  });
+
+  redirect(`/products?selected=${productId}&message=Quote%20choice%20moved`);
+}
+
+export async function updateProductComponentAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const componentId = readString(formData, "componentId");
+
+  if (!productId || !componentId) redirect("/products?error=No%20material%20row%20selected");
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const existingComponent = definition.components.find((item: Record<string, any>) => String(item.id ?? "") === componentId);
+
+  if (!existingComponent) redirect(`/products?selected=${productId}&error=Material%20row%20not%20found`);
+
+  const nextComponent = buildComponentFromForm(formData, existingComponent);
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    components: definition.components.map((item: Record<string, any>) => String(item.id ?? "") === componentId ? nextComponent : item)
+  });
+
+  redirect(`/products?selected=${productId}&message=Material%20row%20updated`);
+}
+
+export async function deleteProductComponentAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const componentId = readString(formData, "componentId");
+
+  if (!productId || !componentId) redirect("/products?error=No%20material%20row%20selected");
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    components: definition.components.filter((item: Record<string, any>) => String(item.id ?? "") !== componentId)
+  });
+
+  redirect(`/products?selected=${productId}&message=Material%20row%20removed`);
+}
