@@ -1,19 +1,22 @@
+
+import type { CSSProperties } from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getConfiguratorTemplateById, listConfiguratorTemplatesForTenant } from "@/server/configurators";
-import { getProductById, listProductsForTenant } from "@/server/products";
-import { addProductComponentAction, addProductOptionAction, createProductAction, updateProductAction } from "./actions";
+import { getConfiguratorTemplateById } from "@/server/configurators";
 import { listMaterialsForTenant } from "@/server/materials";
-import { listSuppliersForTenant } from "@/server/suppliers";
+import { getProductById, listProductsForTenant } from "@/server/products";
+import {
+  addProductComponentAction,
+  addProductOptionAction,
+  applyQuoteBehaviourPresetAction,
+  createProductAction,
+  updateProductAction
+} from "./actions";
 
 type ProductsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
-
-type EditorDefinition = {
-  components: Array<any>;
-  fields: Array<any>;
 };
 
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
@@ -22,33 +25,69 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
   return value ?? "";
 }
 
-function matchesQuery(value: string, query: string): boolean {
-  return value.toLowerCase().includes(query.toLowerCase());
+function matchesQuery(value: string | null | undefined, query: string): boolean {
+  return String(value ?? "").toLowerCase().includes(query.toLowerCase());
 }
 
-function niceCalcLabel(value: string): string {
-  const labels: Record<string, string> = {
-    fixed: "Fixed qty",
-    per_unit: "Per unit sold",
-    per_sqm: "Per sqm",
-    per_lm: "Per linear metre",
-    per_sheet: "Per sheet",
-    yield_based: "Yield based"
-  };
-  return labels[value] ?? value;
+function humanize(value: string | null | undefined): string {
+  if (!value) return "Not set";
+  return String(value)
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase())
+    .replace(/(\d+)x(\d+)/i, "$1 × $2");
 }
 
-function niceOptionTypeLabel(value: string): string {
-  const labels: Record<string, string> = {
-    select: "Select list",
-    yes_no: "Yes / No",
-    quantity: "Quantity",
-    number: "Number",
-    text: "Text",
-    colour: "Colour",
-    binding: "Binding"
-  };
-  return labels[value] ?? value;
+function selectedProductUrl(productId: string, query: string): string {
+  const q = query ? `&q=${encodeURIComponent(query)}` : "";
+  return `/products?selected=${productId}${q}`;
+}
+
+const pageStyle: CSSProperties = { maxWidth: 1180, margin: "0 auto", display: "grid", gap: 16, paddingBottom: 32 };
+const cardStyle: CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 20, boxShadow: "0 1px 2px rgba(16,24,40,0.05)" };
+const inputStyle: CSSProperties = { width: "100%", minHeight: 42, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 12px", fontSize: 14, boxSizing: "border-box" };
+const textareaStyle: CSSProperties = { ...inputStyle, minHeight: 92, padding: 12 };
+const labelStyle: CSSProperties = { display: "grid", gap: 6 };
+const labelTextStyle: CSSProperties = { fontWeight: 800, fontSize: 13, color: "#344054" };
+const grid2: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 };
+const grid3: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 };
+const buttonStyle: CSSProperties = { minHeight: 42, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 900, padding: "0 16px", cursor: "pointer" };
+const ghostStyle: CSSProperties = { minHeight: 40, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, padding: "0 14px", cursor: "pointer", textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" };
+const chipStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "6px 10px", fontSize: 12, fontWeight: 900 };
+const itemCardStyle: CSSProperties = { border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, background: "#fcfcfd", display: "grid", gap: 8 };
+const sectionHeadingStyle: CSSProperties = { margin: 0, fontSize: 22 };
+const mutedStyle: CSSProperties = { margin: 0, color: "#667085", lineHeight: 1.5 };
+const tableWrapStyle: CSSProperties = { overflowX: "auto", border: "1px solid #e5e7eb", borderRadius: 16 };
+const tableStyle: CSSProperties = { width: "100%", borderCollapse: "collapse", minWidth: 760 };
+const cellStyle: CSSProperties = { padding: "12px 14px", borderBottom: "1px solid #e5e7eb", textAlign: "left", verticalAlign: "top", fontSize: 14 };
+
+function MessageBanner({ tone, children }: { tone: "success" | "error"; children: string }) {
+  const success = tone === "success";
+  return (
+    <section
+      style={{
+        border: `1px solid ${success ? "#abefc6" : "#fda29b"}`,
+        background: success ? "#ecfdf3" : "#fff5f4",
+        color: success ? "#067647" : "#b42318",
+        borderRadius: 16,
+        padding: 14,
+        fontWeight: 800
+      }}
+    >
+      {children}
+    </section>
+  );
+}
+
+function productPresetButton(props: { label: string; starterType: string; productId: string; baseMaterialId?: string | null; baseUsage?: string }) {
+  return (
+    <form action={applyQuoteBehaviourPresetAction}>
+      <input type="hidden" name="productId" value={props.productId} />
+      <input type="hidden" name="starterType" value={props.starterType} />
+      <input type="hidden" name="baseMaterialId" value={props.baseMaterialId ?? ""} />
+      <input type="hidden" name="baseUsage" value={props.baseUsage ?? "part_sheet"} />
+      <button type="submit" style={ghostStyle}>{props.label}</button>
+    </form>
+  );
 }
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
@@ -62,270 +101,379 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const selectedId = readParam(params, "selected");
   const query = readParam(params, "q");
 
-  const [products, templates, materials, suppliers] = await Promise.all([
+  const [products, materials, selectedProduct] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
-    listConfiguratorTemplatesForTenant(activeTenant.tenantId),
     listMaterialsForTenant(activeTenant.tenantId),
-    listSuppliersForTenant(activeTenant.tenantId)
+    selectedId ? getProductById(activeTenant.tenantId, selectedId) : Promise.resolve(null)
   ]);
 
   const filteredProducts = query
-    ? products.filter((product) =>
-        matchesQuery(product.name, query) ||
-        matchesQuery(product.sku ?? "", query) ||
-        matchesQuery(product.productFamily, query)
-      )
+    ? products.filter((product) => matchesQuery(product.name, query) || matchesQuery(product.sku, query) || matchesQuery(product.productFamily, query))
     : products;
 
-  const selectedProduct = selectedId ? await getProductById(activeTenant.tenantId, selectedId) : null;
   const editorTemplate = selectedProduct?.defaultTemplateId
     ? await getConfiguratorTemplateById(activeTenant.tenantId, selectedProduct.defaultTemplateId)
     : null;
-  const editorDefinition: EditorDefinition = {
-    components: Array.isArray(editorTemplate?.definitionJson?.components) ? editorTemplate!.definitionJson.components : [],
-    fields: Array.isArray(editorTemplate?.definitionJson?.fields) ? editorTemplate!.definitionJson.fields : []
-  };
 
-  const cardStyle: React.CSSProperties = { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 24 };
-  const inputStyle: React.CSSProperties = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", fontSize: 16, width: "100%" };
-  const sectionTitleStyle: React.CSSProperties = { margin: 0, fontSize: 24 };
-  const fieldLabelStyle: React.CSSProperties = { fontWeight: 600 };
-  const helperStyle: React.CSSProperties = { margin: "6px 0 0", color: "#475467", lineHeight: 1.5 };
+  const definition = (editorTemplate?.definitionJson ?? {}) as Record<string, any>;
+  const fields = Array.isArray(definition.fields) ? definition.fields : [];
+  const components = Array.isArray(definition.components) ? definition.components : [];
+  const activeMaterials = materials.filter((material) => material.active);
 
   return (
-    <div style={{ maxWidth: 1180, margin: "0 auto", display: "grid", gap: 16 }}>
-      {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 16 }}>{message}</section> : null}
-      {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 16 }}>{error}</section> : null}
+    <div style={pageStyle}>
+      {message ? <MessageBanner tone="success">{message}</MessageBanner> : null}
+      {error ? <MessageBanner tone="error">{error}</MessageBanner> : null}
 
-      <section style={cardStyle}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Catalog</p>
-        <h1 style={{ marginTop: 12, marginBottom: 12 }}>Products</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
-          Keep this simple: create or find a product, then set up what it <strong>uses</strong> in <strong>Components</strong> and what can <strong>vary</strong> in <strong>Options</strong>. Tax defaults to GST automatically.
-        </p>
-      </section>
+      <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+          <div style={{ minWidth: 0 }}>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.08em", color: "#4f46e5" }}>Catalog</p>
+            <h1 style={{ margin: "8px 0 6px", fontSize: 34 }}>Products</h1>
+            <p style={{ ...mutedStyle, maxWidth: 760 }}>
+              Keep product setup simple. Create or open a product, then set its details, add the components it uses, and add the quote options staff can choose.
+            </p>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <span style={chipStyle}>{products.length} products</span>
+            <span style={chipStyle}>{activeMaterials.length} active materials</span>
+            <span style={chipStyle}>GST default</span>
+          </div>
+        </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 360px) 1fr", gap: 16, alignItems: "start" }}>
-        <div style={{ display: "grid", gap: 16 }}>
-          <form action={createProductAction} style={{ ...cardStyle, display: "grid", gap: 14 }}>
-            <h2 style={{ margin: 0 }}>Create product</h2>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={fieldLabelStyle}>Product name</span>
-              <input name="name" required placeholder="5mm Corflute Sign" style={inputStyle} />
-            </label>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={fieldLabelStyle}>SKU</span>
-              <input name="sku" placeholder="COR-5MM-SIGN" style={inputStyle} />
-            </label>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={fieldLabelStyle}>Department</span>
+        <div style={grid2}>
+          <form action={createProductAction} style={{ ...cardStyle, padding: 16, display: "grid", gap: 12, background: "#f8fafc" }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Create product</h2>
+            <p style={mutedStyle}>Add the basic sellable product first. It will open straight away so you can keep building it on this page.</p>
+            <input type="hidden" name="starterType" value="sign_acm" />
+            <input type="hidden" name="baseUsage" value="part_sheet" />
+            <div style={grid2}>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Product name</span>
+                <input name="name" required placeholder="eg ACM Sign" style={inputStyle} />
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>SKU (optional)</span>
+                <input name="sku" placeholder="eg ACM-SIGN" style={inputStyle} />
+              </label>
+            </div>
+            <div style={grid3}>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Department</span>
                 <select name="department" defaultValue="signage" style={inputStyle}>
                   <option value="signage">Signage</option>
                   <option value="small_format">Small format</option>
-                  <option value="installation">Installation</option>
                   <option value="general">General</option>
+                  <option value="installation">Installation</option>
                 </select>
               </label>
-              <label style={{ display: "grid", gap: 8 }}>
-                <span style={fieldLabelStyle}>Status</span>
-                <select name="status" defaultValue="draft" style={inputStyle}>
-                  <option value="draft">Draft</option>
-                  <option value="active">Active</option>
-                  <option value="archived">Archived</option>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Product family</span>
+                <select name="productFamily" defaultValue="display_products" style={inputStyle}>
+                  <option value="display_products">Display products</option>
+                  <option value="rigid_signage">Rigid signage</option>
+                  <option value="roll_media">Roll media</option>
+                  <option value="banners">Banners</option>
+                  <option value="stickers_labels">Stickers & labels</option>
+                  <option value="small_format_print">Small format print</option>
+                </select>
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Base material (optional)</span>
+                <select name="baseMaterialId" defaultValue="" style={inputStyle}>
+                  <option value="">Choose later</option>
+                  {activeMaterials.map((material) => (
+                    <option key={material.id} value={material.id}>{material.name}</option>
+                  ))}
                 </select>
               </label>
             </div>
-            <label style={{ display: "grid", gap: 8 }}>
-              <span style={fieldLabelStyle}>Product family</span>
-              <select name="productFamily" defaultValue="rigid_signage" style={inputStyle}>
-                <option value="rigid_signage">Rigid signage</option>
-                <option value="roll_media">Roll media</option>
-                <option value="banners">Banners</option>
-                <option value="stickers_labels">Stickers / labels</option>
-                <option value="window_wall_graphics">Window / wall graphics</option>
-                <option value="vehicle_graphics">Vehicle graphics</option>
-                <option value="display_products">Display products</option>
-                <option value="small_format_print">Small format print</option>
-              </select>
-            </label>
-            <button type="submit" style={{ minHeight: 46, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, cursor: "pointer" }}>Create product</button>
+            <button type="submit" style={buttonStyle}>Create product</button>
           </form>
 
-          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
-              <div>
-                <h2 style={{ margin: 0 }}>Find product</h2>
-                <p style={helperStyle}>Open one product and edit it on this same page.</p>
-              </div>
-              <div style={{ fontSize: 13, color: "#667085" }}>{products.length} total</div>
-            </div>
-            <form method="GET" action="/products" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
-              <input type="text" name="q" defaultValue={query} placeholder="Search by name, SKU, or family" style={inputStyle} />
-              <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#111827", color: "#fff", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>Search</button>
+          <section style={{ ...cardStyle, padding: 16, display: "grid", gap: 12 }}>
+            <h2 style={{ margin: 0, fontSize: 20 }}>Find product</h2>
+            <p style={mutedStyle}>Open an existing product and continue editing it here.</p>
+            <form method="get" style={{ display: "grid", gap: 10 }}>
+              <input name="q" defaultValue={query} placeholder="Search by product name, SKU or family" style={inputStyle} />
+              <button type="submit" style={ghostStyle}>Search</button>
             </form>
-            <div style={{ display: "grid", gap: 10 }}>
-              {filteredProducts.slice(0, 6).map((product) => {
-                const isSelected = selectedProduct?.id === product.id;
-                return (
-                  <a key={product.id} href={`/products?selected=${product.id}${query ? `&q=${encodeURIComponent(query)}` : ""}`} style={{ display: "block", textDecoration: "none", border: isSelected ? "1px solid #4f46e5" : "1px solid #e5e7eb", background: isSelected ? "#eef2ff" : "#fafafa", color: "#111827", borderRadius: 14, padding: 14 }}>
-                    <div style={{ fontWeight: 700 }}>{product.name}</div>
-                    <div style={{ marginTop: 6, fontSize: 14, color: "#475467" }}>{product.sku || "No SKU"} · {product.productFamily}</div>
-                  </a>
-                );
-              })}
-            </div>
-            <details style={{ borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>All products</summary>
-              <div style={{ display: "grid", gap: 10, marginTop: 14, maxHeight: 360, overflowY: "auto" }}>
-                {products.map((product) => (
-                  <a key={product.id} href={`/products?selected=${product.id}`} style={{ display: "block", textDecoration: "none", border: "1px solid #e5e7eb", background: "#fafafa", color: "#111827", borderRadius: 14, padding: 14 }}>
-                    <div style={{ fontWeight: 700 }}>{product.name}</div>
-                    <div style={{ marginTop: 6, fontSize: 14, color: "#475467" }}>{product.sku || "No SKU"} · {product.department} · {product.status}</div>
-                  </a>
-                ))}
+            {selectedProduct ? (
+              <div style={{ ...itemCardStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
+                <strong>{selectedProduct.name}</strong>
+                <div style={mutedStyle}>{selectedProduct.sku || "No SKU"} · {humanize(selectedProduct.department)} · {humanize(selectedProduct.productFamily)}</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <span style={chipStyle}>{components.length} components</span>
+                  <span style={chipStyle}>{fields.length} options</span>
+                </div>
               </div>
-            </details>
-          </section>
-        </div>
-
-        <div style={{ display: "grid", gap: 16 }}>
-          <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-            <div>
-              <h2 style={sectionTitleStyle}>Selected product</h2>
-              {!selectedProduct ? <p style={helperStyle}>Select a product from the left to edit its details, components and options.</p> : <p style={helperStyle}>Edit the basic product details here, then use Components and Options below.</p>}
-            </div>
-            {!selectedProduct ? null : (
-              <form action={updateProductAction} style={{ display: "grid", gap: 14 }}>
-                <input type="hidden" name="productId" value={selectedProduct.id} />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Product name</span><input name="name" required defaultValue={selectedProduct.name} style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>SKU</span><input name="sku" defaultValue={selectedProduct.sku ?? ""} style={inputStyle} /></label>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Department</span><select name="department" defaultValue={selectedProduct.department} style={inputStyle}><option value="signage">Signage</option><option value="small_format">Small format</option><option value="installation">Installation</option><option value="general">General</option></select></label>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Product family</span><select name="productFamily" defaultValue={selectedProduct.productFamily} style={inputStyle}><option value="rigid_signage">Rigid signage</option><option value="roll_media">Roll media</option><option value="banners">Banners</option><option value="stickers_labels">Stickers / labels</option><option value="window_wall_graphics">Window / wall graphics</option><option value="vehicle_graphics">Vehicle graphics</option><option value="display_products">Display products</option><option value="small_format_print">Small format print</option></select></label>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Status</span><select name="status" defaultValue={selectedProduct.status} style={inputStyle}><option value="draft">Draft</option><option value="active">Active</option><option value="archived">Archived</option></select></label>
-                </div>
-                <button type="submit" style={{ minHeight: 46, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, cursor: "pointer", justifySelf: "start", padding: "0 18px" }}>Save product</button>
-              </form>
+            ) : (
+              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No product selected yet.</div>
             )}
           </section>
-
-          {selectedProduct ? (
-            <>
-              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-                <div>
-                  <h2 style={sectionTitleStyle}>Components</h2>
-                  <p style={helperStyle}>What does this product use? Add materials or labour here. Start simple. Use Advanced only when you need a trigger or more detailed rule.</p>
-                </div>
-
-                <div style={{ display: "grid", gap: 10 }}>
-                  {editorDefinition.components.length === 0 ? (
-                    <div style={{ border: "1px dashed #d0d5dd", borderRadius: 16, padding: 18, color: "#475467", background: "#fafafa" }}>No components yet. Add the materials and labour this product uses.</div>
-                  ) : (
-                    editorDefinition.components.map((component) => {
-                      const material = materials.find((item) => item.id === component.materialId);
-                      const supplier = suppliers.find((item) => item.id === component.supplierId);
-                      return (
-                        <div key={component.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fafafa" }}>
-                          <div style={{ display: "grid", gridTemplateColumns: "180px 1fr auto", gap: 12, alignItems: "start" }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.06em", color: component.kind === "labour" ? "#7c2d12" : "#065f46" }}>{component.kind}</div>
-                            <div>
-                              <div style={{ fontWeight: 700, fontSize: 16 }}>{component.label}</div>
-                              <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>
-                                {niceCalcLabel(component.ruleType ?? "fixed")} · {component.quantity} {component.unit}
-                                {component.wastePercent ? ` · ${component.wastePercent}% waste` : ""}
-                              </div>
-                            </div>
-                            <div style={{ fontSize: 13, color: "#667085", textAlign: "right" }}>{component.optionTriggerKey ? "Triggered" : "Always used"}</div>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 12, fontSize: 14, color: "#475467" }}>
-                            <div><strong>Material</strong><div>{material?.name ?? "—"}</div></div>
-                            <div><strong>Supplier</strong><div>{supplier?.displayName ?? "—"}</div></div>
-                            <div><strong>Trigger</strong><div>{component.optionTriggerKey ? `${component.optionTriggerKey} = ${component.optionTriggerValue ?? "yes"}` : "—"}</div></div>
-                          </div>
-                          {component.notes ? <div style={{ marginTop: 12, fontSize: 14, color: "#475467" }}><strong>Notes:</strong> {component.notes}</div> : null}
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-
-                <form action={addProductComponentAction} style={{ display: "grid", gap: 14, borderTop: "1px solid #e5e7eb", paddingTop: 18 }}>
-                  <input type="hidden" name="productId" value={selectedProduct.id} />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Type</span><select name="componentKind" defaultValue="material" style={inputStyle}><option value="material">Material</option><option value="labour">Labour</option></select></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Material</span><select name="materialId" defaultValue="" style={inputStyle}><option value="">Select material (optional)</option>{materials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Supplier</span><select name="supplierId" defaultValue="" style={inputStyle}><option value="">Optional</option>{suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.displayName}</option>)}</select></label>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr 1fr", gap: 12 }}>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Component name</span><input name="label" placeholder="ACM panel" style={inputStyle} /></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>How calculated</span><select name="ruleType" defaultValue="fixed" style={inputStyle}><option value="fixed">Fixed qty</option><option value="per_unit">Per unit sold</option><option value="per_sqm">Per sqm</option><option value="per_lm">Per linear metre</option><option value="per_sheet">Per sheet</option><option value="yield_based">Yield based</option></select></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Value</span><input name="quantity" defaultValue="1" style={inputStyle} /></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Unit</span><input name="unit" defaultValue="each" style={inputStyle} /></label>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "180px 1fr", gap: 12 }}>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Waste %</span><input name="wastePercent" defaultValue="0" style={inputStyle} /></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Notes</span><input name="notes" placeholder="Optional notes" style={inputStyle} /></label>
-                  </div>
-                  <details>
-                    <summary style={{ cursor: "pointer", fontWeight: 700 }}>Advanced</summary>
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 12 }}>
-                      <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Trigger option key</span><input name="optionTriggerKey" placeholder="laminate" style={inputStyle} /></label>
-                      <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Trigger value</span><input name="optionTriggerValue" placeholder="yes" style={inputStyle} /></label>
-                    </div>
-                  </details>
-                  <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, cursor: "pointer", justifySelf: "start", padding: "0 18px" }}>Add component</button>
-                </form>
-              </section>
-
-              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-                <div>
-                  <h2 style={sectionTitleStyle}>Options</h2>
-                  <p style={helperStyle}>What can vary on this product? Use options for size, sides, laminate, quantities, colours or other choices staff need during quoting.</p>
-                </div>
-
-                <div style={{ display: "grid", gap: 10 }}>
-                  {editorDefinition.fields.length === 0 ? (
-                    <div style={{ border: "1px dashed #d0d5dd", borderRadius: 16, padding: 18, color: "#475467", background: "#fafafa" }}>No options yet. Add the choices that staff or customers can pick for this product.</div>
-                  ) : (
-                    editorDefinition.fields.map((field) => (
-                      <div key={field.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fafafa" }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12 }}>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: 16 }}>{field.label}</div>
-                            <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{niceOptionTypeLabel(field.type)} · key: {field.key}{field.required ? " · required" : ""}</div>
-                          </div>
-                          <div style={{ fontSize: 13, color: "#667085" }}>{field.defaultValue ? `Default: ${field.defaultValue}` : ""}</div>
-                        </div>
-                        {Array.isArray(field.options) && field.options.length > 0 ? <div style={{ marginTop: 10, fontSize: 14, color: "#475467" }}><strong>Choices:</strong> {field.options.map((option: any) => option.label ?? option.value).join(", ")}</div> : null}
-                        {field.helpText ? <div style={{ marginTop: 10, fontSize: 14, color: "#475467" }}>{field.helpText}</div> : null}
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <form action={addProductOptionAction} style={{ display: "grid", gap: 14, borderTop: "1px solid #e5e7eb", paddingTop: 18 }}>
-                  <input type="hidden" name="productId" value={selectedProduct.id} />
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Option name</span><input name="label" placeholder="Sides" style={inputStyle} /></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Key</span><input name="key" placeholder="sides" style={inputStyle} /></label>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Field type</span><select name="fieldType" defaultValue="select" style={inputStyle}><option value="select">Select list</option><option value="yes_no">Yes / No</option><option value="quantity">Quantity</option><option value="number">Number</option><option value="text">Text</option><option value="colour">Colour</option><option value="binding">Binding</option></select></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Required</span><select name="required" defaultValue="yes" style={inputStyle}><option value="yes">Yes</option><option value="no">No</option></select></label>
-                    <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Default value</span><input name="defaultValue" placeholder="Optional" style={inputStyle} /></label>
-                  </div>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Choices (CSV)</span><input name="optionsCsv" placeholder="Single sided, Double sided" style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 8 }}><span style={fieldLabelStyle}>Help text</span><input name="helpText" placeholder="Shown to staff when quoting" style={inputStyle} /></label>
-                  <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, cursor: "pointer", justifySelf: "start", padding: "0 18px" }}>Add option</button>
-                </form>
-              </section>
-            </>
-          ) : null}
         </div>
-      </div>
+      </section>
+
+      <section style={{ ...cardStyle, padding: 16 }}>
+        <details>
+          <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 16 }}>All products ({filteredProducts.length})</summary>
+          <div style={{ display: "grid", gap: 10, marginTop: 14 }}>
+            {filteredProducts.length === 0 ? (
+              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No matching products.</div>
+            ) : (
+              filteredProducts.map((product) => (
+                <Link key={product.id} href={selectedProductUrl(product.id, query)} style={{ ...itemCardStyle, textDecoration: "none", color: "inherit", background: selectedProduct?.id === product.id ? "#eef2ff" : "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <strong>{product.name}</strong>
+                    <span style={chipStyle}>{humanize(product.status)}</span>
+                  </div>
+                  <div style={mutedStyle}>{product.sku || "No SKU"} · {humanize(product.department)} · {humanize(product.productFamily)}</div>
+                </Link>
+              ))
+            )}
+          </div>
+        </details>
+      </section>
+
+      {selectedProduct ? (
+        <>
+          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+            <div>
+              <h2 style={sectionHeadingStyle}>Product details</h2>
+              <p style={mutedStyle}>Keep the basics simple. Save the product first, then build up the components and quote options underneath.</p>
+            </div>
+            <form action={updateProductAction} style={{ display: "grid", gap: 12 }}>
+              <input type="hidden" name="productId" value={selectedProduct.id} />
+              <input type="hidden" name="defaultTemplateId" value={selectedProduct.defaultTemplateId ?? ""} />
+              <div style={grid2}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Product name</span>
+                  <input name="name" defaultValue={selectedProduct.name} required style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>SKU</span>
+                  <input name="sku" defaultValue={selectedProduct.sku ?? ""} style={inputStyle} />
+                </label>
+              </div>
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Department</span>
+                  <select name="department" defaultValue={selectedProduct.department} style={inputStyle}>
+                    <option value="signage">Signage</option>
+                    <option value="small_format">Small format</option>
+                    <option value="general">General</option>
+                    <option value="installation">Installation</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Product family</span>
+                  <select name="productFamily" defaultValue={selectedProduct.productFamily} style={inputStyle}>
+                    <option value="display_products">Display products</option>
+                    <option value="rigid_signage">Rigid signage</option>
+                    <option value="roll_media">Roll media</option>
+                    <option value="banners">Banners</option>
+                    <option value="stickers_labels">Stickers & labels</option>
+                    <option value="small_format_print">Small format print</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Status</span>
+                  <select name="status" defaultValue={selectedProduct.status} style={inputStyle}>
+                    <option value="draft">Draft</option>
+                    <option value="active">Active</option>
+                    <option value="archived">Archived</option>
+                  </select>
+                </label>
+              </div>
+              <button type="submit" style={buttonStyle}>Save product details</button>
+            </form>
+          </section>
+
+          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+            <div style={{ display: "grid", gap: 6 }}>
+              <h2 style={sectionHeadingStyle}>Quick start packs</h2>
+              <p style={mutedStyle}>Use a starter pack to pre-load common options and components, then adjust what is needed.</p>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {productPresetButton({ label: "Direct Print ACM Sign", starterType: "sign_acm", productId: selectedProduct.id, baseUsage: "part_sheet" })}
+              {productPresetButton({ label: "Printed Corflute Sign", starterType: "sign_corflute", productId: selectedProduct.id, baseUsage: "part_sheet" })}
+              {productPresetButton({ label: "Banner", starterType: "banner", productId: selectedProduct.id, baseUsage: "roll_metres" })}
+              {productPresetButton({ label: "Sticker / Label", starterType: "roll_print", productId: selectedProduct.id, baseUsage: "area" })}
+              {productPresetButton({ label: "Book", starterType: "books", productId: selectedProduct.id, baseUsage: "each" })}
+              {productPresetButton({ label: "Carbon Book", starterType: "carbon_books", productId: selectedProduct.id, baseUsage: "each" })}
+            </div>
+          </section>
+
+          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+            <div>
+              <h2 style={sectionHeadingStyle}>Components</h2>
+              <p style={mutedStyle}>What does this product use? Add one row per stock item or labour item. Start simple and only open advanced rules when needed.</p>
+            </div>
+
+            {components.length === 0 ? (
+              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No components yet. Use a quick start pack or add a component below.</div>
+            ) : (
+              <div style={tableWrapStyle}>
+                <table style={tableStyle}>
+                  <thead style={{ background: "#f9fafb" }}>
+                    <tr>
+                      <th style={cellStyle}>Type</th>
+                      <th style={cellStyle}>Component</th>
+                      <th style={cellStyle}>How calculated</th>
+                      <th style={cellStyle}>Value</th>
+                      <th style={cellStyle}>Waste</th>
+                      <th style={cellStyle}>Notes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {components.map((component: any) => {
+                      const linkedMaterial = component.materialId ? materials.find((m) => m.id === component.materialId) : null;
+                      return (
+                        <tr key={component.id ?? component.label}>
+                          <td style={cellStyle}>{component.kind === "labour" ? "Labour" : "Material"}</td>
+                          <td style={cellStyle}>
+                            <strong>{component.label ?? "Component"}</strong>
+                            <div style={mutedStyle}>{linkedMaterial?.name ?? component.labourRateName ?? component.role ?? "Manual component"}</div>
+                          </td>
+                          <td style={cellStyle}>{humanize(component.ruleType ?? component.stockUsage?.usageBasis ?? "fixed")}</td>
+                          <td style={cellStyle}>{component.quantity ? `${component.quantity} ${component.unit ?? ""}`.trim() : (component.unit ?? "—")}</td>
+                          <td style={cellStyle}>{component.wastePercent ? `${component.wastePercent}%` : "—"}</td>
+                          <td style={cellStyle}>{component.notes || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            <form action={addProductComponentAction} style={{ display: "grid", gap: 12, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
+              <input type="hidden" name="productId" value={selectedProduct.id} />
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Component name</span>
+                  <input name="label" placeholder="eg ACM sheet" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Material</span>
+                  <select name="materialId" defaultValue="" style={inputStyle}>
+                    <option value="">Not linked</option>
+                    {activeMaterials.map((material) => (
+                      <option key={material.id} value={material.id}>{material.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>How calculated</span>
+                  <select name="baseUsage" defaultValue="part_sheet" style={inputStyle}>
+                    <option value="part_sheet">Part sheet</option>
+                    <option value="whole_sheet">Whole sheet</option>
+                    <option value="roll_metres">Linear metres</option>
+                    <option value="area">Square metres</option>
+                    <option value="each">Each</option>
+                  </select>
+                </label>
+              </div>
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Value</span>
+                  <input name="quantity" defaultValue="1" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Waste %</span>
+                  <input name="wastePercent" defaultValue="10" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Use when option matches (optional)</span>
+                  <input name="triggerOptionKey" placeholder="eg laminate" style={inputStyle} />
+                </label>
+              </div>
+
+              <details>
+                <summary style={{ cursor: "pointer", fontWeight: 800 }}>Advanced</summary>
+                <div style={{ ...grid2, marginTop: 12 }}>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Allowed option values (CSV)</span>
+                    <input name="triggerOptionValuesCsv" placeholder="eg matt,gloss" style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Notes</span>
+                    <textarea name="notes" rows={3} placeholder="Explain how this component is used" style={textareaStyle} />
+                  </label>
+                </div>
+              </details>
+
+              <button type="submit" style={buttonStyle}>Add component</button>
+            </form>
+          </section>
+
+          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+            <div>
+              <h2 style={sectionHeadingStyle}>Options</h2>
+              <p style={mutedStyle}>Add the choices staff can pick when quoting this product, such as size, laminate, binding, duplicate/triplicate and other preset options.</p>
+            </div>
+
+            {fields.length === 0 ? (
+              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No options yet.</div>
+            ) : (
+              <div style={{ display: "grid", gap: 10 }}>
+                {fields.map((field: any) => (
+                  <div key={field.id ?? field.key} style={itemCardStyle}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <strong>{field.label}</strong>
+                      <span style={chipStyle}>{humanize(field.type)}</span>
+                    </div>
+                    <div style={mutedStyle}>Key: {field.key} · Default: {field.defaultValue ? humanize(field.defaultValue) : "None"}</div>
+                    {Array.isArray(field.options) && field.options.length > 0 ? (
+                      <div style={mutedStyle}>Choices: {field.options.map((option: any) => String(option.label ?? option.value ?? "")).join(", ")}</div>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <form action={addProductOptionAction} style={{ display: "grid", gap: 12, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
+              <input type="hidden" name="productId" value={selectedProduct.id} />
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Option label</span>
+                  <input name="label" placeholder="eg Size" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Type</span>
+                  <select name="fieldType" defaultValue="select" style={inputStyle}>
+                    <option value="select">Select list</option>
+                    <option value="yes_no">Yes / No</option>
+                    <option value="quantity">Quantity</option>
+                    <option value="number">Number</option>
+                    <option value="text">Text</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Default answer</span>
+                  <input name="defaultAnswer" placeholder="eg 600x900 or yes" style={inputStyle} />
+                </label>
+              </div>
+              <div style={grid2}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Other choices (CSV)</span>
+                  <input name="otherOptionsCsv" placeholder="eg 450x600,600x900,1200x2400" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Help text</span>
+                  <input name="helpText" placeholder="Explain how staff should use this option" style={inputStyle} />
+                </label>
+              </div>
+              <button type="submit" style={buttonStyle}>Add option</button>
+            </form>
+          </section>
+        </>
+      ) : (
+        <section style={{ ...cardStyle, display: "grid", gap: 10 }}>
+          <h2 style={{ margin: 0, fontSize: 24 }}>Open a product to edit it</h2>
+          <p style={mutedStyle}>Create a product first or use Find product / All products to open an existing one.</p>
+        </section>
+      )}
     </div>
   );
 }

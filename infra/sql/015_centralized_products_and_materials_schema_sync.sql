@@ -30,7 +30,7 @@ DO $$
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_indexes
-    WHERE schemaname = ''catalog'' AND indexname = ''materials_source_product_idx''
+    WHERE schemaname = 'catalog' AND indexname = 'materials_source_product_idx'
   ) THEN
     CREATE INDEX materials_source_product_idx ON catalog.materials(source_product_id);
   END IF;
