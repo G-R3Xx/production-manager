@@ -1,12 +1,15 @@
-import type { CSSProperties } from "react";
+
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getConfiguratorTemplateById } from "@/server/configurators";
-import { listMaterialsForTenant } from "@/server/materials";
-import { getProductById, listProductsForTenant } from "@/server/products";
+import { getEnquiryById } from "@/server/enquiries";
+import { getSurveyRequestById } from "@/server/surveys";
+import { listProductsForTenant } from "@/server/products";
+import { createQuoteDraftAction, addQuoteLineAction } from "./actions";
+import { getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 
-type QuotesPageProps = {
+
+type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
@@ -16,269 +19,120 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
   return value ?? "";
 }
 
-function humanize(value: string | null | undefined): string {
-  if (!value) return "Not set";
-  return String(value)
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase())
-    .replace(/(\d+)x(\d+)/i, "$1 × $2 mm");
+function cardStyle() {
+  return { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22 } as const;
 }
 
-function choiceValue(option: any): string {
-  return String(option?.value ?? option?.label ?? "");
-}
+const inputStyle = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", width: "100%", boxSizing: "border-box" } as const;
+const textareaStyle = { minHeight: 110, borderRadius: 12, border: "1px solid #d0d5dd", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit" } as const;
+const buttonStyle = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" } as const;
 
-function choiceLabel(option: any): string {
-  return String(option?.label ?? option?.value ?? "Choice");
-}
 
-function triggerSummary(component: Record<string, any>): string {
-  const trigger = component.trigger ?? {};
-  const optionKey = trigger.optionKey ?? component.stockUsage?.optionKey;
-  const values = Array.isArray(trigger.optionValues) && trigger.optionValues.length > 0 ? trigger.optionValues : component.stockUsage?.optionValues;
-  if (!optionKey || (Array.isArray(values) && values.length === 0 && component.role === "base_material")) return "Always used";
-  const friendlyValues = Array.isArray(values) && values.length > 0 ? values.map(humanize).join(", ") : "selected";
-  return `Only when ${humanize(optionKey)} is ${friendlyValues}`;
-}
-
-function usageSummary(component: Record<string, any>): string {
-  const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "fixed");
-  if (ruleType === "yield_based") return "Allocates part of parent sheet / yield";
-  if (ruleType === "per_linear_metre") return "Allocates metres from roll";
-  if (ruleType === "per_sqm") return "Allocates by square metre";
-  if (ruleType === "per_unit") return `Allocates ${component.quantity ?? 1} ${component.unit ?? "each"} per quantity`;
-  if (ruleType === "selected_by_option") return "Applies only when selected";
-  return humanize(ruleType);
-}
-
-const cardStyle: CSSProperties = {
-  background: "#fff",
-  border: "1px solid #e5e7eb",
-  borderRadius: 24,
-  padding: 22,
-  boxShadow: "0 1px 2px rgba(16, 24, 40, 0.04)"
-};
-
-const softCardStyle: CSSProperties = {
-  background: "#f8fafc",
-  border: "1px solid #e5e7eb",
-  borderRadius: 18,
-  padding: 16
-};
-
-const inputStyle: CSSProperties = {
-  width: "100%",
-  minHeight: 42,
-  borderRadius: 12,
-  border: "1px solid #d0d5dd",
-  padding: "0 12px",
-  fontSize: 15,
-  boxSizing: "border-box",
-  background: "#fff"
-};
-
-const labelStyle: CSSProperties = { display: "grid", gap: 7, minWidth: 0 };
-const labelTextStyle: CSSProperties = { fontWeight: 850, fontSize: 13, color: "#344054" };
-const mutedTextStyle: CSSProperties = { color: "#667085", fontSize: 13, lineHeight: 1.5 };
-const buttonStyle: CSSProperties = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 900, cursor: "pointer", padding: "0 16px" };
-const pillStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "5px 10px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" };
-const greenPillStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#ecfdf3", color: "#067647", padding: "5px 10px", fontSize: 12, fontWeight: 900, whiteSpace: "nowrap" };
-
-function QuoteField({ field }: { field: Record<string, any> }) {
-  const options = Array.isArray(field.options) ? field.options : [];
-  const defaultValue = String(field.defaultValue ?? "");
-  const matchedDefault = options.find((option: any) => choiceValue(option) === defaultValue || choiceLabel(option) === defaultValue);
-
-  return (
-    <label style={labelStyle}>
-      <span style={labelTextStyle}>{field.label}</span>
-      {options.length > 0 ? (
-        <select name={field.key} defaultValue={matchedDefault ? choiceValue(matchedDefault) : defaultValue} style={inputStyle}>
-          {options.map((option: any) => <option key={option.id ?? choiceValue(option)} value={choiceValue(option)}>{choiceLabel(option)}</option>)}
-        </select>
-      ) : (
-        <input name={field.key} defaultValue={defaultValue} type={field.type === "quantity" || field.type === "number" ? "number" : "text"} style={inputStyle} />
-      )}
-      {field.helpText ? <span style={mutedTextStyle}>{field.helpText}</span> : null}
-      {field.showWhen?.optionKey ? <span style={mutedTextStyle}>Appears when {humanize(field.showWhen.optionKey)} is {(field.showWhen.optionValues ?? []).map(humanize).join(", ")}</span> : null}
-    </label>
-  );
-}
-
-export default async function QuotesPage({ searchParams }: QuotesPageProps) {
+export default async function QuotesPage({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
-
-  if (!activeTenant) {
-    redirect("/bootstrap");
-  }
-
+  if (!activeTenant) redirect("/bootstrap");
   const params = (await searchParams) ?? {};
-  const selectedProductId = readParam(params, "product");
+  const message = readParam(params, "message");
+  const error = readParam(params, "error");
+  const fromEnquiry = readParam(params, "fromEnquiry");
+  const fromSurvey = readParam(params, "fromSurvey");
+  const selected = readParam(params, "selected");
 
-  const [products, materials, selectedProduct] = await Promise.all([
+  const [quoteDrafts, products, enquiry, survey, selectedQuote] = await Promise.all([
+    listQuoteDraftsForTenant(activeTenant.tenantId),
     listProductsForTenant(activeTenant.tenantId),
-    listMaterialsForTenant(activeTenant.tenantId),
-    selectedProductId ? getProductById(activeTenant.tenantId, selectedProductId) : Promise.resolve(null)
+    fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
+    fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
+    selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null)
   ]);
-
-  const template = selectedProduct?.defaultTemplateId
-    ? await getConfiguratorTemplateById(activeTenant.tenantId, selectedProduct.defaultTemplateId)
-    : null;
-
-  const definition = template?.definitionJson ?? {};
-  const fields = Array.isArray(definition.fields) ? definition.fields : [];
-  const components = Array.isArray(definition.components) ? definition.components : [];
-  const materialMap = new Map(materials.map((material) => [material.id, material]));
-  const baseComponents = components.filter((item) => item.role === "base_material" || (!item.trigger?.optionKey && item.kind !== "labour"));
-  const triggeredComponents = components.filter((item) => !baseComponents.includes(item));
+  const quoteLines = selectedQuote ? await listQuoteLines(selectedQuote.id) : [];
+  const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
+  const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
+  const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
+  const sourceEmail = enquiry?.email ?? "";
 
   return (
-    <div style={{ maxWidth: 1240, margin: "0 auto", display: "grid", gap: 16 }}>
-      <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
-          <div>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Quotes</p>
-            <h1 style={{ margin: "10px 0 8px", fontSize: 34 }}>Quote builder</h1>
-            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6, maxWidth: 880 }}>
-              This is where quote-time choices happen. Select a base product, then choose the size, print type, laminate, finishing and quantity. The product setup controls which materials are allocated.
-            </p>
+    <div style={{ maxWidth: 1320, margin: "0 auto", display: "grid", gap: 16 }}>
+      {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
+      {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
+      <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Quote entry</p>
+        <h1 style={{ margin: 0 }}>Fast quote setup from enquiry or survey</h1>
+        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a base product, preset options, and quantity. MYOB linkage can happen later when the quote/job is ready.</p>
+      </section>
+
+      <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+        <form action={createQuoteDraftAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
+          <h2 style={{ margin: 0 }}>New draft quote</h2>
+          <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
+          <input type="hidden" name="surveyRequestId" value={survey?.id ?? ""} />
+          <input name="clientName" defaultValue={sourceClientName} placeholder="Client / business name" style={inputStyle} />
+          <input name="contactName" defaultValue={sourceContactName} placeholder="Contact name" style={inputStyle} />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <input name="phone" defaultValue={sourcePhone} placeholder="Phone" style={inputStyle} />
+            <input name="email" defaultValue={sourceEmail} placeholder="Email" style={inputStyle} />
           </div>
-          <span style={pillStyle}>{products.length} products available</span>
-        </div>
-      </section>
+          <input name="discountPercent" defaultValue="0" placeholder="Client discount %" style={inputStyle} />
+          <textarea name="notes" defaultValue={[enquiry?.requestSummary, survey?.notes].filter(Boolean).join("\n\n")} placeholder="Quote notes" style={textareaStyle} />
+          <button type="submit" style={buttonStyle}>Create draft quote</button>
+        </form>
 
-      <section style={{ display: "grid", gridTemplateColumns: "minmax(280px, 360px) minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <aside style={{ ...cardStyle, display: "grid", gap: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 20 }}>1. Select product</h2>
-          {products.length === 0 ? (
-            <p style={{ margin: 0, color: "#475467" }}>No products created yet. Create base products first.</p>
-          ) : (
-            <div style={{ display: "grid", gap: 8, maxHeight: 680, overflowY: "auto" }}>
-              {products.map((product) => {
-                const selected = selectedProduct?.id === product.id;
-                return (
-                  <a
-                    key={product.id}
-                    href={`/quotes?product=${product.id}`}
-                    style={{
-                      border: selected ? "1px solid #4f46e5" : "1px solid #e5e7eb",
-                      background: selected ? "#eef2ff" : "#fafafa",
-                      color: "#111827",
-                      borderRadius: 14,
-                      padding: 13,
-                      textDecoration: "none"
-                    }}
-                  >
-                    <strong>{product.name}</strong>
-                    <div style={{ marginTop: 5, fontSize: 13, color: "#475467" }}>{product.sku || "No SKU"} · {humanize(product.productFamily)}</div>
-                    <div style={{ marginTop: 5, fontSize: 12, color: "#667085" }}>{product.templateName ? "quote choices ready" : "needs quote behaviour"}</div>
-                  </a>
-                );
-              })}
+        <section style={{ ...cardStyle(), display: "grid", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <h2 style={{ margin: 0 }}>Current draft quotes</h2>
+            <span style={{ fontSize: 13, color: "#667085" }}>{quoteDrafts.length} total</span>
+          </div>
+          <div style={{ display: "grid", gap: 12 }}>
+            {quoteDrafts.map((quote) => (
+              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ textDecoration: "none", color: "inherit", border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 6 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <strong>{quote.clientName}</strong>
+                  <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{quote.status}</span>
+                </div>
+                <div style={{ color: "#667085", fontSize: 13 }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
+              </a>
+            ))}
+            {quoteDrafts.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No draft quotes yet.</p> : null}
+          </div>
+
+          {selectedQuote ? (
+            <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, display: "grid", gap: 16 }}>
+              <div>
+                <h3 style={{ margin: 0 }}>Selected quote: {selectedQuote.clientName}</h3>
+                <p style={{ margin: "6px 0 0", color: "#667085" }}>Add fast quote lines by choosing a base product, a preset option summary, and quantity.</p>
+              </div>
+              <form action={addQuoteLineAction} style={{ display: "grid", gap: 12 }}>
+                <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                <select name="productId" style={inputStyle}>
+                  <option value="">Choose base product</option>
+                  {products.map((product) => (
+                    <option key={product.id} value={product.id}>{product.name}</option>
+                  ))}
+                </select>
+                <input name="optionSummary" placeholder="Preset options (eg 600x900, direct print, matte laminate)" style={inputStyle} />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                  <input name="quantity" defaultValue="1" placeholder="Quantity" style={inputStyle} />
+                  <input name="unitPrice" defaultValue="0" placeholder="Unit price" style={inputStyle} />
+                </div>
+                <textarea name="notes" placeholder="Line notes" style={textareaStyle} />
+                <button type="submit" style={buttonStyle}>Add quote line</button>
+              </form>
+
+              <div style={{ display: "grid", gap: 10 }}>
+                <h4 style={{ margin: 0 }}>Quote lines</h4>
+                {quoteLines.map((line) => (
+                  <div key={line.id} style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14, display: "grid", gap: 4 }}>
+                    <strong>{line.productName}</strong>
+                    <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${line.unitPrice}`, `Total $${line.lineTotal}`].filter(Boolean).join(" · ")}</div>
+                  </div>
+                ))}
+                {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No quote lines yet.</p> : null}
+              </div>
             </div>
-          )}
-        </aside>
-
-        <main style={{ display: "grid", gap: 16 }}>
-          {!selectedProduct ? (
-            <section style={cardStyle}>
-              <h2 style={{ marginTop: 0 }}>Select a product to start a quote</h2>
-              <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
-                Example: choose “Sign - ACM - 3mm”, then the quote screen will ask for size, print type, laminate, finishing and quantity.
-              </p>
-            </section>
-          ) : (
-            <>
-              <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-                  <div>
-                    <p style={{ margin: 0, fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Selected product</p>
-                    <h2 style={{ margin: "8px 0 0", fontSize: 30 }}>{selectedProduct.name}</h2>
-                    <p style={{ margin: "6px 0 0", color: "#667085" }}>{selectedProduct.sku || "No SKU"} · GST</p>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    <span style={greenPillStyle}>{baseComponents.length} base materials</span>
-                    <span style={pillStyle}>{fields.length} quote choices</span>
-                  </div>
-                </div>
-                <div style={{ ...softCardStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
-                  <strong style={{ color: "#067647" }}>Quote flow</strong>
-                  <p style={{ margin: "6px 0 0", color: "#064e3b", lineHeight: 1.55 }}>
-                    The base product is fixed. The choices below are what staff change for this quote only. Stock allocation comes from the base materials and any extra materials triggered by the choices.
-                  </p>
-                </div>
-              </section>
-
-              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-                <h2 style={{ margin: 0 }}>2. Quote choices</h2>
-                {fields.length === 0 ? (
-                  <div style={{ border: "1px dashed #d0d5dd", borderRadius: 16, padding: 16, color: "#475467" }}>
-                    This product has no quote behaviour yet. Open it on Products and apply a quote preset such as ACM sign, banner or business cards.
-                  </div>
-                ) : (
-                  <form style={{ display: "grid", gap: 14 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-                      {fields.map((field, index) => <QuoteField key={field.id ?? `${field.key}-${index}`} field={field} />)}
-                    </div>
-                    <div style={{ ...softCardStyle }}>
-                      <strong>Next batch placeholder</strong>
-                      <p style={{ margin: "6px 0 0", ...mutedTextStyle }}>
-                        This screen now shows the correct quote flow. The next database batch can save quote headers, quote lines, selected answers, pricing snapshot and material allocations.
-                      </p>
-                    </div>
-                    <button type="button" style={{ ...buttonStyle, opacity: 0.65, cursor: "not-allowed" }}>Save quote line coming next</button>
-                  </form>
-                )}
-              </section>
-
-              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-                <h2 style={{ margin: 0 }}>3. Stock allocation preview</h2>
-                <div style={{ display: "grid", gap: 12 }}>
-                  <div style={softCardStyle}>
-                    <strong>Base product materials</strong>
-                    {baseComponents.length === 0 ? (
-                      <p style={{ margin: "8px 0 0", ...mutedTextStyle }}>No base material linked yet.</p>
-                    ) : (
-                      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                        {baseComponents.map((item, index) => {
-                          const material = item.materialId ? materialMap.get(item.materialId) : null;
-                          return (
-                            <div key={item.id ?? `${item.label}-${index}`} style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "#fff" }}>
-                              <strong>{item.label}</strong>
-                              <div style={{ marginTop: 4, ...mutedTextStyle }}>{material?.name ? `Material: ${material.name}` : "No material linked"} · {usageSummary(item)}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-
-                  <div style={softCardStyle}>
-                    <strong>Materials triggered by quote choices</strong>
-                    {triggeredComponents.length === 0 ? (
-                      <p style={{ margin: "8px 0 0", ...mutedTextStyle }}>No optional materials or labour yet.</p>
-                    ) : (
-                      <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                        {triggeredComponents.map((item, index) => {
-                          const material = item.materialId ? materialMap.get(item.materialId) : null;
-                          return (
-                            <div key={item.id ?? `${item.label}-${index}`} style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 12, background: "#fff" }}>
-                              <strong>{item.label}</strong>
-                              <div style={{ marginTop: 4, ...mutedTextStyle }}>{material?.name ? `Material: ${material.name}` : item.kind === "labour" ? "Labour / process" : "Material link can be added later"} · {usageSummary(item)}</div>
-                              <div style={{ marginTop: 3, ...mutedTextStyle }}>{triggerSummary(item)}</div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </section>
-            </>
-          )}
-        </main>
-      </section>
+          ) : null}
+        </section>
+      </div>
     </div>
   );
 }
