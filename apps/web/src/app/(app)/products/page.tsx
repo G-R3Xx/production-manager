@@ -12,7 +12,11 @@ import {
   addProductOptionAction,
   applyQuoteBehaviourPresetAction,
   createProductAction,
-  updateProductAction
+  deleteProductComponentAction,
+  deleteProductOptionAction,
+  updateProductAction,
+  updateProductComponentAction,
+  updateProductOptionAction
 } from "./actions";
 
 type ProductsPageProps = {
@@ -40,6 +44,39 @@ function humanize(value: string | null | undefined): string {
 function selectedProductUrl(productId: string, query: string): string {
   const q = query ? `&q=${encodeURIComponent(query)}` : "";
   return `/products?selected=${productId}${q}`;
+}
+
+function editProductUrl(productId: string, query: string, kind: "component" | "option", id: string): string {
+  const q = query ? `&q=${encodeURIComponent(query)}` : "";
+  const param = kind === "component" ? "editComponent" : "editOption";
+  return `/products?selected=${productId}${q}&${param}=${id}`;
+}
+
+function baseUsageFromComponent(component: any): string {
+  const ruleType = String(component?.ruleType ?? component?.stockUsage?.usageBasis ?? "yield_based");
+  if (ruleType === "per_linear_metre") return "roll_metres";
+  if (ruleType === "per_sqm") return "area";
+  if (ruleType === "per_unit" && String(component?.unit ?? "") === "sheet") return "whole_sheet";
+  if (ruleType === "per_unit") return "each";
+  return "part_sheet";
+}
+
+function defaultAnswerFromField(field: any): string {
+  const defaultValue = String(field?.defaultValue ?? "");
+  if (!defaultValue) return "";
+  const matched = Array.isArray(field?.options)
+    ? field.options.find((option: any) => String(option?.value ?? "") === defaultValue)
+    : null;
+  return String(matched?.label ?? defaultValue).replace(/_/g, " ");
+}
+
+function otherChoicesCsvFromField(field: any): string {
+  if (!Array.isArray(field?.options) || field.options.length === 0) return "";
+  const defaultValue = String(field?.defaultValue ?? "");
+  return field.options
+    .filter((option: any) => String(option?.value ?? "") !== defaultValue)
+    .map((option: any) => String(option?.label ?? option?.value ?? ""))
+    .join(", ");
 }
 
 const pageStyle: CSSProperties = { maxWidth: 1180, margin: "0 auto", display: "grid", gap: 16, paddingBottom: 32 };
@@ -100,6 +137,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const error = readParam(params, "error");
   const selectedId = readParam(params, "selected");
   const query = readParam(params, "q");
+  const editComponentId = readParam(params, "editComponent");
+  const editOptionId = readParam(params, "editOption");
 
   const [products, materials, selectedProduct] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
@@ -119,6 +158,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const fields = Array.isArray(definition.fields) ? definition.fields : [];
   const components = Array.isArray(definition.components) ? definition.components : [];
   const activeMaterials = materials.filter((material) => material.active);
+  const editingComponent = components.find((item: any) => String(item?.id ?? "") === editComponentId) ?? null;
+  const editingOption = fields.find((item: any) => String(item?.id ?? "") === editOptionId) ?? null;
 
   return (
     <div style={pageStyle}>
@@ -307,52 +348,134 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <div>
               <h2 style={sectionHeadingStyle}>Components</h2>
-              <p style={mutedStyle}>What does this product use? Add one row per stock item or labour item. Start simple and only open advanced rules when needed.</p>
+              <p style={mutedStyle}>What does this product use? Keep it simple: list the materials and labour, then edit only what needs changing.</p>
             </div>
 
             {components.length === 0 ? (
-              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No components yet. Use a quick start pack or add a component below.</div>
+              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No components yet. Use a quick start pack or add one below.</div>
             ) : (
-              <div style={tableWrapStyle}>
-                <table style={tableStyle}>
-                  <thead style={{ background: "#f9fafb" }}>
-                    <tr>
-                      <th style={cellStyle}>Type</th>
-                      <th style={cellStyle}>Component</th>
-                      <th style={cellStyle}>How calculated</th>
-                      <th style={cellStyle}>Value</th>
-                      <th style={cellStyle}>Waste</th>
-                      <th style={cellStyle}>Notes</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {components.map((component: any) => {
-                      const linkedMaterial = component.materialId ? materials.find((m) => m.id === component.materialId) : null;
-                      return (
-                        <tr key={component.id ?? component.label}>
-                          <td style={cellStyle}>{component.kind === "labour" ? "Labour" : "Material"}</td>
-                          <td style={cellStyle}>
-                            <strong>{component.label ?? "Component"}</strong>
-                            <div style={mutedStyle}>{linkedMaterial?.name ?? component.labourRateName ?? component.role ?? "Manual component"}</div>
-                          </td>
-                          <td style={cellStyle}>{humanize(component.ruleType ?? component.stockUsage?.usageBasis ?? "fixed")}</td>
-                          <td style={cellStyle}>{component.quantity ? `${component.quantity} ${component.unit ?? ""}`.trim() : (component.unit ?? "—")}</td>
-                          <td style={cellStyle}>{component.wastePercent ? `${component.wastePercent}%` : "—"}</td>
-                          <td style={cellStyle}>{component.notes || "—"}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+              <div style={{ display: "grid", gap: 10 }}>
+                {components.map((component: any) => {
+                  const linkedMaterial = component.materialId ? materials.find((m) => m.id === component.materialId) : null;
+                  const isEditing = String(component.id ?? "") === String(editComponentId);
+                  return (
+                    <div key={component.id ?? component.label} style={itemCardStyle}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <strong>{component.label ?? "Component"}</strong>
+                          <div style={mutedStyle}>
+                            {component.kind === "labour" ? "Labour" : "Material"} · {linkedMaterial?.name ?? component.labourRateName ?? "Not linked"}
+                          </div>
+                          <div style={mutedStyle}>
+                            {humanize(component.ruleType ?? component.stockUsage?.usageBasis ?? "fixed")} · {component.quantity ? `${component.quantity} ${component.unit ?? ""}`.trim() : (component.unit ?? "—")} · Waste {component.wastePercent ? `${component.wastePercent}%` : "0%"}
+                          </div>
+                          {component.notes ? <div style={mutedStyle}>{component.notes}</div> : null}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <Link href={editProductUrl(selectedProduct.id, query, "component", String(component.id ?? ""))} style={{ ...ghostStyle, textDecoration: "none" }}>
+                            Edit
+                          </Link>
+                          <form action={deleteProductComponentAction}>
+                            <input type="hidden" name="productId" value={selectedProduct.id} />
+                            <input type="hidden" name="componentId" value={String(component.id ?? "")} />
+                            <button type="submit" style={ghostStyle}>Remove</button>
+                          </form>
+                        </div>
+                      </div>
+
+                      {isEditing ? (
+                        <form action={updateProductComponentAction} style={{ display: "grid", gap: 12, borderTop: "1px solid #e5e7eb", paddingTop: 12, marginTop: 12 }}>
+                          <input type="hidden" name="productId" value={selectedProduct.id} />
+                          <input type="hidden" name="componentId" value={String(component.id ?? "")} />
+                          <div style={grid3}>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Type</span>
+                              <select name="kind" defaultValue={component.kind === "labour" ? "labour" : "material"} style={inputStyle}>
+                                <option value="material">Material</option>
+                                <option value="labour">Labour</option>
+                              </select>
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Component name</span>
+                              <input name="label" defaultValue={component.label ?? ""} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Material</span>
+                              <select name="materialId" defaultValue={component.materialId ?? ""} style={inputStyle}>
+                                <option value="">Not linked</option>
+                                {activeMaterials.map((material) => (
+                                  <option key={material.id} value={material.id}>{material.name}</option>
+                                ))}
+                              </select>
+                            </label>
+                          </div>
+                          <div style={grid3}>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Labour label</span>
+                              <input name="labourRateName" defaultValue={component.labourRateName ?? ""} placeholder="eg Print labour" style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>How calculated</span>
+                              <select name="baseUsage" defaultValue={baseUsageFromComponent(component)} style={inputStyle}>
+                                <option value="part_sheet">Part sheet</option>
+                                <option value="whole_sheet">Whole sheet</option>
+                                <option value="roll_metres">Linear metres</option>
+                                <option value="area">Square metres</option>
+                                <option value="each">Each</option>
+                              </select>
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Value</span>
+                              <input name="quantity" defaultValue={String(component.quantity ?? "1")} style={inputStyle} />
+                            </label>
+                          </div>
+                          <div style={grid3}>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Waste %</span>
+                              <input name="wastePercent" defaultValue={String(component.wastePercent ?? "10")} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Use when option key matches</span>
+                              <input name="triggerOptionKey" defaultValue={String(component.trigger?.optionKey ?? "")} placeholder="eg laminate" style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Allowed values (CSV)</span>
+                              <input name="triggerOptionValuesCsv" defaultValue={Array.isArray(component.trigger?.optionValues) ? component.trigger.optionValues.join(", ") : ""} placeholder="eg matte,gloss" style={inputStyle} />
+                            </label>
+                          </div>
+                          <label style={labelStyle}>
+                            <span style={labelTextStyle}>Notes</span>
+                            <textarea name="notes" rows={3} defaultValue={String(component.notes ?? "")} style={textareaStyle} />
+                          </label>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button type="submit" style={buttonStyle}>Save component</button>
+                            <Link href={selectedProductUrl(selectedProduct.id, query)} style={{ ...ghostStyle, textDecoration: "none" }}>Cancel</Link>
+                          </div>
+                        </form>
+                      ) : null}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
             <form action={addProductComponentAction} style={{ display: "grid", gap: 12, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
               <input type="hidden" name="productId" value={selectedProduct.id} />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <strong>Add component</strong>
+                <span style={mutedStyle}>Add only what this product actually uses.</span>
+              </div>
               <div style={grid3}>
                 <label style={labelStyle}>
+                  <span style={labelTextStyle}>Type</span>
+                  <select name="kind" defaultValue="material" style={inputStyle}>
+                    <option value="material">Material</option>
+                    <option value="labour">Labour</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>
                   <span style={labelTextStyle}>Component name</span>
-                  <input name="label" placeholder="eg ACM sheet" style={inputStyle} />
+                  <input name="label" placeholder="eg ACM face" style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Material</span>
@@ -362,6 +485,12 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                       <option key={material.id} value={material.id}>{material.name}</option>
                     ))}
                   </select>
+                </label>
+              </div>
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Labour label</span>
+                  <input name="labourRateName" placeholder="eg Print labour" style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>How calculated</span>
@@ -373,36 +502,29 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                     <option value="each">Each</option>
                   </select>
                 </label>
-              </div>
-              <div style={grid3}>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Value</span>
                   <input name="quantity" defaultValue="1" style={inputStyle} />
                 </label>
+              </div>
+              <div style={grid3}>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Waste %</span>
                   <input name="wastePercent" defaultValue="10" style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Use when option matches (optional)</span>
+                  <span style={labelTextStyle}>Use when option key matches (optional)</span>
                   <input name="triggerOptionKey" placeholder="eg laminate" style={inputStyle} />
                 </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Allowed values (CSV)</span>
+                  <input name="triggerOptionValuesCsv" placeholder="eg matte,gloss" style={inputStyle} />
+                </label>
               </div>
-
-              <details>
-                <summary style={{ cursor: "pointer", fontWeight: 800 }}>Advanced</summary>
-                <div style={{ ...grid2, marginTop: 12 }}>
-                  <label style={labelStyle}>
-                    <span style={labelTextStyle}>Allowed option values (CSV)</span>
-                    <input name="triggerOptionValuesCsv" placeholder="eg matt,gloss" style={inputStyle} />
-                  </label>
-                  <label style={labelStyle}>
-                    <span style={labelTextStyle}>Notes</span>
-                    <textarea name="notes" rows={3} placeholder="Explain how this component is used" style={textareaStyle} />
-                  </label>
-                </div>
-              </details>
-
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Notes</span>
+                <textarea name="notes" rows={3} placeholder="Explain how this component is used" style={textareaStyle} />
+              </label>
               <button type="submit" style={buttonStyle}>Add component</button>
             </form>
           </section>
@@ -410,30 +532,94 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <div>
               <h2 style={sectionHeadingStyle}>Options</h2>
-              <p style={mutedStyle}>Add the choices staff can pick when quoting this product, such as size, laminate, binding, duplicate/triplicate and other preset options.</p>
+              <p style={mutedStyle}>These are the choices staff pick when quoting, like size, sides, laminate, eyelets or binding.</p>
             </div>
 
             {fields.length === 0 ? (
-              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No options yet.</div>
+              <div style={{ ...itemCardStyle, background: "#fcfcfd" }}>No options yet. Add the choices staff should pick when quoting.</div>
             ) : (
               <div style={{ display: "grid", gap: 10 }}>
-                {fields.map((field: any) => (
-                  <div key={field.id ?? field.key} style={itemCardStyle}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <strong>{field.label}</strong>
-                      <span style={chipStyle}>{humanize(field.type)}</span>
+                {fields.map((field: any) => {
+                  const isEditing = String(field.id ?? "") === String(editOptionId);
+                  return (
+                    <div key={field.id ?? field.key} style={itemCardStyle}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+                        <div style={{ display: "grid", gap: 4 }}>
+                          <strong>{field.label}</strong>
+                          <div style={mutedStyle}>{humanize(field.type)} · Default: {defaultAnswerFromField(field) || "None"}</div>
+                          {Array.isArray(field.options) && field.options.length > 0 ? (
+                            <div style={mutedStyle}>Choices: {field.options.map((option: any) => String(option.label ?? option.value ?? "")).join(", ")}</div>
+                          ) : null}
+                          {field.helpText ? <div style={mutedStyle}>{field.helpText}</div> : null}
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <Link href={editProductUrl(selectedProduct.id, query, "option", String(field.id ?? ""))} style={{ ...ghostStyle, textDecoration: "none" }}>
+                            Edit
+                          </Link>
+                          <form action={deleteProductOptionAction}>
+                            <input type="hidden" name="productId" value={selectedProduct.id} />
+                            <input type="hidden" name="fieldId" value={String(field.id ?? "")} />
+                            <button type="submit" style={ghostStyle}>Remove</button>
+                          </form>
+                        </div>
+                      </div>
+
+                      {isEditing ? (
+                        <form action={updateProductOptionAction} style={{ display: "grid", gap: 12, borderTop: "1px solid #e5e7eb", paddingTop: 12, marginTop: 12 }}>
+                          <input type="hidden" name="productId" value={selectedProduct.id} />
+                          <input type="hidden" name="fieldId" value={String(field.id ?? "")} />
+                          <div style={grid3}>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Option label</span>
+                              <input name="label" defaultValue={String(field.label ?? "")} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Key</span>
+                              <input name="key" defaultValue={String(field.key ?? "")} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Type</span>
+                              <select name="fieldType" defaultValue={String(field.type ?? "select")} style={inputStyle}>
+                                <option value="select">Select list</option>
+                                <option value="yes_no">Yes / No</option>
+                                <option value="quantity">Quantity</option>
+                                <option value="number">Number</option>
+                                <option value="text">Text</option>
+                              </select>
+                            </label>
+                          </div>
+                          <div style={grid3}>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Default answer</span>
+                              <input name="defaultAnswer" defaultValue={defaultAnswerFromField(field)} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Other choices (CSV)</span>
+                              <input name="otherOptionsCsv" defaultValue={otherChoicesCsvFromField(field)} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Help text</span>
+                              <input name="helpText" defaultValue={String(field.helpText ?? "")} style={inputStyle} />
+                            </label>
+                          </div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <button type="submit" style={buttonStyle}>Save option</button>
+                            <Link href={selectedProductUrl(selectedProduct.id, query)} style={{ ...ghostStyle, textDecoration: "none" }}>Cancel</Link>
+                          </div>
+                        </form>
+                      ) : null}
                     </div>
-                    <div style={mutedStyle}>Key: {field.key} · Default: {field.defaultValue ? humanize(field.defaultValue) : "None"}</div>
-                    {Array.isArray(field.options) && field.options.length > 0 ? (
-                      <div style={mutedStyle}>Choices: {field.options.map((option: any) => String(option.label ?? option.value ?? "")).join(", ")}</div>
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
             <form action={addProductOptionAction} style={{ display: "grid", gap: 12, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
               <input type="hidden" name="productId" value={selectedProduct.id} />
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <strong>Add option</strong>
+                <span style={mutedStyle}>Use plain business language like Size, Sides, Laminate or Eyelets.</span>
+              </div>
               <div style={grid3}>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Option label</span>
