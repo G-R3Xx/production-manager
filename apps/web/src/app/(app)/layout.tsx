@@ -1,8 +1,8 @@
+import Link from "next/link";
 import type { ReactNode } from "react";
-import { getRequiredSessionUser } from "@/server/auth/session";
-import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
+import { requireAuthenticatedUser } from "@/lib/supabase/server";
 import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
-import { AppNavLink } from "@/components/AppNavLink";
+import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { signOutAction, switchTenantAction } from "./actions";
 
 type AppLayoutProps = {
@@ -10,46 +10,46 @@ type AppLayoutProps = {
 };
 
 const navItems = [
-  { href: "/enquiries", label: "Enquiries" },
-  { href: "/surveys", label: "Surveys" },
-  { href: "/quotes", label: "Quotes" },
+  { href: "/dashboard", label: "Dashboard" },
   { href: "/clients", label: "Clients" },
   { href: "/suppliers", label: "Suppliers" },
-  { href: "/materials", label: "Materials" },
+  { href: "/company", label: "Company" },
+  { href: "/users", label: "Users" },
   { href: "/products", label: "Products" },
-  { href: "/integrations", label: "Integrations" }
+  { href: "/materials", label: "Materials" },
+  { href: "/quotes", label: "Quotes" },
+  { href: "/integrations", label: "Integrations" },
+  { href: "/bootstrap", label: "Bootstrap" }
 ];
 
 export default async function AppLayout({ children }: AppLayoutProps) {
-  const user = await getRequiredSessionUser();
-  const [memberships, activeTenant] = await Promise.all([
-    listMembershipsForAuthUser(user.id),
-    resolveActiveTenantForAuthUserId(user.id)
-  ]);
+  const user = await requireAuthenticatedUser("/dashboard");
+  const memberships = await listMembershipsForAuthUser(user.id);
+  const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
 
   return (
     <div
       style={{
         minHeight: "100vh",
         display: "grid",
-        gridTemplateColumns: "280px minmax(0, 1fr)"
+        gridTemplateColumns: "300px 1fr"
       }}
     >
       <aside
         style={{
           borderRight: "1px solid #e5e7eb",
           background: "#ffffff",
-          padding: 22,
+          padding: 24,
           display: "grid",
           gridTemplateRows: "auto auto auto 1fr auto",
-          gap: 18
+          gap: 20
         }}
       >
         <div>
           <div
             style={{
               fontSize: 12,
-              fontWeight: 800,
+              fontWeight: 700,
               letterSpacing: "0.08em",
               textTransform: "uppercase",
               color: "#4f46e5"
@@ -70,7 +70,9 @@ export default async function AppLayout({ children }: AppLayoutProps) {
         >
           <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>Signed in as</div>
           <div style={{ marginTop: 6, fontWeight: 700, wordBreak: "break-word" }}>{user.email ?? "Unknown user"}</div>
-          <div style={{ marginTop: 8, fontSize: 13, color: "#667085" }}>Memberships found: {memberships.length}</div>
+          <div style={{ marginTop: 8, fontSize: 13, color: "#667085" }}>
+            Memberships found: {memberships.length}
+          </div>
         </div>
 
         <div
@@ -89,44 +91,56 @@ export default async function AppLayout({ children }: AppLayoutProps) {
             {activeTenant ? `${activeTenant.tenantSlug} · ${activeTenant.tenantRole}` : "Create or select a tenant"}
           </div>
 
-          {memberships.length > 1 ? (
-            <details>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Switch tenant</summary>
-              <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-                {memberships.map((membership) => {
-                  const isActive = activeTenant?.tenantId === membership.tenantId;
+          {memberships.length > 0 ? (
+            <div style={{ display: "grid", gap: 8, marginTop: 4 }}>
+              {memberships.map((membership) => {
+                const isActive = activeTenant?.tenantId === membership.tenantId;
 
-                  return (
-                    <form action={switchTenantAction} key={`${membership.tenantId}-${membership.userProfileId}`}>
-                      <input type="hidden" name="tenantId" value={membership.tenantId} />
-                      <button
-                        type="submit"
-                        style={{
-                          width: "100%",
-                          textAlign: "left",
-                          padding: "10px 12px",
-                          borderRadius: 12,
-                          border: isActive ? "1px solid #4f46e5" : "1px solid #d0d5dd",
-                          background: isActive ? "#eef2ff" : "#ffffff",
-                          cursor: "pointer"
-                        }}
-                      >
-                        <div style={{ fontWeight: 700 }}>{membership.tenantName}</div>
-                        <div style={{ marginTop: 4, fontSize: 12, color: "#667085" }}>
-                          {membership.tenantSlug} · {membership.tenantRole}
-                        </div>
-                      </button>
-                    </form>
-                  );
-                })}
-              </div>
-            </details>
+                return (
+                  <form action={switchTenantAction} key={`${membership.tenantId}-${membership.userProfileId}`}>
+                    <input type="hidden" name="tenantId" value={membership.tenantId} />
+                    <button
+                      type="submit"
+                      style={{
+                        width: "100%",
+                        textAlign: "left",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: isActive ? "1px solid #4f46e5" : "1px solid #d0d5dd",
+                        background: isActive ? "#eef2ff" : "#ffffff",
+                        cursor: "pointer"
+                      }}
+                    >
+                      <div style={{ fontWeight: 700 }}>{membership.tenantName}</div>
+                      <div style={{ marginTop: 4, fontSize: 12, color: "#667085" }}>
+                        {membership.tenantSlug} · {membership.tenantRole}
+                      </div>
+                    </button>
+                  </form>
+                );
+              })}
+            </div>
           ) : null}
         </div>
 
         <nav style={{ display: "grid", gap: 10, alignContent: "start" }}>
           {navItems.map((item) => (
-            <AppNavLink key={item.href} href={item.href} label={item.label} />
+            <Link
+              key={item.href}
+              href={item.href}
+              style={{
+                display: "block",
+                padding: "12px 14px",
+                borderRadius: 12,
+                border: "1px solid #e5e7eb",
+                background: "#fafafa",
+                color: "#111827",
+                fontWeight: 600,
+                textDecoration: "none"
+              }}
+            >
+              {item.label}
+            </Link>
           ))}
         </nav>
 
@@ -148,7 +162,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
         </form>
       </aside>
 
-      <main style={{ padding: 28, minWidth: 0 }}>{children}</main>
+      <main style={{ padding: 32 }}>{children}</main>
     </div>
   );
 }

@@ -1,21 +1,6 @@
 # Production Manager
 
-Production Manager is a multi-tenant production workflow app for print/signage operations.
-
-## Current workflow
-
-The main app workflow is intentionally focused on:
-
-- Clients
-- Suppliers
-- Materials
-- Products
-- Quotes
-- Integrations
-
-Materials are purchased stock from suppliers. Products are sellable items. Product setup happens inside the Products page through product details, components and options. Components consume materials and labour; options drive quoting choices such as finished size, sides, laminate, cello, binding, cover colour, tape colour, duplicate/triplicate copies and copy colours.
-
-Tax code defaults to `GST` for products and is not shown on product creation.
+Fresh rebuild of the Production Manager platform.
 
 ## Core architecture
 

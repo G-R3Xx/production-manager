@@ -29,11 +29,10 @@ export type ConfiguratorTemplateCreateInput = {
 };
 
 function parseDefinition(value: unknown): Record<string, any> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return { version: 2, fields: [], components: [] };
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { version: 1, fields: [], components: [] };
   const obj = value as Record<string, any>;
   return {
-    ...obj,
-    version: typeof obj.version === 'number' ? obj.version : 2,
+    version: typeof obj.version === 'number' ? obj.version : 1,
     fields: Array.isArray(obj.fields) ? obj.fields : [],
     components: Array.isArray(obj.components) ? obj.components : []
   };

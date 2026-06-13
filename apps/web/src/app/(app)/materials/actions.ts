@@ -20,7 +20,7 @@ export async function createMaterialAction(formData: FormData) {
   await createMaterial({
     tenantId: activeTenant.tenantId,
     supplierId: readString(formData, 'supplierId') || null,
-    sourceProductId: null,
+    sourceProductId: readString(formData, 'sourceProductId') || null,
     name,
     sku: readString(formData, 'sku') || null,
     materialType: readString(formData, 'materialType') || 'sheet_media',

@@ -1,4 +1,3 @@
-import { cache } from "react";
 import { redirect } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -11,7 +10,7 @@ export type SessionSummary = {
   user: SessionUser | null;
 };
 
-export const getSessionUser = cache(async function getSessionUser(): Promise<SessionUser | null> {
+export async function getSessionUser(): Promise<SessionUser | null> {
   const supabase = await getSupabaseServerClient();
 
   const {
@@ -27,7 +26,7 @@ export const getSessionUser = cache(async function getSessionUser(): Promise<Ses
     id: user.id,
     email: user.email ?? null
   };
-});
+}
 
 export async function getSessionSummary(): Promise<SessionSummary> {
   return {
