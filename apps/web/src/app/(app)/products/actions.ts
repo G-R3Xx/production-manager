@@ -497,63 +497,14 @@ export async function addProductComponentAction(formData: FormData) {
   if (!productId) redirect("/products?error=No%20product%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
-  const materialId = readString(formData, "materialId") || null;
-  const baseUsage = readString(formData, "baseUsage") || "part_sheet";
-  const label = readString(formData, "label") || "Base material";
-  const triggerOptionKey = readString(formData, "triggerOptionKey") || null;
-  const triggerOptionValues = splitCsv(readString(formData, "triggerOptionValuesCsv"));
-  const role = triggerOptionKey ? "quote_selected_material" : "base_material";
-
-  let ruleType = "yield_based";
-  let unit = "sheet";
-  let dimensionSource = "finished_size";
-  let usageOptionKey = "finished_size";
-
-  if (baseUsage === "whole_sheet") {
-    ruleType = "per_unit";
-    unit = "sheet";
-    dimensionSource = "quantity_only";
-    usageOptionKey = "quantity";
-  }
-
-  if (baseUsage === "roll_metres") {
-    ruleType = "per_linear_metre";
-    unit = "lm";
-  }
-
-  if (baseUsage === "area") {
-    ruleType = "per_sqm";
-    unit = "sqm";
-  }
-
-  if (baseUsage === "each") {
-    ruleType = "per_unit";
-    unit = "each";
-    dimensionSource = "quantity_only";
-    usageOptionKey = "quantity";
-  }
-
-  const nextComponent = component({
-    label,
-    materialId,
-    role,
-    ruleType,
-    unit,
-    quantity: safeNumberString(readString(formData, "quantity"), "1"),
-    wastePercent: safeNumberString(readString(formData, "wastePercent"), "10"),
-    dimensionSource,
-    usageOptionKey,
-    triggerOptionKey,
-    triggerOptionValues,
-    notes: readString(formData, "notes") || "Material linked to this base product."
-  });
+  const nextComponent = buildComponentFromForm(formData);
 
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     components: [...definition.components, nextComponent]
   });
 
-  redirect(`/products?selected=${productId}&message=Material%20linked%20to%20product`);
+  redirect(`/products?selected=${productId}&message=Component%20added`);
 }
 
 export async function addProductOptionAction(formData: FormData) {
@@ -563,44 +514,8 @@ export async function addProductOptionAction(formData: FormData) {
   if (!productId) redirect("/products?error=No%20product%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
-  const label = readString(formData, "label") || readString(formData, "questionLabel") || "Quote choice";
-  const key = keyFromLabel(readString(formData, "key") || label);
-  const fieldType = readString(formData, "fieldType") || "select";
-  const defaultAnswer = readString(formData, "defaultAnswer");
-  const otherOptionsCsv = readString(formData, "otherOptionsCsv");
-  const helpText = readString(formData, "helpText") || "Shown after this product is selected on a quote.";
-  const required = readString(formData, "required") !== "no";
-
-  let defaultValue = defaultAnswer || null;
-  let options: Array<Record<string, any>> = [];
-
-  if (defaultAnswer) {
-    const parsedDefault = parseChoice(defaultAnswer);
-    defaultValue = parsedDefault.value;
-    options = [parsedDefault, ...splitCsv(otherOptionsCsv).map(parseChoice)];
-  }
-
-  const nextField = {
-    id: randomUUID(),
-    key,
-    label,
-    type: fieldType,
-    required,
-    defaultValue,
-    helpText,
-    quoteOnly: true,
-    showWhen: null,
-    options,
-    rule: {
-      effectType: "none",
-      effectTarget: null,
-      effectValue: null,
-      effectUnit: null,
-      componentLinkMode: "none"
-    }
-  };
-
-  const existingIndex = definition.fields.findIndex((field: Record<string, any>) => field.key === key);
+  const nextField = buildFieldFromForm(formData);
+  const existingIndex = definition.fields.findIndex((field: Record<string, any>) => field.key === nextField.key);
   const fields = existingIndex >= 0
     ? definition.fields.map((field: Record<string, any>, index: number) => index === existingIndex ? { ...nextField, id: field.id ?? nextField.id } : field)
     : [...definition.fields, nextField];
@@ -611,7 +526,7 @@ export async function addProductOptionAction(formData: FormData) {
     fields
   });
 
-  redirect(`/products?selected=${productId}&message=Quote%20choice%20saved`);
+  redirect(`/products?selected=${productId}&message=Quote%20option%20saved`);
 }
 
 // Backwards-compatible export for older form names used by previous zips.
