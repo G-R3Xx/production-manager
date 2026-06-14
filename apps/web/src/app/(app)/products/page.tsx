@@ -279,7 +279,7 @@ function UsageAmountFields({ component }: { component?: any }) {
 }
 
 const optionUsageModes = [
-  { value: "auto_sheet", label: "Auto from finished size", amountHelp: "leave blank", summary: "Uses quoted size ÷ parent sheet/roll size." },
+  { value: "auto_sheet", label: "Auto from material type", amountHelp: "leave blank", summary: "Sheets use quoted size ÷ parent sheet. Roll stock uses quoted size ÷ roll width." },
   { value: "parts_per_sheet", label: "Parts per sheet", amountHelp: "eg 8", summary: "Enter how many finished pieces one sheet makes." },
   { value: "sheets_per_item", label: "Sheets per item", amountHelp: "eg 0.25 or 1", summary: "Enter sheet fraction or full sheets used by this answer." },
   { value: "roll_metres", label: "Roll metres per item", amountHelp: "eg 1.2", summary: "Enter fixed linear metres used by this answer, or leave blank for size ÷ roll width." },
@@ -410,7 +410,7 @@ function CostedOptionRows({ materials, field, components = [] }: { materials: an
                   <input name="optionNotes" defaultValue={String(component?.notes ?? "")} placeholder="optional" style={inputStyle} />
                 </label>
               </div>
-              <p style={mutedStyle}>{optionUsageModes.find((mode) => mode.value === usageMode)?.summary ?? "Choose how this answer uses stock."}</p>
+              <p style={mutedStyle}>{optionUsageModes.find((mode) => mode.value === usageMode)?.summary ?? "Choose how this answer uses stock. Auto from material type is safest for normal sheet and roll materials."}</p>
             </div>
           );
         })}

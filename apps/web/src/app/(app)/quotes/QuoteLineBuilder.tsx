@@ -286,6 +286,35 @@ function sheetAreaSqm(material: QuoteMaterial): number {
   return (widthMm / 1000) * (lengthMm / 1000);
 }
 
+function materialLooksLikeRoll(material: QuoteMaterial): boolean {
+  const materialType = String(material.materialType ?? "").toLowerCase();
+  const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
+  const stockUom = String(material.stockUom ?? "").toLowerCase();
+  const name = String(material.name ?? "").toLowerCase();
+
+  return (
+    numberValue(material.rollWidthMm, 0) > 0 ||
+    [purchaseUom, stockUom].some((unit) => ["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(unit)) ||
+    purchaseUom.includes("roll") ||
+    stockUom.includes("roll") ||
+    materialType.includes("roll") ||
+    materialType.includes("vinyl") ||
+    materialType.includes("media") ||
+    name.includes("sav") ||
+    name.includes("vinyl") ||
+    name.includes("laminate") ||
+    name.includes("roll")
+  );
+}
+
+function normalizedRuleTypeFor(component: QuoteComponent, material: QuoteMaterial): string {
+  const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
+  if (["yield_based", "auto_sheet", "auto_material"].includes(ruleType) && materialLooksLikeRoll(material)) {
+    return "per_linear_metre";
+  }
+  return ruleType;
+}
+
 function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "each"): { rate: number; unit: string; note?: string } {
   const purchaseCost = numberValue(material.purchaseCost, 0);
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
@@ -304,7 +333,10 @@ function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "e
     if (purchaseUom.includes("roll") && stockQuantity > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) {
       return { rate: purchaseCost / stockQuantity, unit: "lm", note: `using ${formatUsage(stockQuantity)} lm per roll from material stock quantity` };
     }
-    return { rate: purchaseCost, unit: "lm", note: "set material purchase cost per linear metre for exact roll pricing" };
+    if (materialLooksLikeRoll(material) && stockQuantity > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) {
+      return { rate: purchaseCost / stockQuantity, unit: "lm", note: `roll stock detected; using ${formatUsage(stockQuantity)} lm from material stock quantity` };
+    }
+    return { rate: purchaseCost, unit: "lm", note: "set material purchase unit to lm, or set purchase unit to roll + stock quantity as roll length" };
   }
 
   if (basis === "sqm") {
@@ -337,8 +369,17 @@ function linearMetresFor(dimensions: { widthMm: number; heightMm: number } | nul
 
   if (rollWidthMm > 0) {
     const rollNote = componentRollWidthMm > 0 ? "using product roll width override" : undefined;
-    if (widthMm <= rollWidthMm) return { amount: heightMm / 1000, note: rollNote };
-    if (heightMm <= rollWidthMm) return { amount: widthMm / 1000, note: ["rotated to fit roll width", rollNote].filter(Boolean).join(" · ") || undefined };
+    const widthFits = widthMm <= rollWidthMm;
+    const heightFits = heightMm <= rollWidthMm;
+
+    if (widthFits && heightFits) {
+      const shorterLengthMm = Math.min(widthMm, heightMm);
+      const note = widthMm <= heightMm ? ["rotated to save roll length", rollNote].filter(Boolean).join(" · ") : rollNote;
+      return { amount: shorterLengthMm / 1000, note: note || undefined };
+    }
+
+    if (widthFits) return { amount: heightMm / 1000, note: rollNote };
+    if (heightFits) return { amount: widthMm / 1000, note: ["rotated to fit roll width", rollNote].filter(Boolean).join(" · ") || undefined };
     return { amount: Math.max(widthMm, heightMm) / 1000, note: ["size is wider than roll width; check paneling", rollNote].filter(Boolean).join(" · ") || undefined };
   }
 
@@ -369,7 +410,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
       const material = materialFor(materials, component.materialId);
       if (!material) return [];
 
-      const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
+      const ruleType = normalizedRuleTypeFor(component, material);
       const dimensions = dimensionsForComponent(product.fields, answers, component);
       const allowance = componentAllowance(component);
       const waste = wasteMultiplier(component);
@@ -390,7 +431,11 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [metres.note, rate.note].filter(Boolean).join(" · ")
+          note: [
+            String(component.ruleType ?? component.stockUsage?.usageBasis ?? "") === "per_linear_metre" ? undefined : "auto-detected roll stock",
+            metres.note,
+            rate.note
+          ].filter(Boolean).join(" · ")
         })];
       }
 
