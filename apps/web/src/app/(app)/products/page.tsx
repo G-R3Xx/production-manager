@@ -279,13 +279,13 @@ function UsageAmountFields({ component }: { component?: any }) {
 }
 
 const optionUsageModes = [
-  { value: "auto_sheet", label: "Auto from material type", amountHelp: "leave blank", summary: "Sheets use quoted size ÷ parent sheet. Roll stock uses quoted size ÷ roll width." },
-  { value: "parts_per_sheet", label: "Parts per sheet", amountHelp: "eg 8", summary: "Enter how many finished pieces one sheet makes." },
-  { value: "sheets_per_item", label: "Sheets per item", amountHelp: "eg 0.25 or 1", summary: "Enter sheet fraction or full sheets used by this answer." },
-  { value: "roll_metres", label: "Roll metres per item", amountHelp: "eg 1.2", summary: "Enter fixed linear metres used by this answer, or leave blank for size ÷ roll width." },
-  { value: "sqm", label: "Square metres", amountHelp: "leave blank", summary: "Uses quoted finished square metres." },
-  { value: "whole_sheet", label: "Whole sheet", amountHelp: "eg 1", summary: "Uses one or more full sheets." },
-  { value: "each", label: "Each / fixed item", amountHelp: "eg 1", summary: "Uses a fixed quantity per quoted item." }
+  { value: "none", label: "No extra cost", amountHelp: "leave blank", summary: "This answer is just a choice on the quote. It does not add stock or a charge." },
+  { value: "auto_sheet", label: "Material: auto from size", amountHelp: "leave blank", summary: "Safest normal choice. Sheet materials use the quoted size. Roll materials use roll length from the quoted size." },
+  { value: "parts_per_sheet", label: "Material: parts per sheet", amountHelp: "eg 8", summary: "Use this when one parent sheet makes a known number of this answer." },
+  { value: "sheets_per_item", label: "Material: sheets per item", amountHelp: "eg 0.25 or 1", summary: "Use this when this answer always uses a fixed sheet amount." },
+  { value: "roll_metres", label: "Material: metres per item", amountHelp: "eg 1.2", summary: "Use this when this answer always uses a fixed roll length." },
+  { value: "sqm_charge", label: "Charge: dollars per m²", amountHelp: "eg 10", summary: "Use this for ink, white ink or print charges. The number is the sell charge per square metre." },
+  { value: "fixed_charge", label: "Charge: dollars each", amountHelp: "eg 15", summary: "Use this for a fixed add-on charge per quoted item." }
 ];
 
 function optionKeyValue(option: any): string {
@@ -312,12 +312,15 @@ function linkedOptionComponent(field: any, option: any, components: any[]): any 
 function optionUsageModeFromComponent(component: any): string {
   const stockUsage = component?.stockUsage ?? {};
   const ruleType = String(component?.ruleType ?? stockUsage?.usageBasis ?? "yield_based");
+  if (ruleType === "sell_sqm") return "sqm_charge";
+  if (ruleType === "sell_each") return "fixed_charge";
   if (ruleType === "per_linear_metre") return "roll_metres";
-  if (ruleType === "per_sqm") return "sqm";
-  if (ruleType === "per_unit" && String(component?.unit ?? "") === "sheet") return "whole_sheet";
-  if (ruleType === "per_unit") return "each";
+  if (ruleType === "per_sqm") return "sqm_charge";
+  if (ruleType === "per_unit" && String(component?.unit ?? "") === "sheet") return "sheets_per_item";
+  if (ruleType === "per_unit") return component?.materialId ? "fixed_charge" : "fixed_charge";
   if (cleanUsageNumber(stockUsage?.partsPerSheet)) return "parts_per_sheet";
   if (cleanUsageNumber(stockUsage?.sheetsPerUnit)) return "sheets_per_item";
+  if (!component?.materialId && !cleanUsageNumber(stockUsage?.sellRate)) return "none";
   return "auto_sheet";
 }
 
@@ -325,17 +328,30 @@ function optionUsageAmountFromComponent(component: any): string {
   const stockUsage = component?.stockUsage ?? {};
   const mode = optionUsageModeFromComponent(component);
   if (mode === "parts_per_sheet") return cleanUsageNumber(stockUsage?.partsPerSheet);
-  if (mode === "sheets_per_item" || mode === "whole_sheet") return cleanUsageNumber(stockUsage?.sheetsPerUnit) || "1";
+  if (mode === "sheets_per_item") return cleanUsageNumber(stockUsage?.sheetsPerUnit) || "1";
   if (mode === "roll_metres") return cleanUsageNumber(stockUsage?.metresPerUnit);
-  if (mode === "each") return cleanUsageNumber(component?.quantity) || "1";
   return "";
 }
 
 function optionCostingSummaryForField(field: any, components: any[]): string {
   if (!["select", "size_select", "color"].includes(String(field?.type ?? ""))) return "No answer rows needed";
   const choices = Array.isArray(field?.options) ? field.options : [];
-  const costed = choices.filter((choice: any) => linkedOptionComponent(field, choice, components)?.materialId).length;
-  return `${costed}/${choices.length} answer${choices.length === 1 ? "" : "s"} linked to material costing`;
+  const costed = choices.filter((choice: any) => {
+    const linked = linkedOptionComponent(field, choice, components);
+    const ruleType = String(linked?.ruleType ?? linked?.stockUsage?.usageBasis ?? "");
+    return Boolean(linked?.materialId) || ["sell_sqm", "sell_each"].includes(ruleType);
+  }).length;
+  return `${costed}/${choices.length} answer${choices.length === 1 ? "" : "s"} linked to pricing`;
+}
+
+function optionChargeNameFromComponent(component: any): string {
+  return String(component?.stockUsage?.chargeName ?? component?.label ?? "");
+}
+
+function optionRateFromComponent(component: any): string {
+  const mode = optionUsageModeFromComponent(component);
+  if (mode === "sqm_charge" || mode === "fixed_charge") return cleanUsageNumber(component?.stockUsage?.sellRate ?? component?.quantity) || "";
+  return "";
 }
 
 function CostedOptionRows({ materials, field, components = [] }: { materials: any[]; field?: any; components?: any[] }) {
@@ -350,9 +366,15 @@ function CostedOptionRows({ materials, field, components = [] }: { materials: an
   return (
     <div style={{ ...softCardStyle, background: "#fff" }}>
       <div>
-        <strong>Answer lines and material usage</strong>
+        <strong>Answer lines</strong>
         <p style={{ ...mutedStyle, marginTop: 4 }}>
-          Fill one line per selectable answer. Each line can have its own material and usage amount. The first filled answer becomes the default on the quote page.
+          Add the answers staff will pick on the quote. Each line can also add stock usage or a simple charge. Leave cost fields blank for choice-only answers.
+        </p>
+      </div>
+      <div style={{ ...softCardStyle, background: "#eef2ff", borderColor: "#c7d2fe" }}>
+        <strong>Simple examples</strong>
+        <p style={mutedStyle}>
+          Size 600 × 900: choose ACM + Material: parts per sheet + number 8. Ink: choose Charge: dollars per m² + number 10. White ink: choose Charge: dollars per m² + number 10.
         </p>
       </div>
       {materials.length === 0 ? (
@@ -365,30 +387,22 @@ function CostedOptionRows({ materials, field, components = [] }: { materials: an
         {rows.map((row: any, index: number) => {
           const component = row.component;
           const choice = row.choice;
-          const usageMode = component ? optionUsageModeFromComponent(component) : "auto_sheet";
+          const usageMode = component ? optionUsageModeFromComponent(component) : "none";
           const usageHelp = optionUsageModes.find((mode) => mode.value === usageMode)?.amountHelp ?? "optional";
+          const isCharge = usageMode === "sqm_charge" || usageMode === "fixed_charge";
           return (
             <div key={choice?.id ?? row.blankId ?? index} style={{ ...softCardStyle, background: "#fcfcfd" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                <strong>Line {index + 1}</strong>
-                <span style={plainChipStyle}>{component?.materialId ? "Costed" : "Choice only"}</span>
+                <strong>Answer {index + 1}</strong>
+                <span style={component?.materialId || isCharge ? greenChipStyle : plainChipStyle}>{component?.materialId ? "Material cost" : isCharge ? "Charge" : "Choice only"}</span>
               </div>
-              <div style={grid3}>
+              <div style={grid2}>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Answer shown on quote</span>
-                  <input name="optionAnswerLabel" defaultValue={String(choice?.label ?? "")} placeholder="eg 600 x 900 mm, Gloss laminate, Yes" style={inputStyle} />
+                  <input name="optionAnswerLabel" defaultValue={String(choice?.label ?? "")} placeholder="eg 600 x 900 mm, SAV 7YR, Matte, Yes" style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Material used by this answer</span>
-                  <select name="optionMaterialId" defaultValue={String(component?.materialId ?? "")} style={inputStyle}>
-                    <option value="">No material / choice only</option>
-                    {materials.map((material) => (
-                      <option key={material.id} value={material.id}>{material.name}</option>
-                    ))}
-                  </select>
-                </label>
-                <label style={labelStyle}>
-                  <span style={labelTextStyle}>Calculate using</span>
+                  <span style={labelTextStyle}>What does this answer add?</span>
                   <select name="optionUsageMode" defaultValue={usageMode} style={inputStyle}>
                     {optionUsageModes.map((mode) => (
                       <option key={mode.value} value={mode.value}>{mode.label}</option>
@@ -398,11 +412,26 @@ function CostedOptionRows({ materials, field, components = [] }: { materials: an
               </div>
               <div style={grid3}>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Amount</span>
-                  <input name="optionUsageAmount" defaultValue={optionUsageAmountFromComponent(component)} placeholder={usageHelp} style={inputStyle} />
+                  <span style={labelTextStyle}>Material used, if any</span>
+                  <select name="optionMaterialId" defaultValue={String(component?.materialId ?? "")} style={inputStyle}>
+                    <option value="">No stock material</option>
+                    {materials.map((material) => (
+                      <option key={material.id} value={material.id}>{material.name}</option>
+                    ))}
+                  </select>
                 </label>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Waste %</span>
+                  <span style={labelTextStyle}>Charge name, if any</span>
+                  <input name="optionChargeName" defaultValue={isCharge ? optionChargeNameFromComponent(component) : ""} placeholder="eg CMYK ink, White ink" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Number</span>
+                  <input name="optionUsageAmount" defaultValue={isCharge ? optionRateFromComponent(component) : optionUsageAmountFromComponent(component)} placeholder={usageHelp} style={inputStyle} />
+                </label>
+              </div>
+              <div style={grid2}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Waste % for materials</span>
                   <input name="optionWastePercent" defaultValue={String(component?.wastePercent ?? "10")} placeholder="eg 10" style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
@@ -410,7 +439,7 @@ function CostedOptionRows({ materials, field, components = [] }: { materials: an
                   <input name="optionNotes" defaultValue={String(component?.notes ?? "")} placeholder="optional" style={inputStyle} />
                 </label>
               </div>
-              <p style={mutedStyle}>{optionUsageModes.find((mode) => mode.value === usageMode)?.summary ?? "Choose how this answer uses stock. Auto from material type is safest for normal sheet and roll materials."}</p>
+              <p style={mutedStyle}>{optionUsageModes.find((mode) => mode.value === usageMode)?.summary ?? "Choose what this answer adds to the quote price."}</p>
             </div>
           );
         })}
@@ -464,8 +493,8 @@ function MessageBanner({ tone, children }: { tone: "success" | "error"; children
 function SetupMap({ selectedProduct, componentsCount, fieldsCount }: { selectedProduct: any; componentsCount: number; fieldsCount: number }) {
   const items = [
     { title: "1. Name it", body: selectedProduct ? selectedProduct.name : "Create or open a product", ready: Boolean(selectedProduct) },
-    { title: "2. What it uses", body: componentsCount ? `${componentsCount} material/process row${componentsCount === 1 ? "" : "s"}` : "Add stock, media, laminate or labour", ready: componentsCount > 0 },
-    { title: "3. What staff choose", body: fieldsCount ? `${fieldsCount} quote question${fieldsCount === 1 ? "" : "s"}` : "Add size, print, laminate, finishing, qty", ready: fieldsCount > 0 }
+    { title: "2. Add quote choices", body: fieldsCount ? `${fieldsCount} quote question${fieldsCount === 1 ? "" : "s"}` : "Add size, print, laminate, ink, finishing, qty", ready: fieldsCount > 0 },
+    { title: "3. Advanced rows", body: componentsCount ? `${componentsCount} pricing/stock row${componentsCount === 1 ? "" : "s"}` : "Usually created automatically from answer lines", ready: componentsCount > 0 }
   ];
 
   return (
@@ -494,12 +523,12 @@ function SimpleExplanation() {
           <p style={mutedStyle}>The thing you sell. Example: <b>Sign - ACM - 3mm</b>.</p>
         </div>
         <div style={softCardStyle}>
-          <strong>Uses</strong>
-          <p style={mutedStyle}>The stock/processes behind it. Example: ACM sheet, roll vinyl, laminate, cutting labour. Material costs live here.</p>
+          <strong>Quote choices</strong>
+          <p style={mutedStyle}>The answers staff pick later. Example: size, print type, ink, laminate and finishing. Each answer line can add its own stock usage or charge.</p>
         </div>
         <div style={softCardStyle}>
-          <strong>Quote questions</strong>
-          <p style={mutedStyle}>The choices staff answer later. Example: size, print type, laminate, finishing, quantity. No prices are typed here.</p>
+          <strong>Advanced rows</strong>
+          <p style={mutedStyle}>Extra always-used stock or labour. Most products do not need this because answer lines create the pricing rows automatically.</p>
         </div>
       </div>
     </section>
@@ -777,16 +806,16 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
               <div>
-                <p style={tinyLabelStyle}>Step 2</p>
-                <h2 style={sectionHeadingStyle}>What this product uses</h2>
-                <p style={{ ...mutedStyle, marginTop: 6 }}>These rows are the stock, media, laminate, hardware or labour behind the product. Quote pricing is calculated from these linked material rows.</p>
+                <p style={tinyLabelStyle}>Advanced - usually skip</p>
+                <h2 style={sectionHeadingStyle}>Extra stock or process rows</h2>
+                <p style={{ ...mutedStyle, marginTop: 6 }}>Most pricing should be added in the quote answer lines below. Only use this section for something that is always used by the product and is not tied to a specific answer.</p>
               </div>
               <Link href="/materials" style={ghostStyle}>Manage materials</Link>
             </div>
 
             <div style={{ ...softCardStyle, background: "#f6fef9", borderColor: "#abefc6" }}>
-              <strong>How automatic pricing works</strong>
-              <p style={mutedStyle}>Link a material, choose how it is used, and make sure the material has purchase cost plus sheet size or roll width. On the quote page the app calculates: material cost × sheet/roll amount used.</p>
+              <strong>Normal users should use the answer lines below</strong>
+              <p style={mutedStyle}>This advanced area is kept for unusual products. For normal setup, add a quote question such as Size, Print Type or White Ink, then fill in answer lines with parts per sheet, roll metres or dollars per m².</p>
             </div>
 
             {activeMaterials.length === 0 ? (
@@ -1023,9 +1052,9 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
 
           <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <div>
-              <p style={tinyLabelStyle}>Step 3</p>
-              <h2 style={sectionHeadingStyle}>Questions asked while quoting</h2>
-              <p style={{ ...mutedStyle, marginTop: 6 }}>Add the choices staff pick on quotes. Each answer line can also say what material it uses and how much of the sheet or roll it consumes.</p>
+              <p style={tinyLabelStyle}>Step 2</p>
+              <h2 style={sectionHeadingStyle}>Quote choices and costing</h2>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>Add one question, then fill in the answer lines. Each answer can be choice-only, material usage, or a simple charge such as ink at $10/m².</p>
             </div>
 
             {fields.length === 0 ? (
@@ -1145,8 +1174,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             <form action={addProductOptionAction} style={{ ...softCardStyle, background: "#f8fafc" }}>
               <input type="hidden" name="productId" value={selectedProduct.id} />
               <div>
-                <h3 style={{ margin: 0, fontSize: 18 }}>Add an option with its costing rows</h3>
-                <p style={{ ...mutedStyle, marginTop: 4 }}>Example: Question = Size, then lines for 450 × 600, 600 × 900, 900 × 1200, each with its own material and parts-per-sheet/roll usage.</p>
+                <h3 style={{ margin: 0, fontSize: 18 }}>Add a quote question</h3>
+                <p style={{ ...mutedStyle, marginTop: 4 }}>Example: Question = White Ink. Answers = No extra cost, Yes with Charge: dollars per m² and number 10.</p>
               </div>
               <div style={grid3}>
                 <label style={labelStyle}>

@@ -174,6 +174,50 @@ function component(input: {
   };
 }
 
+function sellChargeComponent(input: {
+  label: string;
+  rate: string;
+  unit: "sqm" | "each";
+  triggerOptionKey?: string | null;
+  triggerOptionValues?: string[];
+  notes: string;
+}) {
+  const ruleType = input.unit === "sqm" ? "sell_sqm" : "sell_each";
+  return {
+    id: randomUUID(),
+    kind: "material",
+    role: "quote_sell_charge",
+    materialId: null,
+    supplierId: null,
+    labourRateName: null,
+    label: input.label,
+    quantity: input.rate,
+    unit: input.unit,
+    notes: input.notes,
+    ruleType,
+    wastePercent: "0",
+    stockUsage: {
+      usageBasis: ruleType,
+      dimensionSource: input.unit === "sqm" ? "finished_size" : "quantity_only",
+      optionKey: input.triggerOptionKey ?? null,
+      optionValues: input.triggerOptionValues ?? [],
+      widthMm: null,
+      heightMm: null,
+      rollWidthMm: null,
+      partsPerSheet: null,
+      metresPerUnit: null,
+      sheetsPerUnit: null,
+      sellRate: input.rate,
+      chargeName: input.label
+    },
+    trigger: {
+      optionKey: input.triggerOptionKey ?? null,
+      optionValue: null,
+      optionValues: input.triggerOptionValues ?? []
+    }
+  };
+}
+
 function mergeByKey(existingFields: Array<Record<string, any>>, incomingFields: Array<Record<string, any>>) {
   const existingKeys = new Set(existingFields.map((field) => field.key));
   return [...existingFields, ...incomingFields.filter((field) => !existingKeys.has(field.key))];
@@ -299,13 +343,15 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
       quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "600x900", optionsCsv: "600x900,450x600,300x450,Custom=custom", helpText: "Quote-time sign size. This allocates part of the parent sheet and drives print/laminate area." }),
       quoteField({ key: "print_method", label: "Print type", type: "select", defaultValue: "direct_print", optionsCsv: "Direct print=direct_print,Roll stock applied=roll_stock", helpText: "Direct print uses ink on the base sheet. Roll stock adds a separate roll media layer." }),
       quoteField({ key: "roll_stock_type", label: "Roll stock", type: "select", defaultValue: "white", optionsCsv: "White print vinyl=white,Clear reverse print=clear_reverse", helpText: "Only used when Print type is Roll stock applied.", showWhen: { optionKey: "print_method", optionValues: ["roll_stock"] } }),
+      quoteField({ key: "white_ink", label: "White ink", type: "yes_no", defaultValue: "no", optionsCsv: "No=no,Yes=yes", helpText: "Adds the white ink square-metre charge when required.", showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] } }),
       quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: "none", optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate", helpText: "Optional laminate. Laminate stock is only consumed when gloss or matt is selected." }),
       quoteField({ key: "finishing", label: "Finishing", type: "select", defaultValue: "none", optionsCsv: "None=none,Jingwei cutting=jingwei_cutting,Router/CNC cut=cnc_cut,Drill holes=drill_holes", helpText: "Optional finishing choice for the quoted sign." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "1", helpText: "Number of finished signs being quoted." })
     );
     components.push(
       ...makeBaseMaterialComponent(baseMaterialId, baseUsage, baseLabel),
-      component({ label: "Direct print ink", role: "quote_consumable", ruleType: "per_sqm", unit: "sqm", wastePercent: "5", triggerOptionKey: "print_method", triggerOptionValues: ["direct_print"], notes: "Quote option: only used when Print type is Direct print." }),
+      sellChargeComponent({ label: "CMYK Ink", rate: "10", unit: "sqm", triggerOptionKey: "print_method", triggerOptionValues: ["direct_print", "roll_stock"], notes: "Simple print charge: finished square metres × $10/m²." }),
+      sellChargeComponent({ label: "White Ink", rate: "10", unit: "sqm", triggerOptionKey: "white_ink", triggerOptionValues: ["yes"], notes: "White ink extra: finished square metres × $10/m² when White ink is Yes." }),
       component({ label: "Roll stock layer", role: "quote_selected_material", ruleType: "per_linear_metre", unit: "lm", triggerOptionKey: "print_method", triggerOptionValues: ["roll_stock"], notes: "Optional roll material layer. Link white or clear roll stock material if this product needs it." }),
       component({ label: "Laminate roll", role: "quote_selected_material", ruleType: "per_linear_metre", unit: "lm", triggerOptionKey: "laminate", triggerOptionValues: ["gloss_laminate", "matt_laminate"], notes: "Optional laminate material, triggered by the Laminate quote choice." }),
       component({ label: "Jingwei / cutting labour", kind: "labour", role: "quote_finishing", ruleType: "selected_by_option", unit: "each", triggerOptionKey: "finishing", triggerOptionValues: ["jingwei_cutting", "cnc_cut"], labourRateName: "Cutting", notes: "Only applies when a cutting finish is chosen on the quote." })
@@ -321,7 +367,7 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
     );
     components.push(
       ...makeBaseMaterialComponent(baseMaterialId, baseUsage === "part_sheet" ? "roll_metres" : baseUsage, baseLabel),
-      component({ label: "Banner print ink", role: "quote_consumable", ruleType: "per_sqm", unit: "sqm", wastePercent: "5", notes: "Ink/print coverage driven by banner size." }),
+      sellChargeComponent({ label: "CMYK Ink", rate: "10", unit: "sqm", notes: "Simple print charge: finished square metres × $10/m²." }),
       component({ label: "Eyelets / hem finishing", role: "quote_finishing", ruleType: "selected_by_option", unit: "each", triggerOptionKey: "banner_finish", triggerOptionValues: ["hem_eyelets", "pole_pockets", "keder"], notes: "Finishing consumables/labour triggered by banner finish." })
     );
   }
@@ -335,7 +381,7 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
     );
     components.push(
       ...makeBaseMaterialComponent(baseMaterialId, "roll_metres", baseLabel),
-      component({ label: "Print ink", role: "quote_consumable", ruleType: "per_sqm", unit: "sqm", wastePercent: "5", notes: "Ink/print area driven by finished size." }),
+      sellChargeComponent({ label: "CMYK Ink", rate: "10", unit: "sqm", notes: "Simple print charge: finished square metres × $10/m²." }),
       component({ label: "Laminate roll", role: "quote_selected_material", ruleType: "per_linear_metre", unit: "lm", triggerOptionKey: "laminate", triggerOptionValues: ["gloss_laminate", "matt_laminate", "anti_graffiti"], notes: "Only used when a laminate is chosen." })
     );
   }
@@ -585,6 +631,7 @@ type CostedOptionRow = {
   usageAmount: string | null;
   wastePercent: string;
   notes: string;
+  chargeName: string;
 };
 
 function optionalNumberText(value: unknown): string | null {
@@ -600,7 +647,8 @@ function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
   const usageAmounts = readStringArray(formData, "optionUsageAmount");
   const wastePercents = readStringArray(formData, "optionWastePercent");
   const notes = readStringArray(formData, "optionNotes");
-  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length);
+  const chargeNames = readStringArray(formData, "optionChargeName");
+  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length, chargeNames.length);
 
   const rows: CostedOptionRow[] = [];
   for (let index = 0; index < totalRows; index += 1) {
@@ -613,7 +661,8 @@ function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
       usageMode: String(usageModes[index] ?? "auto_sheet").trim() || "auto_sheet",
       usageAmount: optionalNumberText(usageAmounts[index]),
       wastePercent: safeNumberString(String(wastePercents[index] ?? "10"), "10"),
-      notes: String(notes[index] ?? "").trim()
+      notes: String(notes[index] ?? "").trim(),
+      chargeName: String(chargeNames[index] ?? "").trim()
     });
   }
 
@@ -626,44 +675,61 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
   const rows = costedOptionRowsFromForm(formData);
 
   return rows.flatMap((row, index) => {
-    if (!row.materialId) return [];
-
     const option = options[index] ?? parseChoice(row.answerLabel);
     const optionValue = String(option.value ?? option.label ?? "").trim();
     if (!fieldKey || !optionValue) return [];
 
-    const usageMode = row.usageMode || "auto_sheet";
+    const usageMode = row.usageMode || "none";
+    if (usageMode === "none") return [];
+
     const usageAmount = row.usageAmount;
+    const isChargePerSqm = usageMode === "sqm_charge";
+    const isFixedCharge = usageMode === "fixed_charge";
     const isRoll = usageMode === "roll_metres";
-    const isArea = usageMode === "sqm";
-    const isEach = usageMode === "each";
-    const isWholeSheet = usageMode === "whole_sheet";
-    const amountForEach = isEach ? (usageAmount ?? "1") : "1";
+    const isEach = isFixedCharge;
+    const isWholeSheet = usageMode === "sheets_per_item";
+    const isPartsPerSheet = usageMode === "parts_per_sheet";
+    const isMaterialAuto = usageMode === "auto_sheet";
+    const isMaterialMode = isMaterialAuto || isPartsPerSheet || isWholeSheet || isRoll;
+
+    if (isMaterialMode && !row.materialId) return [];
+    if ((isChargePerSqm || isFixedCharge) && !usageAmount) return [];
+
+    const chargeName = row.chargeName || `${String(field.label ?? "Charge")}: ${String(option.label ?? row.answerLabel)}`;
+    const componentLabel = isChargePerSqm || isFixedCharge
+      ? chargeName
+      : `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)}`;
 
     return [{
       id: randomUUID(),
       kind: "material",
-      role: "quote_selected_material",
-      materialId: row.materialId,
+      role: isChargePerSqm || isFixedCharge ? "quote_sell_charge" : "quote_selected_material",
+      materialId: isChargePerSqm || isFixedCharge ? null : row.materialId,
       supplierId: null,
       labourRateName: null,
-      label: `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)}`,
-      quantity: amountForEach,
-      unit: isRoll ? "lm" : isArea ? "sqm" : isEach ? "each" : "sheet",
-      notes: row.notes || `Auto-cost row for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`,
-      ruleType: isRoll ? "per_linear_metre" : isArea ? "per_sqm" : isEach || isWholeSheet ? "per_unit" : "yield_based",
-      wastePercent: row.wastePercent,
+      label: componentLabel,
+      quantity: isFixedCharge ? (usageAmount ?? "0") : "1",
+      unit: isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : "sheet",
+      notes: row.notes || (isChargePerSqm
+        ? `Sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Calculates from finished square metres.`
+        : isFixedCharge
+          ? `Fixed sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`
+          : `Auto-cost row for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`),
+      ruleType: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+      wastePercent: isChargePerSqm || isFixedCharge ? "0" : row.wastePercent,
       stockUsage: {
-        usageBasis: isRoll ? "per_linear_metre" : isArea ? "per_sqm" : isEach || isWholeSheet ? "per_unit" : "yield_based",
-        dimensionSource: isEach ? "quantity_only" : "finished_size",
+        usageBasis: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+        dimensionSource: isFixedCharge ? "quantity_only" : "finished_size",
         optionKey: fieldKey,
         optionValues: [optionValue],
         widthMm: null,
         heightMm: null,
         rollWidthMm: null,
-        partsPerSheet: usageMode === "parts_per_sheet" ? usageAmount : null,
+        partsPerSheet: isPartsPerSheet ? usageAmount : null,
         metresPerUnit: isRoll ? usageAmount : null,
-        sheetsPerUnit: usageMode === "sheets_per_item" || isWholeSheet ? (usageAmount ?? "1") : null
+        sheetsPerUnit: isWholeSheet ? (usageAmount ?? "1") : null,
+        sellRate: isChargePerSqm || isFixedCharge ? usageAmount : null,
+        chargeName: isChargePerSqm || isFixedCharge ? chargeName : null
       },
       trigger: {
         optionKey: fieldKey,

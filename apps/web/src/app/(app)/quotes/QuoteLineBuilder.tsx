@@ -47,6 +47,8 @@ type QuoteComponent = {
     partsPerSheet?: string | null;
     metresPerUnit?: string | null;
     sheetsPerUnit?: string | null;
+    sellRate?: string | null;
+    chargeName?: string | null;
   } | null;
   trigger?: {
     optionKey?: string | null;
@@ -407,14 +409,47 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
     .filter((component) => String(component.kind ?? "material") !== "labour")
     .filter((component) => componentApplies(component, answers))
     .flatMap((component): CostBreakdownItem[] => {
+      const rawRuleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
+      const dimensions = dimensionsForComponent(product.fields, answers, component);
+      const allowance = componentAllowance(component);
+      const waste = wasteMultiplier(component);
+      const componentLabel = String(component.stockUsage?.chargeName ?? component.label ?? "Material");
+
+      if (rawRuleType === "sell_sqm") {
+        const area = dimensions ? (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000) : 0;
+        const rate = numberValue(component.stockUsage?.sellRate, numberValue(component.quantity, 0));
+        const amount = area * allowance;
+        return [costBreakdownItem({
+          componentLabel,
+          materialName: "Sell charge",
+          basis: "Square metre charge",
+          amount,
+          unit: "sqm",
+          rate,
+          cost: amount * rate,
+          note: "price rule from product answer line"
+        })];
+      }
+
+      if (rawRuleType === "sell_each") {
+        const rate = numberValue(component.stockUsage?.sellRate, numberValue(component.quantity, 0));
+        const amount = allowance;
+        return [costBreakdownItem({
+          componentLabel,
+          materialName: "Sell charge",
+          basis: "Fixed charge",
+          amount,
+          unit: "each",
+          rate,
+          cost: amount * rate,
+          note: "price rule from product answer line"
+        })];
+      }
+
       const material = materialFor(materials, component.materialId);
       if (!material) return [];
 
       const ruleType = normalizedRuleTypeFor(component, material);
-      const dimensions = dimensionsForComponent(product.fields, answers, component);
-      const allowance = componentAllowance(component);
-      const waste = wasteMultiplier(component);
-      const componentLabel = String(component.label ?? "Material");
 
       if (ruleType === "per_linear_metre") {
         const fixedMetresPerUnit = numberValue(component.stockUsage?.metresPerUnit, 0);
@@ -512,6 +547,7 @@ function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: R
   return product.components
     .filter((component) => String(component.kind ?? "material") !== "labour")
     .filter((component) => componentApplies(component, answers))
+    .filter((component) => !["sell_sqm", "sell_each"].includes(String(component.ruleType ?? component.stockUsage?.usageBasis ?? "")))
     .filter((component) => !component.materialId);
 }
 
@@ -592,7 +628,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div>
             <strong>2. Select options for this quote line</strong>
-            <p style={{ ...mutedStyle, marginTop: 4 }}>These answers decide which product material rows apply. The price below is calculated from material cost × sheet/roll usage.</p>
+            <p style={{ ...mutedStyle, marginTop: 4 }}>These answers decide which product price rules apply. The price below can include material usage, roll length, ink per m² and fixed charges.</p>
           </div>
           <span style={chipStyle}>{visibleFields.length} option{visibleFields.length === 1 ? "" : "s"}</span>
         </div>
@@ -679,7 +715,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
       </div>
 
       <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, display: "grid", gap: 12 }}>
-        <strong>3. Material cost and add line</strong>
+        <strong>3. Calculated price and add line</strong>
         <div style={{ display: "grid", gridTemplateColumns: quantityField ? "1fr" : "1fr 1fr", gap: 10 }}>
           {!quantityField ? (
             <label style={labelStyle}>
@@ -705,8 +741,8 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         </div>
 
         <div style={priceCardStyle}>
-          <span style={{ fontSize: 12, fontWeight: 900, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated from material usage</span>
-          <strong>{formatMoney(autoUnitPrice)} per unit · {formatMoney(autoLineTotal)} line material cost at qty {formatUsage(quantityNumber)}</strong>
+          <span style={{ fontSize: 12, fontWeight: 900, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated from product rules</span>
+          <strong>{formatMoney(autoUnitPrice)} per unit · {formatMoney(autoLineTotal)} line calculated cost at qty {formatUsage(quantityNumber)}</strong>
           {materialBreakdown.length > 0 ? (
             <div style={{ display: "grid", gap: 6 }}>
               {materialBreakdown.map((item) => (
@@ -717,7 +753,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
               ))}
             </div>
           ) : (
-            <span style={{ color: "#667085", fontSize: 13 }}>No material cost yet. Link materials to this product's Step 2 rows, add material purchase costs, and make sure the selected size has dimensions.</span>
+            <span style={{ color: "#667085", fontSize: 13 }}>No automatic price yet. Add answer lines on the Products page with material usage or simple charges such as ink at dollars per m².</span>
           )}
           {missingMaterials.length > 0 ? (
             <span style={{ color: "#b54708", fontSize: 13 }}>
