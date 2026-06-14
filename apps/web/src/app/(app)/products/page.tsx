@@ -26,6 +26,8 @@ type ProductsPageProps = {
 type Choice = {
   label?: string | null;
   value?: string | null;
+  priceDelta?: string | null;
+  price?: string | null;
 };
 
 type StarterType = {
@@ -125,13 +127,40 @@ function defaultAnswerFromField(field: any): string {
   return String(matched?.label ?? defaultValue).replace(/_/g, " ");
 }
 
+function optionPrice(option: Choice | null | undefined): string {
+  const raw = String(option?.priceDelta ?? option?.price ?? "0").replace(/,/g, "").replace(/\$/g, "").trim();
+  const amount = Number(raw);
+  return Number.isFinite(amount) ? amount.toFixed(2) : "0.00";
+}
+
+function formatPrice(value: string | number | null | undefined): string {
+  const amount = Number(String(value ?? "0").replace(/,/g, "").replace(/\$/g, ""));
+  if (!Number.isFinite(amount) || amount === 0) return "$0";
+  return `$${amount.toFixed(2)}`;
+}
+
+function choiceTextForSetup(option: Choice): string {
+  const label = String(option?.label ?? option?.value ?? "").trim();
+  const value = String(option?.value ?? label).trim();
+  const choice = !label || label === value ? value : `${label}=${value}`;
+  const price = optionPrice(option);
+  return Number(price) === 0 ? choice : `${choice} | ${price}`;
+}
+
+function defaultPriceFromField(field: any): string {
+  const defaultValue = String(field?.defaultValue ?? "");
+  if (!Array.isArray(field?.options) || !defaultValue) return "0.00";
+  const matched = field.options.find((option: Choice) => String(option?.value ?? option?.label ?? "") === defaultValue);
+  return optionPrice(matched);
+}
+
 function otherChoicesCsvFromField(field: any): string {
   if (!Array.isArray(field?.options) || field.options.length === 0) return "";
   const defaultValue = String(field?.defaultValue ?? "");
   return field.options
     .filter((option: Choice) => String(option?.value ?? "") !== defaultValue)
-    .map((option: Choice) => String(option?.label ?? option?.value ?? ""))
-    .join(", ");
+    .map(choiceTextForSetup)
+    .join("\n");
 }
 
 function showWhenOptionKeyFromField(field: any): string {
@@ -145,7 +174,22 @@ function showWhenValuesCsvFromField(field: any): string {
 function optionChoicesSummary(field: any): string {
   if (!["select", "size_select", "color"].includes(String(field?.type ?? ""))) return defaultAnswerFromField(field) || "Typed by staff";
   if (!Array.isArray(field?.options) || field.options.length === 0) return "No choices yet";
-  return field.options.map((option: Choice) => String(option.label ?? option.value ?? "")).filter(Boolean).join(", ");
+  return field.options
+    .map((option: Choice) => {
+      const label = String(option.label ?? option.value ?? "");
+      const price = optionPrice(option);
+      return Number(price) === 0 ? label : `${label} (${formatPrice(price)})`;
+    })
+    .filter(Boolean)
+    .join(", ");
+}
+
+function optionPricingSummary(field: any): string {
+  if (!["select", "size_select", "color", "yes_no"].includes(String(field?.type ?? ""))) return "No option prices";
+  if (!Array.isArray(field?.options) || field.options.length === 0) return "No option prices yet";
+  const priced = field.options.filter((option: Choice) => Number(optionPrice(option)) !== 0);
+  if (priced.length === 0) return "All choices currently $0";
+  return priced.map((option: Choice) => `${option.label ?? option.value}: ${formatPrice(optionPrice(option))}`).join(" · ");
 }
 
 function conditionSummary(component: any, fields: any[]): string {
@@ -761,7 +805,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             <div>
               <p style={tinyLabelStyle}>Step 3</p>
               <h2 style={sectionHeadingStyle}>Questions asked while quoting</h2>
-              <p style={{ ...mutedStyle, marginTop: 6 }}>These are the fields staff answer after choosing this product on a quote.</p>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>These are the fields staff answer after choosing this product on a quote. Dropdown choices can include prices so the quote line calculates automatically.</p>
             </div>
 
             {fields.length === 0 ? (
@@ -787,6 +831,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                           </div>
                           <div style={mutedStyle}>Default: {defaultAnswerFromField(field) || "None"} · {field.required === false ? "Optional" : "Required"}</div>
                           <div style={mutedStyle}>Choices: {optionChoicesSummary(field)}</div>
+                          <div style={mutedStyle}>Prices: {optionPricingSummary(field)}</div>
                           {field.showWhen?.optionKey ? <div style={mutedStyle}>Only appears when {field.showWhen.optionKey}: {showWhenValuesCsvFromField(field) || "any value"}</div> : null}
                           {field.helpText ? <div style={mutedStyle}>{field.helpText}</div> : null}
                         </div>
@@ -837,11 +882,16 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                               <span style={labelTextStyle}>Default answer</span>
                               <input name="defaultAnswer" defaultValue={defaultAnswerFromField(field)} style={inputStyle} />
                             </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Default price</span>
+                              <input name="defaultPrice" type="number" min="0" step="0.01" defaultValue={defaultPriceFromField(field)} style={inputStyle} />
+                            </label>
                           </div>
                           <div style={grid2}>
                             <label style={labelStyle}>
-                              <span style={labelTextStyle}>Other answers</span>
-                              <input name="otherOptionsCsv" defaultValue={otherChoicesCsvFromField(field)} placeholder="Comma separated" style={inputStyle} />
+                              <span style={labelTextStyle}>Other answers and prices</span>
+                              <textarea name="otherOptionsCsv" defaultValue={otherChoicesCsvFromField(field)} placeholder={"900x1200 | 85\nCustom=custom | 0"} style={textareaStyle} />
+                              <small style={{ color: "#667085" }}>One per line. Use: Choice label | price. The price becomes the unit price part on the quote.</small>
                             </label>
                             <label style={labelStyle}>
                               <span style={labelTextStyle}>Required?</span>
@@ -912,11 +962,16 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   <span style={labelTextStyle}>Default answer</span>
                   <input name="defaultAnswer" placeholder="eg 600x900 or None" style={inputStyle} />
                 </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Default price</span>
+                  <input name="defaultPrice" type="number" min="0" step="0.01" defaultValue="0.00" style={inputStyle} />
+                </label>
               </div>
               <div style={grid2}>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Other answers</span>
-                  <input name="otherOptionsCsv" placeholder="eg 450x600, 900x1200, Custom=custom" style={inputStyle} />
+                  <span style={labelTextStyle}>Other answers and prices</span>
+                  <textarea name="otherOptionsCsv" placeholder={"450x600 | 35\n900x1200 | 85\nCustom=custom | 0"} style={textareaStyle} />
+                  <small style={{ color: "#667085" }}>One per line. Use: Choice label | price. Leave price as 0 for choices that should not add cost.</small>
                 </label>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Required?</span>

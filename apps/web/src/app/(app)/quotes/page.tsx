@@ -15,6 +15,7 @@ type QuoteChoice = {
   id?: string | null;
   label?: string | null;
   value?: string | null;
+  priceDelta?: string | null;
 };
 
 type QuoteQuestion = {
@@ -55,7 +56,8 @@ function cleanQuoteQuestions(definition: Record<string, any> | null | undefined)
         ? field.options.map((option: any) => ({
             id: option?.id ? String(option.id) : null,
             label: option?.label ? String(option.label) : String(option?.value ?? ""),
-            value: String(option?.value ?? option?.label ?? "")
+            value: String(option?.value ?? option?.label ?? ""),
+            priceDelta: option?.priceDelta == null && option?.price == null ? "0" : String(option.priceDelta ?? option.price)
           })).filter((option: QuoteChoice) => String(option.value ?? "").length > 0)
         : [];
 

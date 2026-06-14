@@ -13,8 +13,14 @@ function readString(formData: FormData, key: string): string {
 
 function safeNumberString(value: string, fallback: string): string {
   if (!value) return fallback;
-  const normalized = value.replace(/,/g, "").trim();
+  const normalized = value.replace(/,/g, "").replace(/\$/g, "").trim();
   return Number.isFinite(Number(normalized)) ? normalized : fallback;
+}
+
+function safeMoneyString(value: string, fallback = "0"): string {
+  const normalized = safeNumberString(value, fallback);
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? amount.toFixed(2) : fallback;
 }
 
 function keyFromLabel(value: string): string {
@@ -32,6 +38,13 @@ function splitCsv(value: string): string[] {
     .filter(Boolean);
 }
 
+function splitChoiceEntries(value: string): string[] {
+  return value
+    .split(/\r?\n|,/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+}
+
 function labelFromValue(value: string): string {
   return value
     .replace(/_/g, " ")
@@ -40,14 +53,30 @@ function labelFromValue(value: string): string {
 }
 
 function parseChoice(entry: string) {
-  const [rawLabel, rawValue] = entry.includes("=") ? entry.split("=").map((part) => part.trim()) : [entry.trim(), entry.trim()];
+  const pipeParts = entry.split("|").map((part) => part.trim());
+  let choicePart = pipeParts[0] ?? "";
+  let pricePart = pipeParts.length > 1 ? pipeParts.slice(1).join("|") : "";
+
+  if (!pricePart) {
+    const atPrice = choicePart.match(/\s*@\s*\$?(-?\d+(?:\.\d+)?)\s*$/);
+    if (atPrice) {
+      pricePart = atPrice[1] ?? "0";
+      choicePart = choicePart.slice(0, atPrice.index).trim();
+    }
+  }
+
+  const equalsIndex = choicePart.indexOf("=");
+  const rawLabel = equalsIndex >= 0 ? choicePart.slice(0, equalsIndex).trim() : choicePart.trim();
+  const rawValue = equalsIndex >= 0 ? choicePart.slice(equalsIndex + 1).trim() : choicePart.trim();
   const value = rawValue || keyFromLabel(rawLabel);
   const sizeMatch = value.match(/^(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*mm)?$/i);
+  const priceDelta = safeMoneyString(pricePart, "0");
 
   return {
     id: randomUUID(),
     label: rawLabel.includes("x") || rawLabel.includes("×") ? labelFromValue(rawLabel) : rawLabel || labelFromValue(value),
     value: keyFromLabel(value) === "option" ? value : value.replace(/\s+/g, "_"),
+    priceDelta,
     widthMm: sizeMatch ? sizeMatch[1] : null,
     heightMm: sizeMatch ? sizeMatch[2] : null
   };
@@ -73,7 +102,7 @@ function quoteField(input: {
     helpText: input.helpText,
     quoteOnly: true,
     showWhen: input.showWhen ?? null,
-    options: splitCsv(input.optionsCsv ?? "").map(parseChoice),
+    options: splitChoiceEntries(input.optionsCsv ?? "").map(parseChoice),
     rule: {
       effectType: "none",
       effectTarget: null,
@@ -540,11 +569,12 @@ function fieldOptionCsv(field: Record<string, any>, includeDefault: boolean): st
     .map((option: Record<string, any>) => {
       const label = String(option.label ?? option.value ?? "").trim();
       const value = String(option.value ?? label).trim();
-      if (!label) return value;
-      return label === value ? label : `${label}=${value}`;
+      const priceDelta = safeMoneyString(String(option.priceDelta ?? option.price ?? "0"), "0");
+      const choiceText = !label || label === value ? value : `${label}=${value}`;
+      return Number(priceDelta) === 0 ? choiceText : `${choiceText} | ${priceDelta}`;
     })
     .filter(Boolean)
-    .join(",");
+    .join("\n");
 }
 
 function buildFieldFromForm(formData: FormData, existingField?: Record<string, any>) {
@@ -552,6 +582,7 @@ function buildFieldFromForm(formData: FormData, existingField?: Record<string, a
   const key = keyFromLabel(readString(formData, "key") || existingField?.key || label);
   const fieldType = readString(formData, "fieldType") || existingField?.type || "select";
   const defaultAnswer = readString(formData, "defaultAnswer");
+  const defaultPrice = safeMoneyString(readString(formData, "defaultPrice"), String(existingField?.options?.find((option: Record<string, any>) => String(option.value ?? "") === String(existingField?.defaultValue ?? ""))?.priceDelta ?? existingField?.options?.find((option: Record<string, any>) => String(option.value ?? "") === String(existingField?.defaultValue ?? ""))?.price ?? "0"));
   const otherOptionsCsv = readString(formData, "otherOptionsCsv");
   const helpText = readString(formData, "helpText") || existingField?.helpText || "Shown after this product is selected on a quote.";
   const required = readString(formData, "required") !== "no";
@@ -563,9 +594,9 @@ function buildFieldFromForm(formData: FormData, existingField?: Record<string, a
 
   if (["select", "size_select", "color"].includes(fieldType)) {
     if (defaultAnswer) {
-      const parsedDefault = parseChoice(defaultAnswer);
+      const parsedDefault = { ...parseChoice(defaultAnswer), priceDelta: defaultPrice };
       defaultValue = parsedDefault.value;
-      options = [parsedDefault, ...splitCsv(otherOptionsCsv).map(parseChoice)];
+      options = [parsedDefault, ...splitChoiceEntries(otherOptionsCsv).map(parseChoice)];
     } else if (existingField?.defaultValue) {
       defaultValue = String(existingField.defaultValue);
       options = Array.isArray(existingField.options) ? existingField.options : [];
