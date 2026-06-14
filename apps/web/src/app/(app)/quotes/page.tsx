@@ -5,9 +5,79 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listProductsForTenant } from "@/server/products";
-import { createQuoteDraftAction, addQuoteLineAction } from "./actions";
+import { getConfiguratorTemplateById } from "@/server/configurators";
+import { createQuoteDraftAction } from "./actions";
+import { QuoteLineBuilder } from "./QuoteLineBuilder";
 import { getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 
+
+type QuoteChoice = {
+  id?: string | null;
+  label?: string | null;
+  value?: string | null;
+};
+
+type QuoteQuestion = {
+  id?: string | null;
+  key: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  defaultValue?: string | null;
+  helpText?: string | null;
+  options?: QuoteChoice[];
+  showWhen?: {
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+  } | null;
+};
+
+type QuoteProduct = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  fields: QuoteQuestion[];
+};
+
+function cleanQuestionKey(value: unknown, fallback: string): string {
+  const raw = String(value ?? fallback).trim();
+  return raw || fallback;
+}
+
+function cleanQuoteQuestions(definition: Record<string, any> | null | undefined): QuoteQuestion[] {
+  const rawFields = Array.isArray(definition?.fields) ? definition?.fields ?? [] : [];
+
+  return rawFields
+    .map((field: any, index: number) => {
+      const label = String(field?.label ?? `Option ${index + 1}`).trim();
+      const key = cleanQuestionKey(field?.key, `option_${index + 1}`);
+      const options = Array.isArray(field?.options)
+        ? field.options.map((option: any) => ({
+            id: option?.id ? String(option.id) : null,
+            label: option?.label ? String(option.label) : String(option?.value ?? ""),
+            value: String(option?.value ?? option?.label ?? "")
+          })).filter((option: QuoteChoice) => String(option.value ?? "").length > 0)
+        : [];
+
+      return {
+        id: field?.id ? String(field.id) : key,
+        key,
+        label: label || key,
+        type: String(field?.type ?? "text"),
+        required: field?.required !== false,
+        defaultValue: field?.defaultValue == null ? null : String(field.defaultValue),
+        helpText: field?.helpText == null ? null : String(field.helpText),
+        options,
+        showWhen: field?.showWhen?.optionKey
+          ? {
+              optionKey: String(field.showWhen.optionKey),
+              optionValues: Array.isArray(field.showWhen.optionValues) ? field.showWhen.optionValues.map(String) : []
+            }
+          : null
+      };
+    })
+    .filter((field: QuoteQuestion) => field.label.length > 0);
+}
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -46,7 +116,18 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null)
   ]);
-  const quoteLines = selectedQuote ? await listQuoteLines(selectedQuote.id) : [];
+  const [quoteLines, productTemplates] = await Promise.all([
+    selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
+    Promise.all(products.map((product) => product.defaultTemplateId
+      ? getConfiguratorTemplateById(activeTenant.tenantId, product.defaultTemplateId)
+      : Promise.resolve(null)))
+  ]);
+  const quoteProducts: QuoteProduct[] = products.map((product, index) => ({
+    id: product.id,
+    name: product.name,
+    sku: product.sku,
+    fields: cleanQuoteQuestions(productTemplates[index]?.definitionJson)
+  }));
   const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
   const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
@@ -59,7 +140,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
         <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Quote entry</p>
         <h1 style={{ margin: 0 }}>Fast quote setup from enquiry or survey</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a base product, preset options, and quantity. MYOB linkage can happen later when the quote/job is ready.</p>
+        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a base product, answer its quote questions, set the price, then add the line. MYOB linkage can happen later when the quote/job is ready.</p>
       </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
@@ -100,24 +181,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, display: "grid", gap: 16 }}>
               <div>
                 <h3 style={{ margin: 0 }}>Selected quote: {selectedQuote.clientName}</h3>
-                <p style={{ margin: "6px 0 0", color: "#667085" }}>Add fast quote lines by choosing a base product, a preset option summary, and quantity.</p>
+                <p style={{ margin: "6px 0 0", color: "#667085" }}>Add quote lines by choosing a product, then selecting the options/questions you set up on the Products page.</p>
               </div>
-              <form action={addQuoteLineAction} style={{ display: "grid", gap: 12 }}>
-                <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                <select name="productId" style={inputStyle}>
-                  <option value="">Choose base product</option>
-                  {products.map((product) => (
-                    <option key={product.id} value={product.id}>{product.name}</option>
-                  ))}
-                </select>
-                <input name="optionSummary" placeholder="Preset options (eg 600x900, direct print, matte laminate)" style={inputStyle} />
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                  <input name="quantity" defaultValue="1" placeholder="Quantity" style={inputStyle} />
-                  <input name="unitPrice" defaultValue="0" placeholder="Unit price" style={inputStyle} />
-                </div>
-                <textarea name="notes" placeholder="Line notes" style={textareaStyle} />
-                <button type="submit" style={buttonStyle}>Add quote line</button>
-              </form>
+              <QuoteLineBuilder quoteId={selectedQuote.id} products={quoteProducts} />
 
               <div style={{ display: "grid", gap: 10 }}>
                 <h4 style={{ margin: 0 }}>Quote lines</h4>
