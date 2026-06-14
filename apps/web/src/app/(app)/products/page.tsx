@@ -180,7 +180,7 @@ function optionChoicesSummary(field: any): string {
 
 function materialCostingSummary(field: any): string {
   if (["quantity", "number", "text"].includes(String(field?.type ?? ""))) return "This answer helps quantity/notes only";
-  return "Cost comes from Step 2 material rows that match this answer";
+  return "Cost can be set directly on each answer line";
 }
 
 function conditionSummary(component: any, fields: any[]): string {
@@ -274,6 +274,147 @@ function UsageAmountFields({ component }: { component?: any }) {
         </label>
       </div>
       <p style={mutedStyle}>Examples: ACM sign auto-calculates from size and parent sheet. A fixed full sheet uses <b>Sheets per item = 1</b>. A roll option can use <b>Roll metres per item = 1.2</b>. If one sheet yields 8 pieces, enter <b>Items per sheet = 8</b>.</p>
+    </div>
+  );
+}
+
+const optionUsageModes = [
+  { value: "auto_sheet", label: "Auto from finished size", amountHelp: "leave blank", summary: "Uses quoted size ÷ parent sheet/roll size." },
+  { value: "parts_per_sheet", label: "Parts per sheet", amountHelp: "eg 8", summary: "Enter how many finished pieces one sheet makes." },
+  { value: "sheets_per_item", label: "Sheets per item", amountHelp: "eg 0.25 or 1", summary: "Enter sheet fraction or full sheets used by this answer." },
+  { value: "roll_metres", label: "Roll metres per item", amountHelp: "eg 1.2", summary: "Enter fixed linear metres used by this answer, or leave blank for size ÷ roll width." },
+  { value: "sqm", label: "Square metres", amountHelp: "leave blank", summary: "Uses quoted finished square metres." },
+  { value: "whole_sheet", label: "Whole sheet", amountHelp: "eg 1", summary: "Uses one or more full sheets." },
+  { value: "each", label: "Each / fixed item", amountHelp: "eg 1", summary: "Uses a fixed quantity per quoted item." }
+];
+
+function optionKeyValue(option: any): string {
+  return String(option?.value ?? option?.label ?? "").trim();
+}
+
+function linkedOptionComponent(field: any, option: any, components: any[]): any | null {
+  const fieldKey = String(field?.key ?? "");
+  const optionValue = optionKeyValue(option);
+  if (!fieldKey || !optionValue) return null;
+
+  return components.find((component: any) => {
+    if (String(component?.kind ?? "material") === "labour") return false;
+    const triggerKey = String(component?.trigger?.optionKey ?? component?.stockUsage?.optionKey ?? "");
+    const values = Array.isArray(component?.trigger?.optionValues)
+      ? component.trigger.optionValues
+      : Array.isArray(component?.stockUsage?.optionValues)
+        ? component.stockUsage.optionValues
+        : [];
+    return triggerKey === fieldKey && values.includes(optionValue);
+  }) ?? null;
+}
+
+function optionUsageModeFromComponent(component: any): string {
+  const stockUsage = component?.stockUsage ?? {};
+  const ruleType = String(component?.ruleType ?? stockUsage?.usageBasis ?? "yield_based");
+  if (ruleType === "per_linear_metre") return "roll_metres";
+  if (ruleType === "per_sqm") return "sqm";
+  if (ruleType === "per_unit" && String(component?.unit ?? "") === "sheet") return "whole_sheet";
+  if (ruleType === "per_unit") return "each";
+  if (cleanUsageNumber(stockUsage?.partsPerSheet)) return "parts_per_sheet";
+  if (cleanUsageNumber(stockUsage?.sheetsPerUnit)) return "sheets_per_item";
+  return "auto_sheet";
+}
+
+function optionUsageAmountFromComponent(component: any): string {
+  const stockUsage = component?.stockUsage ?? {};
+  const mode = optionUsageModeFromComponent(component);
+  if (mode === "parts_per_sheet") return cleanUsageNumber(stockUsage?.partsPerSheet);
+  if (mode === "sheets_per_item" || mode === "whole_sheet") return cleanUsageNumber(stockUsage?.sheetsPerUnit) || "1";
+  if (mode === "roll_metres") return cleanUsageNumber(stockUsage?.metresPerUnit);
+  if (mode === "each") return cleanUsageNumber(component?.quantity) || "1";
+  return "";
+}
+
+function optionCostingSummaryForField(field: any, components: any[]): string {
+  if (!["select", "size_select", "color"].includes(String(field?.type ?? ""))) return "No answer rows needed";
+  const choices = Array.isArray(field?.options) ? field.options : [];
+  const costed = choices.filter((choice: any) => linkedOptionComponent(field, choice, components)?.materialId).length;
+  return `${costed}/${choices.length} answer${choices.length === 1 ? "" : "s"} linked to material costing`;
+}
+
+function CostedOptionRows({ materials, field, components = [] }: { materials: any[]; field?: any; components?: any[] }) {
+  const options = Array.isArray(field?.options) ? field.options : [];
+  const existingRows = options.map((choice: any) => ({ choice, component: linkedOptionComponent(field, choice, components) }));
+  const blankCount = field ? Math.max(2, 6 - existingRows.length) : 6;
+  const rows = [
+    ...existingRows,
+    ...Array.from({ length: blankCount }, (_, index) => ({ choice: null, component: null, blankId: `blank-${index}` }))
+  ];
+
+  return (
+    <div style={{ ...softCardStyle, background: "#fff" }}>
+      <div>
+        <strong>Answer lines and material usage</strong>
+        <p style={{ ...mutedStyle, marginTop: 4 }}>
+          Fill one line per selectable answer. Each line can have its own material and usage amount. The first filled answer becomes the default on the quote page.
+        </p>
+      </div>
+      {materials.length === 0 ? (
+        <div style={{ ...softCardStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
+          <strong>No active materials available</strong>
+          <p style={mutedStyle}>You can still create the answers now. Link materials later after adding them on the Materials page.</p>
+        </div>
+      ) : null}
+      <div style={{ display: "grid", gap: 10 }}>
+        {rows.map((row: any, index: number) => {
+          const component = row.component;
+          const choice = row.choice;
+          const usageMode = component ? optionUsageModeFromComponent(component) : "auto_sheet";
+          const usageHelp = optionUsageModes.find((mode) => mode.value === usageMode)?.amountHelp ?? "optional";
+          return (
+            <div key={choice?.id ?? row.blankId ?? index} style={{ ...softCardStyle, background: "#fcfcfd" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                <strong>Line {index + 1}</strong>
+                <span style={plainChipStyle}>{component?.materialId ? "Costed" : "Choice only"}</span>
+              </div>
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Answer shown on quote</span>
+                  <input name="optionAnswerLabel" defaultValue={String(choice?.label ?? "")} placeholder="eg 600 x 900 mm, Gloss laminate, Yes" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Material used by this answer</span>
+                  <select name="optionMaterialId" defaultValue={String(component?.materialId ?? "")} style={inputStyle}>
+                    <option value="">No material / choice only</option>
+                    {materials.map((material) => (
+                      <option key={material.id} value={material.id}>{material.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Calculate using</span>
+                  <select name="optionUsageMode" defaultValue={usageMode} style={inputStyle}>
+                    {optionUsageModes.map((mode) => (
+                      <option key={mode.value} value={mode.value}>{mode.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+              <div style={grid3}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Amount</span>
+                  <input name="optionUsageAmount" defaultValue={optionUsageAmountFromComponent(component)} placeholder={usageHelp} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Waste %</span>
+                  <input name="optionWastePercent" defaultValue={String(component?.wastePercent ?? "10")} placeholder="eg 10" style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Note</span>
+                  <input name="optionNotes" defaultValue={String(component?.notes ?? "")} placeholder="optional" style={inputStyle} />
+                </label>
+              </div>
+              <p style={mutedStyle}>{optionUsageModes.find((mode) => mode.value === usageMode)?.summary ?? "Choose how this answer uses stock."}</p>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
@@ -884,7 +1025,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             <div>
               <p style={tinyLabelStyle}>Step 3</p>
               <h2 style={sectionHeadingStyle}>Questions asked while quoting</h2>
-              <p style={{ ...mutedStyle, marginTop: 6 }}>These are the fields staff answer after choosing this product on a quote. Prices are not typed into these answers; the quote page calculates from Step 2 material cost × sheet/roll usage.</p>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>Add the choices staff pick on quotes. Each answer line can also say what material it uses and how much of the sheet or roll it consumes.</p>
             </div>
 
             {fields.length === 0 ? (
@@ -910,7 +1051,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                           </div>
                           <div style={mutedStyle}>Default: {defaultAnswerFromField(field) || "None"} · {field.required === false ? "Optional" : "Required"}</div>
                           <div style={mutedStyle}>Choices: {optionChoicesSummary(field)}</div>
-                          <div style={mutedStyle}>Costing: {materialCostingSummary(field)}</div>
+                          <div style={mutedStyle}>Costing: {optionCostingSummaryForField(field, components) || materialCostingSummary(field)}</div>
                           {field.showWhen?.optionKey ? <div style={mutedStyle}>Only appears when {field.showWhen.optionKey}: {showWhenValuesCsvFromField(field) || "any value"}</div> : null}
                           {field.helpText ? <div style={mutedStyle}>{field.helpText}</div> : null}
                         </div>
@@ -931,11 +1072,8 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                           <form action={deleteProductOptionAction} style={{ display: "grid", gap: 6 }}>
                             <input type="hidden" name="productId" value={selectedProduct.id} />
                             <input type="hidden" name="fieldId" value={String(field.id ?? "")} />
-                            <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, color: "#667085" }}>
-                              <input type="checkbox" name="deleteLinkedMaterials" value="yes" />
-                              remove linked rows too
-                            </label>
-                            <button type="submit" style={dangerGhostStyle}>Remove</button>
+                            <input type="hidden" name="deleteLinkedMaterials" value="yes" />
+                            <button type="submit" style={dangerGhostStyle}>Remove question</button>
                           </form>
                         </div>
                       </div>
@@ -958,17 +1096,6 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                               </select>
                             </label>
                             <label style={labelStyle}>
-                              <span style={labelTextStyle}>Default answer</span>
-                              <input name="defaultAnswer" defaultValue={defaultAnswerFromField(field)} style={inputStyle} />
-                            </label>
-                          </div>
-                          <div style={grid2}>
-                            <label style={labelStyle}>
-                              <span style={labelTextStyle}>Other answers</span>
-                              <textarea name="otherOptionsCsv" defaultValue={otherChoicesCsvFromField(field)} placeholder={"900x1200 | 85\nCustom=custom | 0"} style={textareaStyle} />
-                              <small style={{ color: "#667085" }}>One per line. Use: Choice label or Choice label=value. Prices come from the linked material rows in Step 2.</small>
-                            </label>
-                            <label style={labelStyle}>
                               <span style={labelTextStyle}>Required?</span>
                               <select name="required" defaultValue={field.required === false ? "no" : "yes"} style={inputStyle}>
                                 <option value="yes">Required</option>
@@ -976,6 +1103,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                               </select>
                             </label>
                           </div>
+                          <CostedOptionRows materials={activeMaterials} field={field} components={components} />
                           <AdvancedSection title="Advanced visibility and key">
                             <div style={grid3}>
                               <label style={labelStyle}>
@@ -1017,13 +1145,13 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             <form action={addProductOptionAction} style={{ ...softCardStyle, background: "#f8fafc" }}>
               <input type="hidden" name="productId" value={selectedProduct.id} />
               <div>
-                <h3 style={{ margin: 0, fontSize: 18 }}>Add a quote question</h3>
-                <p style={{ ...mutedStyle, marginTop: 4 }}>Examples: Size, Print type, Roll stock, Laminate, Finishing, Sides, GSM, Quantity.</p>
+                <h3 style={{ margin: 0, fontSize: 18 }}>Add an option with its costing rows</h3>
+                <p style={{ ...mutedStyle, marginTop: 4 }}>Example: Question = Size, then lines for 450 × 600, 600 × 900, 900 × 1200, each with its own material and parts-per-sheet/roll usage.</p>
               </div>
               <div style={grid3}>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Question label</span>
-                  <input name="label" placeholder="eg Size" style={inputStyle} />
+                  <input name="label" placeholder="eg Size, Laminate, Finishing" style={inputStyle} />
                 </label>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Answer type</span>
@@ -1034,17 +1162,6 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   </select>
                 </label>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Default answer</span>
-                  <input name="defaultAnswer" placeholder="eg 600x900 or None" style={inputStyle} />
-                </label>
-              </div>
-              <div style={grid2}>
-                <label style={labelStyle}>
-                  <span style={labelTextStyle}>Other answers</span>
-                  <textarea name="otherOptionsCsv" placeholder={"450x600 | 35\n900x1200 | 85\nCustom=custom | 0"} style={textareaStyle} />
-                  <small style={{ color: "#667085" }}>One per line. Use: Choice label or Choice label=value. Do not enter prices here; costs come from linked materials in Step 2.</small>
-                </label>
-                <label style={labelStyle}>
                   <span style={labelTextStyle}>Required?</span>
                   <select name="required" defaultValue="yes" style={inputStyle}>
                     <option value="yes">Required</option>
@@ -1052,6 +1169,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   </select>
                 </label>
               </div>
+              <CostedOptionRows materials={activeMaterials} components={components} />
               <AdvancedSection title="Advanced: only show this question sometimes">
                 <div style={grid3}>
                   <label style={labelStyle}>
@@ -1077,7 +1195,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   <input name="helpText" placeholder="Explain how staff should use this question" style={inputStyle} />
                 </label>
               </AdvancedSection>
-              <button type="submit" style={buttonStyle}>Add quote question</button>
+              <button type="submit" style={buttonStyle}>Add option</button>
             </form>
           </section>
         </>

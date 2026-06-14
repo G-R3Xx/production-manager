@@ -53,6 +53,10 @@ function splitChoiceEntries(value: string): string[] {
     .filter(Boolean);
 }
 
+function readStringArray(formData: FormData, key: string): string[] {
+  return formData.getAll(key).map((value) => String(value ?? "").trim());
+}
+
 function labelFromValue(value: string): string {
   return value
     .replace(/_/g, " ")
@@ -555,10 +559,17 @@ export async function addProductOptionAction(formData: FormData) {
     ? definition.fields.map((field: Record<string, any>, index: number) => index === existingIndex ? { ...nextField, id: field.id ?? nextField.id } : field)
     : [...definition.fields, nextField];
 
+  const linkedComponents = componentsLinkedToOptionRows(formData, nextField);
+  const components = [
+    ...definition.components.filter((item: Record<string, any>) => !isLinkedToOptionKey(item, nextField.key)),
+    ...linkedComponents
+  ];
+
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     version: 3,
-    fields
+    fields,
+    components
   });
 
   redirect(`/products?selected=${productId}&message=Quote%20option%20saved`);
@@ -566,6 +577,109 @@ export async function addProductOptionAction(formData: FormData) {
 
 // Backwards-compatible export for older form names used by previous zips.
 export const addStarterRulesAction = applyQuoteBehaviourPresetAction;
+
+type CostedOptionRow = {
+  answerLabel: string;
+  materialId: string | null;
+  usageMode: string;
+  usageAmount: string | null;
+  wastePercent: string;
+  notes: string;
+};
+
+function optionalNumberText(value: unknown): string | null {
+  const raw = String(value ?? "").replace(/,/g, "").replace(/\$/g, "").trim();
+  if (!raw) return null;
+  return Number.isFinite(Number(raw)) ? raw : null;
+}
+
+function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
+  const labels = readStringArray(formData, "optionAnswerLabel");
+  const materialIds = readStringArray(formData, "optionMaterialId");
+  const usageModes = readStringArray(formData, "optionUsageMode");
+  const usageAmounts = readStringArray(formData, "optionUsageAmount");
+  const wastePercents = readStringArray(formData, "optionWastePercent");
+  const notes = readStringArray(formData, "optionNotes");
+  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length);
+
+  const rows: CostedOptionRow[] = [];
+  for (let index = 0; index < totalRows; index += 1) {
+    const answerLabel = String(labels[index] ?? "").trim();
+    if (!answerLabel) continue;
+
+    rows.push({
+      answerLabel,
+      materialId: String(materialIds[index] ?? "").trim() || null,
+      usageMode: String(usageModes[index] ?? "auto_sheet").trim() || "auto_sheet",
+      usageAmount: optionalNumberText(usageAmounts[index]),
+      wastePercent: safeNumberString(String(wastePercents[index] ?? "10"), "10"),
+      notes: String(notes[index] ?? "").trim()
+    });
+  }
+
+  return rows;
+}
+
+function componentsLinkedToOptionRows(formData: FormData, field: Record<string, any>): Array<Record<string, any>> {
+  const fieldKey = String(field.key ?? "");
+  const options = Array.isArray(field.options) ? field.options : [];
+  const rows = costedOptionRowsFromForm(formData);
+
+  return rows.flatMap((row, index) => {
+    if (!row.materialId) return [];
+
+    const option = options[index] ?? parseChoice(row.answerLabel);
+    const optionValue = String(option.value ?? option.label ?? "").trim();
+    if (!fieldKey || !optionValue) return [];
+
+    const usageMode = row.usageMode || "auto_sheet";
+    const usageAmount = row.usageAmount;
+    const isRoll = usageMode === "roll_metres";
+    const isArea = usageMode === "sqm";
+    const isEach = usageMode === "each";
+    const isWholeSheet = usageMode === "whole_sheet";
+    const amountForEach = isEach ? (usageAmount ?? "1") : "1";
+
+    return [{
+      id: randomUUID(),
+      kind: "material",
+      role: "quote_selected_material",
+      materialId: row.materialId,
+      supplierId: null,
+      labourRateName: null,
+      label: `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)}`,
+      quantity: amountForEach,
+      unit: isRoll ? "lm" : isArea ? "sqm" : isEach ? "each" : "sheet",
+      notes: row.notes || `Auto-cost row for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`,
+      ruleType: isRoll ? "per_linear_metre" : isArea ? "per_sqm" : isEach || isWholeSheet ? "per_unit" : "yield_based",
+      wastePercent: row.wastePercent,
+      stockUsage: {
+        usageBasis: isRoll ? "per_linear_metre" : isArea ? "per_sqm" : isEach || isWholeSheet ? "per_unit" : "yield_based",
+        dimensionSource: isEach ? "quantity_only" : "finished_size",
+        optionKey: fieldKey,
+        optionValues: [optionValue],
+        widthMm: null,
+        heightMm: null,
+        rollWidthMm: null,
+        partsPerSheet: usageMode === "parts_per_sheet" ? usageAmount : null,
+        metresPerUnit: isRoll ? usageAmount : null,
+        sheetsPerUnit: usageMode === "sheets_per_item" || isWholeSheet ? (usageAmount ?? "1") : null
+      },
+      trigger: {
+        optionKey: fieldKey,
+        optionValue: null,
+        optionValues: [optionValue]
+      }
+    }];
+  });
+}
+
+function isLinkedToOptionKey(item: Record<string, any>, optionKey: string): boolean {
+  const triggerKey = String(item.trigger?.optionKey ?? "");
+  const stockKey = String(item.stockUsage?.optionKey ?? "");
+  const stockValues = Array.isArray(item.stockUsage?.optionValues) ? item.stockUsage.optionValues : [];
+  return triggerKey === optionKey || (stockKey === optionKey && stockValues.length > 0);
+}
 
 function fieldOptionCsv(field: Record<string, any>, includeDefault: boolean): string {
   const defaultValue = String(field.defaultValue ?? "");
@@ -597,8 +711,13 @@ function buildFieldFromForm(formData: FormData, existingField?: Record<string, a
   let defaultValue: string | null = null;
   let options: Array<Record<string, any>> = [];
 
+  const costedRows = costedOptionRowsFromForm(formData);
+
   if (["select", "size_select", "color"].includes(fieldType)) {
-    if (defaultAnswer) {
+    if (costedRows.length > 0) {
+      options = costedRows.map((row) => parseChoice(row.answerLabel));
+      defaultValue = options[0]?.value ? String(options[0].value) : null;
+    } else if (defaultAnswer) {
       const parsedDefault = { ...parseChoice(defaultAnswer), priceDelta: defaultPrice };
       defaultValue = parsedDefault.value;
       options = [parsedDefault, ...splitChoiceEntries(otherOptionsCsv).map(parseChoice)];
@@ -740,19 +859,16 @@ export async function updateProductOptionAction(formData: FormData) {
   const oldKey = String(existingField.key ?? "");
   const nextKey = String(nextField.key ?? "");
 
+  const linkedComponents = componentsLinkedToOptionRows(formData, nextField);
+
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     version: 3,
     fields: definition.fields.map((field: Record<string, any>) => String(field.id ?? "") === fieldId ? nextField : field),
-    components: definition.components.map((item: Record<string, any>) => {
-      const trigger = item.trigger ?? {};
-      const stockUsage = item.stockUsage ?? {};
-      return {
-        ...item,
-        trigger: trigger.optionKey === oldKey ? { ...trigger, optionKey: nextKey } : trigger,
-        stockUsage: stockUsage.optionKey === oldKey ? { ...stockUsage, optionKey: nextKey } : stockUsage
-      };
-    })
+    components: [
+      ...definition.components.filter((item: Record<string, any>) => !isLinkedToOptionKey(item, oldKey) && !isLinkedToOptionKey(item, nextKey)),
+      ...linkedComponents
+    ]
   });
 
   redirect(`/products?selected=${productId}&message=Quote%20choice%20updated`);
@@ -768,14 +884,10 @@ export async function deleteProductOptionAction(formData: FormData) {
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const field = definition.fields.find((item: Record<string, any>) => String(item.id ?? "") === fieldId);
   const deletedKey = String(field?.key ?? "");
-  const deleteLinked = readString(formData, "deleteLinkedMaterials") === "yes";
-
   await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
     ...definition,
     fields: definition.fields.filter((item: Record<string, any>) => String(item.id ?? "") !== fieldId),
-    components: deleteLinked
-      ? definition.components.filter((item: Record<string, any>) => item.trigger?.optionKey !== deletedKey && item.stockUsage?.optionKey !== deletedKey)
-      : definition.components
+    components: definition.components.filter((item: Record<string, any>) => !isLinkedToOptionKey(item, deletedKey))
   });
 
   redirect(`/products?selected=${productId}&message=Quote%20choice%20removed`);
