@@ -23,6 +23,14 @@ function safeMoneyString(value: string, fallback = "0"): string {
   return Number.isFinite(amount) ? amount.toFixed(2) : fallback;
 }
 
+function optionalNumberString(formData: FormData, key: string, existingValue: unknown = null): string | null {
+  if (!formData.has(key)) return existingValue == null ? null : String(existingValue);
+  const raw = readString(formData, key);
+  if (!raw) return null;
+  const normalized = raw.replace(/,/g, "").replace(/\$/g, "").trim();
+  return Number.isFinite(Number(normalized)) ? normalized : (existingValue == null ? null : String(existingValue));
+}
+
 function keyFromLabel(value: string): string {
   return value
     .toLowerCase()
@@ -70,13 +78,11 @@ function parseChoice(entry: string) {
   const rawValue = equalsIndex >= 0 ? choicePart.slice(equalsIndex + 1).trim() : choicePart.trim();
   const value = rawValue || keyFromLabel(rawLabel);
   const sizeMatch = value.match(/^(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)(?:\s*mm)?$/i);
-  const priceDelta = safeMoneyString(pricePart, "0");
-
   return {
     id: randomUUID(),
     label: rawLabel.includes("x") || rawLabel.includes("×") ? labelFromValue(rawLabel) : rawLabel || labelFromValue(value),
     value: keyFromLabel(value) === "option" ? value : value.replace(/\s+/g, "_"),
-    priceDelta,
+    priceDelta: "0.00",
     widthMm: sizeMatch ? sizeMatch[1] : null,
     heightMm: sizeMatch ? sizeMatch[2] : null
   };
@@ -569,9 +575,8 @@ function fieldOptionCsv(field: Record<string, any>, includeDefault: boolean): st
     .map((option: Record<string, any>) => {
       const label = String(option.label ?? option.value ?? "").trim();
       const value = String(option.value ?? label).trim();
-      const priceDelta = safeMoneyString(String(option.priceDelta ?? option.price ?? "0"), "0");
       const choiceText = !label || label === value ? value : `${label}=${value}`;
-      return Number(priceDelta) === 0 ? choiceText : `${choiceText} | ${priceDelta}`;
+      return choiceText;
     })
     .filter(Boolean)
     .join("\n");
@@ -582,7 +587,7 @@ function buildFieldFromForm(formData: FormData, existingField?: Record<string, a
   const key = keyFromLabel(readString(formData, "key") || existingField?.key || label);
   const fieldType = readString(formData, "fieldType") || existingField?.type || "select";
   const defaultAnswer = readString(formData, "defaultAnswer");
-  const defaultPrice = safeMoneyString(readString(formData, "defaultPrice"), String(existingField?.options?.find((option: Record<string, any>) => String(option.value ?? "") === String(existingField?.defaultValue ?? ""))?.priceDelta ?? existingField?.options?.find((option: Record<string, any>) => String(option.value ?? "") === String(existingField?.defaultValue ?? ""))?.price ?? "0"));
+  const defaultPrice = "0.00";
   const otherOptionsCsv = readString(formData, "otherOptionsCsv");
   const helpText = readString(formData, "helpText") || existingField?.helpText || "Shown after this product is selected on a quote.";
   const required = readString(formData, "required") !== "no";
@@ -683,6 +688,8 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
     usageOptionKey = "quantity";
   }
 
+  const existingStockUsage = existingComponent?.stockUsage ?? {};
+
   return {
     id: existingComponent?.id ?? randomUUID(),
     kind,
@@ -697,17 +704,17 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
     ruleType,
     wastePercent: safeNumberString(readString(formData, "wastePercent"), String(existingComponent?.wastePercent ?? "10")),
     stockUsage: {
-      ...(existingComponent?.stockUsage ?? {}),
+      ...existingStockUsage,
       usageBasis: ruleType,
       dimensionSource,
       optionKey: triggerOptionKey ?? usageOptionKey,
       optionValues: triggerOptionValues,
-      widthMm: existingComponent?.stockUsage?.widthMm ?? null,
-      heightMm: existingComponent?.stockUsage?.heightMm ?? null,
-      rollWidthMm: existingComponent?.stockUsage?.rollWidthMm ?? null,
-      partsPerSheet: existingComponent?.stockUsage?.partsPerSheet ?? null,
-      metresPerUnit: existingComponent?.stockUsage?.metresPerUnit ?? null,
-      sheetsPerUnit: existingComponent?.stockUsage?.sheetsPerUnit ?? null
+      widthMm: optionalNumberString(formData, "componentWidthMm", existingStockUsage?.widthMm ?? null),
+      heightMm: optionalNumberString(formData, "componentHeightMm", existingStockUsage?.heightMm ?? null),
+      rollWidthMm: optionalNumberString(formData, "componentRollWidthMm", existingStockUsage?.rollWidthMm ?? null),
+      partsPerSheet: optionalNumberString(formData, "partsPerSheet", existingStockUsage?.partsPerSheet ?? null),
+      metresPerUnit: optionalNumberString(formData, "metresPerUnit", existingStockUsage?.metresPerUnit ?? null),
+      sheetsPerUnit: optionalNumberString(formData, "sheetsPerUnit", existingStockUsage?.sheetsPerUnit ?? null)
     },
     trigger: {
       optionKey: triggerOptionKey,

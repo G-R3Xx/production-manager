@@ -51,9 +51,9 @@ const starterTypes: StarterType[] = [
 ];
 
 const usageModes = [
-  { value: "part_sheet", label: "Uses part of a sheet", help: "Best for ACM, Corflute, Acrylic and PVC signs." },
+  { value: "part_sheet", label: "Uses part of a sheet", help: "Best for ACM, Corflute, Acrylic and PVC signs. Uses finished size / parent sheet size × sheet cost." },
   { value: "whole_sheet", label: "Uses full sheets", help: "Use when each quoted item consumes a whole purchased sheet." },
-  { value: "roll_metres", label: "Uses roll length", help: "Best for banners, vinyl, laminate and roll media." },
+  { value: "roll_metres", label: "Uses roll length", help: "Best for banners, vinyl, laminate and roll media. Uses finished size / roll width × roll material cost." },
   { value: "area", label: "Uses square metres", help: "Best for ink, print coverage or area-based consumables." },
   { value: "paper_yield", label: "Uses paper/card yield", help: "Best for small format sheet yield." },
   { value: "each", label: "Each / fixed item", help: "Best for labour, hardware or finishing steps." }
@@ -142,9 +142,7 @@ function formatPrice(value: string | number | null | undefined): string {
 function choiceTextForSetup(option: Choice): string {
   const label = String(option?.label ?? option?.value ?? "").trim();
   const value = String(option?.value ?? label).trim();
-  const choice = !label || label === value ? value : `${label}=${value}`;
-  const price = optionPrice(option);
-  return Number(price) === 0 ? choice : `${choice} | ${price}`;
+  return !label || label === value ? value : `${label}=${value}`;
 }
 
 function defaultPriceFromField(field: any): string {
@@ -175,21 +173,14 @@ function optionChoicesSummary(field: any): string {
   if (!["select", "size_select", "color"].includes(String(field?.type ?? ""))) return defaultAnswerFromField(field) || "Typed by staff";
   if (!Array.isArray(field?.options) || field.options.length === 0) return "No choices yet";
   return field.options
-    .map((option: Choice) => {
-      const label = String(option.label ?? option.value ?? "");
-      const price = optionPrice(option);
-      return Number(price) === 0 ? label : `${label} (${formatPrice(price)})`;
-    })
+    .map((option: Choice) => String(option.label ?? option.value ?? ""))
     .filter(Boolean)
     .join(", ");
 }
 
-function optionPricingSummary(field: any): string {
-  if (!["select", "size_select", "color", "yes_no"].includes(String(field?.type ?? ""))) return "No option prices";
-  if (!Array.isArray(field?.options) || field.options.length === 0) return "No option prices yet";
-  const priced = field.options.filter((option: Choice) => Number(optionPrice(option)) !== 0);
-  if (priced.length === 0) return "All choices currently $0";
-  return priced.map((option: Choice) => `${option.label ?? option.value}: ${formatPrice(optionPrice(option))}`).join(" · ");
+function materialCostingSummary(field: any): string {
+  if (["quantity", "number", "text"].includes(String(field?.type ?? ""))) return "This answer helps quantity/notes only";
+  return "Cost comes from Step 2 material rows that match this answer";
 }
 
 function conditionSummary(component: any, fields: any[]): string {
@@ -209,9 +200,82 @@ function conditionSummary(component: any, fields: any[]): string {
 
 function materialDetails(material: any): string {
   const pieces = [humanize(material.materialType), material.sku ? `SKU ${material.sku}` : null];
+  if (material.purchaseCost) pieces.push(`Cost $${material.purchaseCost}/${material.purchaseUom ?? "unit"}`);
   if (material.widthMm || material.lengthMm) pieces.push(`${material.widthMm ?? "?"} × ${material.lengthMm ?? "?"} mm`);
   if (material.rollWidthMm) pieces.push(`${material.rollWidthMm} mm roll`);
   return pieces.filter(Boolean).join(" · ");
+}
+
+function cleanUsageNumber(value: unknown): string {
+  const text = String(value ?? "").trim();
+  if (!text || text === "0" || text === "0.00") return "";
+  return text;
+}
+
+function usageAmountSummary(component: any): string {
+  const stockUsage = component?.stockUsage ?? {};
+  const ruleType = String(component?.ruleType ?? stockUsage?.usageBasis ?? "yield_based");
+  const allowance = cleanUsageNumber(component?.quantity) || "1";
+  const waste = cleanUsageNumber(component?.wastePercent) || "0";
+  const sheetsPerUnit = cleanUsageNumber(stockUsage?.sheetsPerUnit);
+  const partsPerSheet = cleanUsageNumber(stockUsage?.partsPerSheet);
+  const metresPerUnit = cleanUsageNumber(stockUsage?.metresPerUnit);
+  const widthMm = cleanUsageNumber(stockUsage?.widthMm);
+  const heightMm = cleanUsageNumber(stockUsage?.heightMm);
+  const rollWidthMm = cleanUsageNumber(stockUsage?.rollWidthMm);
+
+  let amount = "Auto from quote size";
+  if (sheetsPerUnit) amount = `${sheetsPerUnit} sheet${sheetsPerUnit === "1" ? "" : "s"} per quoted item`;
+  else if (partsPerSheet) amount = `1 parent sheet makes ${partsPerSheet} item${partsPerSheet === "1" ? "" : "s"}`;
+  else if (metresPerUnit) amount = `${metresPerUnit} lm per quoted item`;
+  else if (widthMm && heightMm) amount = `override size ${widthMm} × ${heightMm} mm`;
+  else if (ruleType === "per_linear_metre") amount = "Auto from quote size ÷ roll width";
+  else if (ruleType === "per_sqm") amount = "Auto from quote square metres";
+  else if (ruleType === "per_unit") amount = `${allowance} ${component?.unit ?? "each"} per quoted item`;
+
+  const rollText = rollWidthMm ? ` · roll width override ${rollWidthMm} mm` : "";
+  return `Calculation: ${amount}${rollText} · multiplier ${allowance} · waste ${waste}%`;
+}
+
+function UsageAmountFields({ component }: { component?: any }) {
+  const stockUsage = component?.stockUsage ?? {};
+  return (
+    <div style={{ ...softCardStyle, background: "#fff" }}>
+      <div>
+        <strong>Usage amount per quoted item</strong>
+        <p style={{ ...mutedStyle, marginTop: 4 }}>Leave these blank to auto-calculate from the quote size and the linked material sheet/roll dimensions. Fill them in when an option has a fixed usage.</p>
+      </div>
+      <div style={grid3}>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Sheets per item</span>
+          <input name="sheetsPerUnit" defaultValue={String(stockUsage?.sheetsPerUnit ?? "")} placeholder="eg 1, 0.5, 0.25" style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Or items per sheet</span>
+          <input name="partsPerSheet" defaultValue={String(stockUsage?.partsPerSheet ?? "")} placeholder="eg 8" style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Roll metres per item</span>
+          <input name="metresPerUnit" defaultValue={String(stockUsage?.metresPerUnit ?? "")} placeholder="eg 1.2" style={inputStyle} />
+        </label>
+      </div>
+      <div style={grid3}>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Override width mm</span>
+          <input name="componentWidthMm" defaultValue={String(stockUsage?.widthMm ?? "")} placeholder="optional" style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Override height mm</span>
+          <input name="componentHeightMm" defaultValue={String(stockUsage?.heightMm ?? "")} placeholder="optional" style={inputStyle} />
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Override roll width mm</span>
+          <input name="componentRollWidthMm" defaultValue={String(stockUsage?.rollWidthMm ?? "")} placeholder="optional" style={inputStyle} />
+        </label>
+      </div>
+      <p style={mutedStyle}>Examples: ACM sign auto-calculates from size and parent sheet. A fixed full sheet uses <b>Sheets per item = 1</b>. A roll option can use <b>Roll metres per item = 1.2</b>. If one sheet yields 8 pieces, enter <b>Items per sheet = 8</b>.</p>
+    </div>
+  );
 }
 
 function starterDescription(value: string): string {
@@ -290,11 +354,11 @@ function SimpleExplanation() {
         </div>
         <div style={softCardStyle}>
           <strong>Uses</strong>
-          <p style={mutedStyle}>The stock/processes behind it. Example: ACM sheet, roll vinyl, laminate, cutting labour.</p>
+          <p style={mutedStyle}>The stock/processes behind it. Example: ACM sheet, roll vinyl, laminate, cutting labour. Material costs live here.</p>
         </div>
         <div style={softCardStyle}>
           <strong>Quote questions</strong>
-          <p style={mutedStyle}>The choices staff answer later. Example: size, print type, laminate, finishing, quantity.</p>
+          <p style={mutedStyle}>The choices staff answer later. Example: size, print type, laminate, finishing, quantity. No prices are typed here.</p>
         </div>
       </div>
     </section>
@@ -574,15 +638,20 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
               <div>
                 <p style={tinyLabelStyle}>Step 2</p>
                 <h2 style={sectionHeadingStyle}>What this product uses</h2>
-                <p style={{ ...mutedStyle, marginTop: 6 }}>These rows are the stock, media, laminate, hardware or labour behind the product.</p>
+                <p style={{ ...mutedStyle, marginTop: 6 }}>These rows are the stock, media, laminate, hardware or labour behind the product. Quote pricing is calculated from these linked material rows.</p>
               </div>
               <Link href="/materials" style={ghostStyle}>Manage materials</Link>
+            </div>
+
+            <div style={{ ...softCardStyle, background: "#f6fef9", borderColor: "#abefc6" }}>
+              <strong>How automatic pricing works</strong>
+              <p style={mutedStyle}>Link a material, choose how it is used, and make sure the material has purchase cost plus sheet size or roll width. On the quote page the app calculates: material cost × sheet/roll amount used.</p>
             </div>
 
             {activeMaterials.length === 0 ? (
               <div style={{ ...softCardStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
                 <strong>No active materials yet</strong>
-                <p style={mutedStyle}>You can still add labour/process rows, but stock allocation works best after adding materials.</p>
+                <p style={mutedStyle}>Add materials with purchase cost and sheet/roll dimensions before expecting automatic quote prices.</p>
               </div>
             ) : null}
 
@@ -611,7 +680,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                           <div style={mutedStyle}>{linkedMaterial?.name ?? component.labourRateName ?? "Not linked"}</div>
                           {linkedMaterial ? <div style={mutedStyle}>{materialDetails(linkedMaterial)}</div> : null}
                           <div style={mutedStyle}>{conditionSummary(component, fields)}</div>
-                          <div style={mutedStyle}>{humanize(component.ruleType ?? component.stockUsage?.usageBasis ?? "fixed")} · Qty {component.quantity ?? "1"} {component.unit ?? ""} · Waste {component.wastePercent ? `${component.wastePercent}%` : "0%"}</div>
+                          <div style={mutedStyle}>{usageAmountSummary(component)}</div>
                           {component.notes ? <div style={mutedStyle}>{component.notes}</div> : null}
                         </div>
                         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -664,10 +733,11 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                               </select>
                             </label>
                             <label style={labelStyle}>
-                              <span style={labelTextStyle}>Quantity / allowance</span>
-                              <input name="quantity" defaultValue={String(component.quantity ?? "1")} style={inputStyle} />
+                              <span style={labelTextStyle}>Multiplier / allowance</span>
+                              <input name="quantity" defaultValue={String(component.quantity ?? "1")} placeholder="usually 1" style={inputStyle} />
                             </label>
                           </div>
+                          <UsageAmountFields component={component} />
                           <div style={grid3}>
                             <label style={labelStyle}>
                               <span style={labelTextStyle}>Waste %</span>
@@ -708,12 +778,10 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
               <form action={addProductComponentAction} style={{ ...softCardStyle, background: "#f8fafc" }}>
                 <input type="hidden" name="productId" value={selectedProduct.id} />
                 <input type="hidden" name="kind" value="material" />
-                <input type="hidden" name="quantity" value="1" />
-                <input type="hidden" name="wastePercent" value="10" />
                 <input type="hidden" name="labourRateName" value="" />
                 <div>
                   <h3 style={{ margin: 0, fontSize: 18 }}>Add stock / material</h3>
-                  <p style={{ ...mutedStyle, marginTop: 4 }}>Use for ACM, roll vinyl, laminate, paper, hardware or other stock.</p>
+                  <p style={{ ...mutedStyle, marginTop: 4 }}>Use for ACM, roll vinyl, laminate, paper, hardware or other stock. These rows drive automatic material costing on quotes.</p>
                 </div>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Name</span>
@@ -728,14 +796,25 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                     ))}
                   </select>
                 </label>
-                <label style={labelStyle}>
-                  <span style={labelTextStyle}>How it is used</span>
-                  <select name="baseUsage" defaultValue="part_sheet" style={inputStyle}>
-                    {usageModes.map((mode) => (
-                      <option key={mode.value} value={mode.value}>{mode.label}</option>
-                    ))}
-                  </select>
-                </label>
+                <div style={grid3}>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>How it is used</span>
+                    <select name="baseUsage" defaultValue="part_sheet" style={inputStyle}>
+                      {usageModes.map((mode) => (
+                        <option key={mode.value} value={mode.value}>{mode.label}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Multiplier / allowance</span>
+                    <input name="quantity" defaultValue="1" placeholder="usually 1" style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Waste %</span>
+                    <input name="wastePercent" defaultValue="10" placeholder="eg 10" style={inputStyle} />
+                  </label>
+                </div>
+                <UsageAmountFields />
                 <AdvancedSection title="Only use this stock for certain quote answers">
                   <label style={labelStyle}>
                     <span style={labelTextStyle}>Quote question</span>
@@ -805,7 +884,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
             <div>
               <p style={tinyLabelStyle}>Step 3</p>
               <h2 style={sectionHeadingStyle}>Questions asked while quoting</h2>
-              <p style={{ ...mutedStyle, marginTop: 6 }}>These are the fields staff answer after choosing this product on a quote. Dropdown choices can include prices so the quote line calculates automatically.</p>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>These are the fields staff answer after choosing this product on a quote. Prices are not typed into these answers; the quote page calculates from Step 2 material cost × sheet/roll usage.</p>
             </div>
 
             {fields.length === 0 ? (
@@ -831,7 +910,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                           </div>
                           <div style={mutedStyle}>Default: {defaultAnswerFromField(field) || "None"} · {field.required === false ? "Optional" : "Required"}</div>
                           <div style={mutedStyle}>Choices: {optionChoicesSummary(field)}</div>
-                          <div style={mutedStyle}>Prices: {optionPricingSummary(field)}</div>
+                          <div style={mutedStyle}>Costing: {materialCostingSummary(field)}</div>
                           {field.showWhen?.optionKey ? <div style={mutedStyle}>Only appears when {field.showWhen.optionKey}: {showWhenValuesCsvFromField(field) || "any value"}</div> : null}
                           {field.helpText ? <div style={mutedStyle}>{field.helpText}</div> : null}
                         </div>
@@ -882,16 +961,12 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                               <span style={labelTextStyle}>Default answer</span>
                               <input name="defaultAnswer" defaultValue={defaultAnswerFromField(field)} style={inputStyle} />
                             </label>
-                            <label style={labelStyle}>
-                              <span style={labelTextStyle}>Default price</span>
-                              <input name="defaultPrice" type="number" min="0" step="0.01" defaultValue={defaultPriceFromField(field)} style={inputStyle} />
-                            </label>
                           </div>
                           <div style={grid2}>
                             <label style={labelStyle}>
-                              <span style={labelTextStyle}>Other answers and prices</span>
+                              <span style={labelTextStyle}>Other answers</span>
                               <textarea name="otherOptionsCsv" defaultValue={otherChoicesCsvFromField(field)} placeholder={"900x1200 | 85\nCustom=custom | 0"} style={textareaStyle} />
-                              <small style={{ color: "#667085" }}>One per line. Use: Choice label | price. The price becomes the unit price part on the quote.</small>
+                              <small style={{ color: "#667085" }}>One per line. Use: Choice label or Choice label=value. Prices come from the linked material rows in Step 2.</small>
                             </label>
                             <label style={labelStyle}>
                               <span style={labelTextStyle}>Required?</span>
@@ -962,16 +1037,12 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
                   <span style={labelTextStyle}>Default answer</span>
                   <input name="defaultAnswer" placeholder="eg 600x900 or None" style={inputStyle} />
                 </label>
-                <label style={labelStyle}>
-                  <span style={labelTextStyle}>Default price</span>
-                  <input name="defaultPrice" type="number" min="0" step="0.01" defaultValue="0.00" style={inputStyle} />
-                </label>
               </div>
               <div style={grid2}>
                 <label style={labelStyle}>
-                  <span style={labelTextStyle}>Other answers and prices</span>
+                  <span style={labelTextStyle}>Other answers</span>
                   <textarea name="otherOptionsCsv" placeholder={"450x600 | 35\n900x1200 | 85\nCustom=custom | 0"} style={textareaStyle} />
-                  <small style={{ color: "#667085" }}>One per line. Use: Choice label | price. Leave price as 0 for choices that should not add cost.</small>
+                  <small style={{ color: "#667085" }}>One per line. Use: Choice label or Choice label=value. Do not enter prices here; costs come from linked materials in Step 2.</small>
                 </label>
                 <label style={labelStyle}>
                   <span style={labelTextStyle}>Required?</span>

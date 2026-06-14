@@ -170,12 +170,12 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
                 <input name="purchaseUom" defaultValue="sheet" placeholder="sheet, roll, box, each" style={inputStyle} />
               </label>
               <label style={labelStyle}>
-                <span style={labelTextStyle}>Opening stock qty</span>
-                <input name="stockQuantity" defaultValue="0" style={inputStyle} />
+                <span style={labelTextStyle}>Stock qty / roll length</span>
+                <input name="stockQuantity" defaultValue="0" placeholder="eg 50 if this roll is 50lm" style={inputStyle} />
               </label>
               <label style={labelStyle}>
                 <span style={labelTextStyle}>Purchase cost</span>
-                <input name="purchaseCost" defaultValue="0" style={inputStyle} />
+                <input name="purchaseCost" defaultValue="0" placeholder="cost per sheet, lm, sqm, each or roll" style={inputStyle} />
               </label>
             </div>
 
@@ -200,7 +200,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
             <label style={labelStyle}>
               <span style={labelTextStyle}>Notes</span>
-              <textarea name="notes" rows={4} placeholder="Parent sheet size, roll length, supplier notes, nesting/yield assumptions, stock handling." style={textareaStyle} />
+              <textarea name="notes" rows={4} placeholder="Parent sheet size, roll length, supplier notes, nesting/yield assumptions, stock handling. For whole-roll cost, set Stock UOM to lm and Stock qty / roll length to the roll length." style={textareaStyle} />
             </label>
             <button type="submit" style={buttonStyle}>Create material</button>
           </form>

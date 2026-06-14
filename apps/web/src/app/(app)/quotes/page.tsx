@@ -4,6 +4,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
+import { listMaterialsForTenant } from "@/server/materials";
 import { listProductsForTenant } from "@/server/products";
 import { getConfiguratorTemplateById } from "@/server/configurators";
 import { createQuoteDraftAction } from "./actions";
@@ -15,7 +16,8 @@ type QuoteChoice = {
   id?: string | null;
   label?: string | null;
   value?: string | null;
-  priceDelta?: string | null;
+  widthMm?: string | null;
+  heightMm?: string | null;
 };
 
 type QuoteQuestion = {
@@ -33,11 +35,34 @@ type QuoteQuestion = {
   } | null;
 };
 
+type QuoteComponent = {
+  id?: string | null;
+  label?: string | null;
+  kind?: string | null;
+  materialId?: string | null;
+  quantity?: string | null;
+  unit?: string | null;
+  ruleType?: string | null;
+  wastePercent?: string | null;
+  notes?: string | null;
+  stockUsage?: {
+    usageBasis?: string | null;
+    dimensionSource?: string | null;
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+  } | null;
+  trigger?: {
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+  } | null;
+};
+
 type QuoteProduct = {
   id: string;
   name: string;
   sku?: string | null;
   fields: QuoteQuestion[];
+  components: QuoteComponent[];
 };
 
 function cleanQuestionKey(value: unknown, fallback: string): string {
@@ -57,7 +82,8 @@ function cleanQuoteQuestions(definition: Record<string, any> | null | undefined)
             id: option?.id ? String(option.id) : null,
             label: option?.label ? String(option.label) : String(option?.value ?? ""),
             value: String(option?.value ?? option?.label ?? ""),
-            priceDelta: option?.priceDelta == null && option?.price == null ? "0" : String(option.priceDelta ?? option.price)
+            widthMm: option?.widthMm == null ? null : String(option.widthMm),
+            heightMm: option?.heightMm == null ? null : String(option.heightMm)
           })).filter((option: QuoteChoice) => String(option.value ?? "").length > 0)
         : [];
 
@@ -79,6 +105,35 @@ function cleanQuoteQuestions(definition: Record<string, any> | null | undefined)
       };
     })
     .filter((field: QuoteQuestion) => field.label.length > 0);
+}
+function cleanComponents(definition: Record<string, any> | null | undefined): QuoteComponent[] {
+  const rawComponents = Array.isArray(definition?.components) ? definition?.components ?? [] : [];
+
+  return rawComponents.map((component: any, index: number) => ({
+    id: component?.id ? String(component.id) : `component_${index + 1}`,
+    label: component?.label == null ? `Material row ${index + 1}` : String(component.label),
+    kind: component?.kind == null ? "material" : String(component.kind),
+    materialId: component?.materialId == null || component.materialId === "" ? null : String(component.materialId),
+    quantity: component?.quantity == null ? "1" : String(component.quantity),
+    unit: component?.unit == null ? null : String(component.unit),
+    ruleType: component?.ruleType == null ? null : String(component.ruleType),
+    wastePercent: component?.wastePercent == null ? "0" : String(component.wastePercent),
+    notes: component?.notes == null ? null : String(component.notes),
+    stockUsage: component?.stockUsage
+      ? {
+          usageBasis: component.stockUsage.usageBasis == null ? null : String(component.stockUsage.usageBasis),
+          dimensionSource: component.stockUsage.dimensionSource == null ? null : String(component.stockUsage.dimensionSource),
+          optionKey: component.stockUsage.optionKey == null ? null : String(component.stockUsage.optionKey),
+          optionValues: Array.isArray(component.stockUsage.optionValues) ? component.stockUsage.optionValues.map(String) : []
+        }
+      : null,
+    trigger: component?.trigger
+      ? {
+          optionKey: component.trigger.optionKey == null ? null : String(component.trigger.optionKey),
+          optionValues: Array.isArray(component.trigger.optionValues) ? component.trigger.optionValues.map(String) : []
+        }
+      : null
+  }));
 }
 
 type PageProps = {
@@ -111,9 +166,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const fromSurvey = readParam(params, "fromSurvey");
   const selected = readParam(params, "selected");
 
-  const [quoteDrafts, products, enquiry, survey, selectedQuote] = await Promise.all([
+  const [quoteDrafts, products, materials, enquiry, survey, selectedQuote] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId),
     listProductsForTenant(activeTenant.tenantId),
+    listMaterialsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null)
@@ -128,7 +184,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     id: product.id,
     name: product.name,
     sku: product.sku,
-    fields: cleanQuoteQuestions(productTemplates[index]?.definitionJson)
+    fields: cleanQuoteQuestions(productTemplates[index]?.definitionJson),
+    components: cleanComponents(productTemplates[index]?.definitionJson)
   }));
   const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
@@ -142,7 +199,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
         <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Quote entry</p>
         <h1 style={{ margin: 0 }}>Fast quote setup from enquiry or survey</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a base product, answer its quote questions, set the price, then add the line. MYOB linkage can happen later when the quote/job is ready.</p>
+        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a base product, answer its quote questions, and the line price is calculated from linked material cost and sheet/roll usage. MYOB linkage can happen later when the quote/job is ready.</p>
       </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
@@ -185,7 +242,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 <h3 style={{ margin: 0 }}>Selected quote: {selectedQuote.clientName}</h3>
                 <p style={{ margin: "6px 0 0", color: "#667085" }}>Add quote lines by choosing a product, then selecting the options/questions you set up on the Products page.</p>
               </div>
-              <QuoteLineBuilder quoteId={selectedQuote.id} products={quoteProducts} />
+              <QuoteLineBuilder quoteId={selectedQuote.id} products={quoteProducts} materials={materials.filter((material) => material.active)} />
 
               <div style={{ display: "grid", gap: 10 }}>
                 <h4 style={{ margin: 0 }}>Quote lines</h4>

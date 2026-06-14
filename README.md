@@ -47,8 +47,3 @@ pnpm build
 pnpm lint
 pnpm typecheck
 ```
-
-## Latest rebuild: simpler guided product flow
-
-The Products page has been simplified further after feedback that the process was still confusing. The flow now uses plain labels: **Product**, **What this product uses**, and **Questions asked while quoting**. Advanced stock/trigger settings are hidden behind collapsible sections so the common path is easier to follow. See `docs/architecture/products-simpler-guided-flow-batch.md`.
-
