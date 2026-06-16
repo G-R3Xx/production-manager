@@ -147,12 +147,12 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
 }
 
 function cardStyle() {
-  return { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22 } as const;
+  return { background: "rgba(255,255,255,0.94)", border: "1px solid #dfe7f2", borderRadius: 26, padding: 22, boxShadow: "0 18px 48px rgba(15,23,42,0.06)" } as const;
 }
 
-const inputStyle = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", width: "100%", boxSizing: "border-box" } as const;
-const textareaStyle = { minHeight: 110, borderRadius: 12, border: "1px solid #d0d5dd", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit" } as const;
-const buttonStyle = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" } as const;
+const inputStyle = { minHeight: 44, borderRadius: 14, border: "1px solid #cfd9e8", padding: "0 14px", width: "100%", boxSizing: "border-box", background: "#fff" } as const;
+const textareaStyle = { minHeight: 110, borderRadius: 14, border: "1px solid #cfd9e8", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit", background: "#fff" } as const;
+const buttonStyle = { minHeight: 44, borderRadius: 14, border: "none", background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 16px" } as const;
 
 
 export default async function QuotesPage({ searchParams }: PageProps) {
@@ -193,16 +193,16 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourceEmail = enquiry?.email ?? "";
 
   return (
-    <div style={{ maxWidth: 1320, margin: "0 auto", display: "grid", gap: 16 }}>
+    <div style={{ maxWidth: 1360, margin: "0 auto", display: "grid", gap: 18 }}>
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
-      <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Quote entry</p>
-        <h1 style={{ margin: 0 }}>Fast quote setup from enquiry or survey</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a base product, answer its quote questions, and the line price is calculated from linked material cost and sheet/roll usage. MYOB linkage can happen later when the quote/job is ready.</p>
+      <section style={{ ...cardStyle(), display: "grid", gap: 8, background: "linear-gradient(135deg, #ffffff 0%, #f7fbff 54%, #eef6ff 100%)" }}>
+        <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote entry</p>
+        <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Fast quote setup from enquiry or survey</h1>
+        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Choose a product, answer its quote cards, and the line price is calculated from linked material cost, sheet/roll usage and sell charges. MYOB linkage can happen later when the quote/job is ready.</p>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "390px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         <form action={createQuoteDraftAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <h2 style={{ margin: 0 }}>New draft quote</h2>
           <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
@@ -225,7 +225,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             {quoteDrafts.map((quote) => (
-              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ textDecoration: "none", color: "inherit", border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 6 }}>
+              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ textDecoration: "none", color: "inherit", border: "1px solid #dfe7f2", borderRadius: 18, padding: 16, display: "grid", gap: 6, background: "#fbfdff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
                   <strong>{quote.clientName}</strong>
                   <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{quote.status}</span>
@@ -240,14 +240,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             <div style={{ borderTop: "1px solid #e5e7eb", paddingTop: 16, display: "grid", gap: 16 }}>
               <div>
                 <h3 style={{ margin: 0 }}>Selected quote: {selectedQuote.clientName}</h3>
-                <p style={{ margin: "6px 0 0", color: "#667085" }}>Add quote lines by choosing a product, then selecting the options/questions you set up on the Products page.</p>
+                <p style={{ margin: "6px 0 0", color: "#667085" }}>Add quote lines by choosing a product, then answering the quote cards you set up on the Products page.</p>
               </div>
               <QuoteLineBuilder quoteId={selectedQuote.id} products={quoteProducts} materials={materials.filter((material) => material.active)} />
 
               <div style={{ display: "grid", gap: 10 }}>
                 <h4 style={{ margin: 0 }}>Quote lines</h4>
                 {quoteLines.map((line) => (
-                  <div key={line.id} style={{ border: "1px solid #e5e7eb", borderRadius: 14, padding: 14, display: "grid", gap: 4 }}>
+                  <div key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 14, display: "grid", gap: 4, background: "#fbfdff" }}>
                     <strong>{line.productName}</strong>
                     <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${line.unitPrice}`, `Total $${line.lineTotal}`].filter(Boolean).join(" · ")}</div>
                   </div>

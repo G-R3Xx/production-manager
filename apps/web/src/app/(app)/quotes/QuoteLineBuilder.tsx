@@ -96,18 +96,19 @@ type QuoteLineBuilderProps = {
 
 const inputStyle = {
   minHeight: 44,
-  borderRadius: 12,
-  border: "1px solid #d0d5dd",
+  borderRadius: 14,
+  border: "1px solid #cfd9e8",
   padding: "0 14px",
   width: "100%",
   boxSizing: "border-box" as const,
-  background: "#fff"
+  background: "#fff",
+  color: "#0f172a"
 };
 
 const textareaStyle = {
   minHeight: 96,
-  borderRadius: 12,
-  border: "1px solid #d0d5dd",
+  borderRadius: 14,
+  border: "1px solid #cfd9e8",
   padding: "12px 14px",
   width: "100%",
   boxSizing: "border-box" as const,
@@ -117,31 +118,32 @@ const textareaStyle = {
 
 const buttonStyle = {
   minHeight: 44,
-  borderRadius: 12,
+  borderRadius: 14,
   border: "none",
-  background: "#111827",
+  background: "#0f172a",
   color: "#fff",
-  fontWeight: 800,
+  fontWeight: 950,
   cursor: "pointer",
   padding: "0 16px"
 };
 
 const secondaryButtonStyle = {
   minHeight: 40,
-  borderRadius: 12,
-  border: "1px solid #d0d5dd",
+  borderRadius: 14,
+  border: "1px solid #cfd9e8",
   background: "#fff",
-  color: "#111827",
-  fontWeight: 800,
+  color: "#1e293b",
+  fontWeight: 900,
   cursor: "pointer",
   padding: "0 14px"
 };
 
 const labelStyle = { display: "grid", gap: 6 };
-const labelTextStyle = { fontWeight: 800, fontSize: 13, color: "#344054" };
-const mutedStyle = { margin: 0, color: "#667085", lineHeight: 1.5 };
-const chipStyle = { borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 };
-const priceCardStyle = { border: "1px solid #d1fadf", borderRadius: 12, padding: 12, background: "#f6fef9", display: "grid", gap: 8 };
+const labelTextStyle = { fontWeight: 900, fontSize: 12, color: "#334155" };
+const mutedStyle = { margin: 0, color: "#64748b", lineHeight: 1.55 };
+const chipStyle = { borderRadius: 999, background: "#e0f2fe", color: "#075985", padding: "5px 10px", fontSize: 12, fontWeight: 950 };
+const priceCardStyle = { border: "1px solid #bbf7d0", borderRadius: 18, padding: 14, background: "#f0fdf4", display: "grid", gap: 8 };
+const quotePanelStyle = { border: "1px solid #dfe7f2", borderRadius: 20, padding: 16, display: "grid", gap: 12, background: "#fbfdff" };
 
 function humanize(value: string | null | undefined): string {
   if (!value) return "";
@@ -624,11 +626,11 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         </select>
       </label>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, display: "grid", gap: 12, background: "#fcfcfd" }}>
+      <div style={quotePanelStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div>
-            <strong>2. Select options for this quote line</strong>
-            <p style={{ ...mutedStyle, marginTop: 4 }}>These answers decide which product price rules apply. The price below can include material usage, roll length, ink per m² and fixed charges.</p>
+            <strong>2. Answer quote cards</strong>
+            <p style={{ ...mutedStyle, marginTop: 4 }}>These are the quote cards created on the Products page. The price below can include material usage, roll length, ink per m² and fixed charges.</p>
           </div>
           <span style={chipStyle}>{visibleFields.length} option{visibleFields.length === 1 ? "" : "s"}</span>
         </div>
@@ -714,8 +716,8 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         )}
       </div>
 
-      <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, display: "grid", gap: 12 }}>
-        <strong>3. Calculated price and add line</strong>
+      <div style={{ ...quotePanelStyle, background: "#ffffff" }}>
+        <strong>3. Calculated price</strong>
         <div style={{ display: "grid", gridTemplateColumns: quantityField ? "1fr" : "1fr 1fr", gap: 10 }}>
           {!quantityField ? (
             <label style={labelStyle}>
@@ -741,7 +743,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         </div>
 
         <div style={priceCardStyle}>
-          <span style={{ fontSize: 12, fontWeight: 900, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated from product rules</span>
+          <span style={{ fontSize: 12, fontWeight: 900, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated from product setup</span>
           <strong>{formatMoney(autoUnitPrice)} per unit · {formatMoney(autoLineTotal)} line calculated cost at qty {formatUsage(quantityNumber)}</strong>
           {materialBreakdown.length > 0 ? (
             <div style={{ display: "grid", gap: 6 }}>
@@ -760,7 +762,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
               Missing linked material for: {missingMaterials.map((component) => component.label ?? "material row").join(", ")}.
             </span>
           ) : null}
-          {unitPriceOverridden ? <button type="button" onClick={useAutoPrice} style={secondaryButtonStyle}>Use material cost</button> : null}
+          {unitPriceOverridden ? <button type="button" onClick={useAutoPrice} style={secondaryButtonStyle}>Use calculated price</button> : null}
         </div>
 
         <label style={labelStyle}>

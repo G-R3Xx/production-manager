@@ -10,14 +10,15 @@ type AppLayoutProps = {
 };
 
 const navItems = [
-  { href: "/enquiries", label: "Enquiries" },
-  { href: "/surveys", label: "Surveys" },
-  { href: "/quotes", label: "Quotes" },
-  { href: "/clients", label: "Clients" },
-  { href: "/suppliers", label: "Suppliers" },
-  { href: "/materials", label: "Materials" },
-  { href: "/products", label: "Products" },
-  { href: "/integrations", label: "Integrations" }
+  { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
+  { href: "/enquiries", label: "Enquiries", emoji: "?" },
+  { href: "/surveys", label: "Surveys", emoji: "⌖" },
+  { href: "/quotes", label: "Quotes", emoji: "$" },
+  { href: "/clients", label: "Clients", emoji: "◉" },
+  { href: "/suppliers", label: "Suppliers", emoji: "▣" },
+  { href: "/materials", label: "Materials", emoji: "▥" },
+  { href: "/products", label: "Products", emoji: "◇" },
+  { href: "/integrations", label: "Integrations", emoji: "↔" }
 ];
 
 export default async function AppLayout({ children }: AppLayoutProps) {
@@ -32,66 +33,90 @@ export default async function AppLayout({ children }: AppLayoutProps) {
       style={{
         minHeight: "100vh",
         display: "grid",
-        gridTemplateColumns: "280px minmax(0, 1fr)"
+        gridTemplateColumns: "264px minmax(0, 1fr)",
+        background: "linear-gradient(180deg, #f7faff 0%, #f3f6fb 320px, #eef2f7 100%)"
       }}
     >
       <aside
         style={{
-          borderRight: "1px solid #e5e7eb",
-          background: "#ffffff",
-          padding: 22,
+          borderRight: "1px solid #e4e9f2",
+          background: "rgba(255,255,255,0.88)",
+          backdropFilter: "blur(12px)",
+          padding: 18,
           display: "grid",
-          gridTemplateRows: "auto auto auto 1fr auto",
-          gap: 18
+          gridTemplateRows: "auto auto 1fr auto",
+          gap: 16,
+          position: "sticky",
+          top: 0,
+          height: "100vh",
+          boxSizing: "border-box"
         }}
       >
-        <div>
-          <div
-            style={{
-              fontSize: 12,
-              fontWeight: 800,
-              letterSpacing: "0.08em",
-              textTransform: "uppercase",
-              color: "#4f46e5"
-            }}
-          >
-            Production Manager
-          </div>
-          <h2 style={{ margin: "10px 0 0", fontSize: 22 }}>Office</h2>
-        </div>
-
         <div
           style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 16,
-            padding: 14,
-            background: "#fafafa"
+            display: "grid",
+            gap: 12,
+            padding: "8px 8px 4px"
           }}
         >
-          <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>Signed in as</div>
-          <div style={{ marginTop: 6, fontWeight: 700, wordBreak: "break-word" }}>{user.email ?? "Unknown user"}</div>
-          <div style={{ marginTop: 8, fontSize: 13, color: "#667085" }}>Memberships found: {memberships.length}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <div
+              style={{
+                width: 42,
+                height: 42,
+                borderRadius: 16,
+                background: "linear-gradient(135deg, #1d4ed8 0%, #38bdf8 100%)",
+                boxShadow: "0 14px 28px rgba(29,78,216,0.24)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "white",
+                fontWeight: 950,
+                letterSpacing: "-0.05em"
+              }}
+            >
+              PM
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#2563eb" }}>
+                Production Hub
+              </div>
+              <div style={{ fontSize: 18, fontWeight: 950, color: "#0f172a", lineHeight: 1.1 }}>
+                Manager
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
           style={{
-            border: "1px solid #e5e7eb",
-            borderRadius: 16,
+            border: "1px solid #dbe4f0",
+            borderRadius: 22,
             padding: 14,
-            background: "#fafafa",
+            background: "linear-gradient(180deg, #ffffff 0%, #f8fbff 100%)",
+            boxShadow: "0 10px 30px rgba(15, 23, 42, 0.05)",
             display: "grid",
             gap: 10
           }}
         >
-          <div style={{ fontSize: 12, color: "#667085", fontWeight: 700 }}>Active tenant</div>
-          <div style={{ fontWeight: 700 }}>{activeTenant?.tenantName ?? "None selected"}</div>
-          <div style={{ fontSize: 13, color: "#667085" }}>
-            {activeTenant ? `${activeTenant.tenantSlug} · ${activeTenant.tenantRole}` : "Create or select a tenant"}
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 12, color: "#64748b", fontWeight: 850 }}>Workspace</div>
+              <div style={{ marginTop: 4, fontWeight: 950, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {activeTenant?.tenantName ?? "None selected"}
+              </div>
+              <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
+                {activeTenant ? `${activeTenant.tenantRole}` : "Create or select a tenant"}
+              </div>
+            </div>
+            <span style={{ borderRadius: 999, background: "#e0f2fe", color: "#075985", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>
+              {memberships.length}
+            </span>
           </div>
 
           {memberships.length > 1 ? (
             <details>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Switch tenant</summary>
+              <summary style={{ cursor: "pointer", fontWeight: 850, color: "#1d4ed8", fontSize: 13 }}>Switch workspace</summary>
               <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
                 {memberships.map((membership) => {
                   const isActive = activeTenant?.tenantId === membership.tenantId;
@@ -105,14 +130,14 @@ export default async function AppLayout({ children }: AppLayoutProps) {
                           width: "100%",
                           textAlign: "left",
                           padding: "10px 12px",
-                          borderRadius: 12,
-                          border: isActive ? "1px solid #4f46e5" : "1px solid #d0d5dd",
-                          background: isActive ? "#eef2ff" : "#ffffff",
+                          borderRadius: 14,
+                          border: isActive ? "1px solid #93c5fd" : "1px solid #dbe4f0",
+                          background: isActive ? "#eff6ff" : "#ffffff",
                           cursor: "pointer"
                         }}
                       >
-                        <div style={{ fontWeight: 700 }}>{membership.tenantName}</div>
-                        <div style={{ marginTop: 4, fontSize: 12, color: "#667085" }}>
+                        <div style={{ fontWeight: 900 }}>{membership.tenantName}</div>
+                        <div style={{ marginTop: 4, fontSize: 12, color: "#64748b" }}>
                           {membership.tenantSlug} · {membership.tenantRole}
                         </div>
                       </button>
@@ -124,31 +149,37 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           ) : null}
         </div>
 
-        <nav style={{ display: "grid", gap: 10, alignContent: "start" }}>
+        <nav style={{ display: "grid", gap: 4, alignContent: "start" }}>
           {navItems.map((item) => (
-            <AppNavLink key={item.href} href={item.href} label={item.label} />
+            <AppNavLink key={item.href} href={item.href} label={item.label} emoji={item.emoji} />
           ))}
         </nav>
 
-        <form action={signOutAction}>
-          <button
-            type="submit"
-            style={{
-              width: "100%",
-              minHeight: 42,
-              borderRadius: 12,
-              border: "1px solid #d0d5dd",
-              background: "#ffffff",
-              fontWeight: 700,
-              cursor: "pointer"
-            }}
-          >
-            Sign out
-          </button>
-        </form>
+        <div style={{ display: "grid", gap: 10 }}>
+          <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
+            Signed in as <strong style={{ color: "#334155" }}>{user.email ?? "Unknown user"}</strong>
+          </div>
+          <form action={signOutAction}>
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                minHeight: 42,
+                borderRadius: 15,
+                border: "1px solid #dbe4f0",
+                background: "#ffffff",
+                color: "#334155",
+                fontWeight: 850,
+                cursor: "pointer"
+              }}
+            >
+              Sign out
+            </button>
+          </form>
+        </div>
       </aside>
 
-      <main style={{ padding: 28, minWidth: 0 }}>{children}</main>
+      <main style={{ padding: "24px 28px 36px", minWidth: 0 }}>{children}</main>
     </div>
   );
 }

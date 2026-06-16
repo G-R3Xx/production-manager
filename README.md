@@ -47,3 +47,7 @@ pnpm build
 pnpm lint
 pnpm typecheck
 ```
+
+## Latest UI rebuild
+
+- PrintOS-style UI rebuild: production-hub shell, dashboard, quote-card product setup, and collapsed advanced stock/process rows. See `docs/architecture/printos-style-ui-rebuild-batch.md`.
