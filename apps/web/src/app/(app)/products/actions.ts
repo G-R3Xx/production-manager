@@ -595,8 +595,10 @@ export async function addProductComponentAction(formData: FormData) {
 export async function addProductOptionAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
+  const label = readString(formData, "label") || readString(formData, "questionLabel");
 
   if (!productId) redirect("/products?error=No%20product%20selected");
+  if (!label) redirect(`/products?selected=${productId}&error=Question%20name%20is%20required`);
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const nextField = buildFieldFromForm(formData);
@@ -763,7 +765,7 @@ function fieldOptionCsv(field: Record<string, any>, includeDefault: boolean): st
 }
 
 function buildFieldFromForm(formData: FormData, existingField?: Record<string, any>) {
-  const label = readString(formData, "label") || readString(formData, "questionLabel") || existingField?.label || "Quote choice";
+  const label = readString(formData, "label") || readString(formData, "questionLabel") || existingField?.label || "New quote card";
   const key = keyFromLabel(readString(formData, "key") || existingField?.key || label);
   const fieldType = readString(formData, "fieldType") || existingField?.type || "select";
   const defaultAnswer = readString(formData, "defaultAnswer");
@@ -913,8 +915,10 @@ export async function updateProductOptionAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
   const fieldId = readString(formData, "fieldId");
+  const label = readString(formData, "label") || readString(formData, "questionLabel");
 
   if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
+  if (!label) redirect(`/products?selected=${productId}&editOption=${fieldId}&error=Question%20name%20is%20required`);
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const existingField = definition.fields.find((field: Record<string, any>) => String(field.id ?? "") === fieldId);

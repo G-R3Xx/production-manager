@@ -50,6 +50,14 @@ type QuoteComponent = {
     dimensionSource?: string | null;
     optionKey?: string | null;
     optionValues?: string[] | null;
+    widthMm?: string | null;
+    heightMm?: string | null;
+    rollWidthMm?: string | null;
+    partsPerSheet?: string | null;
+    metresPerUnit?: string | null;
+    sheetsPerUnit?: string | null;
+    sellRate?: string | null;
+    chargeName?: string | null;
   } | null;
   trigger?: {
     optionKey?: string | null;
@@ -77,6 +85,7 @@ function cleanQuoteQuestions(definition: Record<string, any> | null | undefined)
     .map((field: any, index: number) => {
       const label = String(field?.label ?? `Option ${index + 1}`).trim();
       const key = cleanQuestionKey(field?.key, `option_${index + 1}`);
+      const type = String(field?.type ?? "text");
       const options = Array.isArray(field?.options)
         ? field.options.map((option: any) => ({
             id: option?.id ? String(option.id) : null,
@@ -91,7 +100,7 @@ function cleanQuoteQuestions(definition: Record<string, any> | null | undefined)
         id: field?.id ? String(field.id) : key,
         key,
         label: label || key,
-        type: String(field?.type ?? "text"),
+        type,
         required: field?.required !== false,
         defaultValue: field?.defaultValue == null ? null : String(field.defaultValue),
         helpText: field?.helpText == null ? null : String(field.helpText),
@@ -104,7 +113,16 @@ function cleanQuoteQuestions(definition: Record<string, any> | null | undefined)
           : null
       };
     })
-    .filter((field: QuoteQuestion) => field.label.length > 0);
+    .filter((field: QuoteQuestion) => {
+      if (field.label.length === 0) return false;
+
+      const isEmptyPlaceholder =
+        field.label.toLowerCase() === "quote choice" &&
+        ["select", "size_select", "color"].includes(field.type) &&
+        (!field.options || field.options.length === 0);
+
+      return !isEmptyPlaceholder;
+    });
 }
 function cleanComponents(definition: Record<string, any> | null | undefined): QuoteComponent[] {
   const rawComponents = Array.isArray(definition?.components) ? definition?.components ?? [] : [];
@@ -124,7 +142,15 @@ function cleanComponents(definition: Record<string, any> | null | undefined): Qu
           usageBasis: component.stockUsage.usageBasis == null ? null : String(component.stockUsage.usageBasis),
           dimensionSource: component.stockUsage.dimensionSource == null ? null : String(component.stockUsage.dimensionSource),
           optionKey: component.stockUsage.optionKey == null ? null : String(component.stockUsage.optionKey),
-          optionValues: Array.isArray(component.stockUsage.optionValues) ? component.stockUsage.optionValues.map(String) : []
+          optionValues: Array.isArray(component.stockUsage.optionValues) ? component.stockUsage.optionValues.map(String) : [],
+          widthMm: component.stockUsage.widthMm == null ? null : String(component.stockUsage.widthMm),
+          heightMm: component.stockUsage.heightMm == null ? null : String(component.stockUsage.heightMm),
+          rollWidthMm: component.stockUsage.rollWidthMm == null ? null : String(component.stockUsage.rollWidthMm),
+          partsPerSheet: component.stockUsage.partsPerSheet == null ? null : String(component.stockUsage.partsPerSheet),
+          metresPerUnit: component.stockUsage.metresPerUnit == null ? null : String(component.stockUsage.metresPerUnit),
+          sheetsPerUnit: component.stockUsage.sheetsPerUnit == null ? null : String(component.stockUsage.sheetsPerUnit),
+          sellRate: component.stockUsage.sellRate == null ? null : String(component.stockUsage.sellRate),
+          chargeName: component.stockUsage.chargeName == null ? null : String(component.stockUsage.chargeName)
         }
       : null,
     trigger: component?.trigger

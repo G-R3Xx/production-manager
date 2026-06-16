@@ -154,7 +154,9 @@ function humanize(value: string | null | undefined): string {
 }
 
 function numberValue(value: string | number | null | undefined, fallback = 0): number {
-  const amount = Number(String(value ?? "").replace(/,/g, "").replace(/\$/g, "").trim());
+  const text = String(value ?? "").replace(/,/g, "").replace(/\$/g, "").trim();
+  if (!text) return fallback;
+  const amount = Number(text);
   return Number.isFinite(amount) ? amount : fallback;
 }
 
