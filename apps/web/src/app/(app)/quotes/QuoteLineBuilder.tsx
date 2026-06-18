@@ -176,11 +176,34 @@ function formatUsage(value: number): string {
   return value.toFixed(2);
 }
 
+function normalizedQuestionType(field: Pick<QuoteQuestion, "type" | "key" | "label" | "options">): string {
+  const rawType = String(field.type ?? "text").trim().toLowerCase();
+  const keyLabel = `${field.key ?? ""} ${field.label ?? ""}`.toLowerCase();
+  const choices = Array.isArray(field.options) ? field.options : [];
+
+  if (["multi_select", "multi", "multi_choice", "multiple", "checkbox", "checkboxes", "checkbox_group", "tick_multiple", "tick_multiple_choices"].includes(rawType)) {
+    return "multi_select";
+  }
+
+  // Backwards-compatible safety: old Finishing questions may already exist in the DB as
+  // normal dropdowns. Finishing is almost always "tick all that apply", so render it as
+  // multi-choice on quotes when it has multiple answers.
+  if (keyLabel.includes("finishing") && choices.length > 1) {
+    return "multi_select";
+  }
+
+  return rawType || "text";
+}
+
+function isMultiSelectField(field: Pick<QuoteQuestion, "type" | "key" | "label" | "options">): boolean {
+  return normalizedQuestionType(field) === "multi_select";
+}
+
 function defaultAnswersFor(product: QuoteProduct | undefined): Record<string, string> {
   const next: Record<string, string> = {};
   for (const field of product?.fields ?? []) {
     const defaultValue = String(field.defaultValue ?? "");
-    const firstChoice = field.type === "multi_select" ? "" : (field.options?.[0]?.value ? String(field.options[0].value) : "");
+    const firstChoice = isMultiSelectField(field) ? "" : (field.options?.[0]?.value ? String(field.options[0].value) : "");
     next[field.key] = defaultValue || firstChoice;
   }
   return next;
@@ -197,8 +220,13 @@ function selectedValues(value: string | null | undefined): string[] {
     .filter(Boolean);
 }
 
+function isNoneChoice(value: string | null | undefined): boolean {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  return ["none", "no", "no extra cost", "not required", "n/a", "na"].includes(normalized);
+}
+
 function answerLabel(field: QuoteQuestion, value: string): string {
-  if (field.type === "multi_select") {
+  if (isMultiSelectField(field)) {
     const labels = selectedValues(value).map((item) => {
       const matched = selectedChoice(field, item);
       return String(matched?.label ?? item).replace(/_/g, " ");
@@ -644,9 +672,16 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
   function toggleMultiAnswer(key: string, value: string, checked: boolean) {
     setAnswers((current) => {
       const currentValues = selectedValues(current[key]);
-      const nextValues = checked
+      let nextValues = checked
         ? Array.from(new Set([...currentValues, value]))
         : currentValues.filter((item) => item !== value);
+
+      if (checked && isNoneChoice(value)) {
+        nextValues = [value];
+      } else if (checked) {
+        nextValues = nextValues.filter((item) => !isNoneChoice(item));
+      }
+
       return { ...current, [key]: nextValues.join(",") };
     });
   }
@@ -693,9 +728,10 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         {selectedProduct && selectedProduct.fields.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
             {visibleFields.map((field) => {
+              const fieldType = normalizedQuestionType(field);
               const value = answers[field.key] ?? String(field.defaultValue ?? "");
 
-              if (field.type === "multi_select") {
+              if (fieldType === "multi_select") {
                 const choices = field.options ?? [];
                 const checkedValues = selectedValues(value);
 
@@ -726,8 +762,8 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
                 );
               }
 
-              if (["select", "size_select", "color", "yes_no"].includes(field.type)) {
-                const choices = field.type === "yes_no" && (!field.options || field.options.length === 0)
+              if (["select", "size_select", "color", "yes_no"].includes(fieldType)) {
+                const choices = fieldType === "yes_no" && (!field.options || field.options.length === 0)
                   ? [
                       { label: "Yes", value: "yes" },
                       { label: "No", value: "no" }
@@ -756,14 +792,14 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
                 );
               }
 
-              if (needsTextInput(field.type)) {
+              if (needsTextInput(fieldType)) {
                 return (
                   <label key={field.id ?? field.key} style={labelStyle}>
                     <span style={labelTextStyle}>{field.label}{field.required === false ? "" : " *"}</span>
                     <input
                       name={field.key === "quantity" ? "quantity" : `option_${field.key}`}
-                      type={inputTypeFor(field.type)}
-                      min={field.type === "quantity" ? "1" : undefined}
+                      type={inputTypeFor(fieldType)}
+                      min={fieldType === "quantity" ? "1" : undefined}
                       step="any"
                       value={value}
                       required={field.required !== false}
