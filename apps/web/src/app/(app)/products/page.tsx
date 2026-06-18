@@ -377,6 +377,8 @@ const blueChipStyle: CSSProperties = { ...chipStyle, background: "#dbeafe", colo
 const sectionHeadingStyle: CSSProperties = { margin: 0, fontSize: 26, letterSpacing: "-0.03em" };
 const mutedStyle: CSSProperties = { margin: 0, color: "#64748b", lineHeight: 1.55 };
 const tinyLabelStyle: CSSProperties = { margin: 0, fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.1em", color: "#2563eb" };
+const pickerBackdropStyle: CSSProperties = { position: "fixed", inset: 0, zIndex: 80, background: "rgba(15,23,42,0.46)", padding: "34px", display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto" };
+const pickerPanelStyle: CSSProperties = { width: "min(1180px, 96vw)", maxHeight: "90vh", borderRadius: 24, overflow: "hidden", background: "#fff", border: "1px solid #dfe7f2", boxShadow: "0 30px 90px rgba(15,23,42,0.32)", display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" };
 
 function MessageBanner({ tone, children }: { tone: "success" | "error"; children: string }) {
   const success = tone === "success";
@@ -1415,6 +1417,42 @@ function moneyText(value: unknown): string {
   return `$${amount.toFixed(2)}`;
 }
 
+function numberFrom(value: unknown, fallback = 0): number {
+  const amount = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
+  return Number.isFinite(amount) ? amount : fallback;
+}
+
+function isLinearMetreUnit(value: unknown): boolean {
+  const unit = lowerText(value);
+  return unit === "lm" || unit === "m" || unit.includes("linear metre") || unit.includes("linear meter") || unit.includes("metre") || unit.includes("meter");
+}
+
+function materialPickerCost(material: any): { primary: string; secondary: string } {
+  const purchaseCost = numberFrom(material?.purchaseCost, 0);
+  const purchaseUom = lowerText(material?.purchaseUom);
+  const stockUom = lowerText(material?.stockUom);
+  const stockQuantity = numberFrom(material?.stockQuantity, 0);
+  const rollWidthM = numberFrom(material?.rollWidthMm, 0) / 1000;
+
+  if (isRollMaterial(material)) {
+    if (isLinearMetreUnit(purchaseUom)) {
+      return { primary: `${moneyText(purchaseCost)}/lm`, secondary: "purchase cost already entered per linear metre" };
+    }
+    if ((purchaseUom.includes("roll") || materialTypeText(material).includes("roll")) && stockQuantity > 0 && isLinearMetreUnit(stockUom)) {
+      return { primary: `${moneyText(purchaseCost / stockQuantity)}/lm`, secondary: `${moneyText(purchaseCost)} per ${stockQuantity}lm roll` };
+    }
+    if (stockQuantity > 0 && isLinearMetreUnit(stockUom)) {
+      return { primary: `${moneyText(purchaseCost / stockQuantity)}/lm`, secondary: `derived from ${stockQuantity}lm stock quantity` };
+    }
+    if ((purchaseUom === "sqm" || purchaseUom.includes("square")) && rollWidthM > 0) {
+      return { primary: `${moneyText(purchaseCost * rollWidthM)}/lm`, secondary: `${moneyText(purchaseCost)}/m² × ${material.rollWidthMm}mm roll width` };
+    }
+    return { primary: "Set roll length", secondary: `${moneyText(purchaseCost)} roll price needs stock qty as lm` };
+  }
+
+  return { primary: `${moneyText(purchaseCost)}/${material?.purchaseUom ?? material?.stockUom ?? "unit"}`, secondary: material?.purchaseUom ? "purchase cost" : "cost basis not set" };
+}
+
 function isRollMaterial(material: any): boolean {
   const text = `${materialTypeText(material)} ${lowerText(material?.name)}`;
   return text.includes("roll") || text.includes("vinyl") || text.includes("sav") || text.includes("laminate") || text.includes("cello") || text.includes("banner");
@@ -1507,7 +1545,9 @@ function BuildSlotRow({ slot, selectedProduct, query, components, materials }: {
         </div>
       </td>
       <td style={{ padding: "13px 10px", color: "#334155", fontSize: 14 }}>{selected ? componentTriggerText(selected, []) : "Not selected"}</td>
-      <td style={{ padding: "13px 10px", fontWeight: 900 }}>{selected?.materialId ? moneyText(materials.find((material) => String(material.id) === String(selected.materialId))?.purchaseCost) : selected ? recipeBasisText(selected) : "—"}</td>
+      <td style={{ padding: "13px 10px", fontWeight: 900 }}>
+        {selected?.materialId ? materialPickerCost(materials.find((material) => String(material.id) === String(selected.materialId))).primary : selected ? recipeBasisText(selected) : "—"}
+      </td>
       <td style={{ padding: "13px 10px", textAlign: "right" }}>
         <div style={{ display: "inline-flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
           <Link href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={isDone ? ghostStyle : blueButtonStyle}>{isDone ? "Change" : `+ ${slot.chooseLabel}`}</Link>
@@ -1563,10 +1603,12 @@ function ProductPartListSummary({ selectedProduct, fields, components, materials
 }
 
 function SupplierPriceHint({ material }: { material: any }) {
+  const cost = materialPickerCost(material);
   return (
     <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.45 }}>
       <div><b>{material?.supplierName ?? "No supplier linked"}</b></div>
-      <div>{material?.sku ? `SKU ${material.sku} · ` : ""}{materialSizeText(material)} · {moneyText(material?.purchaseCost)} / {material?.purchaseUom ?? material?.stockUom ?? "unit"}</div>
+      <div>{material?.sku ? `SKU ${material.sku} · ` : ""}{materialSizeText(material)} · <b style={{ color: "#0f172a" }}>{cost.primary}</b></div>
+      <div>{cost.secondary}</div>
       <div>Stock: {material?.stockQuantity ?? "0"} {material?.stockUom ?? ""}</div>
     </div>
   );
@@ -1593,28 +1635,32 @@ function SelectMaterialForSlotForm({ selectedProduct, slot, material, existing }
   );
 }
 
-function MaterialPickerForSlot({ selectedProduct, slot, materials, existing }: { selectedProduct: any; slot: ProductBuildSlot; materials: any[]; existing: any | null }) {
-  const filtered = materials.filter((material) => materialMatchesPart(material, slot.key));
-  const rows = filtered.length ? filtered : materials;
+function MaterialPickerForSlot({ selectedProduct, slot, materials, existing, query }: { selectedProduct: any; slot: ProductBuildSlot; materials: any[]; existing: any | null; query: string }) {
+  const rows = materials.filter((material) => materialMatchesPart(material, slot.key));
+  const closeHref = productBuilderUrl(selectedProduct.id, query);
 
   return (
-    <section style={{ ...whitePanelStyle, padding: 0, overflow: "hidden" }}>
-      <div style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb", padding: 18, display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
-        <div>
-          <p style={tinyLabelStyle}>{slot.label}</p>
-          <h3 style={{ margin: "4px 0 2px", fontSize: 26 }}>Choose from materials</h3>
-          <p style={mutedStyle}>{slot.description}</p>
+    <div style={pickerBackdropStyle}>
+      <section style={pickerPanelStyle}>
+        <div style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb", padding: 18, display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+          <div>
+            <p style={tinyLabelStyle}>{slot.label}</p>
+            <h3 style={{ margin: "4px 0 2px", fontSize: 26 }}>Choose {slot.label.toLowerCase()}</h3>
+            <p style={mutedStyle}>{slot.description}</p>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <span style={plainChipStyle}>{rows.length} matching material{rows.length === 1 ? "" : "s"}</span>
+            <Link href={closeHref} style={ghostStyle}>Close</Link>
+          </div>
         </div>
-        <span style={plainChipStyle}>{rows.length} matching material{rows.length === 1 ? "" : "s"}</span>
-      </div>
-      {rows.length === 0 ? (
-        <div style={{ padding: 18 }}>
-          <p style={mutedStyle}>No materials exist yet. Add stock in Materials first, then come back to choose it here.</p>
-          <Link href="/materials" style={blueButtonStyle}>Go to Materials</Link>
-        </div>
-      ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+        {rows.length === 0 ? (
+          <div style={{ padding: 18 }}>
+            <p style={mutedStyle}>No applicable materials found for this part. Add or update stock in Materials first, then come back to choose it here.</p>
+            <Link href="/materials" style={blueButtonStyle}>Go to Materials</Link>
+          </div>
+        ) : (
+          <div style={{ overflow: "auto", maxHeight: "calc(90vh - 128px)" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
             <thead>
               <tr style={{ textAlign: "left", color: "#64748b", fontSize: 12, borderBottom: "1px solid #e5e7eb" }}>
                 <th style={{ padding: "12px 14px" }}>Material</th>
@@ -1633,15 +1679,19 @@ function MaterialPickerForSlot({ selectedProduct, slot, materials, existing }: {
                   </td>
                   <td style={{ padding: "14px" }}><SupplierPriceHint material={material} /></td>
                   <td style={{ padding: "14px" }}>{materialSizeText(material)}</td>
-                  <td style={{ padding: "14px", fontWeight: 900 }}>{moneyText(material.purchaseCost)}</td>
+                  <td style={{ padding: "14px", fontWeight: 900 }}>
+                    <div>{materialPickerCost(material).primary}</div>
+                    <small style={{ color: "#64748b", fontWeight: 700 }}>{materialPickerCost(material).secondary}</small>
+                  </td>
                   <td style={{ padding: "14px", textAlign: "right" }}><SelectMaterialForSlotForm selectedProduct={selectedProduct} slot={slot} material={material} existing={existing} /></td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
-    </section>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -1718,7 +1768,7 @@ function SupplierOrderingPreview({ materials }: { materials: any[] }) {
           {supplierRows.map((material) => (
             <div key={material.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center", borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
               <span><strong>{material.name}</strong><br /><small style={{ color: "#64748b" }}>{material.supplierName}</small></span>
-              <span style={{ fontWeight: 900 }}>{moneyText(material.purchaseCost)}</span>
+              <span style={{ fontWeight: 900 }}>{materialPickerCost(material).primary}</span>
               <button type="button" disabled style={{ ...ghostStyle, opacity: 0.6, cursor: "not-allowed" }}>Order later</button>
             </div>
           ))}
@@ -1784,7 +1834,7 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
           </section>
 
           {activeSlot && ["substrate", "print_media", "laminate", "finishing"].includes(activeSlot.key) ? (
-            <MaterialPickerForSlot selectedProduct={selectedProduct} slot={activeSlot} materials={materials} existing={selectedForActiveSlot} />
+            <MaterialPickerForSlot selectedProduct={selectedProduct} slot={activeSlot} materials={materials} existing={selectedForActiveSlot} query={query} />
           ) : null}
 
           {activePart === "ink" ? <InkBuilderPanel selectedProduct={selectedProduct} fields={fields} /> : null}
