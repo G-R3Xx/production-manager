@@ -15,7 +15,7 @@ function readParam(
 
 export default async function SignInPage({ searchParams }: SignInPageProps) {
   const params = (await searchParams) ?? {};
-  const next = readParam(params, "next") || "/dashboard";
+  const next = readParam(params, "next") || "/enquiries";
   const error = readParam(params, "error");
   const message = readParam(params, "message");
 

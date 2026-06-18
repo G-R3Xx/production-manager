@@ -5,7 +5,7 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 import { getPublicEnv } from "@/lib/env";
 
 export async function signInWithGoogleAction(formData: FormData): Promise<void> {
-  const next = String(formData.get("next") || "/dashboard");
+  const next = String(formData.get("next") || "/enquiries");
   const supabase = await getSupabaseServerClient();
   const env = getPublicEnv();
 
@@ -25,7 +25,7 @@ export async function signInWithGoogleAction(formData: FormData): Promise<void> 
 
 export async function signInWithMagicLinkAction(formData: FormData): Promise<void> {
   const email = String(formData.get("email") || "").trim();
-  const next = String(formData.get("next") || "/dashboard");
+  const next = String(formData.get("next") || "/enquiries");
   const supabase = await getSupabaseServerClient();
   const env = getPublicEnv();
 

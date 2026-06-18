@@ -39,7 +39,7 @@ export async function getRequiredSessionUser(): Promise<SessionUser> {
   const user = await getSessionUser();
 
   if (!user) {
-    redirect("/sign-in");
+    redirect("/sign-in?next=/enquiries");
   }
 
   return user;
