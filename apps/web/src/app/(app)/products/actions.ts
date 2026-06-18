@@ -837,9 +837,18 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
   const triggerOptionKey = triggerOptionKeyRaw ? keyFromLabel(triggerOptionKeyRaw) : null;
   const triggerOptionValues = splitCsv(readString(formData, "triggerOptionValuesCsv")).map((value) => keyFromLabel(value) === "option" ? value : value.replace(/\s+/g, "_"));
   const kind = readString(formData, "kind") || existingComponent?.kind || "material";
-  const role = triggerOptionKey
-    ? (kind === "labour" ? "quote_finishing" : "quote_selected_material")
-    : (readString(formData, "role") || existingComponent?.role || "base_material");
+  const isSellChargeUsage = ["sell_sqm", "sell_each"].includes(baseUsage);
+  const isLabourUsage = baseUsage === "labour_hours";
+  const isOutsourceUsage = baseUsage === "outsourced_each";
+  const role = isSellChargeUsage
+    ? "quote_sell_charge"
+    : isLabourUsage
+      ? "factory_labour"
+      : isOutsourceUsage
+        ? "outsourced_item"
+        : triggerOptionKey
+          ? (kind === "labour" ? "quote_finishing" : "quote_selected_material")
+          : (readString(formData, "role") || existingComponent?.role || "base_material");
 
   let ruleType = "yield_based";
   let unit = "sheet";
@@ -875,13 +884,42 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
     usageOptionKey = "quantity";
   }
 
+  if (baseUsage === "sell_sqm") {
+    ruleType = "sell_sqm";
+    unit = "sqm";
+    dimensionSource = "finished_size";
+    usageOptionKey = "finished_size";
+  }
+
+  if (baseUsage === "sell_each") {
+    ruleType = "sell_each";
+    unit = "each";
+    dimensionSource = "quantity_only";
+    usageOptionKey = "quantity";
+  }
+
+  if (baseUsage === "labour_hours") {
+    ruleType = "labour_hours";
+    unit = "hr";
+    dimensionSource = "quantity_only";
+    usageOptionKey = "quantity";
+  }
+
+  if (baseUsage === "outsourced_each") {
+    ruleType = "outsourced_each";
+    unit = "each";
+    dimensionSource = "quantity_only";
+    usageOptionKey = "quantity";
+  }
+
   const existingStockUsage = existingComponent?.stockUsage ?? {};
+  const sellRate = optionalNumberString(formData, "sellRate", existingStockUsage?.sellRate ?? null);
 
   return {
     id: existingComponent?.id ?? randomUUID(),
     kind,
     role,
-    materialId,
+    materialId: ["sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(baseUsage) ? null : materialId,
     supplierId: existingComponent?.supplierId ?? null,
     labourRateName: readString(formData, "labourRateName") || existingComponent?.labourRateName || null,
     label,
@@ -901,7 +939,9 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
       rollWidthMm: optionalNumberString(formData, "componentRollWidthMm", existingStockUsage?.rollWidthMm ?? null),
       partsPerSheet: optionalNumberString(formData, "partsPerSheet", existingStockUsage?.partsPerSheet ?? null),
       metresPerUnit: optionalNumberString(formData, "metresPerUnit", existingStockUsage?.metresPerUnit ?? null),
-      sheetsPerUnit: optionalNumberString(formData, "sheetsPerUnit", existingStockUsage?.sheetsPerUnit ?? null)
+      sheetsPerUnit: optionalNumberString(formData, "sheetsPerUnit", existingStockUsage?.sheetsPerUnit ?? null),
+      sellRate,
+      chargeName: ["sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(baseUsage) ? label : (existingStockUsage?.chargeName ?? null)
     },
     trigger: {
       optionKey: triggerOptionKey,

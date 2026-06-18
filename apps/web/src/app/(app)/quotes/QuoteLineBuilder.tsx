@@ -410,7 +410,6 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
   if (!product) return [];
 
   return product.components
-    .filter((component) => String(component.kind ?? "material") !== "labour")
     .filter((component) => componentApplies(component, answers))
     .flatMap((component): CostBreakdownItem[] => {
       const rawRuleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
@@ -446,7 +445,37 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "each",
           rate,
           cost: amount * rate,
-          note: "price rule from product answer line"
+          note: "price rule from product recipe row"
+        })];
+      }
+
+      if (rawRuleType === "labour_hours") {
+        const hours = allowance;
+        const rate = numberValue(component.stockUsage?.sellRate, 66);
+        return [costBreakdownItem({
+          componentLabel,
+          materialName: "Factory labour",
+          basis: "Hours",
+          amount: hours,
+          unit: "hr",
+          rate,
+          cost: hours * rate,
+          note: "factory labour row from product setup"
+        })];
+      }
+
+      if (rawRuleType === "outsourced_each") {
+        const amount = allowance;
+        const rate = numberValue(component.stockUsage?.sellRate, 0);
+        return [costBreakdownItem({
+          componentLabel,
+          materialName: "Outsourced / supplier",
+          basis: "Supplier item",
+          amount,
+          unit: "each",
+          rate,
+          cost: amount * rate,
+          note: "outsourced row from product setup"
         })];
       }
 
@@ -551,7 +580,7 @@ function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: R
   return product.components
     .filter((component) => String(component.kind ?? "material") !== "labour")
     .filter((component) => componentApplies(component, answers))
-    .filter((component) => !["sell_sqm", "sell_each"].includes(String(component.ruleType ?? component.stockUsage?.usageBasis ?? "")))
+    .filter((component) => !["sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(String(component.ruleType ?? component.stockUsage?.usageBasis ?? "")))
     .filter((component) => !component.materialId);
 }
 

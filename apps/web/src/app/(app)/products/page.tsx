@@ -8,6 +8,7 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { getProductById, listProductsForTenant } from "@/server/products";
 import {
   addProductOptionAction,
+  addProductComponentAction,
   applyQuoteBehaviourPresetAction,
   createProductAction,
   deleteProductOptionAction,
@@ -868,62 +869,460 @@ function AddQuestionPanel({ selectedProduct, activeMaterials, fields }: { select
   );
 }
 
+
+function componentRuleType(component: any): string {
+  return String(component?.ruleType ?? component?.stockUsage?.usageBasis ?? "yield_based");
+}
+
+function componentTriggerText(component: any, fields: any[]): string {
+  const optionKey = String(component?.trigger?.optionKey ?? component?.stockUsage?.optionKey ?? "");
+  const values = Array.isArray(component?.trigger?.optionValues)
+    ? component.trigger.optionValues
+    : Array.isArray(component?.stockUsage?.optionValues)
+      ? component.stockUsage.optionValues
+      : [];
+
+  if (!optionKey || values.length === 0) return "Always included";
+  const fieldLabel = fields.find((field: any) => String(field.key ?? "") === optionKey)?.label ?? humanize(optionKey);
+  return `${fieldLabel}: ${values.map(humanize).join(", ")}`;
+}
+
+function recipeRowType(component: any): "material" | "charge" | "labour" | "outsource" {
+  const kind = String(component?.kind ?? "material");
+  const role = String(component?.role ?? "");
+  const ruleType = componentRuleType(component);
+  if (kind === "labour" || ruleType === "labour_hours") return "labour";
+  if (kind === "outsourced" || role.includes("outsource") || ruleType === "outsourced_each") return "outsource";
+  if (["sell_sqm", "sell_each"].includes(ruleType) || role === "quote_sell_charge") return "charge";
+  return "material";
+}
+
+function recipeBasisText(component: any): string {
+  const ruleType = componentRuleType(component);
+  const stockUsage = component?.stockUsage ?? {};
+  if (ruleType === "sell_sqm") return `$${cleanUsageNumber(stockUsage.sellRate ?? component.quantity) || "0"} / m²`;
+  if (ruleType === "sell_each") return `$${cleanUsageNumber(stockUsage.sellRate ?? component.quantity) || "0"} each`;
+  if (ruleType === "labour_hours") return `${cleanUsageNumber(component.quantity) || "0"} hr × $${cleanUsageNumber(stockUsage.sellRate) || "0"}/hr`;
+  if (ruleType === "outsourced_each") return `${cleanUsageNumber(component.quantity) || "1"} × $${cleanUsageNumber(stockUsage.sellRate) || "0"}`;
+  if (ruleType === "per_linear_metre") return cleanUsageNumber(stockUsage.metresPerUnit) ? `${cleanUsageNumber(stockUsage.metresPerUnit)} lm each` : "Roll length from size";
+  if (ruleType === "per_sqm") return "Square metres from size";
+  if (ruleType === "per_unit") return String(component.unit ?? "each") === "sheet" ? `${cleanUsageNumber(stockUsage.sheetsPerUnit) || "1"} sheet each` : `${cleanUsageNumber(component.quantity) || "1"} each`;
+  if (cleanUsageNumber(stockUsage.partsPerSheet)) return `1 sheet makes ${cleanUsageNumber(stockUsage.partsPerSheet)}`;
+  return "Part sheet from size";
+}
+
+function materialNameFor(component: any, materials: any[]): string {
+  if (!component?.materialId) return "No material";
+  return materials.find((material: any) => String(material.id) === String(component.materialId))?.name ?? "Linked material";
+}
+
+function RecipeRowCard({ component, fields, materials }: { component: any; fields: any[]; materials: any[] }) {
+  const type = recipeRowType(component);
+  const chip = type === "material" ? greenChipStyle : type === "charge" ? blueChipStyle : type === "labour" ? yellowChipStyle : plainChipStyle;
+  return (
+    <div style={{ ...whitePanelStyle, gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div style={{ minWidth: 0 }}>
+          <strong>{component.label}</strong>
+          <p style={mutedStyle}>{type === "material" ? materialNameFor(component, materials) : humanize(type)} · {recipeBasisText(component)}</p>
+        </div>
+        <span style={chip}>{humanize(type)}</span>
+      </div>
+      <p style={{ ...mutedStyle, fontSize: 13 }}>{componentTriggerText(component, fields)}</p>
+    </div>
+  );
+}
+
+function ExistingRecipeRows({ title, emptyText, rows, fields, materials }: { title: string; emptyText: string; rows: any[]; fields: any[]; materials: any[] }) {
+  return (
+    <section style={{ ...panelStyle, background: "#fff" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <strong style={{ fontSize: 18 }}>{title}</strong>
+        <span style={plainChipStyle}>{rows.length} row{rows.length === 1 ? "" : "s"}</span>
+      </div>
+      {rows.length === 0 ? (
+        <p style={mutedStyle}>{emptyText}</p>
+      ) : (
+        <div style={{ display: "grid", gap: 10 }}>
+          {rows.map((component: any) => <RecipeRowCard key={component.id ?? component.label} component={component} fields={fields} materials={materials} />)}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AppliesWhenFields({ fields }: { fields: any[] }) {
+  return (
+    <details style={{ ...whitePanelStyle, background: "#fbfdff" }}>
+      <summary style={{ cursor: "pointer", fontWeight: 900 }}>Optional: only use this row for certain quote answers</summary>
+      <div style={{ ...grid2, marginTop: 12 }}>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Question</span>
+          <select name="triggerOptionKey" defaultValue="" style={inputStyle}>
+            <option value="">Always included</option>
+            {fields.map((field: any) => <option key={field.id ?? field.key} value={String(field.key ?? "")}>{field.label}</option>)}
+          </select>
+        </label>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Answers</span>
+          <input name="triggerOptionValuesCsv" placeholder="eg matte_laminate, gloss_laminate" style={inputStyle} />
+        </label>
+      </div>
+    </details>
+  );
+}
+
+function AddMaterialRecipeRow({ productId, materials, fields }: { productId: string; materials: any[]; fields: any[] }) {
+  return (
+    <details style={whitePanelStyle}>
+      <summary style={{ cursor: "pointer", fontWeight: 950 }}>+ Add material / stock row</summary>
+      <form action={addProductComponentAction} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="kind" value="material" />
+        <div style={grid3}>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Row name</span>
+            <input name="label" placeholder="eg ACM sheet, SAV 7YR, Matt laminate" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Material from stock list</span>
+            <select name="materialId" defaultValue="" style={inputStyle}>
+              <option value="">Choose material</option>
+              {materials.map((material: any) => <option key={material.id} value={material.id}>{material.name}</option>)}
+            </select>
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>How it is used</span>
+            <select name="baseUsage" defaultValue="part_sheet" style={inputStyle}>
+              <option value="part_sheet">Part sheet from quoted size</option>
+              <option value="roll_metres">Roll metres from quoted size</option>
+              <option value="area">Square metres from quoted size</option>
+              <option value="whole_sheet">Whole sheet each</option>
+              <option value="each">Each / fixed item</option>
+            </select>
+          </label>
+        </div>
+        <div style={grid3}>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Qty / allowance</span>
+            <input name="quantity" defaultValue="1" placeholder="usually 1" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Waste %</span>
+            <input name="wastePercent" defaultValue="10" placeholder="eg 10" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Unit label</span>
+            <input name="unit" placeholder="sheet, lm, each" style={inputStyle} />
+          </label>
+        </div>
+        <AppliesWhenFields fields={fields} />
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Note</span>
+          <input name="notes" placeholder="eg roll length comes from finished size" style={inputStyle} />
+        </label>
+        <button type="submit" style={blueButtonStyle}>Add material row</button>
+      </form>
+    </details>
+  );
+}
+
+function AddChargeRecipeRow({ productId, fields }: { productId: string; fields: any[] }) {
+  return (
+    <details style={whitePanelStyle}>
+      <summary style={{ cursor: "pointer", fontWeight: 950 }}>+ Add ink / production charge</summary>
+      <form action={addProductComponentAction} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="kind" value="material" />
+        <div style={grid3}>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Charge name</span>
+            <input name="label" placeholder="eg CMYK Ink, White Ink" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Charge type</span>
+            <select name="baseUsage" defaultValue="sell_sqm" style={inputStyle}>
+              <option value="sell_sqm">Sell $ per m²</option>
+              <option value="sell_each">Sell $ each</option>
+            </select>
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Sell rate</span>
+            <input name="sellRate" placeholder="eg 10" style={inputStyle} />
+          </label>
+        </div>
+        <input type="hidden" name="quantity" value="1" />
+        <input type="hidden" name="wastePercent" value="0" />
+        <AppliesWhenFields fields={fields} />
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Note</span>
+          <input name="notes" placeholder="eg finished area × $10/m²" style={inputStyle} />
+        </label>
+        <button type="submit" style={blueButtonStyle}>Add charge row</button>
+      </form>
+    </details>
+  );
+}
+
+function AddLabourRecipeRow({ productId, fields }: { productId: string; fields: any[] }) {
+  return (
+    <details style={whitePanelStyle}>
+      <summary style={{ cursor: "pointer", fontWeight: 950 }}>+ Add factory labour row</summary>
+      <form action={addProductComponentAction} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="kind" value="labour" />
+        <input type="hidden" name="baseUsage" value="labour_hours" />
+        <div style={grid3}>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Labour name</span>
+            <input name="label" placeholder="eg Print setup, Laminate apply, Jingwei" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Hours per item</span>
+            <input name="quantity" placeholder="eg 0.25" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Rate $/hr</span>
+            <input name="sellRate" defaultValue="66" style={inputStyle} />
+          </label>
+        </div>
+        <input type="hidden" name="wastePercent" value="0" />
+        <AppliesWhenFields fields={fields} />
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Note</span>
+          <input name="notes" placeholder="eg only when Jingwei is selected" style={inputStyle} />
+        </label>
+        <button type="submit" style={blueButtonStyle}>Add labour row</button>
+      </form>
+    </details>
+  );
+}
+
+function AddOutsourceRecipeRow({ productId, fields }: { productId: string; fields: any[] }) {
+  return (
+    <details style={whitePanelStyle}>
+      <summary style={{ cursor: "pointer", fontWeight: 950 }}>+ Add outsourced / supplier row</summary>
+      <form action={addProductComponentAction} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+        <input type="hidden" name="productId" value={productId} />
+        <input type="hidden" name="kind" value="outsourced" />
+        <input type="hidden" name="baseUsage" value="outsourced_each" />
+        <div style={grid3}>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Supplier row name</span>
+            <input name="label" placeholder="eg Laser cut letters, powder coat" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Qty per item</span>
+            <input name="quantity" defaultValue="1" style={inputStyle} />
+          </label>
+          <label style={labelStyle}>
+            <span style={labelTextStyle}>Cost / sell each</span>
+            <input name="sellRate" placeholder="eg 120" style={inputStyle} />
+          </label>
+        </div>
+        <input type="hidden" name="wastePercent" value="0" />
+        <AppliesWhenFields fields={fields} />
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Note</span>
+          <input name="notes" placeholder="eg ordered from supplier" style={inputStyle} />
+        </label>
+        <button type="submit" style={blueButtonStyle}>Add outsourced row</button>
+      </form>
+    </details>
+  );
+}
+
+function SpreadsheetRecipeRows({ selectedProduct, fields, components, materials }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[] }) {
+  const materialRows = components.filter((component: any) => recipeRowType(component) === "material");
+  const chargeRows = components.filter((component: any) => recipeRowType(component) === "charge");
+  const labourRows = components.filter((component: any) => recipeRowType(component) === "labour");
+  const outsourceRows = components.filter((component: any) => recipeRowType(component) === "outsource");
+
+  return (
+    <section style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 12 }}>
+        <div style={{ ...whitePanelStyle, background: "#f6fef9", borderColor: "#abefc6" }}>
+          <span style={greenChipStyle}>1</span>
+          <strong>Materials / stock</strong>
+          <p style={mutedStyle}>Sheets, roll media, laminate, fixings and consumables.</p>
+        </div>
+        <div style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
+          <span style={blueChipStyle}>2</span>
+          <strong>Ink / charges</strong>
+          <p style={mutedStyle}>Simple charges like $10/m² CMYK and $10/m² white ink.</p>
+        </div>
+        <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
+          <span style={yellowChipStyle}>3</span>
+          <strong>Factory labour</strong>
+          <p style={mutedStyle}>Artwork, setup, cutting, laminating and finishing time.</p>
+        </div>
+        <div style={{ ...whitePanelStyle }}>
+          <span style={plainChipStyle}>4</span>
+          <strong>Supplier / outsource</strong>
+          <p style={mutedStyle}>Any supplier cost or bought-in production item.</p>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(300px, 1fr) minmax(300px, 1fr)", gap: 14 }}>
+        <ExistingRecipeRows title="Materials this item uses" emptyText="No material rows yet." rows={materialRows} fields={fields} materials={materials} />
+        <ExistingRecipeRows title="Ink / production charges" emptyText="No charge rows yet." rows={chargeRows} fields={fields} materials={materials} />
+        <ExistingRecipeRows title="Factory labour" emptyText="No labour rows yet." rows={labourRows} fields={fields} materials={materials} />
+        <ExistingRecipeRows title="Outsourced / supplier items" emptyText="No outsourced rows yet." rows={outsourceRows} fields={fields} materials={materials} />
+      </div>
+
+      <section style={{ ...panelStyle, background: "#f8fafc", borderStyle: "dashed" }}>
+        <div>
+          <h3 style={{ margin: 0, fontSize: 22 }}>Add a recipe row</h3>
+          <p style={{ ...mutedStyle, marginTop: 4 }}>This now matches the spreadsheet idea: one row for each material, charge, labour line or outsourced item.</p>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 12 }}>
+          <AddMaterialRecipeRow productId={selectedProduct.id} materials={materials} fields={fields} />
+          <AddChargeRecipeRow productId={selectedProduct.id} fields={fields} />
+          <AddLabourRecipeRow productId={selectedProduct.id} fields={fields} />
+          <AddOutsourceRecipeRow productId={selectedProduct.id} fields={fields} />
+        </div>
+      </section>
+    </section>
+  );
+}
+
+function QuoteQuestionsSpreadsheetPanel({ selectedProduct, fields, components, activeMaterials, query, editOptionId }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[]; query: string; editOptionId: string }) {
+  return (
+    <section style={{ display: "grid", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div>
+          <p style={tinyLabelStyle}>Quote questions</p>
+          <h2 style={sectionHeadingStyle}>What staff answer on the quote</h2>
+          <p style={{ ...mutedStyle, marginTop: 6 }}>These should stay short: Size, Print type, Laminate, White ink, Finishing and Quantity.</p>
+        </div>
+        <span style={fields.length ? greenChipStyle : yellowChipStyle}>{fields.length ? `${fields.length} questions` : "Add Size first"}</span>
+      </div>
+
+      {fields.length === 0 ? (
+        <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
+          <strong>No quote questions yet</strong>
+          <p style={mutedStyle}>Add Size first, then Print type, Laminate, White ink, Finishing and Quantity.</p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gap: 12 }}>
+          {fields.map((field: any, index: number) => (
+            <QuestionCard
+              key={field.id ?? field.key}
+              field={field}
+              index={index}
+              selectedProduct={selectedProduct}
+              query={query}
+              components={components}
+              isEditing={String(field.id ?? "") === String(editOptionId)}
+              activeMaterials={activeMaterials}
+              fields={fields}
+            />
+          ))}
+        </div>
+      )}
+
+      <AddQuestionPanel selectedProduct={selectedProduct} activeMaterials={activeMaterials} fields={fields} />
+    </section>
+  );
+}
+
+function LiveSpreadsheetPreview({ fields, components }: { fields: any[]; components: any[] }) {
+  const sizeField = fields.find((field: any) => String(field.key ?? "").includes("size") || String(field.type ?? "") === "size_select");
+  const printField = fields.find((field: any) => String(field.key ?? "").includes("print"));
+  const laminateField = fields.find((field: any) => String(field.key ?? "").includes("laminate"));
+  const hasInk = components.some((component: any) => String(component.label ?? "").toLowerCase().includes("ink") || componentRuleType(component) === "sell_sqm");
+
+  return (
+    <aside style={{ display: "grid", gap: 12, alignContent: "start" }}>
+      <div style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
+        <span style={blueChipStyle}>Live recipe map</span>
+        <strong style={{ fontSize: 20 }}>Spreadsheet flow</strong>
+        <p style={mutedStyle}>Quote questions choose the job. Recipe rows calculate the price. This is the same idea as the workbook tabs.</p>
+      </div>
+      <div style={whitePanelStyle}>
+        <strong>Expected quote screen</strong>
+        <RecipeLine label="Size" body={sizeField ? "Staff picks a finished size" : "Add a Size question"} />
+        <RecipeLine label="Print / laminate" body={printField || laminateField ? "Choices can turn material rows on or off" : "Add Print type and Laminate questions if needed"} />
+        <RecipeLine label="Ink" body={hasInk ? "Ink is set as $/m² charge" : "Add CMYK ink at $10/m², then White ink at +$10/m²"} />
+      </div>
+      <div style={whitePanelStyle}>
+        <strong>Good recipe example</strong>
+        <p style={mutedStyle}>600 × 900 ACM sign:</p>
+        <p style={mutedStyle}>ACM = part sheet from size</p>
+        <p style={mutedStyle}>SAV = roll metres from size</p>
+        <p style={mutedStyle}>Ink = $10/m²</p>
+        <p style={mutedStyle}>White ink = another $10/m² only when selected</p>
+        <p style={mutedStyle}>Labour = hours × hourly rate</p>
+      </div>
+    </aside>
+  );
+}
+
 function ProductRecipeCanvas({ selectedProduct, fields, components, activeMaterials, query, editOptionId, selectedStarterType }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[]; query: string; editOptionId: string; selectedStarterType: string }) {
   return (
-    <section style={canvasStyle}>
-      <div style={{ display: "grid", gridTemplateColumns: "320px 1fr", alignItems: "stretch" }}>
-        <div style={{ background: "#f8fafc", borderRight: "1px solid #dfe7f2", padding: 18, display: "grid", gap: 12, alignContent: "start" }}>
-          <BuilderHelpPanel />
-          <ProductBasicsPanel selectedProduct={selectedProduct} />
-          <PresetRowsPanel productId={selectedProduct.id} activeMaterials={activeMaterials} selectedStarterType={selectedStarterType} />
+    <section style={{ ...canvasStyle, display: "grid", gap: 0 }}>
+      <div style={{ padding: 22, borderBottom: "1px solid #dfe7f2", background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)", display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
+        <div>
+          <p style={tinyLabelStyle}>Spreadsheet-style product recipe</p>
+          <h2 style={{ ...sectionHeadingStyle, fontSize: 32 }}>{selectedProduct.name}</h2>
+          <p style={{ ...mutedStyle, marginTop: 6, maxWidth: 900 }}>
+            Build this like your quote workbook: material rows, ink/charge rows, labour rows, supplier rows, then simple quote questions staff answer.
+          </p>
         </div>
-        <div style={{ padding: 20, display: "grid", gap: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-            <div>
-              <p style={tinyLabelStyle}>Quote experience</p>
-              <h2 style={sectionHeadingStyle}>Staff will answer these cards</h2>
-              <p style={{ ...mutedStyle, marginTop: 6 }}>Keep the cards in the same order staff should see them on the quote page.</p>
-            </div>
-            <span style={fields.length ? greenChipStyle : yellowChipStyle}>{fields.length ? `${fields.length} cards` : "Start with Size"}</span>
-          </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <span style={greenChipStyle}>{components.length} recipe rows</span>
+          <span style={blueChipStyle}>{fields.length} quote questions</span>
+          <span style={plainChipStyle}>{humanize(selectedProduct.status)}</span>
+        </div>
+      </div>
 
-          {fields.length === 0 ? (
-            <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
-              <strong>No quote cards yet</strong>
-              <p style={mutedStyle}>Add Size first, then Print type, White ink, Laminate, Finishing and Quantity.</p>
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: 12 }}>
-              {fields.map((field: any, index: number) => (
-                <QuestionCard
-                  key={field.id ?? field.key}
-                  field={field}
-                  index={index}
-                  selectedProduct={selectedProduct}
-                  query={query}
-                  components={components}
-                  isEditing={String(field.id ?? "") === String(editOptionId)}
-                  activeMaterials={activeMaterials}
-                  fields={fields}
-                />
-              ))}
-            </div>
-          )}
-
-          <AddQuestionPanel selectedProduct={selectedProduct} activeMaterials={activeMaterials} fields={fields} />
-
-          <details style={{ ...whitePanelStyle, background: "#fcfcfd" }}>
-            <summary style={{ cursor: "pointer", fontWeight: 950, color: "#64748b" }}>Developer/advanced data preview</summary>
-            <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-              <p style={mutedStyle}>This is intentionally hidden from normal product setup. It is only here to confirm the automatic pricing rows being created from answer lines.</p>
-              <div style={{ display: "grid", gap: 8 }}>
-                {components.length === 0 ? <p style={mutedStyle}>No pricing rows yet.</p> : components.map((component: any) => (
-                  <div key={component.id ?? component.label} style={{ ...panelStyle, background: "#fff" }}>
-                    <strong>{component.label}</strong>
-                    <p style={mutedStyle}>{humanize(component.ruleType)} · {component.materialId ? "Linked material" : "No material"} · trigger {component.trigger?.optionKey || component.stockUsage?.optionKey || "always"}</p>
-                  </div>
-                ))}
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 0 }}>
+        <div style={{ padding: 20, display: "grid", gap: 18 }}>
+          <section style={{ ...panelStyle, background: "#ffffff" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 24 }}>1. Product details</h3>
+                <p style={{ ...mutedStyle, marginTop: 4 }}>Keep this boring. The recipe rows below do the quoting work.</p>
               </div>
+              <span style={greenChipStyle}>Start here</span>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
+              <ProductBasicsPanel selectedProduct={selectedProduct} />
+              <PresetRowsPanel productId={selectedProduct.id} activeMaterials={activeMaterials} selectedStarterType={selectedStarterType} />
+            </div>
+          </section>
+
+          <section style={{ ...panelStyle, background: "#ffffff" }}>
+            <div>
+              <h3 style={{ margin: 0, fontSize: 24 }}>2. Recipe rows</h3>
+              <p style={{ ...mutedStyle, marginTop: 4 }}>This replaces the confusing hidden rules. Add rows the same way you add lines in the spreadsheet.</p>
+            </div>
+            <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={activeMaterials} />
+          </section>
+
+          <section style={{ ...panelStyle, background: "#ffffff" }}>
+            <QuoteQuestionsSpreadsheetPanel
+              selectedProduct={selectedProduct}
+              fields={fields}
+              components={components}
+              activeMaterials={activeMaterials}
+              query={query}
+              editOptionId={editOptionId}
+            />
+          </section>
+        </div>
+
+        <div style={{ borderLeft: "1px solid #dfe7f2", background: "#f8fafc", padding: 18 }}>
+          <LiveSpreadsheetPreview fields={fields} components={components} />
+          <details style={{ ...whitePanelStyle, background: "#fcfcfd", marginTop: 12 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 950, color: "#64748b" }}>Advanced data preview</summary>
+            <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+              {components.length === 0 ? <p style={mutedStyle}>No recipe rows yet.</p> : components.map((component: any) => (
+                <div key={component.id ?? component.label} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+                  <strong>{component.label}</strong>
+                  <p style={{ ...mutedStyle, fontSize: 13 }}>{humanize(componentRuleType(component))} · {componentTriggerText(component, fields)}</p>
+                </div>
+              ))}
             </div>
           </details>
         </div>
@@ -931,6 +1330,7 @@ function ProductRecipeCanvas({ selectedProduct, fields, components, activeMateri
     </section>
   );
 }
+
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
   const user = await getRequiredSessionUser();
