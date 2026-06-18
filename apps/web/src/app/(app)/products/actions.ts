@@ -623,6 +623,127 @@ export async function addProductOptionAction(formData: FormData) {
   redirect(`/products?selected=${productId}&message=Quote%20option%20saved`);
 }
 
+export async function addQuickProductQuestionAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const presetKey = readString(formData, "presetKey");
+  const fallbackMaterialId = readString(formData, "fallbackMaterialId") || null;
+  const preset = quickQuestionPresetDefinitions[presetKey];
+
+  if (!productId) redirect("/products?error=No%20product%20selected");
+  if (!preset) redirect(`/products?selected=${productId}&error=Question%20preset%20not%20found`);
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const fieldKey = preset.key;
+  const alreadyExists = definition.fields.some((field: Record<string, any>) => String(field.key ?? "") === fieldKey);
+
+  if (alreadyExists) {
+    redirect(`/products?selected=${productId}&message=${encodeURIComponent(`${preset.label} already added`)}`);
+  }
+
+  const options = ["select", "size_select", "color"].includes(preset.type)
+    ? preset.rows.map((row) => parseChoice(row.answer))
+    : [];
+
+  const nextField = {
+    id: randomUUID(),
+    key: fieldKey,
+    label: preset.label,
+    type: preset.type,
+    required: preset.required,
+    defaultValue: preset.type === "quantity" ? "1" : (options[0]?.value ? String(options[0].value) : null),
+    helpText: "Shown after this product is selected on a quote.",
+    quoteOnly: true,
+    showWhen: null,
+    options,
+    rule: {
+      effectType: "none",
+      effectTarget: null,
+      effectValue: null,
+      effectUnit: null,
+      componentLinkMode: "none"
+    }
+  };
+
+  const linkedComponents = quickQuestionComponents(preset, nextField, fallbackMaterialId);
+
+  await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, {
+    ...definition,
+    version: 3,
+    fields: [...definition.fields, nextField],
+    components: [
+      ...definition.components.filter((item: Record<string, any>) => !isLinkedToOptionKey(item, fieldKey)),
+      ...linkedComponents
+    ]
+  });
+
+  redirect(`/products?selected=${productId}&message=${encodeURIComponent(`${preset.label} question added`)}`);
+}
+
+function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<string, any>, fallbackMaterialId: string | null): Array<Record<string, any>> {
+  const fieldKey = String(field.key ?? "");
+  const options = Array.isArray(field.options) ? field.options : [];
+
+  return preset.rows.flatMap((row, index) => {
+    const option = options[index] ?? parseChoice(row.answer);
+    const optionValue = String(option.value ?? option.label ?? "").trim();
+    const usageMode = row.mode || "none";
+    const usageAmount = optionalNumberText(row.amount);
+    const isChargePerSqm = usageMode === "sqm_charge";
+    const isFixedCharge = usageMode === "fixed_charge";
+    const isRoll = usageMode === "roll_metres";
+    const isWholeSheet = usageMode === "sheets_per_item";
+    const isPartsPerSheet = usageMode === "parts_per_sheet";
+    const isMaterialAuto = usageMode === "auto_sheet";
+    const isMaterialMode = isMaterialAuto || isPartsPerSheet || isWholeSheet || isRoll;
+
+    if (!fieldKey || !optionValue || usageMode === "none") return [];
+    if (isMaterialMode && !fallbackMaterialId) return [];
+    if ((isChargePerSqm || isFixedCharge) && !usageAmount) return [];
+
+    const chargeName = row.chargeName || `${preset.label}: ${String(option.label ?? row.answer)}`;
+    const componentLabel = isChargePerSqm || isFixedCharge ? chargeName : `${preset.label}: ${String(option.label ?? row.answer)}`;
+
+    return [{
+      id: randomUUID(),
+      kind: "material",
+      role: isChargePerSqm || isFixedCharge ? "quote_sell_charge" : "quote_selected_material",
+      materialId: isChargePerSqm || isFixedCharge ? null : fallbackMaterialId,
+      supplierId: null,
+      labourRateName: null,
+      label: componentLabel,
+      quantity: isFixedCharge ? (usageAmount ?? "0") : "1",
+      unit: isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : "sheet",
+      notes: isChargePerSqm
+        ? `Sell charge for ${preset.label} = ${String(option.label ?? row.answer)}. Calculates from finished square metres.`
+        : isFixedCharge
+          ? `Fixed sell charge for ${preset.label} = ${String(option.label ?? row.answer)}.`
+          : `Auto-cost row for ${preset.label} = ${String(option.label ?? row.answer)}.`,
+      ruleType: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+      wastePercent: isChargePerSqm || isFixedCharge ? "0" : "10",
+      stockUsage: {
+        usageBasis: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+        dimensionSource: isFixedCharge ? "quantity_only" : "finished_size",
+        optionKey: fieldKey,
+        optionValues: [optionValue],
+        widthMm: null,
+        heightMm: null,
+        rollWidthMm: null,
+        partsPerSheet: isPartsPerSheet ? usageAmount : null,
+        metresPerUnit: isRoll ? usageAmount : null,
+        sheetsPerUnit: isWholeSheet ? (usageAmount ?? "1") : null,
+        sellRate: isChargePerSqm || isFixedCharge ? usageAmount : null,
+        chargeName: isChargePerSqm || isFixedCharge ? chargeName : null
+      },
+      trigger: {
+        optionKey: fieldKey,
+        optionValue: null,
+        optionValues: [optionValue]
+      }
+    }];
+  });
+}
+
 // Backwards-compatible export for older form names used by previous zips.
 export const addStarterRulesAction = applyQuoteBehaviourPresetAction;
 
@@ -634,6 +755,85 @@ type CostedOptionRow = {
   wastePercent: string;
   notes: string;
   chargeName: string;
+};
+
+type QuickQuestionPresetRow = {
+  answer: string;
+  mode: string;
+  amount?: string;
+  chargeName?: string;
+};
+
+type QuickQuestionPreset = {
+  key: string;
+  label: string;
+  type: string;
+  required: boolean;
+  rows: QuickQuestionPresetRow[];
+};
+
+const quickQuestionPresetDefinitions: Record<string, QuickQuestionPreset> = {
+  size: {
+    key: "size",
+    label: "Size",
+    type: "size_select",
+    required: true,
+    rows: [
+      { answer: "600 x 900 mm", mode: "parts_per_sheet", amount: "8" },
+      { answer: "900 x 1200 mm", mode: "parts_per_sheet", amount: "4" },
+      { answer: "1200 x 2400 mm", mode: "sheets_per_item", amount: "1" }
+    ]
+  },
+  print_type: {
+    key: "print_type",
+    label: "Print type",
+    type: "select",
+    required: true,
+    rows: [
+      { answer: "Direct print", mode: "sqm_charge", amount: "10", chargeName: "CMYK Ink" },
+      { answer: "SAV 7YR", mode: "auto_sheet", amount: "" },
+      { answer: "No print", mode: "none", amount: "" }
+    ]
+  },
+  white_ink: {
+    key: "white_ink",
+    label: "White ink",
+    type: "yes_no",
+    required: true,
+    rows: [
+      { answer: "No", mode: "none", amount: "" },
+      { answer: "Yes", mode: "sqm_charge", amount: "10", chargeName: "White Ink" }
+    ]
+  },
+  laminate: {
+    key: "laminate",
+    label: "Laminate",
+    type: "select",
+    required: true,
+    rows: [
+      { answer: "None", mode: "none", amount: "" },
+      { answer: "Gloss laminate", mode: "auto_sheet", amount: "" },
+      { answer: "Matt laminate", mode: "auto_sheet", amount: "" }
+    ]
+  },
+  finishing: {
+    key: "finishing",
+    label: "Finishing",
+    type: "select",
+    required: true,
+    rows: [
+      { answer: "None", mode: "none", amount: "" },
+      { answer: "Jingwei cutting", mode: "fixed_charge", amount: "0" },
+      { answer: "Drill holes", mode: "fixed_charge", amount: "0" }
+    ]
+  },
+  quantity: {
+    key: "quantity",
+    label: "Quantity",
+    type: "quantity",
+    required: true,
+    rows: []
+  }
 };
 
 function optionalNumberText(value: unknown): string | null {

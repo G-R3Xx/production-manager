@@ -8,6 +8,7 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { getProductById, listProductsForTenant } from "@/server/products";
 import {
   addProductOptionAction,
+  addQuickProductQuestionAction,
   addProductComponentAction,
   applyQuoteBehaviourPresetAction,
   createProductAction,
@@ -118,6 +119,7 @@ const optionUsageModes = [
 
 const quickQuestionPresets = [
   {
+    key: "size",
     label: "Size",
     type: "size_select",
     required: "yes",
@@ -128,6 +130,7 @@ const quickQuestionPresets = [
     ]
   },
   {
+    key: "print_type",
     label: "Print type",
     type: "select",
     required: "yes",
@@ -138,6 +141,7 @@ const quickQuestionPresets = [
     ]
   },
   {
+    key: "white_ink",
     label: "White ink",
     type: "yes_no",
     required: "yes",
@@ -147,6 +151,7 @@ const quickQuestionPresets = [
     ]
   },
   {
+    key: "laminate",
     label: "Laminate",
     type: "select",
     required: "yes",
@@ -157,6 +162,7 @@ const quickQuestionPresets = [
     ]
   },
   {
+    key: "finishing",
     label: "Finishing",
     type: "select",
     required: "yes",
@@ -167,6 +173,7 @@ const quickQuestionPresets = [
     ]
   },
   {
+    key: "quantity",
     label: "Quantity",
     type: "quantity",
     required: "yes",
@@ -779,52 +786,75 @@ function AdvancedQuestionSettings({ fields, field, currentShowWhenKey, showWhenV
   );
 }
 
+function questionAlreadyExists(fields: any[], preset: (typeof quickQuestionPresets)[number]): boolean {
+  const key = String(preset.key ?? "");
+  return fields.some((field: any) => {
+    const fieldKey = String(field.key ?? "").toLowerCase();
+    const fieldLabel = String(field.label ?? "").toLowerCase();
+    const fieldType = String(field.type ?? "").toLowerCase();
+
+    if (key === "size") return fieldType === "size_select" || fieldKey.includes("size") || fieldLabel.includes("size");
+    if (key === "print_type") return fieldKey.includes("print") || fieldLabel.includes("print");
+    if (key === "white_ink") return (fieldKey.includes("white") && fieldKey.includes("ink")) || (fieldLabel.includes("white") && fieldLabel.includes("ink"));
+    if (key === "laminate") return fieldKey.includes("laminate") || fieldLabel.includes("laminate");
+    if (key === "finishing") return fieldKey.includes("finish") || fieldLabel.includes("finish");
+    if (key === "quantity") return fieldType === "quantity" || fieldKey === "quantity" || fieldLabel === "quantity";
+
+    return fieldKey === key;
+  });
+}
+
 function QuickQuestionButton({ selectedProductId, preset, activeMaterials }: { selectedProductId: string; preset: (typeof quickQuestionPresets)[number]; activeMaterials: any[] }) {
   const firstMaterialId = activeMaterials[0]?.id ? String(activeMaterials[0].id) : "";
   return (
-    <form action={addProductOptionAction} style={{ ...ghostStyle, minHeight: 46, justifyContent: "space-between", gap: 10 }}>
+    <form action={addQuickProductQuestionAction} method="post" style={{ margin: 0 }}>
       <input type="hidden" name="productId" value={selectedProductId} />
-      <input type="hidden" name="label" value={preset.label} />
-      <input type="hidden" name="fieldType" value={preset.type} />
-      <input type="hidden" name="required" value={preset.required} />
-      {preset.rows.map((row) => (
-        <div key={`${preset.label}-${row.answer}`}>
-          <input type="hidden" name="optionAnswerLabel" value={row.answer} />
-          <input type="hidden" name="optionUsageMode" value={row.mode} />
-          <input type="hidden" name="optionUsageAmount" value={row.amount} />
-          <input type="hidden" name="optionMaterialId" value={row.mode.includes("charge") || row.mode === "none" ? "" : firstMaterialId} />
-          <input type="hidden" name="optionWastePercent" value={row.mode.includes("charge") || row.mode === "none" ? "0" : "10"} />
-          <input type="hidden" name="optionChargeName" value={row.chargeName ?? ""} />
-          <input type="hidden" name="optionNotes" value="" />
-        </div>
-      ))}
-      <span>+ {preset.label}</span>
-      <small style={{ color: "#64748b", fontWeight: 800 }}>{preset.rows.length ? `${preset.rows.length} answers` : "qty"}</small>
+      <input type="hidden" name="presetKey" value={preset.key} />
+      <input type="hidden" name="fallbackMaterialId" value={firstMaterialId} />
+      <button type="submit" style={{ ...ghostStyle, width: "100%", minHeight: 54, justifyContent: "space-between", gap: 10 }}>
+        <span>+ {preset.label}</span>
+        <small style={{ color: "#64748b", fontWeight: 800 }}>{preset.rows.length ? `${preset.rows.length} answers` : "qty"}</small>
+      </button>
     </form>
   );
 }
 
+function AddedQuestionChip({ preset }: { preset: (typeof quickQuestionPresets)[number] }) {
+  return (
+    <div style={{ ...ghostStyle, minHeight: 54, justifyContent: "space-between", gap: 10, cursor: "default", opacity: 0.72 }}>
+      <span>✓ {preset.label}</span>
+      <small style={{ color: "#64748b", fontWeight: 800 }}>added</small>
+    </div>
+  );
+}
+
 function AddQuestionPanel({ selectedProduct, activeMaterials, fields }: { selectedProduct: any; activeMaterials: any[]; fields: any[] }) {
+  const addedPresets = quickQuestionPresets.filter((preset) => questionAlreadyExists(fields, preset));
+  const missingPresets = quickQuestionPresets.filter((preset) => !questionAlreadyExists(fields, preset));
+
   return (
     <section style={{ ...panelStyle, background: "#f8fafc", borderStyle: "dashed" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
           <h3 style={{ margin: 0, fontSize: 22 }}>Add the next question</h3>
-          <p style={{ ...mutedStyle, marginTop: 4 }}>Start with the common buttons. Custom questions are there only when you need something odd.</p>
+          <p style={{ ...mutedStyle, marginTop: 4 }}>Only missing questions are clickable now. Already-added questions show with a tick so it is obvious what happened.</p>
         </div>
-        <span style={yellowChipStyle}>Next</span>
+        <span style={missingPresets.length ? yellowChipStyle : greenChipStyle}>{missingPresets.length ? "Next" : "All common questions added"}</span>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
-        {quickQuestionPresets.map((preset) => (
-          <QuickQuestionButton key={preset.label} selectedProductId={selectedProduct.id} preset={preset} activeMaterials={activeMaterials} />
+        {missingPresets.map((preset) => (
+          <QuickQuestionButton key={preset.key} selectedProductId={selectedProduct.id} preset={preset} activeMaterials={activeMaterials} />
+        ))}
+        {addedPresets.map((preset) => (
+          <AddedQuestionChip key={`added-${preset.key}`} preset={preset} />
         ))}
       </div>
       {activeMaterials.length === 0 ? <p style={mutedStyle}>Material-linked choices can be connected after materials are added.</p> : null}
 
       <details style={{ ...whitePanelStyle }}>
         <summary style={{ cursor: "pointer", fontWeight: 950 }}>Need a custom question?</summary>
-        <form action={addProductOptionAction} style={{ display: "grid", gap: 14, marginTop: 12 }}>
+        <form action={addProductOptionAction} method="post" style={{ display: "grid", gap: 14, marginTop: 12 }}>
           <input type="hidden" name="productId" value={selectedProduct.id} />
           <QuestionBasics />
           <VisualAnswerBuilder materials={activeMaterials} components={[]} />
