@@ -26,6 +26,13 @@ type QuoteQuestion = {
   } | null;
 };
 
+type QuantityPreset = {
+  id?: string | null;
+  label?: string | null;
+  value?: string | null;
+  qty?: string | number | null;
+};
+
 type QuoteComponent = {
   id?: string | null;
   label?: string | null;
@@ -49,6 +56,11 @@ type QuoteComponent = {
     sheetsPerUnit?: string | null;
     sellRate?: string | null;
     chargeName?: string | null;
+    quantitySource?: string | null;
+    quantityPrompt?: string | null;
+    quantityPresets?: QuantityPreset[] | null;
+    allowCustomQuantity?: boolean | null;
+    customQuantityLabel?: string | null;
   } | null;
   trigger?: {
     optionKey?: string | null;
@@ -225,6 +237,106 @@ function isNoneChoice(value: string | null | undefined): boolean {
   return ["none", "no", "no extra cost", "not required", "n/a", "na"].includes(normalized);
 }
 
+function followUpKey(optionKey: string | null | undefined, optionValue: string | null | undefined): string {
+  return `${String(optionKey ?? "").trim()}::${String(optionValue ?? "").trim()}`;
+}
+
+function firstTriggeredOptionValue(component: QuoteComponent): string {
+  const triggerValues = Array.isArray(component.trigger?.optionValues) ? component.trigger?.optionValues ?? [] : [];
+  const stockValues = Array.isArray(component.stockUsage?.optionValues) ? component.stockUsage?.optionValues ?? [] : [];
+  return String(triggerValues[0] ?? stockValues[0] ?? "");
+}
+
+function quantityPresetsFor(component: QuoteComponent): QuantityPreset[] {
+  return Array.isArray(component.stockUsage?.quantityPresets) ? component.stockUsage?.quantityPresets ?? [] : [];
+}
+
+function componentHasFollowUp(component: QuoteComponent): boolean {
+  return String(component.stockUsage?.quantitySource ?? "") === "follow_up" ||
+    Boolean(component.stockUsage?.quantityPrompt) ||
+    quantityPresetsFor(component).length > 0 ||
+    Boolean(component.stockUsage?.allowCustomQuantity);
+}
+
+function presetValue(preset: QuantityPreset): string {
+  return String(preset.value ?? preset.label ?? "").trim();
+}
+
+function presetQuantity(preset: QuantityPreset): number {
+  const rawQty = String(preset.qty ?? "").trim();
+  if (rawQty.toLowerCase() === "custom") return 0;
+  return Math.max(0, numberValue(rawQty, 0));
+}
+
+type FollowUpOption = {
+  key: string;
+  fieldKey: string;
+  optionValue: string;
+  answerLabel: string;
+  prompt: string;
+  presets: QuantityPreset[];
+  allowCustom: boolean;
+  customLabel: string;
+};
+
+function followUpsForField(product: QuoteProduct | undefined, field: QuoteQuestion, answers: Record<string, string>): FollowUpOption[] {
+  if (!product) return [];
+  const fieldKey = String(field.key ?? "");
+  const values = selectedValues(answers[fieldKey] ?? "");
+  const activeValues = values.length > 0 ? values : [String(answers[fieldKey] ?? "")].filter(Boolean);
+
+  return activeValues.flatMap((optionValue) => {
+    const component = product.components.find((item) => {
+      const key = String(item.trigger?.optionKey ?? item.stockUsage?.optionKey ?? "");
+      const optionValues = Array.isArray(item.trigger?.optionValues) ? item.trigger?.optionValues ?? [] : Array.isArray(item.stockUsage?.optionValues) ? item.stockUsage?.optionValues ?? [] : [];
+      return key === fieldKey && optionValues.includes(optionValue) && componentHasFollowUp(item);
+    });
+    if (!component) return [];
+    const choice = selectedChoice(field, optionValue);
+    const presets = quantityPresetsFor(component);
+    const prompt = String(component.stockUsage?.quantityPrompt ?? "").trim() || `${String(choice?.label ?? optionValue)} quantity`;
+    return [{
+      key: followUpKey(fieldKey, optionValue),
+      fieldKey,
+      optionValue,
+      answerLabel: String(choice?.label ?? optionValue).replace(/_/g, " "),
+      prompt,
+      presets,
+      allowCustom: Boolean(component.stockUsage?.allowCustomQuantity),
+      customLabel: String(component.stockUsage?.customQuantityLabel ?? "Custom quantity")
+    }];
+  });
+}
+
+function followUpSelectionLabel(followUp: FollowUpOption, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): string {
+  const selected = followUpAnswers[followUp.key] || presetValue(followUp.presets[0]) || (followUp.allowCustom ? "__custom" : "");
+  if (selected === "__custom") {
+    const customQty = customFollowUpAnswers[followUp.key] || "";
+    return customQty ? `${followUp.customLabel}: ${customQty}` : followUp.customLabel;
+  }
+  const preset = followUp.presets.find((item) => presetValue(item) === selected);
+  return String(preset?.label ?? selected).trim();
+}
+
+function followUpMultiplierFor(component: QuoteComponent, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): { multiplier: number; note?: string } {
+  if (!componentHasFollowUp(component)) return { multiplier: 1 };
+  const optionKey = String(component.trigger?.optionKey ?? component.stockUsage?.optionKey ?? "");
+  const optionValue = firstTriggeredOptionValue(component);
+  const key = followUpKey(optionKey, optionValue);
+  const presets = quantityPresetsFor(component);
+  const selected = followUpAnswers[key] || presetValue(presets[0]) || (component.stockUsage?.allowCustomQuantity ? "__custom" : "");
+
+  if (selected === "__custom" || presets.length === 0) {
+    const customQty = Math.max(0, numberValue(customFollowUpAnswers[key], 0));
+    return { multiplier: customQty, note: customQty > 0 ? `${customQty} custom qty` : "custom qty missing" };
+  }
+
+  const preset = presets.find((item) => presetValue(item) === selected);
+  const qty = preset ? presetQuantity(preset) : 1;
+  const label = String(preset?.label ?? component.stockUsage?.quantityPrompt ?? "quantity preset").trim();
+  return { multiplier: qty > 0 ? qty : 1, note: label ? `${label} = ${formatUsage(qty > 0 ? qty : 1)}` : undefined };
+}
+
 function answerLabel(field: QuoteQuestion, value: string): string {
   if (isMultiSelectField(field)) {
     const labels = selectedValues(value).map((item) => {
@@ -249,14 +361,25 @@ function isVisible(field: QuoteQuestion, answers: Record<string, string>): boole
   return requiredValues.some((required) => currentAnswers.includes(required));
 }
 
-function summaryFor(fields: QuoteQuestion[], answers: Record<string, string>): string {
+function summaryFor(product: QuoteProduct | undefined, fields: QuoteQuestion[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): string {
   return fields
     .filter((field) => isVisible(field, answers))
     .filter((field) => field.type !== "quantity" && field.key !== "quantity")
     .map((field) => {
       const value = answers[field.key] ?? "";
       if (!value) return "";
-      return `${field.label}: ${answerLabel(field, value)}`;
+      const followUps = followUpsForField(product, field, answers);
+      const values = isMultiSelectField(field) ? selectedValues(value) : [value];
+      const followUpText = values
+        .filter(Boolean)
+        .map((item) => {
+          const followUp = followUps.find((entry) => entry.optionValue === item);
+          if (followUp) return `${followUp.answerLabel} (${followUpSelectionLabel(followUp, followUpAnswers, customFollowUpAnswers)})`;
+          const matched = selectedChoice(field, item);
+          return String(matched?.label ?? item).replace(/_/g, " ");
+        })
+        .join(", ");
+      return `${field.label}: ${followUpText}`;
     })
     .filter(Boolean)
     .join(" · ");
@@ -448,7 +571,7 @@ function costBreakdownItem(item: Omit<CostBreakdownItem, "note"> & { note?: stri
   return note ? { ...base, note } : base;
 }
 
-function componentCostBreakdownFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>): CostBreakdownItem[] {
+function componentCostBreakdownFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>, followUpAnswers: Record<string, string> = {}, customFollowUpAnswers: Record<string, string> = {}): CostBreakdownItem[] {
   if (!product) return [];
 
   return product.components
@@ -456,7 +579,9 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
     .flatMap((component): CostBreakdownItem[] => {
       const rawRuleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
       const dimensions = dimensionsForComponent(product.fields, answers, component);
-      const allowance = componentAllowance(component);
+      const baseAllowance = componentAllowance(component);
+      const followUp = followUpMultiplierFor(component, followUpAnswers, customFollowUpAnswers);
+      const allowance = baseAllowance * followUp.multiplier;
       const waste = wasteMultiplier(component);
       const componentLabel = String(component.stockUsage?.chargeName ?? component.label ?? "Material");
 
@@ -487,7 +612,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "each",
           rate,
           cost: amount * rate,
-          note: "price rule from product recipe row"
+          note: ["price rule from product recipe row", followUp.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -502,7 +627,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "hr",
           rate,
           cost: hours * rate,
-          note: "factory labour row from product setup"
+          note: ["factory labour row from product setup", followUp.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -517,7 +642,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "each",
           rate,
           cost: amount * rate,
-          note: "outsourced row from product setup"
+          note: ["outsourced row from product setup", followUp.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -578,7 +703,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, rate.note].filter(Boolean).join(" · ")
+          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, followUp.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -613,8 +738,8 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
     });
 }
 
-function autoUnitPriceFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>): number {
-  return componentCostBreakdownFor(product, materials, answers).reduce((total, item) => total + item.cost, 0);
+function autoUnitPriceFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): number {
+  return componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers).reduce((total, item) => total + item.cost, 0);
 }
 
 function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: Record<string, string>): QuoteComponent[] {
@@ -633,6 +758,8 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
     [products, selectedProductId]
   );
   const [answers, setAnswers] = useState<Record<string, string>>(() => defaultAnswersFor(products[0]));
+  const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, string>>({});
+  const [customFollowUpAnswers, setCustomFollowUpAnswers] = useState<Record<string, string>>({});
   const [manualSummary, setManualSummary] = useState("");
   const [unitPrice, setUnitPrice] = useState("0.00");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
@@ -645,10 +772,10 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
   const quantityField = visibleFields.find((field) => field.type === "quantity" || field.key === "quantity");
   const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : "1";
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
-  const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct.fields, answers) : manualSummary;
-  const materialBreakdown = useMemo(() => componentCostBreakdownFor(selectedProduct, materials, answers), [selectedProduct, materials, answers]);
+  const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct, selectedProduct.fields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
+  const materialBreakdown = useMemo(() => componentCostBreakdownFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
   const missingMaterials = useMemo(() => missingLinkedMaterialRows(selectedProduct, answers), [selectedProduct, answers]);
-  const autoUnitPrice = useMemo(() => autoUnitPriceFor(selectedProduct, materials, answers), [selectedProduct, materials, answers]);
+  const autoUnitPrice = useMemo(() => autoUnitPriceFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
   const autoLineTotal = autoUnitPrice * quantityNumber;
 
   useEffect(() => {
@@ -661,6 +788,8 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
     const nextProduct = products.find((product) => product.id === productId);
     setSelectedProductId(productId);
     setAnswers(defaultAnswersFor(nextProduct));
+    setFollowUpAnswers({});
+    setCustomFollowUpAnswers({});
     setManualSummary("");
     setUnitPriceOverridden(false);
   }
@@ -689,6 +818,54 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
   function useAutoPrice() {
     setUnitPrice(moneyInput(autoUnitPrice));
     setUnitPriceOverridden(false);
+  }
+
+
+  function updateFollowUp(key: string, value: string) {
+    setFollowUpAnswers((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateCustomFollowUp(key: string, value: string) {
+    setCustomFollowUpAnswers((current) => ({ ...current, [key]: value }));
+  }
+
+  function renderFollowUps(field: QuoteQuestion) {
+    const followUps = followUpsForField(selectedProduct, field, answers);
+    if (followUps.length === 0) return null;
+
+    return (
+      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+        {followUps.map((followUp) => {
+          const selected = followUpAnswers[followUp.key] || presetValue(followUp.presets[0]) || (followUp.allowCustom ? "__custom" : "");
+          return (
+            <div key={followUp.key} style={{ border: "1px solid #dbe7f5", borderRadius: 12, padding: 10, background: "#f8fafc", display: "grid", gap: 8 }}>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>{followUp.prompt}</span>
+                {followUp.presets.length > 0 || followUp.allowCustom ? (
+                  <select value={selected} onChange={(event) => updateFollowUp(followUp.key, event.target.value)} style={inputStyle}>
+                    {followUp.presets.map((preset) => {
+                      const value = presetValue(preset);
+                      const label = String(preset.label ?? value);
+                      const qty = String(preset.qty ?? "");
+                      return <option key={value || label} value={value}>{qty && qty !== "custom" ? `${label} (${qty})` : label}</option>;
+                    })}
+                    {followUp.allowCustom && !followUp.presets.some((preset) => presetValue(preset) === "__custom") ? <option value="__custom">{followUp.customLabel}</option> : null}
+                  </select>
+                ) : (
+                  <input type="number" step="any" min="0" value={customFollowUpAnswers[followUp.key] ?? ""} onChange={(event) => updateCustomFollowUp(followUp.key, event.target.value)} style={inputStyle} />
+                )}
+              </label>
+              {selected === "__custom" ? (
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Quantity</span>
+                  <input type="number" step="any" min="0" value={customFollowUpAnswers[followUp.key] ?? ""} onChange={(event) => updateCustomFollowUp(followUp.key, event.target.value)} placeholder="eg 6" style={inputStyle} />
+                </label>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    );
   }
 
   if (products.length === 0) {
@@ -757,6 +934,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
                         );
                       })}
                     </div>
+                    {renderFollowUps(field)}
                     {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
                   </fieldset>
                 );
@@ -787,6 +965,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
                         return <option key={choice.id ?? choiceValue} value={choiceValue}>{label}</option>;
                       })}
                     </select>
+                    {renderFollowUps(field)}
                     {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
                   </label>
                 );

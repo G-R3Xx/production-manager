@@ -116,6 +116,7 @@ const optionUsageModes = [
   { value: "roll_metres", label: "Metres per item", short: "Uses roll", amountLabel: "Metres", amountPlaceholder: "eg 1.2" },
   { value: "sqm_charge", label: "$ per m²", short: "Adds charge", amountLabel: "Sell $/m²", amountPlaceholder: "eg 10" },
   { value: "fixed_charge", label: "$ each", short: "Adds charge", amountLabel: "Sell $ each", amountPlaceholder: "eg 15" },
+  { value: "material_each", label: "Hardware / consumable each", short: "Uses hardware", amountLabel: "Qty each", amountPlaceholder: "eg 1" },
   { value: "labour_hours", label: "Labour hours", short: "Adds labour", amountLabel: "Hours", amountPlaceholder: "eg 0.25" }
 ];
 
@@ -271,6 +272,7 @@ function optionUsageModeFromComponent(component: any): string {
   if (ruleType === "sell_each") return "fixed_charge";
   if (ruleType === "per_linear_metre") return "roll_metres";
   if (ruleType === "per_unit" && String(component?.unit ?? "") === "sheet") return "sheets_per_item";
+  if (ruleType === "per_unit" && String(component?.unit ?? "") !== "sheet") return "material_each";
   if (cleanUsageNumber(stockUsage?.partsPerSheet)) return "parts_per_sheet";
   if (cleanUsageNumber(stockUsage?.sheetsPerUnit)) return "sheets_per_item";
   if (cleanUsageNumber(stockUsage?.metresPerUnit)) return "roll_metres";
@@ -284,6 +286,7 @@ function optionUsageAmountFromComponent(component: any): string {
   if (mode === "parts_per_sheet") return cleanUsageNumber(stockUsage?.partsPerSheet);
   if (mode === "sheets_per_item") return cleanUsageNumber(stockUsage?.sheetsPerUnit) || "1";
   if (mode === "roll_metres") return cleanUsageNumber(stockUsage?.metresPerUnit);
+  if (mode === "material_each") return cleanUsageNumber(component?.quantity) || "1";
   if (mode === "labour_hours") return cleanUsageNumber(component?.quantity ?? stockUsage?.hoursPerUnit) || "";
   if (mode === "sqm_charge" || mode === "fixed_charge") return cleanUsageNumber(stockUsage?.sellRate ?? component?.quantity) || "";
   return "";
@@ -291,6 +294,34 @@ function optionUsageAmountFromComponent(component: any): string {
 
 function optionChargeNameFromComponent(component: any): string {
   return String(component?.stockUsage?.chargeName ?? component?.label ?? "");
+}
+
+function quantityPromptFromComponent(component: any, labourComponent?: any): string {
+  return String(component?.stockUsage?.quantityPrompt ?? labourComponent?.stockUsage?.quantityPrompt ?? "");
+}
+
+function quantityPresetTextFromComponent(component: any, labourComponent?: any): string {
+  const presets = Array.isArray(component?.stockUsage?.quantityPresets)
+    ? component.stockUsage.quantityPresets
+    : Array.isArray(labourComponent?.stockUsage?.quantityPresets)
+      ? labourComponent.stockUsage.quantityPresets
+      : [];
+  return presets
+    .map((preset: any) => {
+      const label = String(preset?.label ?? "").trim();
+      const qty = cleanUsageNumber(preset?.qty ?? preset?.quantity);
+      return label && qty ? `${label}=${qty}` : "";
+    })
+    .filter(Boolean)
+    .join("\n");
+}
+
+function allowCustomQuantityFromComponent(component: any, labourComponent?: any): boolean {
+  return Boolean(component?.stockUsage?.allowCustomQuantity ?? labourComponent?.stockUsage?.allowCustomQuantity ?? false);
+}
+
+function customQuantityLabelFromComponent(component: any, labourComponent?: any): string {
+  return String(component?.stockUsage?.customQuantityLabel ?? labourComponent?.stockUsage?.customQuantityLabel ?? "Custom quantity");
 }
 
 function questionCostingText(field: any, components: any[]): string {
@@ -555,6 +586,7 @@ function BuilderHelpPanel() {
         <RecipeLine label="CMYK ink" body="$ per m², rate 10" />
         <RecipeLine label="White ink" body="Yes answer = $ per m², rate 10" />
         <RecipeLine label="Labour" body="Choose Labour hours, eg 0.25 at $66/hr" />
+        <RecipeLine label="Eyelets" body="Hardware each + ask placement presets like 4 corners=4" />
         <RecipeLine label="No laminate" body="No extra cost" />
       </div>
     </aside>
@@ -729,8 +761,9 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
           const usageMode = component ? optionUsageModeFromComponent(component) : "none";
           const usageMeta = optionUsageModes.find((mode) => mode.value === usageMode) ?? optionUsageModes[0];
           const isCharge = usageMode === "sqm_charge" || usageMode === "fixed_charge";
+          const isConsumableEach = usageMode === "material_each";
           const isLabour = usageMode === "labour_hours";
-          const hasCost = Boolean(component?.materialId) || isCharge || isLabour;
+          const hasCost = Boolean(component?.materialId) || isCharge || isConsumableEach || isLabour;
 
           return (
             <div key={choice?.id ?? row.blankId ?? index} style={{ display: "grid", gridTemplateColumns: "minmax(170px, 1.15fr) minmax(145px, 0.85fr) minmax(155px, 0.95fr) minmax(90px, 0.45fr) minmax(90px, 0.45fr)", gap: 10, alignItems: "center", border: "1px solid #dbe7f5", borderRadius: 18, background: choice ? "#fff" : "#fbfdff", padding: 10 }}>
@@ -761,7 +794,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
               <label style={labelStyle}>
                 <span style={labelTextStyle}>{usageMeta.amountLabel}</span>
                 <input name="optionUsageAmount" defaultValue={optionUsageAmountFromComponent(component)} placeholder={usageMeta.amountPlaceholder} style={inputStyle} />
-                <input type="hidden" name="optionWastePercent" value={String(component?.wastePercent ?? (isCharge ? "0" : "10"))} />
+                <input type="hidden" name="optionWastePercent" value={String(component?.wastePercent ?? (isCharge || isConsumableEach ? "0" : "10"))} />
                 <input type="hidden" name="optionChargeName" value={isCharge || isLabour ? optionChargeNameFromComponent(component) : ""} />
                 <input type="hidden" name="optionLabourRate" value={isLabour ? String(component?.stockUsage?.sellRate ?? "66") : "66"} />
                 <input type="hidden" name="optionNotes" value={String(component?.notes ?? "")} />
@@ -771,6 +804,31 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
                 <input name="optionLabourHours" defaultValue={cleanUsageNumber(labourComponent?.quantity)} placeholder="eg 0.25" style={inputStyle} />
                 <input type="hidden" name="optionLabourName" value={String(labourComponent?.label ?? "")} />
               </label>
+              <details style={{ gridColumn: "1 / -1", borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 900, color: "#475569" }}>More for this answer: ask quantity / placement</summary>
+                <div style={{ ...grid3, marginTop: 10 }}>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Ask this when picked</span>
+                    <input name="optionQuantityPrompt" defaultValue={quantityPromptFromComponent(component, labourComponent)} placeholder="eg Eyelet placement" style={inputStyle} />
+                  </label>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Quantity presets</span>
+                    <textarea name="optionQuantityPresets" defaultValue={quantityPresetTextFromComponent(component, labourComponent)} placeholder={"4 corners=4\nTop corners only=2\nCustom=custom"} style={{ ...textareaStyle, minHeight: 92 }} />
+                  </label>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Custom quantity?</span>
+                    <select name="optionAllowCustomQuantity" defaultValue={allowCustomQuantityFromComponent(component, labourComponent) ? "yes" : "no"} style={inputStyle}>
+                      <option value="no">No</option>
+                      <option value="yes">Allow staff to type qty</option>
+                    </select>
+                  </label>
+                  <label style={labelStyle}>
+                    <span style={labelTextStyle}>Custom label</span>
+                    <input name="optionCustomQuantityLabel" defaultValue={customQuantityLabelFromComponent(component, labourComponent)} placeholder="eg Custom quantity" style={inputStyle} />
+                  </label>
+                </div>
+                <p style={{ ...mutedStyle, fontSize: 13, marginTop: 8 }}>Use this for eyelets, drill holes, standoffs, pole pockets, or anything where staff pick a placement and the app turns it into a quantity.</p>
+              </details>
             </div>
           );
         })}
@@ -778,7 +836,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
 
       <div style={{ ...whitePanelStyle, background: "#fff" }}>
         <strong>Examples</strong>
-        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Print setup / laminate apply / Jingwei: add <b>Labour hrs</b> like <b>0.25</b> on the same answer line. Roll vinyl: <b>Material from size</b> + SAV roll stock.</p>
+        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Print setup / laminate apply / Jingwei: add <b>Labour hrs</b> like <b>0.25</b> on the same answer line. Roll vinyl: <b>Material from size</b> + SAV roll stock. Eyelets: <b>Hardware / consumable each</b> + Eyelet material + ask placement presets.</p>
       </div>
     </section>
   );
