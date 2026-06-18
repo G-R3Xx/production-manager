@@ -15,7 +15,9 @@ import {
   deleteProductOptionAction,
   moveProductOptionAction,
   updateProductAction,
-  updateProductOptionAction
+  updateProductComponentAction,
+  updateProductOptionAction,
+  deleteProductComponentAction
 } from "./actions";
 
 type ProductsPageProps = {
@@ -1275,6 +1277,548 @@ function SpreadsheetRecipeRows({ selectedProduct, fields, components, materials 
   );
 }
 
+
+type ProductBuildSlot = {
+  key: string;
+  label: string;
+  chooseLabel: string;
+  description: string;
+  baseUsage: string;
+  role: string;
+  kind: string;
+  componentLabel: string;
+  materialFilter: string;
+  triggerOptionKey?: string;
+  triggerOptionValuesCsv?: string;
+  defaultQuantity?: string;
+  defaultWaste?: string;
+};
+
+const productBuildSlots: ProductBuildSlot[] = [
+  {
+    key: "substrate",
+    label: "Substrate",
+    chooseLabel: "Choose substrate",
+    description: "The main sheet, board, acrylic, corflute or panel this product is made from.",
+    baseUsage: "part_sheet",
+    role: "base_material",
+    kind: "material",
+    componentLabel: "Substrate",
+    materialFilter: "substrate",
+    defaultWaste: "10"
+  },
+  {
+    key: "print_media",
+    label: "Print media",
+    chooseLabel: "Choose print media",
+    description: "Roll stock or print media used when the product is not direct printed.",
+    baseUsage: "roll_metres",
+    role: "quote_selected_material",
+    kind: "material",
+    componentLabel: "Print media",
+    materialFilter: "print_media",
+    triggerOptionKey: "print_type",
+    triggerOptionValuesCsv: "sav_7yr, roll_stock, roll_stock_applied, clear_reverse, white"
+  },
+  {
+    key: "ink",
+    label: "Ink / print charge",
+    chooseLabel: "Add ink charge",
+    description: "CMYK and white ink charges, usually priced by finished square metres.",
+    baseUsage: "sell_sqm",
+    role: "quote_sell_charge",
+    kind: "material",
+    componentLabel: "CMYK Ink",
+    materialFilter: "charge",
+    triggerOptionKey: "print_type",
+    triggerOptionValuesCsv: "direct_print, sav_7yr, roll_stock, roll_stock_applied"
+  },
+  {
+    key: "laminate",
+    label: "Laminate",
+    chooseLabel: "Choose laminate",
+    description: "Optional laminate roll. Normally only applies when laminate is selected on the quote.",
+    baseUsage: "roll_metres",
+    role: "quote_selected_material",
+    kind: "material",
+    componentLabel: "Laminate",
+    materialFilter: "laminate",
+    triggerOptionKey: "laminate",
+    triggerOptionValuesCsv: "matt_laminate, matte, gloss_laminate, gloss, anti_graffiti"
+  },
+  {
+    key: "finishing",
+    label: "Finishing / hardware",
+    chooseLabel: "Choose finishing",
+    description: "Eyelets, fixings, drill holes, Jingwei, router cutting or other finishing processes.",
+    baseUsage: "each",
+    role: "quote_finishing",
+    kind: "material",
+    componentLabel: "Finishing hardware",
+    materialFilter: "finishing",
+    triggerOptionKey: "finishing",
+    triggerOptionValuesCsv: "eyelets, drill_holes, jingwei_cutting, router_cutting, cnc_cut"
+  },
+  {
+    key: "labour",
+    label: "Labour / process",
+    chooseLabel: "Add labour process",
+    description: "Artwork, print setup, laminate apply, cutting, drilling, packing or general production time.",
+    baseUsage: "labour_hours",
+    role: "factory_labour",
+    kind: "labour",
+    componentLabel: "Factory labour",
+    materialFilter: "labour",
+    defaultQuantity: "0.25",
+    defaultWaste: "0"
+  },
+  {
+    key: "outsourced",
+    label: "Outsourced",
+    chooseLabel: "Add supplier item",
+    description: "Bought-in production, laser cutting, powder coating, formed parts or supplier services.",
+    baseUsage: "outsourced_each",
+    role: "outsourced_item",
+    kind: "outsourced",
+    componentLabel: "Outsourced item",
+    materialFilter: "outsourced",
+    defaultQuantity: "1",
+    defaultWaste: "0"
+  }
+];
+
+function lowerText(value: unknown): string {
+  return String(value ?? "").toLowerCase();
+}
+
+function productBuilderUrl(productId: string, query: string, part?: string): string {
+  const params = new URLSearchParams();
+  params.set("selected", productId);
+  if (query) params.set("q", query);
+  if (part) params.set("part", part);
+  return `/products?${params.toString()}`;
+}
+
+function materialTypeText(material: any): string {
+  return lowerText(`${material?.materialType ?? ""} ${material?.stockUom ?? ""} ${material?.purchaseUom ?? ""}`);
+}
+
+function materialSizeText(material: any): string {
+  if (material?.rollWidthMm) return `${material.rollWidthMm}mm roll`;
+  if (material?.widthMm || material?.lengthMm) return `${material.widthMm ?? "?"} × ${material.lengthMm ?? "?"}mm`;
+  return humanize(material?.stockUom ?? material?.purchaseUom ?? "each");
+}
+
+function moneyText(value: unknown): string {
+  const amount = Number(String(value ?? "0"));
+  if (!Number.isFinite(amount)) return "$0.00";
+  return `$${amount.toFixed(2)}`;
+}
+
+function isRollMaterial(material: any): boolean {
+  const text = `${materialTypeText(material)} ${lowerText(material?.name)}`;
+  return text.includes("roll") || text.includes("vinyl") || text.includes("sav") || text.includes("laminate") || text.includes("cello") || text.includes("banner");
+}
+
+function isSheetMaterial(material: any): boolean {
+  const text = `${materialTypeText(material)} ${lowerText(material?.name)}`;
+  return text.includes("sheet") || text.includes("card") || text.includes("paper") || text.includes("acm") || text.includes("corflute") || text.includes("acrylic") || text.includes("foam") || text.includes("pvc");
+}
+
+function materialMatchesPart(material: any, part: string): boolean {
+  const text = `${materialTypeText(material)} ${lowerText(material?.name)} ${lowerText(material?.sku)} ${lowerText(material?.notes)}`;
+  if (part === "substrate") return isSheetMaterial(material) && !text.includes("laminate") && !text.includes("cello");
+  if (part === "print_media") return isRollMaterial(material) && (text.includes("print") || text.includes("sav") || text.includes("vinyl") || text.includes("banner") || text.includes("media") || text.includes("clear") || text.includes("white"));
+  if (part === "laminate") return text.includes("laminate") || text.includes("cello") || text.includes("gloss") || text.includes("matt") || text.includes("matte") || text.includes("anti graffiti");
+  if (part === "finishing") return text.includes("fixing") || text.includes("hardware") || text.includes("eyelet") || text.includes("standoff") || text.includes("screw") || text.includes("tape") || text.includes("item") || text.includes("consumable");
+  return true;
+}
+
+function slotForKey(part: string): ProductBuildSlot | undefined {
+  return productBuildSlots.find((slot) => slot.key === part);
+}
+
+function componentMatchesBuildSlot(component: any, slot: ProductBuildSlot): boolean {
+  const label = lowerText(component?.label);
+  const role = lowerText(component?.role);
+  const kind = lowerText(component?.kind);
+  const rule = componentRuleType(component);
+  const triggerKey = lowerText(component?.trigger?.optionKey ?? component?.stockUsage?.optionKey);
+
+  if (slot.key === "substrate") {
+    return role === "base_material" || (label.includes("substrate") || label.includes("base sheet") || label.includes("base material"));
+  }
+  if (slot.key === "print_media") {
+    return label.includes("print media") || label.includes("roll stock") || label.includes("sav") || (role === "quote_selected_material" && (triggerKey.includes("print") || triggerKey.includes("roll_stock")));
+  }
+  if (slot.key === "ink") {
+    return label.includes("ink") || rule === "sell_sqm";
+  }
+  if (slot.key === "laminate") {
+    return label.includes("laminate") || label.includes("cello") || triggerKey.includes("laminate");
+  }
+  if (slot.key === "finishing") {
+    return role.includes("finishing") || triggerKey.includes("finish") || label.includes("eyelet") || label.includes("drill") || label.includes("jingwei") || label.includes("router") || label.includes("hole") || label.includes("fixing");
+  }
+  if (slot.key === "labour") {
+    return kind === "labour" || rule === "labour_hours";
+  }
+  if (slot.key === "outsourced") {
+    return kind === "outsourced" || role.includes("outsource") || rule === "outsourced_each";
+  }
+  return false;
+}
+
+function selectedComponentForSlot(components: any[], slot: ProductBuildSlot): any | null {
+  return components.find((component) => componentMatchesBuildSlot(component, slot)) ?? null;
+}
+
+function componentsForSlot(components: any[], slot: ProductBuildSlot): any[] {
+  return components.filter((component) => componentMatchesBuildSlot(component, slot));
+}
+
+function componentPartListText(component: any, materials: any[]): string {
+  if (!component) return "Nothing selected";
+  const rule = componentRuleType(component);
+  const materialName = materialNameFor(component, materials);
+  if (rule === "sell_sqm") return `${component.label} · ${recipeBasisText(component)}`;
+  if (rule === "sell_each") return `${component.label} · ${recipeBasisText(component)}`;
+  if (rule === "labour_hours") return `${component.label} · ${recipeBasisText(component)}`;
+  if (materialName !== "No material") return materialName;
+  return component.label ?? "Selected";
+}
+
+function BuildSlotRow({ slot, selectedProduct, query, components, materials }: { slot: ProductBuildSlot; selectedProduct: any; query: string; components: any[]; materials: any[] }) {
+  const slotComponents = componentsForSlot(components, slot);
+  const selected = slotComponents[0] ?? null;
+  const hasMultiple = slotComponents.length > 1;
+  const isDone = Boolean(selected);
+
+  return (
+    <tr style={{ borderTop: "1px solid #e5e7eb" }}>
+      <td style={{ padding: "13px 10px", fontWeight: 900, color: "#2563eb", width: 170 }}>
+        <Link href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ color: "#2563eb", textDecoration: "underline" }}>{slot.label}</Link>
+      </td>
+      <td style={{ padding: "13px 10px" }}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <strong>{componentPartListText(selected, materials)}</strong>
+          <span style={{ color: "#64748b", fontSize: 13 }}>{selected ? recipeBasisText(selected) : slot.description}</span>
+          {hasMultiple ? <span style={plainChipStyle}>+ {slotComponents.length - 1} extra row{slotComponents.length - 1 === 1 ? "" : "s"}</span> : null}
+        </div>
+      </td>
+      <td style={{ padding: "13px 10px", color: "#334155", fontSize: 14 }}>{selected ? componentTriggerText(selected, []) : "Not selected"}</td>
+      <td style={{ padding: "13px 10px", fontWeight: 900 }}>{selected?.materialId ? moneyText(materials.find((material) => String(material.id) === String(selected.materialId))?.purchaseCost) : selected ? recipeBasisText(selected) : "—"}</td>
+      <td style={{ padding: "13px 10px", textAlign: "right" }}>
+        <div style={{ display: "inline-flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
+          <Link href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={isDone ? ghostStyle : blueButtonStyle}>{isDone ? "Change" : `+ ${slot.chooseLabel}`}</Link>
+          {selected ? (
+            <form action={deleteProductComponentAction}>
+              <input type="hidden" name="productId" value={selectedProduct.id} />
+              <input type="hidden" name="componentId" value={selected.id} />
+              <button type="submit" style={dangerGhostStyle}>Remove</button>
+            </form>
+          ) : null}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function ProductPartListSummary({ selectedProduct, fields, components, materials, query }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string }) {
+  return (
+    <aside style={{ display: "grid", gap: 14, alignSelf: "start", position: "sticky", top: 16 }}>
+      <section style={{ ...whitePanelStyle, padding: 16, boxShadow: "0 12px 30px rgba(15,23,42,0.08)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+          <strong style={{ fontSize: 18 }}>Product List</strong>
+          <span style={blueChipStyle}>{components.length} parts</span>
+        </div>
+        <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
+          {productBuildSlots.map((slot) => {
+            const selected = selectedComponentForSlot(components, slot);
+            return (
+              <Link key={slot.key} href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ display: "grid", gridTemplateColumns: "22px 1fr", gap: 8, alignItems: "start", color: "inherit", textDecoration: "none", borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
+                <span style={selected ? greenChipStyle : plainChipStyle}>{selected ? "✓" : "+"}</span>
+                <span style={{ display: "grid", gap: 2 }}>
+                  <strong>{slot.label}</strong>
+                  <small style={{ color: "#64748b" }}>{selected ? componentPartListText(selected, materials) : "Choose later"}</small>
+                </span>
+              </Link>
+            );
+          })}
+        </div>
+      </section>
+
+      <section style={{ ...whitePanelStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
+        <strong>Compatibility</strong>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>No hard checks yet. This area will warn if laminate is selected without print, roll width is too small, or eyelet choices need quantity/placement.</p>
+      </section>
+
+      <section style={whitePanelStyle}>
+        <strong>Quote questions</strong>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>{fields.length ? `${fields.length} question${fields.length === 1 ? "" : "s"} ready for the quote page.` : "Add Size, Print type, Laminate, Finishing and Quantity."}</p>
+        <Link href={productBuilderUrl(selectedProduct.id, query, "questions")} style={{ ...ghostStyle, marginTop: 10 }}>Manage questions</Link>
+      </section>
+    </aside>
+  );
+}
+
+function SupplierPriceHint({ material }: { material: any }) {
+  return (
+    <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.45 }}>
+      <div><b>{material?.supplierName ?? "No supplier linked"}</b></div>
+      <div>{material?.sku ? `SKU ${material.sku} · ` : ""}{materialSizeText(material)} · {moneyText(material?.purchaseCost)} / {material?.purchaseUom ?? material?.stockUom ?? "unit"}</div>
+      <div>Stock: {material?.stockQuantity ?? "0"} {material?.stockUom ?? ""}</div>
+    </div>
+  );
+}
+
+function SelectMaterialForSlotForm({ selectedProduct, slot, material, existing }: { selectedProduct: any; slot: ProductBuildSlot; material: any; existing: any | null }) {
+  const action = existing ? updateProductComponentAction : addProductComponentAction;
+  return (
+    <form action={action}>
+      <input type="hidden" name="productId" value={selectedProduct.id} />
+      {existing ? <input type="hidden" name="componentId" value={existing.id} /> : null}
+      <input type="hidden" name="label" value={slot.componentLabel} />
+      <input type="hidden" name="kind" value={slot.kind} />
+      <input type="hidden" name="role" value={slot.role} />
+      <input type="hidden" name="materialId" value={material.id} />
+      <input type="hidden" name="baseUsage" value={slot.baseUsage} />
+      <input type="hidden" name="quantity" value={slot.defaultQuantity ?? "1"} />
+      <input type="hidden" name="wastePercent" value={slot.defaultWaste ?? "10"} />
+      <input type="hidden" name="triggerOptionKey" value={slot.triggerOptionKey ?? ""} />
+      <input type="hidden" name="triggerOptionValuesCsv" value={slot.triggerOptionValuesCsv ?? ""} />
+      <input type="hidden" name="notes" value={`${slot.label} selected from the product builder.`} />
+      <button type="submit" style={blueButtonStyle}>{existing ? "Use this instead" : "Add to build"}</button>
+    </form>
+  );
+}
+
+function MaterialPickerForSlot({ selectedProduct, slot, materials, existing }: { selectedProduct: any; slot: ProductBuildSlot; materials: any[]; existing: any | null }) {
+  const filtered = materials.filter((material) => materialMatchesPart(material, slot.key));
+  const rows = filtered.length ? filtered : materials;
+
+  return (
+    <section style={{ ...whitePanelStyle, padding: 0, overflow: "hidden" }}>
+      <div style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb", padding: 18, display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div>
+          <p style={tinyLabelStyle}>{slot.label}</p>
+          <h3 style={{ margin: "4px 0 2px", fontSize: 26 }}>Choose from materials</h3>
+          <p style={mutedStyle}>{slot.description}</p>
+        </div>
+        <span style={plainChipStyle}>{rows.length} matching material{rows.length === 1 ? "" : "s"}</span>
+      </div>
+      {rows.length === 0 ? (
+        <div style={{ padding: 18 }}>
+          <p style={mutedStyle}>No materials exist yet. Add stock in Materials first, then come back to choose it here.</p>
+          <Link href="/materials" style={blueButtonStyle}>Go to Materials</Link>
+        </div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 820 }}>
+            <thead>
+              <tr style={{ textAlign: "left", color: "#64748b", fontSize: 12, borderBottom: "1px solid #e5e7eb" }}>
+                <th style={{ padding: "12px 14px" }}>Material</th>
+                <th style={{ padding: "12px 14px" }}>Supplier / stock</th>
+                <th style={{ padding: "12px 14px" }}>Size</th>
+                <th style={{ padding: "12px 14px" }}>Cost</th>
+                <th style={{ padding: "12px 14px", textAlign: "right" }}>Action</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((material) => (
+                <tr key={material.id} style={{ borderTop: "1px solid #eef2f7" }}>
+                  <td style={{ padding: "14px" }}>
+                    <strong>{material.name}</strong>
+                    <div style={{ color: "#64748b", fontSize: 13 }}>{humanize(material.materialType)}{material.sku ? ` · ${material.sku}` : ""}</div>
+                  </td>
+                  <td style={{ padding: "14px" }}><SupplierPriceHint material={material} /></td>
+                  <td style={{ padding: "14px" }}>{materialSizeText(material)}</td>
+                  <td style={{ padding: "14px", fontWeight: 900 }}>{moneyText(material.purchaseCost)}</td>
+                  <td style={{ padding: "14px", textAlign: "right" }}><SelectMaterialForSlotForm selectedProduct={selectedProduct} slot={slot} material={material} existing={existing} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function InkBuilderPanel({ selectedProduct, fields }: { selectedProduct: any; fields: any[] }) {
+  return (
+    <section style={whitePanelStyle}>
+      <p style={tinyLabelStyle}>Ink / production charge</p>
+      <h3 style={{ margin: "4px 0 8px", fontSize: 24 }}>Add ink as an area charge</h3>
+      <p style={mutedStyle}>Ink is not sheet or roll stock. Add CMYK at $10/m² and white ink as another $10/m² when required.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 12, marginTop: 14 }}>
+        <form action={addProductComponentAction} style={whitePanelStyle}>
+          <input type="hidden" name="productId" value={selectedProduct.id} />
+          <input type="hidden" name="kind" value="material" />
+          <input type="hidden" name="baseUsage" value="sell_sqm" />
+          <input type="hidden" name="label" value="CMYK Ink" />
+          <input type="hidden" name="sellRate" value="10" />
+          <input type="hidden" name="quantity" value="1" />
+          <input type="hidden" name="wastePercent" value="0" />
+          <input type="hidden" name="triggerOptionKey" value="print_type" />
+          <input type="hidden" name="triggerOptionValuesCsv" value="direct_print, sav_7yr, roll_stock, roll_stock_applied" />
+          <input type="hidden" name="notes" value="CMYK ink charge: finished square metres × $10/m²." />
+          <strong>CMYK Ink</strong>
+          <p style={mutedStyle}>$10/m², triggered by print choices.</p>
+          <button type="submit" style={blueButtonStyle}>Add CMYK ink</button>
+        </form>
+        <form action={addProductComponentAction} style={whitePanelStyle}>
+          <input type="hidden" name="productId" value={selectedProduct.id} />
+          <input type="hidden" name="kind" value="material" />
+          <input type="hidden" name="baseUsage" value="sell_sqm" />
+          <input type="hidden" name="label" value="White Ink" />
+          <input type="hidden" name="sellRate" value="10" />
+          <input type="hidden" name="quantity" value="1" />
+          <input type="hidden" name="wastePercent" value="0" />
+          <input type="hidden" name="triggerOptionKey" value="white_ink" />
+          <input type="hidden" name="triggerOptionValuesCsv" value="yes" />
+          <input type="hidden" name="notes" value="White ink extra: finished square metres × $10/m² when white ink is selected." />
+          <strong>White Ink</strong>
+          <p style={mutedStyle}>Extra $10/m², only when White ink = Yes.</p>
+          <button type="submit" style={blueButtonStyle}>Add white ink</button>
+        </form>
+      </div>
+      <details style={{ ...whitePanelStyle, marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Custom ink / production charge</summary>
+        <div style={{ marginTop: 12 }}><AddChargeRecipeRow productId={selectedProduct.id} fields={fields} /></div>
+      </details>
+    </section>
+  );
+}
+
+function LabourBuilderPanel({ selectedProduct, fields }: { selectedProduct: any; fields: any[] }) {
+  return (
+    <section style={whitePanelStyle}>
+      <p style={tinyLabelStyle}>Labour / process</p>
+      <h3 style={{ margin: "4px 0 8px", fontSize: 24 }}>Add factory labour</h3>
+      <p style={mutedStyle}>Use this for print setup, laminate apply, Jingwei, drilling, eyelets or general production time.</p>
+      <div style={{ marginTop: 12 }}><AddLabourRecipeRow productId={selectedProduct.id} fields={fields} /></div>
+    </section>
+  );
+}
+
+function SupplierOrderingPreview({ materials }: { materials: any[] }) {
+  const supplierRows = materials.filter((material) => material.supplierName).slice(0, 6);
+  return (
+    <section style={{ ...whitePanelStyle, background: "#f8fafc" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div>
+          <strong style={{ fontSize: 18 }}>Supplier pricing / ordering direction</strong>
+          <p style={mutedStyle}>Material detail pages can become the ordering page: suppliers, prices, stock, and create purchase order.</p>
+        </div>
+        <Link href="/materials" style={ghostStyle}>Open Materials</Link>
+      </div>
+      {supplierRows.length ? (
+        <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
+          {supplierRows.map((material) => (
+            <div key={material.id} style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: 10, alignItems: "center", borderTop: "1px solid #e5e7eb", paddingTop: 8 }}>
+              <span><strong>{material.name}</strong><br /><small style={{ color: "#64748b" }}>{material.supplierName}</small></span>
+              <span style={{ fontWeight: 900 }}>{moneyText(material.purchaseCost)}</span>
+              <button type="button" disabled style={{ ...ghostStyle, opacity: 0.6, cursor: "not-allowed" }}>Order later</button>
+            </div>
+          ))}
+        </div>
+      ) : <p style={{ ...mutedStyle, marginTop: 10 }}>No supplier-linked materials yet. Add supplier prices on Materials.</p>}
+    </section>
+  );
+}
+
+function ProductPartPickerBuilder({ selectedProduct, fields, components, materials, query, editOptionId, activePart }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string; editOptionId: string; activePart: string }) {
+  const activeSlot = slotForKey(activePart);
+  const selectedForActiveSlot = activeSlot ? selectedComponentForSlot(components, activeSlot) : null;
+
+  return (
+    <section style={{ ...canvasStyle, overflow: "visible" }}>
+      <div style={{ background: "#111827", color: "#fff", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: "18px 22px", display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div>
+          <p style={{ margin: 0, color: "#93c5fd", fontSize: 12, fontWeight: 950, letterSpacing: "0.12em", textTransform: "uppercase" }}>Product builder</p>
+          <h2 style={{ margin: "5px 0 0", fontSize: 30, letterSpacing: "-0.04em" }}>{selectedProduct.name}</h2>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span style={{ ...plainChipStyle, background: "#1f2937", color: "#e5e7eb" }}>{components.length} selected parts</span>
+          <span style={{ ...plainChipStyle, background: "#1f2937", color: "#e5e7eb" }}>{fields.length} quote questions</span>
+          <Link href="/quotes" style={{ ...ghostStyle, borderColor: "#334155", background: "#0f172a", color: "#fff" }}>Go to Quotes</Link>
+        </div>
+      </div>
+
+      <div style={{ padding: 20, display: "grid", gridTemplateColumns: "280px minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
+        <ProductPartListSummary selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} query={query} />
+
+        <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
+          <section style={{ ...whitePanelStyle, padding: 0, overflow: "hidden" }}>
+            <div style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <div>
+                <strong style={{ fontSize: 20 }}>Choose your product parts</strong>
+                <p style={{ ...mutedStyle, marginTop: 4 }}>Build the product by selecting the materials and processes it can use.</p>
+              </div>
+              <span style={components.length ? greenChipStyle : yellowChipStyle}>{components.length ? "Build started" : "Start with substrate"}</span>
+            </div>
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
+                <thead>
+                  <tr style={{ textAlign: "left", color: "#64748b", fontSize: 12, borderBottom: "1px solid #e5e7eb" }}>
+                    <th style={{ padding: "11px 10px" }}>Part</th>
+                    <th style={{ padding: "11px 10px" }}>Selection</th>
+                    <th style={{ padding: "11px 10px" }}>Applies when</th>
+                    <th style={{ padding: "11px 10px" }}>Cost / basis</th>
+                    <th style={{ padding: "11px 10px", textAlign: "right" }}>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {productBuildSlots.map((slot) => <BuildSlotRow key={slot.key} slot={slot} selectedProduct={selectedProduct} query={query} components={components} materials={materials} />)}
+                  <tr style={{ borderTop: "1px solid #e5e7eb" }}>
+                    <td style={{ padding: "13px 10px", fontWeight: 900, color: "#2563eb" }}>Quote questions</td>
+                    <td style={{ padding: "13px 10px" }}><strong>{fields.length ? `${fields.length} questions added` : "No questions yet"}</strong><div style={{ color: "#64748b", fontSize: 13 }}>Size, print, laminate, ink, finishing and quantity.</div></td>
+                    <td style={{ padding: "13px 10px" }}>Shown on quote page</td>
+                    <td style={{ padding: "13px 10px" }}>Staff selections</td>
+                    <td style={{ padding: "13px 10px", textAlign: "right" }}><Link href={productBuilderUrl(selectedProduct.id, query, "questions")} style={fields.length ? ghostStyle : blueButtonStyle}>{fields.length ? "Manage" : "+ Add questions"}</Link></td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          {activeSlot && ["substrate", "print_media", "laminate", "finishing"].includes(activeSlot.key) ? (
+            <MaterialPickerForSlot selectedProduct={selectedProduct} slot={activeSlot} materials={materials} existing={selectedForActiveSlot} />
+          ) : null}
+
+          {activePart === "ink" ? <InkBuilderPanel selectedProduct={selectedProduct} fields={fields} /> : null}
+          {activePart === "labour" ? <LabourBuilderPanel selectedProduct={selectedProduct} fields={fields} /> : null}
+          {activePart === "outsourced" ? <section style={whitePanelStyle}><AddOutsourceRecipeRow productId={selectedProduct.id} fields={fields} /></section> : null}
+          {activePart === "questions" ? (
+            <section style={whitePanelStyle}>
+              <QuoteQuestionsSpreadsheetPanel selectedProduct={selectedProduct} fields={fields} components={components} activeMaterials={materials} query={query} editOptionId={editOptionId} />
+            </section>
+          ) : null}
+
+          {!activePart ? (
+            <section style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
+              <strong style={{ fontSize: 20 }}>How this works</strong>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>Click a row, choose the material or process, and the product build fills in like PCPartPicker. Supplier pricing stays on Materials and can later become purchase ordering.</p>
+            </section>
+          ) : null}
+
+          <SupplierOrderingPreview materials={materials} />
+
+          <details style={{ ...whitePanelStyle }}>
+            <summary style={{ cursor: "pointer", fontWeight: 950 }}>Advanced: old spreadsheet-style rows and starter reset</summary>
+            <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+              <ProductBasicsPanel selectedProduct={selectedProduct} />
+              <PresetRowsPanel productId={selectedProduct.id} activeMaterials={materials} selectedStarterType="sign_acm" />
+              <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} />
+            </div>
+          </details>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function QuoteQuestionsSpreadsheetPanel({ selectedProduct, fields, components, activeMaterials, query, editOptionId }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[]; query: string; editOptionId: string }) {
   return (
     <section style={{ display: "grid", gap: 14 }}>
@@ -1339,75 +1883,19 @@ function LiveSpreadsheetPreview({ fields, components }: { fields: any[]; compone
   );
 }
 
-function ProductRecipeCanvas({ selectedProduct, fields, components, activeMaterials, query, editOptionId, selectedStarterType }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[]; query: string; editOptionId: string; selectedStarterType: string }) {
+function ProductRecipeCanvas({ selectedProduct, fields, components, activeMaterials, query, editOptionId, selectedStarterType, activePart }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[]; query: string; editOptionId: string; selectedStarterType: string; activePart: string }) {
   return (
-    <section style={{ ...canvasStyle, display: "grid", gap: 0 }}>
-      <div style={{ padding: 22, borderBottom: "1px solid #dfe7f2", background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)", display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div>
-          <p style={tinyLabelStyle}>Simple product recipe</p>
-          <h2 style={{ ...sectionHeadingStyle, fontSize: 32 }}>{selectedProduct.name}</h2>
-          <p style={{ ...mutedStyle, marginTop: 6, maxWidth: 900 }}>
-            Main flow: add quote questions, then set what each answer adds. Extra spreadsheet rows are hidden unless you need them.
-          </p>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <span style={blueChipStyle}>{fields.length} question{fields.length === 1 ? "" : "s"}</span>
-          <span style={plainChipStyle}>{components.length} cost row{components.length === 1 ? "" : "s"}</span>
-        </div>
-      </div>
-
-      <div style={{ padding: 20, display: "grid", gap: 16 }}>
-        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-          <div style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
-            <span style={blueChipStyle}>1</span>
-            <strong>Product</strong>
-            <p style={mutedStyle}>Name it and pick a starter.</p>
-          </div>
-          <div style={{ ...whitePanelStyle, background: "#f6fef9", borderColor: "#abefc6" }}>
-            <span style={greenChipStyle}>2</span>
-            <strong>Questions</strong>
-            <p style={mutedStyle}>Size, print, laminate, ink, finishing, qty.</p>
-          </div>
-          <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
-            <span style={yellowChipStyle}>3</span>
-            <strong>Costing</strong>
-            <p style={mutedStyle}>Each answer says what it adds.</p>
-          </div>
-        </section>
-
-        <details style={{ ...whitePanelStyle }}>
-          <summary style={{ cursor: "pointer", fontWeight: 950 }}>Product name / starter rows</summary>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 12 }}>
-            <ProductBasicsPanel selectedProduct={selectedProduct} />
-            <PresetRowsPanel productId={selectedProduct.id} activeMaterials={activeMaterials} selectedStarterType={selectedStarterType} />
-          </div>
-        </details>
-
-        <section style={{ ...panelStyle, background: "#ffffff" }}>
-          <QuoteQuestionsSpreadsheetPanel
-            selectedProduct={selectedProduct}
-            fields={fields}
-            components={components}
-            activeMaterials={activeMaterials}
-            query={query}
-            editOptionId={editOptionId}
-          />
-        </section>
-
-        <details style={{ ...whitePanelStyle, background: "#fcfcfd" }}>
-          <summary style={{ cursor: "pointer", fontWeight: 950 }}>Optional: extra spreadsheet rows for always-included labour, supplier costs or odd jobs</summary>
-          <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
-            <p style={mutedStyle}>Most products should not need this. Use it for setup labour, outsource items, or costs that do not belong to one answer line.</p>
-            <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={activeMaterials} />
-          </div>
-        </details>
-
-        <LiveSpreadsheetPreview fields={fields} components={components} />
-      </div>
-    </section>
+    <ProductPartPickerBuilder
+      selectedProduct={selectedProduct}
+      fields={fields}
+      components={components}
+      materials={activeMaterials}
+      query={query}
+      editOptionId={editOptionId}
+      activePart={activePart}
+    />
   );
 }
-
 
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
@@ -1421,6 +1909,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const selectedId = readParam(params, "selected");
   const query = readParam(params, "q");
   const editOptionId = readParam(params, "editOption");
+  const activePart = readParam(params, "part");
 
   const [products, materials, selectedProduct] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),
@@ -1475,6 +1964,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           query={query}
           editOptionId={editOptionId}
           selectedStarterType={selectedStarterType}
+          activePart={activePart}
         />
       )}
     </div>
