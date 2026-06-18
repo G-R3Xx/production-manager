@@ -7,7 +7,7 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listProductsForTenant } from "@/server/products";
 import { getConfiguratorTemplateById } from "@/server/configurators";
-import { createQuoteDraftAction } from "./actions";
+import { createQuoteDraftAction, deleteQuoteLineAction } from "./actions";
 import { QuoteLineBuilder } from "./QuoteLineBuilder";
 import { getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 
@@ -271,14 +271,26 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <QuoteLineBuilder quoteId={selectedQuote.id} products={quoteProducts} materials={materials.filter((material) => material.active)} />
 
               <div style={{ display: "grid", gap: 10 }}>
-                <h4 style={{ margin: 0 }}>Quote lines</h4>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <h4 style={{ margin: 0 }}>Saved quote lines</h4>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>These are saved snapshots. Changing the quote cards above does not edit a saved line. Remove the old line, then save the current line again.</p>
+                </div>
                 {quoteLines.map((line) => (
-                  <div key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 14, display: "grid", gap: 4, background: "#fbfdff" }}>
-                    <strong>{line.productName}</strong>
-                    <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${line.unitPrice}`, `Total $${line.lineTotal}`].filter(Boolean).join(" · ")}</div>
+                  <div key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 14, display: "grid", gap: 10, background: "#fbfdff" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        <strong>{line.productName}</strong>
+                        <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${line.unitPrice}`, `Total $${line.lineTotal}`].filter(Boolean).join(" · ")}</div>
+                      </div>
+                      <form action={deleteQuoteLineAction}>
+                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                        <input type="hidden" name="lineId" value={line.id} />
+                        <button type="submit" style={{ border: "1px solid #fecaca", background: "#fff", color: "#b42318", borderRadius: 12, padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Remove</button>
+                      </form>
+                    </div>
                   </div>
                 ))}
-                {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No quote lines yet.</p> : null}
+                {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No saved quote lines yet. Choose the options above, then save the current line.</p> : null}
               </div>
             </div>
           ) : null}

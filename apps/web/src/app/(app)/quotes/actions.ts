@@ -4,7 +4,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { addQuoteLine, createQuoteDraftForTenant } from "@/server/quotes";
+import { addQuoteLine, createQuoteDraftForTenant, deleteQuoteLineForTenant } from "@/server/quotes";
 import { getProductById } from "@/server/products";
 
 
@@ -72,4 +72,19 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
   });
 
   redirect(`/quotes?selected=${quoteId}&message=Quote%20line%20added`);
+}
+
+
+export async function deleteQuoteLineAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const lineId = String(formData.get("lineId") ?? "").trim();
+
+  if (!quoteId || !lineId) {
+    redirect("/quotes?error=Select%20a%20saved%20quote%20line%20to%20remove");
+  }
+
+  await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId);
+
+  redirect(`/quotes?selected=${quoteId}&message=Saved%20quote%20line%20removed`);
 }

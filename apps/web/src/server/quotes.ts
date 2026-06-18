@@ -149,3 +149,15 @@ export async function addQuoteLine(quoteId: string, input: {
     )
   `, [quoteId, input.productId ?? null, input.productName, input.optionSummary ?? null, input.quantity, input.unitPrice, input.notes ?? null]);
 }
+
+
+export async function deleteQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<void> {
+  await pool.query(`
+    DELETE FROM sales.quote_lines ql
+    USING sales.quote_drafts qd
+    WHERE ql.quote_id = qd.id
+      AND qd.tenant_id = $1::uuid
+      AND ql.quote_id = $2::uuid
+      AND ql.id = $3::uuid
+  `, [tenantId, quoteId, lineId]);
+}

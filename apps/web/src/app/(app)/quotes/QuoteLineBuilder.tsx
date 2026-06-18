@@ -892,12 +892,12 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
           <textarea name="notes" placeholder="Optional notes for this line" style={textareaStyle} />
         </label>
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#f8fafc", display: "grid", gap: 4 }}>
-          <span style={{ fontSize: 12, fontWeight: 900, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Selected summary</span>
+          <span style={{ fontSize: 12, fontWeight: 900, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current unsaved line</span>
           <span style={{ color: autoSummary ? "#111827" : "#667085" }}>{autoSummary || "No options selected yet"}</span>
         </div>
       </div>
 
-      <button type="submit" style={buttonStyle}>Add quote line</button>
+      <button type="submit" style={buttonStyle}>Save current line to quote</button>
     </form>
   );
 }
