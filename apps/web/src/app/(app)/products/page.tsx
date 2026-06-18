@@ -326,43 +326,29 @@ function MessageBanner({ tone, children }: { tone: "success" | "error"; children
 }
 
 function ProductFlowHero({ selectedProduct, fields, components, activeMaterials }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[] }) {
-  const stats = [
-    { label: "Quote cards", value: fields.length, ready: fields.length > 0 },
-    { label: "Price rows", value: components.length, ready: components.length > 0 },
-    { label: "Materials ready", value: activeMaterials.length, ready: activeMaterials.length > 0 }
-  ];
-
+  const readyCount = [Boolean(selectedProduct), fields.length > 0, components.length > 0].filter(Boolean).length;
   return (
-    <section style={{ ...cardStyle, display: "grid", gap: 16, background: "linear-gradient(135deg, #ffffff 0%, #eff6ff 100%)" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
-        <div style={{ minWidth: 0 }}>
-          <p style={tinyLabelStyle}>Product recipe builder</p>
-          <h1 style={{ margin: "8px 0 6px", fontSize: 42, letterSpacing: "-0.05em" }}>Build products visually</h1>
-          <p style={{ ...mutedStyle, maxWidth: 880 }}>
-            Start with the thing you sell, then add the quote questions staff will answer. Each answer line says what it adds: no cost, material, parts per sheet, roll metres, $/m² or $ each.
+    <section style={{ ...cardStyle, display: "grid", gap: 14, padding: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+        <div>
+          <p style={tinyLabelStyle}>Products</p>
+          <h1 style={{ margin: "6px 0 4px", fontSize: 34, letterSpacing: "-0.04em" }}>Product setup</h1>
+          <p style={{ ...mutedStyle, maxWidth: 840 }}>
+            Build one product like a simple quote sheet. Add the questions staff answer, then attach the costing to those answers.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <span style={greenChipStyle}>No configurator page</span>
-          <span style={blueChipStyle}>Answer-line pricing</span>
-          <span style={plainChipStyle}>GST hidden</span>
+          <span style={readyCount >= 1 ? greenChipStyle : plainChipStyle}>1 Product</span>
+          <span style={readyCount >= 2 ? greenChipStyle : plainChipStyle}>2 Questions</span>
+          <span style={readyCount >= 3 ? greenChipStyle : plainChipStyle}>3 Costing</span>
         </div>
       </div>
-
       {selectedProduct ? (
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.2fr) repeat(3, minmax(130px, 0.45fr))", gap: 12 }}>
-          <div style={{ ...whitePanelStyle, background: "#fff" }}>
-            <span style={greenChipStyle}>Open product</span>
-            <strong style={{ fontSize: 20 }}>{selectedProduct.name}</strong>
-            <p style={mutedStyle}>{selectedProduct.sku || "No SKU"} · {humanize(selectedProduct.productFamily)}</p>
-          </div>
-          {stats.map((stat) => (
-            <div key={stat.label} style={{ ...whitePanelStyle, background: stat.ready ? "#f6fef9" : "#fffcf5", borderColor: stat.ready ? "#abefc6" : "#fedf89" }}>
-              <span style={stat.ready ? greenChipStyle : yellowChipStyle}>{stat.ready ? "Ready" : "Next"}</span>
-              <strong style={{ fontSize: 24 }}>{stat.value}</strong>
-              <p style={mutedStyle}>{stat.label}</p>
-            </div>
-          ))}
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <span style={blueChipStyle}>{selectedProduct.name}</span>
+          <span style={plainChipStyle}>{fields.length} quote question{fields.length === 1 ? "" : "s"}</span>
+          <span style={plainChipStyle}>{components.length} costing row{components.length === 1 ? "" : "s"}</span>
+          <span style={plainChipStyle}>{activeMaterials.length} active material{activeMaterials.length === 1 ? "" : "s"}</span>
         </div>
       ) : null}
     </section>
@@ -671,7 +657,7 @@ function QuestionBasics({ field }: { field?: any }) {
 function VisualAnswerBuilder({ materials, field, components = [] }: { materials: any[]; field?: any; components?: any[] }) {
   const options = choicesForField(field);
   const existingRows = options.map((choice: any) => ({ choice, component: linkedOptionComponent(field, choice, components) }));
-  const blankCount = field ? Math.max(2, 5 - existingRows.length) : 5;
+  const blankCount = field ? Math.max(1, 3 - existingRows.length) : 3;
   const rows = [
     ...existingRows,
     ...Array.from({ length: blankCount }, (_, index) => ({ choice: null, component: null, blankId: `blank-${index}` }))
@@ -681,20 +667,29 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
     <section style={{ ...panelStyle, background: "#f8fafc", borderColor: "#bfdbfe" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
-          <strong style={{ fontSize: 18 }}>Answer lines</strong>
-          <p style={{ ...mutedStyle, marginTop: 4 }}>Each row is one answer staff can pick. The pricing recipe stays on the product, so quotes calculate automatically.</p>
+          <strong style={{ fontSize: 18 }}>Answers staff can pick</strong>
+          <p style={{ ...mutedStyle, marginTop: 4 }}>
+            Keep this like a quote sheet: answer on the left, what it adds on the right.
+          </p>
         </div>
-        <span style={blueChipStyle}>Simple mode</span>
+        <span style={blueChipStyle}>Simple</span>
       </div>
 
       {materials.length === 0 ? (
         <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
           <strong>No active materials yet</strong>
-          <p style={mutedStyle}>You can still create the answers. Link stock later from the Materials page.</p>
+          <p style={mutedStyle}>You can still add choices like CMYK ink or White ink. Link stock materials later.</p>
         </div>
       ) : null}
 
-      <div style={{ display: "grid", gap: 12 }}>
+      <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(160px, 1fr) minmax(100px, 0.55fr)", gap: 10, padding: "0 4px" }}>
+          <span style={labelTextStyle}>Answer</span>
+          <span style={labelTextStyle}>Adds</span>
+          <span style={labelTextStyle}>Material</span>
+          <span style={labelTextStyle}>Number</span>
+        </div>
+
         {rows.map((row: any, index: number) => {
           const component = row.component;
           const choice = row.choice;
@@ -704,70 +699,47 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
           const hasCost = Boolean(component?.materialId) || isCharge;
 
           return (
-            <div key={choice?.id ?? row.blankId ?? index} style={{ border: "1px solid #dbe7f5", borderRadius: 20, background: choice ? "#fff" : "#fbfdff", overflow: "hidden" }}>
-              <div style={{ display: "grid", gridTemplateColumns: "44px 1fr", gap: 0 }}>
-                <div style={{ background: hasCost ? "#ecfdf3" : "#f1f5f9", color: hasCost ? "#067647" : "#475569", display: "grid", placeItems: "center", fontWeight: 950 }}>{index + 1}</div>
-                <div style={{ padding: 14, display: "grid", gap: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-                    <strong>{choice ? choiceLabel(choice) : "Blank answer"}</strong>
-                    <span style={hasCost ? greenChipStyle : plainChipStyle}>{hasCost ? usageMeta.short : "Choice only"}</span>
-                  </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(190px, 1.1fr) minmax(180px, 1fr) minmax(180px, 1fr) minmax(120px, 0.55fr)", gap: 10 }}>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Visible answer</span>
-                      <input name="optionAnswerLabel" defaultValue={String(choice?.label ?? "")} placeholder="eg 600 x 900 mm, Yes, Matt" style={inputStyle} />
-                    </label>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Price recipe</span>
-                      <select name="optionUsageMode" defaultValue={usageMode} style={inputStyle}>
-                        {optionUsageModes.map((mode) => (
-                          <option key={mode.value} value={mode.value}>{mode.label}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>Material used</span>
-                      <select name="optionMaterialId" defaultValue={String(component?.materialId ?? "")} style={inputStyle}>
-                        <option value="">No material</option>
-                        {materials.map((material) => (
-                          <option key={material.id} value={material.id}>{material.name}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label style={labelStyle}>
-                      <span style={labelTextStyle}>{usageMeta.amountLabel}</span>
-                      <input name="optionUsageAmount" defaultValue={optionUsageAmountFromComponent(component)} placeholder={usageMeta.amountPlaceholder} style={inputStyle} />
-                    </label>
-                  </div>
-
-                  <details>
-                    <summary style={{ cursor: "pointer", fontWeight: 900, color: "#475569" }}>More for this answer</summary>
-                    <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-                      <div style={grid3}>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Charge label</span>
-                          <input name="optionChargeName" defaultValue={isCharge ? optionChargeNameFromComponent(component) : ""} placeholder="eg CMYK Ink or White Ink" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Waste %</span>
-                          <input name="optionWastePercent" defaultValue={String(component?.wastePercent ?? "10")} placeholder="eg 10" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Internal note</span>
-                          <input name="optionNotes" defaultValue={String(component?.notes ?? "")} placeholder="optional" style={inputStyle} />
-                        </label>
-                      </div>
-                      <p style={mutedStyle}>For ink: choose <b>$ per m²</b>, leave material blank, enter <b>10</b>. For ACM sizes: choose <b>Parts per sheet</b>, pick ACM, enter the yield such as <b>8</b>.</p>
-                    </div>
-                  </details>
-                </div>
-              </div>
+            <div key={choice?.id ?? row.blankId ?? index} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(160px, 1fr) minmax(100px, 0.55fr)", gap: 10, alignItems: "center", border: "1px solid #dbe7f5", borderRadius: 18, background: choice ? "#fff" : "#fbfdff", padding: 10 }}>
+              <label style={labelStyle}>
+                <span style={{ ...labelTextStyle, display: "flex", gap: 8, alignItems: "center" }}>
+                  <span style={hasCost ? greenChipStyle : plainChipStyle}>{index + 1}</span>
+                  {choice ? "Existing answer" : "New answer"}
+                </span>
+                <input name="optionAnswerLabel" defaultValue={String(choice?.label ?? "")} placeholder="eg 600 x 900mm" style={inputStyle} />
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Cost type</span>
+                <select name="optionUsageMode" defaultValue={usageMode} style={inputStyle}>
+                  {optionUsageModes.map((mode) => (
+                    <option key={mode.value} value={mode.value}>{mode.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Stock/material</span>
+                <select name="optionMaterialId" defaultValue={String(component?.materialId ?? "")} style={inputStyle}>
+                  <option value="">No material</option>
+                  {materials.map((material) => (
+                    <option key={material.id} value={material.id}>{material.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>{usageMeta.amountLabel}</span>
+                <input name="optionUsageAmount" defaultValue={optionUsageAmountFromComponent(component)} placeholder={usageMeta.amountPlaceholder} style={inputStyle} />
+                <input type="hidden" name="optionWastePercent" value={String(component?.wastePercent ?? (isCharge ? "0" : "10"))} />
+                <input type="hidden" name="optionChargeName" value={isCharge ? optionChargeNameFromComponent(component) : ""} />
+                <input type="hidden" name="optionNotes" value={String(component?.notes ?? "")} />
+              </label>
             </div>
           );
         })}
       </div>
-      <p style={mutedStyle}>Need more blank rows? Save this question, edit it again, and more blanks appear.</p>
+
+      <div style={{ ...whitePanelStyle, background: "#fff" }}>
+        <strong>Examples</strong>
+        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Roll vinyl: <b>Material from size</b> + SAV roll stock.</p>
+      </div>
     </section>
   );
 }
@@ -810,7 +782,7 @@ function AdvancedQuestionSettings({ fields, field, currentShowWhenKey, showWhenV
 function QuickQuestionButton({ selectedProductId, preset, activeMaterials }: { selectedProductId: string; preset: (typeof quickQuestionPresets)[number]; activeMaterials: any[] }) {
   const firstMaterialId = activeMaterials[0]?.id ? String(activeMaterials[0].id) : "";
   return (
-    <form action={addProductOptionAction} style={{ ...whitePanelStyle, minHeight: 150 }}>
+    <form action={addProductOptionAction} style={{ ...ghostStyle, minHeight: 46, justifyContent: "space-between", gap: 10 }}>
       <input type="hidden" name="productId" value={selectedProductId} />
       <input type="hidden" name="label" value={preset.label} />
       <input type="hidden" name="fieldType" value={preset.type} />
@@ -826,10 +798,8 @@ function QuickQuestionButton({ selectedProductId, preset, activeMaterials }: { s
           <input type="hidden" name="optionNotes" value="" />
         </div>
       ))}
-      <span style={blueChipStyle}>Quick add</span>
-      <strong style={{ fontSize: 18 }}>{preset.label}</strong>
-      <p style={mutedStyle}>{preset.rows.length ? `${preset.rows.length} starter answers` : "Quantity field"}</p>
-      <button type="submit" style={ghostStyle}>Add {preset.label}</button>
+      <span>+ {preset.label}</span>
+      <small style={{ color: "#64748b", fontWeight: 800 }}>{preset.rows.length ? `${preset.rows.length} answers` : "qty"}</small>
     </form>
   );
 }
@@ -839,35 +809,33 @@ function AddQuestionPanel({ selectedProduct, activeMaterials, fields }: { select
     <section style={{ ...panelStyle, background: "#f8fafc", borderStyle: "dashed" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 22 }}>Add the next quote question</h3>
-          <p style={{ ...mutedStyle, marginTop: 4 }}>Use a quick card, or build your own with visual answer lines.</p>
+          <h3 style={{ margin: 0, fontSize: 22 }}>Add the next question</h3>
+          <p style={{ ...mutedStyle, marginTop: 4 }}>Start with the common buttons. Custom questions are there only when you need something odd.</p>
         </div>
-        <span style={yellowChipStyle}>Next step</span>
+        <span style={yellowChipStyle}>Next</span>
       </div>
 
-      <details open={fields.length === 0} style={{ ...whitePanelStyle }}>
-        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Quick add common question</summary>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10, marginTop: 12 }}>
-          {quickQuestionPresets.map((preset) => (
-            <QuickQuestionButton key={preset.label} selectedProductId={selectedProduct.id} preset={preset} activeMaterials={activeMaterials} />
-          ))}
-        </div>
-        {activeMaterials.length === 0 ? <p style={mutedStyle}>Quick material rows can be linked after materials are added.</p> : null}
-      </details>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+        {quickQuestionPresets.map((preset) => (
+          <QuickQuestionButton key={preset.label} selectedProductId={selectedProduct.id} preset={preset} activeMaterials={activeMaterials} />
+        ))}
+      </div>
+      {activeMaterials.length === 0 ? <p style={mutedStyle}>Material-linked choices can be connected after materials are added.</p> : null}
 
       <details style={{ ...whitePanelStyle }}>
-        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Build a custom question</summary>
+        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Need a custom question?</summary>
         <form action={addProductOptionAction} style={{ display: "grid", gap: 14, marginTop: 12 }}>
           <input type="hidden" name="productId" value={selectedProduct.id} />
           <QuestionBasics />
           <VisualAnswerBuilder materials={activeMaterials} components={[]} />
           <AdvancedQuestionSettings fields={fields} />
-          <button type="submit" style={blueButtonStyle}>Save new question</button>
+          <button type="submit" style={blueButtonStyle}>Save custom question</button>
         </form>
       </details>
     </section>
   );
 }
+
 
 
 function componentRuleType(component: any): string {
@@ -1233,28 +1201,20 @@ function LiveSpreadsheetPreview({ fields, components }: { fields: any[]; compone
   const hasInk = components.some((component: any) => String(component.label ?? "").toLowerCase().includes("ink") || componentRuleType(component) === "sell_sqm");
 
   return (
-    <aside style={{ display: "grid", gap: 12, alignContent: "start" }}>
-      <div style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
-        <span style={blueChipStyle}>Live recipe map</span>
-        <strong style={{ fontSize: 20 }}>Spreadsheet flow</strong>
-        <p style={mutedStyle}>Quote questions choose the job. Recipe rows calculate the price. This is the same idea as the workbook tabs.</p>
+    <section style={{ ...whitePanelStyle, background: "#f8fafc" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        <div>
+          <strong style={{ fontSize: 18 }}>Quick check</strong>
+          <p style={mutedStyle}>A normal sign product usually only needs these pieces.</p>
+        </div>
+        <span style={fields.length && components.length ? greenChipStyle : yellowChipStyle}>{fields.length && components.length ? "Looks usable" : "Keep going"}</span>
       </div>
-      <div style={whitePanelStyle}>
-        <strong>Expected quote screen</strong>
-        <RecipeLine label="Size" body={sizeField ? "Staff picks a finished size" : "Add a Size question"} />
-        <RecipeLine label="Print / laminate" body={printField || laminateField ? "Choices can turn material rows on or off" : "Add Print type and Laminate questions if needed"} />
-        <RecipeLine label="Ink" body={hasInk ? "Ink is set as $/m² charge" : "Add CMYK ink at $10/m², then White ink at +$10/m²"} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        <RecipeLine label="Size" body={sizeField ? "Ready" : "Add a Size question"} />
+        <RecipeLine label="Print / laminate" body={printField || laminateField ? "Ready" : "Add Print type / Laminate if needed"} />
+        <RecipeLine label="Ink" body={hasInk ? "Ready" : "Add CMYK at $10/m² if printed"} />
       </div>
-      <div style={whitePanelStyle}>
-        <strong>Good recipe example</strong>
-        <p style={mutedStyle}>600 × 900 ACM sign:</p>
-        <p style={mutedStyle}>ACM = part sheet from size</p>
-        <p style={mutedStyle}>SAV = roll metres from size</p>
-        <p style={mutedStyle}>Ink = $10/m²</p>
-        <p style={mutedStyle}>White ink = another $10/m² only when selected</p>
-        <p style={mutedStyle}>Labour = hours × hourly rate</p>
-      </div>
-    </aside>
+    </section>
   );
 }
 
@@ -1263,73 +1223,70 @@ function ProductRecipeCanvas({ selectedProduct, fields, components, activeMateri
     <section style={{ ...canvasStyle, display: "grid", gap: 0 }}>
       <div style={{ padding: 22, borderBottom: "1px solid #dfe7f2", background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)", display: "flex", justifyContent: "space-between", gap: 16, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
-          <p style={tinyLabelStyle}>Spreadsheet-style product recipe</p>
+          <p style={tinyLabelStyle}>Simple product recipe</p>
           <h2 style={{ ...sectionHeadingStyle, fontSize: 32 }}>{selectedProduct.name}</h2>
           <p style={{ ...mutedStyle, marginTop: 6, maxWidth: 900 }}>
-            Build this like your quote workbook: material rows, ink/charge rows, labour rows, supplier rows, then simple quote questions staff answer.
+            Main flow: add quote questions, then set what each answer adds. Extra spreadsheet rows are hidden unless you need them.
           </p>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <span style={greenChipStyle}>{components.length} recipe rows</span>
-          <span style={blueChipStyle}>{fields.length} quote questions</span>
-          <span style={plainChipStyle}>{humanize(selectedProduct.status)}</span>
+          <span style={blueChipStyle}>{fields.length} question{fields.length === 1 ? "" : "s"}</span>
+          <span style={plainChipStyle}>{components.length} cost row{components.length === 1 ? "" : "s"}</span>
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 0 }}>
-        <div style={{ padding: 20, display: "grid", gap: 18 }}>
-          <section style={{ ...panelStyle, background: "#ffffff" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
-              <div>
-                <h3 style={{ margin: 0, fontSize: 24 }}>1. Product details</h3>
-                <p style={{ ...mutedStyle, marginTop: 4 }}>Keep this boring. The recipe rows below do the quoting work.</p>
-              </div>
-              <span style={greenChipStyle}>Start here</span>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-              <ProductBasicsPanel selectedProduct={selectedProduct} />
-              <PresetRowsPanel productId={selectedProduct.id} activeMaterials={activeMaterials} selectedStarterType={selectedStarterType} />
-            </div>
-          </section>
+      <div style={{ padding: 20, display: "grid", gap: 16 }}>
+        <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          <div style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
+            <span style={blueChipStyle}>1</span>
+            <strong>Product</strong>
+            <p style={mutedStyle}>Name it and pick a starter.</p>
+          </div>
+          <div style={{ ...whitePanelStyle, background: "#f6fef9", borderColor: "#abefc6" }}>
+            <span style={greenChipStyle}>2</span>
+            <strong>Questions</strong>
+            <p style={mutedStyle}>Size, print, laminate, ink, finishing, qty.</p>
+          </div>
+          <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}>
+            <span style={yellowChipStyle}>3</span>
+            <strong>Costing</strong>
+            <p style={mutedStyle}>Each answer says what it adds.</p>
+          </div>
+        </section>
 
-          <section style={{ ...panelStyle, background: "#ffffff" }}>
-            <div>
-              <h3 style={{ margin: 0, fontSize: 24 }}>2. Recipe rows</h3>
-              <p style={{ ...mutedStyle, marginTop: 4 }}>This replaces the confusing hidden rules. Add rows the same way you add lines in the spreadsheet.</p>
-            </div>
+        <details style={{ ...whitePanelStyle }}>
+          <summary style={{ cursor: "pointer", fontWeight: 950 }}>Product name / starter rows</summary>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12, marginTop: 12 }}>
+            <ProductBasicsPanel selectedProduct={selectedProduct} />
+            <PresetRowsPanel productId={selectedProduct.id} activeMaterials={activeMaterials} selectedStarterType={selectedStarterType} />
+          </div>
+        </details>
+
+        <section style={{ ...panelStyle, background: "#ffffff" }}>
+          <QuoteQuestionsSpreadsheetPanel
+            selectedProduct={selectedProduct}
+            fields={fields}
+            components={components}
+            activeMaterials={activeMaterials}
+            query={query}
+            editOptionId={editOptionId}
+          />
+        </section>
+
+        <details style={{ ...whitePanelStyle, background: "#fcfcfd" }}>
+          <summary style={{ cursor: "pointer", fontWeight: 950 }}>Optional: extra spreadsheet rows for always-included labour, supplier costs or odd jobs</summary>
+          <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+            <p style={mutedStyle}>Most products should not need this. Use it for setup labour, outsource items, or costs that do not belong to one answer line.</p>
             <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={activeMaterials} />
-          </section>
+          </div>
+        </details>
 
-          <section style={{ ...panelStyle, background: "#ffffff" }}>
-            <QuoteQuestionsSpreadsheetPanel
-              selectedProduct={selectedProduct}
-              fields={fields}
-              components={components}
-              activeMaterials={activeMaterials}
-              query={query}
-              editOptionId={editOptionId}
-            />
-          </section>
-        </div>
-
-        <div style={{ borderLeft: "1px solid #dfe7f2", background: "#f8fafc", padding: 18 }}>
-          <LiveSpreadsheetPreview fields={fields} components={components} />
-          <details style={{ ...whitePanelStyle, background: "#fcfcfd", marginTop: 12 }}>
-            <summary style={{ cursor: "pointer", fontWeight: 950, color: "#64748b" }}>Advanced data preview</summary>
-            <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
-              {components.length === 0 ? <p style={mutedStyle}>No recipe rows yet.</p> : components.map((component: any) => (
-                <div key={component.id ?? component.label} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
-                  <strong>{component.label}</strong>
-                  <p style={{ ...mutedStyle, fontSize: 13 }}>{humanize(componentRuleType(component))} · {componentTriggerText(component, fields)}</p>
-                </div>
-              ))}
-            </div>
-          </details>
-        </div>
+        <LiveSpreadsheetPreview fields={fields} components={components} />
       </div>
     </section>
   );
 }
+
 
 
 export default async function ProductsPage({ searchParams }: ProductsPageProps) {
