@@ -691,6 +691,7 @@ function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<stri
     const usageAmount = optionalNumberText(row.amount);
     const isChargePerSqm = usageMode === "sqm_charge";
     const isFixedCharge = usageMode === "fixed_charge";
+    const isLabour = usageMode === "labour_hours";
     const isRoll = usageMode === "roll_metres";
     const isWholeSheet = usageMode === "sheets_per_item";
     const isPartsPerSheet = usageMode === "parts_per_sheet";
@@ -699,31 +700,33 @@ function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<stri
 
     if (!fieldKey || !optionValue || usageMode === "none") return [];
     if (isMaterialMode && !fallbackMaterialId) return [];
-    if ((isChargePerSqm || isFixedCharge) && !usageAmount) return [];
+    if ((isChargePerSqm || isFixedCharge || isLabour) && !usageAmount) return [];
 
     const chargeName = row.chargeName || `${preset.label}: ${String(option.label ?? row.answer)}`;
-    const componentLabel = isChargePerSqm || isFixedCharge ? chargeName : `${preset.label}: ${String(option.label ?? row.answer)}`;
+    const componentLabel = isChargePerSqm || isFixedCharge || isLabour ? chargeName : `${preset.label}: ${String(option.label ?? row.answer)}`;
 
     return [{
       id: randomUUID(),
-      kind: "material",
-      role: isChargePerSqm || isFixedCharge ? "quote_sell_charge" : "quote_selected_material",
-      materialId: isChargePerSqm || isFixedCharge ? null : fallbackMaterialId,
+      kind: isLabour ? "labour" : "material",
+      role: isLabour ? "factory_labour" : (isChargePerSqm || isFixedCharge ? "quote_sell_charge" : "quote_selected_material"),
+      materialId: isChargePerSqm || isFixedCharge || isLabour ? null : fallbackMaterialId,
       supplierId: null,
-      labourRateName: null,
+      labourRateName: isLabour ? "Factory" : null,
       label: componentLabel,
-      quantity: isFixedCharge ? (usageAmount ?? "0") : "1",
-      unit: isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : "sheet",
-      notes: isChargePerSqm
-        ? `Sell charge for ${preset.label} = ${String(option.label ?? row.answer)}. Calculates from finished square metres.`
-        : isFixedCharge
-          ? `Fixed sell charge for ${preset.label} = ${String(option.label ?? row.answer)}.`
-          : `Auto-cost row for ${preset.label} = ${String(option.label ?? row.answer)}.`,
-      ruleType: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
-      wastePercent: isChargePerSqm || isFixedCharge ? "0" : "10",
+      quantity: isLabour ? (usageAmount ?? "0") : isFixedCharge ? (usageAmount ?? "0") : "1",
+      unit: isLabour ? "hr" : isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : "sheet",
+      notes: isLabour
+        ? `Labour for ${preset.label} = ${String(option.label ?? row.answer)}. Calculates hours × hourly rate.`
+        : isChargePerSqm
+          ? `Sell charge for ${preset.label} = ${String(option.label ?? row.answer)}. Calculates from finished square metres.`
+          : isFixedCharge
+            ? `Fixed sell charge for ${preset.label} = ${String(option.label ?? row.answer)}.`
+            : `Auto-cost row for ${preset.label} = ${String(option.label ?? row.answer)}.`,
+      ruleType: isLabour ? "labour_hours" : isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+      wastePercent: isChargePerSqm || isFixedCharge || isLabour ? "0" : "10",
       stockUsage: {
-        usageBasis: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
-        dimensionSource: isFixedCharge ? "quantity_only" : "finished_size",
+        usageBasis: isLabour ? "labour_hours" : isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+        dimensionSource: isLabour || isFixedCharge ? "quantity_only" : "finished_size",
         optionKey: fieldKey,
         optionValues: [optionValue],
         widthMm: null,
@@ -732,8 +735,8 @@ function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<stri
         partsPerSheet: isPartsPerSheet ? usageAmount : null,
         metresPerUnit: isRoll ? usageAmount : null,
         sheetsPerUnit: isWholeSheet ? (usageAmount ?? "1") : null,
-        sellRate: isChargePerSqm || isFixedCharge ? usageAmount : null,
-        chargeName: isChargePerSqm || isFixedCharge ? chargeName : null
+        sellRate: isLabour ? "66" : isChargePerSqm || isFixedCharge ? usageAmount : null,
+        chargeName: isChargePerSqm || isFixedCharge || isLabour ? chargeName : null
       },
       trigger: {
         optionKey: fieldKey,
@@ -755,6 +758,9 @@ type CostedOptionRow = {
   wastePercent: string;
   notes: string;
   chargeName: string;
+  labourRate: string;
+  labourHours: string | null;
+  labourName: string;
 };
 
 type QuickQuestionPresetRow = {
@@ -823,8 +829,8 @@ const quickQuestionPresetDefinitions: Record<string, QuickQuestionPreset> = {
     required: true,
     rows: [
       { answer: "None", mode: "none", amount: "" },
-      { answer: "Jingwei cutting", mode: "fixed_charge", amount: "0" },
-      { answer: "Drill holes", mode: "fixed_charge", amount: "0" }
+      { answer: "Jingwei cutting", mode: "labour_hours", amount: "0.25", chargeName: "Jingwei cutting labour" },
+      { answer: "Drill holes", mode: "labour_hours", amount: "0.10", chargeName: "Drill holes labour" }
     ]
   },
   quantity: {
@@ -850,7 +856,10 @@ function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
   const wastePercents = readStringArray(formData, "optionWastePercent");
   const notes = readStringArray(formData, "optionNotes");
   const chargeNames = readStringArray(formData, "optionChargeName");
-  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length, chargeNames.length);
+  const labourRates = readStringArray(formData, "optionLabourRate");
+  const labourHours = readStringArray(formData, "optionLabourHours");
+  const labourNames = readStringArray(formData, "optionLabourName");
+  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length, chargeNames.length, labourRates.length, labourHours.length, labourNames.length);
 
   const rows: CostedOptionRow[] = [];
   for (let index = 0; index < totalRows; index += 1) {
@@ -864,7 +873,10 @@ function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
       usageAmount: optionalNumberText(usageAmounts[index]),
       wastePercent: safeNumberString(String(wastePercents[index] ?? "10"), "10"),
       notes: String(notes[index] ?? "").trim(),
-      chargeName: String(chargeNames[index] ?? "").trim()
+      chargeName: String(chargeNames[index] ?? "").trim(),
+      labourRate: safeNumberString(String(labourRates[index] ?? "66"), "66"),
+      labourHours: optionalNumberText(labourHours[index]),
+      labourName: String(labourNames[index] ?? "").trim()
     });
   }
 
@@ -882,11 +894,11 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
     if (!fieldKey || !optionValue) return [];
 
     const usageMode = row.usageMode || "none";
-    if (usageMode === "none") return [];
 
     const usageAmount = row.usageAmount;
     const isChargePerSqm = usageMode === "sqm_charge";
     const isFixedCharge = usageMode === "fixed_charge";
+    const isLabour = usageMode === "labour_hours";
     const isRoll = usageMode === "roll_metres";
     const isEach = isFixedCharge;
     const isWholeSheet = usageMode === "sheets_per_item";
@@ -894,34 +906,75 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
     const isMaterialAuto = usageMode === "auto_sheet";
     const isMaterialMode = isMaterialAuto || isPartsPerSheet || isWholeSheet || isRoll;
 
+    if (usageMode === "none" && !row.labourHours) return [];
+
+    if (usageMode === "none" && row.labourHours) {
+      const labourLabel = row.labourName || `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)} labour`;
+      return [{
+        id: randomUUID(),
+        kind: "labour",
+        role: "factory_labour",
+        materialId: null,
+        supplierId: null,
+        labourRateName: "Factory",
+        label: labourLabel,
+        quantity: row.labourHours,
+        unit: "hr",
+        notes: `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`,
+        ruleType: "labour_hours",
+        wastePercent: "0",
+        stockUsage: {
+          usageBasis: "labour_hours",
+          dimensionSource: "quantity_only",
+          optionKey: fieldKey,
+          optionValues: [optionValue],
+          widthMm: null,
+          heightMm: null,
+          rollWidthMm: null,
+          partsPerSheet: null,
+          metresPerUnit: null,
+          sheetsPerUnit: null,
+          sellRate: row.labourRate,
+          chargeName: labourLabel
+        },
+        trigger: {
+          optionKey: fieldKey,
+          optionValue: null,
+          optionValues: [optionValue]
+        }
+      }];
+    }
+
     if (isMaterialMode && !row.materialId) return [];
-    if ((isChargePerSqm || isFixedCharge) && !usageAmount) return [];
+    if ((isChargePerSqm || isFixedCharge || isLabour) && !usageAmount) return [];
 
     const chargeName = row.chargeName || `${String(field.label ?? "Charge")}: ${String(option.label ?? row.answerLabel)}`;
-    const componentLabel = isChargePerSqm || isFixedCharge
+    const componentLabel = isChargePerSqm || isFixedCharge || isLabour
       ? chargeName
       : `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)}`;
 
-    return [{
+    const nextComponents: Array<Record<string, any>> = [{
       id: randomUUID(),
-      kind: "material",
-      role: isChargePerSqm || isFixedCharge ? "quote_sell_charge" : "quote_selected_material",
-      materialId: isChargePerSqm || isFixedCharge ? null : row.materialId,
+      kind: isLabour ? "labour" : "material",
+      role: isLabour ? "factory_labour" : (isChargePerSqm || isFixedCharge ? "quote_sell_charge" : "quote_selected_material"),
+      materialId: isChargePerSqm || isFixedCharge || isLabour ? null : row.materialId,
       supplierId: null,
-      labourRateName: null,
+      labourRateName: isLabour ? "Factory" : null,
       label: componentLabel,
-      quantity: isFixedCharge ? (usageAmount ?? "0") : "1",
-      unit: isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : "sheet",
-      notes: row.notes || (isChargePerSqm
-        ? `Sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Calculates from finished square metres.`
-        : isFixedCharge
-          ? `Fixed sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`
-          : `Auto-cost row for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`),
-      ruleType: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
-      wastePercent: isChargePerSqm || isFixedCharge ? "0" : row.wastePercent,
+      quantity: isLabour ? (usageAmount ?? "0") : isFixedCharge ? (usageAmount ?? "0") : "1",
+      unit: isLabour ? "hr" : isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : "sheet",
+      notes: row.notes || (isLabour
+        ? `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Calculates hours × hourly rate.`
+        : isChargePerSqm
+          ? `Sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Calculates from finished square metres.`
+          : isFixedCharge
+            ? `Fixed sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`
+            : `Auto-cost row for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`),
+      ruleType: isLabour ? "labour_hours" : isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+      wastePercent: isChargePerSqm || isFixedCharge || isLabour ? "0" : row.wastePercent,
       stockUsage: {
-        usageBasis: isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
-        dimensionSource: isFixedCharge ? "quantity_only" : "finished_size",
+        usageBasis: isLabour ? "labour_hours" : isChargePerSqm ? "sell_sqm" : isFixedCharge ? "sell_each" : isRoll ? "per_linear_metre" : isWholeSheet ? "per_unit" : "yield_based",
+        dimensionSource: isLabour || isFixedCharge ? "quantity_only" : "finished_size",
         optionKey: fieldKey,
         optionValues: [optionValue],
         widthMm: null,
@@ -930,8 +983,8 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
         partsPerSheet: isPartsPerSheet ? usageAmount : null,
         metresPerUnit: isRoll ? usageAmount : null,
         sheetsPerUnit: isWholeSheet ? (usageAmount ?? "1") : null,
-        sellRate: isChargePerSqm || isFixedCharge ? usageAmount : null,
-        chargeName: isChargePerSqm || isFixedCharge ? chargeName : null
+        sellRate: isLabour ? row.labourRate : isChargePerSqm || isFixedCharge ? usageAmount : null,
+        chargeName: isChargePerSqm || isFixedCharge || isLabour ? chargeName : null
       },
       trigger: {
         optionKey: fieldKey,
@@ -939,6 +992,45 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
         optionValues: [optionValue]
       }
     }];
+
+    if (!isLabour && row.labourHours) {
+      const labourLabel = row.labourName || `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)} labour`;
+      nextComponents.push({
+        id: randomUUID(),
+        kind: "labour",
+        role: "factory_labour",
+        materialId: null,
+        supplierId: null,
+        labourRateName: "Factory",
+        label: labourLabel,
+        quantity: row.labourHours,
+        unit: "hr",
+        notes: `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`,
+        ruleType: "labour_hours",
+        wastePercent: "0",
+        stockUsage: {
+          usageBasis: "labour_hours",
+          dimensionSource: "quantity_only",
+          optionKey: fieldKey,
+          optionValues: [optionValue],
+          widthMm: null,
+          heightMm: null,
+          rollWidthMm: null,
+          partsPerSheet: null,
+          metresPerUnit: null,
+          sheetsPerUnit: null,
+          sellRate: row.labourRate,
+          chargeName: labourLabel
+        },
+        trigger: {
+          optionKey: fieldKey,
+          optionValue: null,
+          optionValues: [optionValue]
+        }
+      });
+    }
+
+    return nextComponents;
   });
 }
 

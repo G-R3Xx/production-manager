@@ -114,7 +114,8 @@ const optionUsageModes = [
   { value: "sheets_per_item", label: "Sheets per item", short: "Uses material", amountLabel: "Sheets per item", amountPlaceholder: "eg 1 or 0.25" },
   { value: "roll_metres", label: "Metres per item", short: "Uses roll", amountLabel: "Metres", amountPlaceholder: "eg 1.2" },
   { value: "sqm_charge", label: "$ per m²", short: "Adds charge", amountLabel: "Sell $/m²", amountPlaceholder: "eg 10" },
-  { value: "fixed_charge", label: "$ each", short: "Adds charge", amountLabel: "Sell $ each", amountPlaceholder: "eg 15" }
+  { value: "fixed_charge", label: "$ each", short: "Adds charge", amountLabel: "Sell $ each", amountPlaceholder: "eg 15" },
+  { value: "labour_hours", label: "Labour hours", short: "Adds labour", amountLabel: "Hours", amountPlaceholder: "eg 0.25" }
 ];
 
 const quickQuestionPresets = [
@@ -168,8 +169,8 @@ const quickQuestionPresets = [
     required: "yes",
     rows: [
       { answer: "None", mode: "none", amount: "" },
-      { answer: "Jingwei cutting", mode: "fixed_charge", amount: "0" },
-      { answer: "Drill holes", mode: "fixed_charge", amount: "0" }
+      { answer: "Jingwei cutting", mode: "labour_hours", amount: "0.25" },
+      { answer: "Drill holes", mode: "labour_hours", amount: "0.10" }
     ]
   },
   {
@@ -239,7 +240,25 @@ function linkedOptionComponent(field: any, option: any, components: any[]): any 
       : Array.isArray(component?.stockUsage?.optionValues)
         ? component.stockUsage.optionValues
         : [];
-    return triggerKey === fieldKey && values.includes(optionValue);
+    const ruleType = String(component?.ruleType ?? component?.stockUsage?.usageBasis ?? "");
+    return triggerKey === fieldKey && values.includes(optionValue) && ruleType !== "labour_hours" && String(component?.kind ?? "") !== "labour";
+  }) ?? null;
+}
+
+function linkedLabourComponent(field: any, option: any, components: any[]): any | null {
+  const fieldKey = String(field?.key ?? "");
+  const optionValue = optionKeyValue(option);
+  if (!fieldKey || !optionValue) return null;
+
+  return components.find((component: any) => {
+    const triggerKey = String(component?.trigger?.optionKey ?? component?.stockUsage?.optionKey ?? "");
+    const values = Array.isArray(component?.trigger?.optionValues)
+      ? component.trigger.optionValues
+      : Array.isArray(component?.stockUsage?.optionValues)
+        ? component.stockUsage.optionValues
+        : [];
+    const ruleType = String(component?.ruleType ?? component?.stockUsage?.usageBasis ?? "");
+    return triggerKey === fieldKey && values.includes(optionValue) && (ruleType === "labour_hours" || String(component?.kind ?? "") === "labour");
   }) ?? null;
 }
 
@@ -247,6 +266,7 @@ function optionUsageModeFromComponent(component: any): string {
   const stockUsage = component?.stockUsage ?? {};
   const ruleType = String(component?.ruleType ?? stockUsage?.usageBasis ?? "yield_based");
   if (!component) return "none";
+  if (ruleType === "labour_hours" || String(component?.kind ?? "") === "labour") return "labour_hours";
   if (ruleType === "sell_sqm") return "sqm_charge";
   if (ruleType === "sell_each") return "fixed_charge";
   if (ruleType === "per_linear_metre") return "roll_metres";
@@ -264,6 +284,7 @@ function optionUsageAmountFromComponent(component: any): string {
   if (mode === "parts_per_sheet") return cleanUsageNumber(stockUsage?.partsPerSheet);
   if (mode === "sheets_per_item") return cleanUsageNumber(stockUsage?.sheetsPerUnit) || "1";
   if (mode === "roll_metres") return cleanUsageNumber(stockUsage?.metresPerUnit);
+  if (mode === "labour_hours") return cleanUsageNumber(component?.quantity ?? stockUsage?.hoursPerUnit) || "";
   if (mode === "sqm_charge" || mode === "fixed_charge") return cleanUsageNumber(stockUsage?.sellRate ?? component?.quantity) || "";
   return "";
 }
@@ -278,8 +299,9 @@ function questionCostingText(field: any, components: any[]): string {
   if (choices.length === 0) return "No answers yet";
   const costed = choices.filter((choice) => {
     const linked = linkedOptionComponent(field, choice, components);
+    const labour = linkedLabourComponent(field, choice, components);
     const mode = optionUsageModeFromComponent(linked);
-    return linked && mode !== "none";
+    return Boolean(labour) || (linked && mode !== "none");
   }).length;
   return `${costed}/${choices.length} answers add pricing`;
 }
@@ -532,6 +554,7 @@ function BuilderHelpPanel() {
         <RecipeLine label="Roll vinyl" body="Material from size, linked to roll stock" />
         <RecipeLine label="CMYK ink" body="$ per m², rate 10" />
         <RecipeLine label="White ink" body="Yes answer = $ per m², rate 10" />
+        <RecipeLine label="Labour" body="Choose Labour hours, eg 0.25 at $66/hr" />
         <RecipeLine label="No laminate" body="No extra cost" />
       </div>
     </aside>
@@ -571,8 +594,9 @@ function AnswerPills({ field, components }: { field: any; components: any[] }) {
     <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
       {choices.map((choice) => {
         const linked = linkedOptionComponent(field, choice, components);
+        const labour = linkedLabourComponent(field, choice, components);
         const mode = optionUsageModeFromComponent(linked);
-        const chip = mode === "none" ? plainChipStyle : mode.includes("charge") ? blueChipStyle : greenChipStyle;
+        const chip = labour ? yellowChipStyle : mode === "none" ? plainChipStyle : mode.includes("charge") ? blueChipStyle : greenChipStyle;
         return <span key={String(choice.id ?? choice.value ?? choice.label)} style={chip}>{choiceLabel(choice)}</span>;
       })}
     </div>
@@ -690,23 +714,26 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
       ) : null}
 
       <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(160px, 1fr) minmax(100px, 0.55fr)", gap: 10, padding: "0 4px" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(170px, 1.15fr) minmax(145px, 0.85fr) minmax(155px, 0.95fr) minmax(90px, 0.45fr) minmax(90px, 0.45fr)", gap: 10, padding: "0 4px" }}>
           <span style={labelTextStyle}>Answer</span>
           <span style={labelTextStyle}>Adds</span>
           <span style={labelTextStyle}>Material</span>
           <span style={labelTextStyle}>Number</span>
+          <span style={labelTextStyle}>Labour hrs</span>
         </div>
 
         {rows.map((row: any, index: number) => {
           const component = row.component;
           const choice = row.choice;
+          const labourComponent = choice ? linkedLabourComponent(field, choice, components) : null;
           const usageMode = component ? optionUsageModeFromComponent(component) : "none";
           const usageMeta = optionUsageModes.find((mode) => mode.value === usageMode) ?? optionUsageModes[0];
           const isCharge = usageMode === "sqm_charge" || usageMode === "fixed_charge";
-          const hasCost = Boolean(component?.materialId) || isCharge;
+          const isLabour = usageMode === "labour_hours";
+          const hasCost = Boolean(component?.materialId) || isCharge || isLabour;
 
           return (
-            <div key={choice?.id ?? row.blankId ?? index} style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1.2fr) minmax(150px, 0.9fr) minmax(160px, 1fr) minmax(100px, 0.55fr)", gap: 10, alignItems: "center", border: "1px solid #dbe7f5", borderRadius: 18, background: choice ? "#fff" : "#fbfdff", padding: 10 }}>
+            <div key={choice?.id ?? row.blankId ?? index} style={{ display: "grid", gridTemplateColumns: "minmax(170px, 1.15fr) minmax(145px, 0.85fr) minmax(155px, 0.95fr) minmax(90px, 0.45fr) minmax(90px, 0.45fr)", gap: 10, alignItems: "center", border: "1px solid #dbe7f5", borderRadius: 18, background: choice ? "#fff" : "#fbfdff", padding: 10 }}>
               <label style={labelStyle}>
                 <span style={{ ...labelTextStyle, display: "flex", gap: 8, alignItems: "center" }}>
                   <span style={hasCost ? greenChipStyle : plainChipStyle}>{index + 1}</span>
@@ -723,7 +750,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
                 </select>
               </label>
               <label style={labelStyle}>
-                <span style={labelTextStyle}>Stock/material</span>
+                <span style={labelTextStyle}>{isCharge || isLabour ? "Not needed" : "Stock/material"}</span>
                 <select name="optionMaterialId" defaultValue={String(component?.materialId ?? "")} style={inputStyle}>
                   <option value="">No material</option>
                   {materials.map((material) => (
@@ -735,8 +762,14 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
                 <span style={labelTextStyle}>{usageMeta.amountLabel}</span>
                 <input name="optionUsageAmount" defaultValue={optionUsageAmountFromComponent(component)} placeholder={usageMeta.amountPlaceholder} style={inputStyle} />
                 <input type="hidden" name="optionWastePercent" value={String(component?.wastePercent ?? (isCharge ? "0" : "10"))} />
-                <input type="hidden" name="optionChargeName" value={isCharge ? optionChargeNameFromComponent(component) : ""} />
+                <input type="hidden" name="optionChargeName" value={isCharge || isLabour ? optionChargeNameFromComponent(component) : ""} />
+                <input type="hidden" name="optionLabourRate" value={isLabour ? String(component?.stockUsage?.sellRate ?? "66") : "66"} />
                 <input type="hidden" name="optionNotes" value={String(component?.notes ?? "")} />
+              </label>
+              <label style={labelStyle}>
+                <span style={labelTextStyle}>Extra labour</span>
+                <input name="optionLabourHours" defaultValue={cleanUsageNumber(labourComponent?.quantity)} placeholder="eg 0.25" style={inputStyle} />
+                <input type="hidden" name="optionLabourName" value={String(labourComponent?.label ?? "")} />
               </label>
             </div>
           );
@@ -745,7 +778,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
 
       <div style={{ ...whitePanelStyle, background: "#fff" }}>
         <strong>Examples</strong>
-        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Roll vinyl: <b>Material from size</b> + SAV roll stock.</p>
+        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Print setup / laminate apply / Jingwei: add <b>Labour hrs</b> like <b>0.25</b> on the same answer line. Roll vinyl: <b>Material from size</b> + SAV roll stock.</p>
       </div>
     </section>
   );
