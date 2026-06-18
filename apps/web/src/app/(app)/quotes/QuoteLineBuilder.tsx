@@ -180,7 +180,7 @@ function defaultAnswersFor(product: QuoteProduct | undefined): Record<string, st
   const next: Record<string, string> = {};
   for (const field of product?.fields ?? []) {
     const defaultValue = String(field.defaultValue ?? "");
-    const firstChoice = field.options?.[0]?.value ? String(field.options[0].value) : "";
+    const firstChoice = field.type === "multi_select" ? "" : (field.options?.[0]?.value ? String(field.options[0].value) : "");
     next[field.key] = defaultValue || firstChoice;
   }
   return next;
@@ -190,7 +190,21 @@ function selectedChoice(field: QuoteQuestion, value: string): QuoteChoice | unde
   return field.options?.find((option) => String(option.value ?? option.label ?? "") === value);
 }
 
+function selectedValues(value: string | null | undefined): string[] {
+  return String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function answerLabel(field: QuoteQuestion, value: string): string {
+  if (field.type === "multi_select") {
+    const labels = selectedValues(value).map((item) => {
+      const matched = selectedChoice(field, item);
+      return String(matched?.label ?? item).replace(/_/g, " ");
+    });
+    return labels.join(", ");
+  }
   const matched = selectedChoice(field, value);
   const label = String(matched?.label ?? value ?? "").trim();
   return label.replace(/_/g, " ");
@@ -202,9 +216,9 @@ function isVisible(field: QuoteQuestion, answers: Record<string, string>): boole
   if (!optionKey) return true;
 
   const requiredValues = Array.isArray(showWhen?.optionValues) ? showWhen?.optionValues ?? [] : [];
-  const currentAnswer = answers[optionKey] ?? "";
-  if (requiredValues.length === 0) return currentAnswer.length > 0;
-  return requiredValues.includes(currentAnswer);
+  const currentAnswers = selectedValues(answers[optionKey] ?? "");
+  if (requiredValues.length === 0) return currentAnswers.length > 0;
+  return requiredValues.some((required) => currentAnswers.includes(required));
 }
 
 function summaryFor(fields: QuoteQuestion[], answers: Record<string, string>): string {
@@ -270,10 +284,10 @@ function componentApplies(component: QuoteComponent, answers: Record<string, str
   const triggerKey = String(component.trigger?.optionKey ?? "");
   if (!triggerKey) return true;
 
-  const currentAnswer = answers[triggerKey] ?? "";
+  const currentAnswers = selectedValues(answers[triggerKey] ?? "");
   const requiredValues = Array.isArray(component.trigger?.optionValues) ? component.trigger?.optionValues ?? [] : [];
-  if (requiredValues.length === 0) return currentAnswer.length > 0;
-  return requiredValues.includes(currentAnswer);
+  if (requiredValues.length === 0) return currentAnswers.length > 0;
+  return requiredValues.some((required) => currentAnswers.includes(required));
 }
 
 function wasteMultiplier(component: QuoteComponent): number {
@@ -627,6 +641,16 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
     setAnswers((current) => ({ ...current, [key]: value }));
   }
 
+  function toggleMultiAnswer(key: string, value: string, checked: boolean) {
+    setAnswers((current) => {
+      const currentValues = selectedValues(current[key]);
+      const nextValues = checked
+        ? Array.from(new Set([...currentValues, value]))
+        : currentValues.filter((item) => item !== value);
+      return { ...current, [key]: nextValues.join(",") };
+    });
+  }
+
   function useAutoPrice() {
     setUnitPrice(moneyInput(autoUnitPrice));
     setUnitPriceOverridden(false);
@@ -670,6 +694,37 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
             {visibleFields.map((field) => {
               const value = answers[field.key] ?? String(field.defaultValue ?? "");
+
+              if (field.type === "multi_select") {
+                const choices = field.options ?? [];
+                const checkedValues = selectedValues(value);
+
+                return (
+                  <fieldset key={field.id ?? field.key} style={{ ...labelStyle, border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff" }}>
+                    <legend style={labelTextStyle}>{field.label}{field.required === false ? "" : " *"}</legend>
+                    <input type="hidden" name={`option_${field.key}`} value={value} />
+                    {choices.length === 0 ? <small style={{ color: "#667085" }}>No choices set up</small> : null}
+                    <div style={{ display: "grid", gap: 8 }}>
+                      {choices.map((choice) => {
+                        const choiceValue = String(choice.value ?? choice.label ?? "");
+                        const label = choice.label ?? humanize(choiceValue);
+                        const checked = checkedValues.includes(choiceValue);
+                        return (
+                          <label key={choice.id ?? choiceValue} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 800 }}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) => toggleMultiAnswer(field.key, choiceValue, event.target.checked)}
+                            />
+                            <span>{label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
+                  </fieldset>
+                );
+              }
 
               if (["select", "size_select", "color", "yes_no"].includes(field.type)) {
                 const choices = field.type === "yes_no" && (!field.options || field.options.length === 0)

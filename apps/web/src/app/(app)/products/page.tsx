@@ -99,10 +99,11 @@ const starterTypes: StarterType[] = [
 
 const optionTypes = [
   { value: "select", label: "Dropdown choices" },
+  { value: "multi_select", label: "Tick multiple choices" },
   { value: "size_select", label: "Size choices" },
   { value: "yes_no", label: "Yes / No" },
   { value: "quantity", label: "Quantity" },
-  { value: "number", label: "Number" },
+  { value: "number", label: "Number entry" },
   { value: "text", label: "Text box" },
   { value: "color", label: "Colour choices" }
 ];
@@ -165,10 +166,9 @@ const quickQuestionPresets = [
   {
     key: "finishing",
     label: "Finishing",
-    type: "select",
-    required: "yes",
+    type: "multi_select",
+    required: "no",
     rows: [
-      { answer: "None", mode: "none", amount: "" },
       { answer: "Jingwei cutting", mode: "labour_hours", amount: "0.25" },
       { answer: "Drill holes", mode: "labour_hours", amount: "0.10" }
     ]
@@ -295,7 +295,7 @@ function optionChargeNameFromComponent(component: any): string {
 
 function questionCostingText(field: any, components: any[]): string {
   const choices = choicesForField(field);
-  if (!["select", "size_select", "color", "yes_no"].includes(String(field?.type ?? ""))) return "No pricing rows needed";
+  if (!["select", "size_select", "multi_select", "color", "yes_no"].includes(String(field?.type ?? ""))) return "No pricing rows needed";
   if (choices.length === 0) return "No answers yet";
   const costed = choices.filter((choice) => {
     const linked = linkedOptionComponent(field, choice, components);
@@ -543,9 +543,9 @@ function BuilderHelpPanel() {
         <span style={blueChipStyle}>No training flow</span>
         <strong style={{ fontSize: 20 }}>How to build it</strong>
         <div style={{ display: "grid", gap: 10 }}>
-          <StepNumber number="1" title="Add the question" body="Example: Size, Print type, White ink, Laminate." />
-          <StepNumber number="2" title="Add answer lines" body="Example: 600 × 900mm, SAV 7YR, Yes, Matt laminate." />
-          <StepNumber number="3" title="Choose what each answer adds" body="No cost, material from size, parts per sheet, $/m² or $ each." />
+          <StepNumber number="1" title="Add the question" body="Example: Size, Print type, White ink, Laminate, Finishing." />
+          <StepNumber number="2" title="Add answer lines" body="Example: 600 × 900mm, SAV 7YR, Yes, Matt laminate, Jingwei cutting." />
+          <StepNumber number="3" title="Choose what each answer adds" body="No cost, material from size, parts per sheet, $/m², labour, or $ each." />
         </div>
       </div>
       <div style={whitePanelStyle}>
@@ -584,7 +584,7 @@ function RecipeLine({ label, body }: { label: string; body: string }) {
 
 function AnswerPills({ field, components }: { field: any; components: any[] }) {
   const choices = choicesForField(field);
-  if (!["select", "size_select", "color", "yes_no"].includes(String(field?.type ?? ""))) {
+  if (!["select", "size_select", "multi_select", "color", "yes_no"].includes(String(field?.type ?? ""))) {
     return <span style={plainChipStyle}>{String(field?.type ?? "text") === "quantity" ? "Entered as quantity" : "Typed by staff"}</span>;
   }
 
@@ -718,7 +718,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
           <span style={labelTextStyle}>Answer</span>
           <span style={labelTextStyle}>Adds</span>
           <span style={labelTextStyle}>Material</span>
-          <span style={labelTextStyle}>Number</span>
+          <span style={labelTextStyle}>Amount / rate</span>
           <span style={labelTextStyle}>Labour hrs</span>
         </div>
 

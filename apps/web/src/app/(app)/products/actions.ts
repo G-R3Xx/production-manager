@@ -641,7 +641,7 @@ export async function addQuickProductQuestionAction(formData: FormData) {
     redirect(`/products?selected=${productId}&message=${encodeURIComponent(`${preset.label} already added`)}`);
   }
 
-  const options = ["select", "size_select", "color"].includes(preset.type)
+  const options = ["select", "size_select", "multi_select", "color", "yes_no"].includes(preset.type)
     ? preset.rows.map((row) => parseChoice(row.answer))
     : [];
 
@@ -651,7 +651,7 @@ export async function addQuickProductQuestionAction(formData: FormData) {
     label: preset.label,
     type: preset.type,
     required: preset.required,
-    defaultValue: preset.type === "quantity" ? "1" : (options[0]?.value ? String(options[0].value) : null),
+    defaultValue: preset.type === "quantity" ? "1" : preset.type === "multi_select" ? null : (options[0]?.value ? String(options[0].value) : null),
     helpText: "Shown after this product is selected on a quote.",
     quoteOnly: true,
     showWhen: null,
@@ -825,10 +825,9 @@ const quickQuestionPresetDefinitions: Record<string, QuickQuestionPreset> = {
   finishing: {
     key: "finishing",
     label: "Finishing",
-    type: "select",
-    required: true,
+    type: "multi_select",
+    required: false,
     rows: [
-      { answer: "None", mode: "none", amount: "" },
       { answer: "Jingwei cutting", mode: "labour_hours", amount: "0.25", chargeName: "Jingwei cutting labour" },
       { answer: "Drill holes", mode: "labour_hours", amount: "0.10", chargeName: "Drill holes labour" }
     ]
@@ -1073,10 +1072,10 @@ function buildFieldFromForm(formData: FormData, existingField?: Record<string, a
 
   const costedRows = costedOptionRowsFromForm(formData);
 
-  if (["select", "size_select", "color"].includes(fieldType)) {
+  if (["select", "size_select", "multi_select", "color", "yes_no"].includes(fieldType)) {
     if (costedRows.length > 0) {
       options = costedRows.map((row) => parseChoice(row.answerLabel));
-      defaultValue = options[0]?.value ? String(options[0].value) : null;
+      defaultValue = fieldType === "multi_select" ? null : (options[0]?.value ? String(options[0].value) : null);
     } else if (defaultAnswer) {
       const parsedDefault = { ...parseChoice(defaultAnswer), priceDelta: defaultPrice };
       defaultValue = parsedDefault.value;
