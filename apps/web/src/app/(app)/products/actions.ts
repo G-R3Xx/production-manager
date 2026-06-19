@@ -96,7 +96,7 @@ function quoteField(input: {
   key: string;
   label: string;
   type: string;
-  defaultValue: string;
+  defaultValue: string | null;
   optionsCsv?: string;
   helpText: string;
   required?: boolean;
@@ -340,12 +340,12 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (["sign_acm", "sign_corflute", "sign_acrylic", "sign_pvc"].includes(setupPreset)) {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "600x900", optionsCsv: "600x900,450x600,300x450,Custom=custom", helpText: "Quote-time sign size. This allocates part of the parent sheet and drives print/laminate area." }),
-      quoteField({ key: "print_method", label: "Print type", type: "select", defaultValue: "direct_print", optionsCsv: "Direct print=direct_print,Roll stock applied=roll_stock", helpText: "Direct print uses ink on the base sheet. Roll stock adds a separate roll media layer." }),
-      quoteField({ key: "roll_stock_type", label: "Roll stock", type: "select", defaultValue: "white", optionsCsv: "White print vinyl=white,Clear reverse print=clear_reverse", helpText: "Only used when Print type is Roll stock applied.", showWhen: { optionKey: "print_method", optionValues: ["roll_stock"] } }),
-      quoteField({ key: "white_ink", label: "White ink", type: "yes_no", defaultValue: "no", optionsCsv: "No=no,Yes=yes", helpText: "Adds the white ink square-metre charge when required.", showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] } }),
-      quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: "none", optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate", helpText: "Optional laminate. Laminate stock is only consumed when gloss or matt is selected." }),
-      quoteField({ key: "finishing", label: "Finishing", type: "select", defaultValue: "none", optionsCsv: "None=none,Jingwei cutting=jingwei_cutting,Router/CNC cut=cnc_cut,Drill holes=drill_holes", helpText: "Optional finishing choice for the quoted sign." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "600x900,450x600,300x450,Custom=custom", helpText: "Quote-time sign size. This allocates part of the parent sheet and drives print/laminate area." }),
+      quoteField({ key: "print_method", label: "Print type", type: "select", defaultValue: null, optionsCsv: "Direct print=direct_print,Roll stock applied=roll_stock", helpText: "Direct print uses ink on the base sheet. Roll stock adds a separate roll media layer." }),
+      quoteField({ key: "roll_stock_type", label: "Roll stock", type: "select", defaultValue: null, optionsCsv: "White print vinyl=white,Clear reverse print=clear_reverse", helpText: "Only used when Print type is Roll stock applied.", showWhen: { optionKey: "print_method", optionValues: ["roll_stock"] } }),
+      quoteField({ key: "white_ink", label: "White ink", type: "yes_no", defaultValue: null, optionsCsv: "No=no,Yes=yes", helpText: "Adds the white ink square-metre charge when required.", showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] } }),
+      quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: null, optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate", helpText: "Optional laminate. Laminate stock is only consumed when gloss or matt is selected." }),
+      quoteField({ key: "finishing", label: "Finishing", type: "select", defaultValue: null, optionsCsv: "None=none,Jingwei cutting=jingwei_cutting,Router/CNC cut=cnc_cut,Drill holes=drill_holes", helpText: "Optional finishing choice for the quoted sign." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "1", helpText: "Number of finished signs being quoted." })
     );
     components.push(
@@ -360,9 +360,9 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (setupPreset === "banner") {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "1200x2400", optionsCsv: "900x1800,1200x2400,1500x3000,Custom=custom", helpText: "Banner size. Width/height drive roll media and finishing." }),
-      quoteField({ key: "banner_finish", label: "Finishing", type: "select", defaultValue: "hem_eyelets", optionsCsv: "Trim only=trim_only,Hem + eyelets=hem_eyelets,Pole pockets=pole_pockets,Rope track=keder", helpText: "Banner finishing method." }),
-      quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: "none", optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate", helpText: "Usually none for banners, but available if needed." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "900x1800,1200x2400,1500x3000,Custom=custom", helpText: "Banner size. Width/height drive roll media and finishing." }),
+      quoteField({ key: "banner_finish", label: "Finishing", type: "select", defaultValue: null, optionsCsv: "Trim only=trim_only,Hem + eyelets=hem_eyelets,Pole pockets=pole_pockets,Rope track=keder", helpText: "Banner finishing method." }),
+      quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: null, optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate", helpText: "Usually none for banners, but available if needed." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "1", helpText: "Number of banners." })
     );
     components.push(
@@ -374,9 +374,9 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (setupPreset === "roll_print") {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "1000x1000", optionsCsv: "1000x1000,1200x2400,1500x3000,Custom=custom", helpText: "Finished size drives roll stock, print and laminate usage." }),
-      quoteField({ key: "roll_stock_type", label: "Roll stock", type: "select", defaultValue: "white", optionsCsv: "White print media=white,Clear reverse print=clear_reverse,Etch/frost=etch", helpText: "Roll media type selected while quoting." }),
-      quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: "none", optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate,Anti-graffiti=anti_graffiti", helpText: "Optional overlaminate." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "1000x1000,1200x2400,1500x3000,Custom=custom", helpText: "Finished size drives roll stock, print and laminate usage." }),
+      quoteField({ key: "roll_stock_type", label: "Roll stock", type: "select", defaultValue: null, optionsCsv: "White print media=white,Clear reverse print=clear_reverse,Etch/frost=etch", helpText: "Roll media type selected while quoting." }),
+      quoteField({ key: "laminate", label: "Laminate", type: "select", defaultValue: null, optionsCsv: "None=none,Gloss laminate=gloss_laminate,Matt laminate=matt_laminate,Anti-graffiti=anti_graffiti", helpText: "Optional overlaminate." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "1", helpText: "Number of prints." })
     );
     components.push(
@@ -389,9 +389,9 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
   if (["business_cards", "flyers"].includes(setupPreset)) {
     const isCards = setupPreset === "business_cards";
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: isCards ? "90x55" : "A5", optionsCsv: isCards ? "90x55,85x55,Custom=custom" : "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Small format finished size." }),
-      quoteField({ key: "sides", label: "Front / back", type: "select", defaultValue: "double_sided", optionsCsv: "Front only=single_sided,Front and back=double_sided", helpText: "Controls print faces." }),
-      quoteField({ key: "cello", label: "Celloglaze", type: "select", defaultValue: "none", optionsCsv: "None=none,Gloss cello=gloss_cello,Matt cello=matt_cello", helpText: "Optional cello. Cello stock is only allocated when selected." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: isCards ? "90x55,85x55,Custom=custom" : "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Small format finished size." }),
+      quoteField({ key: "sides", label: "Front / back", type: "select", defaultValue: null, optionsCsv: "Front only=single_sided,Front and back=double_sided", helpText: "Controls print faces." }),
+      quoteField({ key: "cello", label: "Celloglaze", type: "select", defaultValue: null, optionsCsv: "None=none,Gloss cello=gloss_cello,Matt cello=matt_cello", helpText: "Optional cello. Cello stock is only allocated when selected." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: isCards ? "250" : "100", helpText: "Quantity being quoted." })
     );
     components.push(
@@ -403,10 +403,10 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (setupPreset === "books") {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "A5", optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Book/pad finished size." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Book/pad finished size." }),
       quoteField({ key: "page_count", label: "Pages", type: "quantity", defaultValue: "50", helpText: "Pages per book or pad." }),
-      quoteField({ key: "cover_colour", label: "Cover colour", type: "color", defaultValue: "white", optionsCsv: "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", helpText: "Cover stock colour." }),
-      quoteField({ key: "binding_type", label: "Binding", type: "select", defaultValue: "pad_binding", optionsCsv: "Pad binding=pad_binding,Saddle stitch=saddle_stitch,Wire bind=wire_bind,Perfect bind=perfect_bind", helpText: "Binding method." }),
+      quoteField({ key: "cover_colour", label: "Cover colour", type: "color", defaultValue: null, optionsCsv: "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", helpText: "Cover stock colour." }),
+      quoteField({ key: "binding_type", label: "Binding", type: "select", defaultValue: null, optionsCsv: "Pad binding=pad_binding,Saddle stitch=saddle_stitch,Wire bind=wire_bind,Perfect bind=perfect_bind", helpText: "Binding method." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "25", helpText: "Book/pad quantity." })
     );
     components.push(
@@ -418,13 +418,13 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (setupPreset === "carbon_books") {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "A5", optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Carbon book finished size." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Carbon book finished size." }),
       quoteField({ key: "page_count", label: "Pages", type: "quantity", defaultValue: "50", helpText: "Numbered pages/sets per book." }),
-      quoteField({ key: "copy_set", label: "Copies", type: "select", defaultValue: "duplicate", optionsCsv: "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate", helpText: "Duplicate/triplicate copy count per set." }),
-      quoteField({ key: "copy_colours", label: "Copy colours", type: "select", defaultValue: "white_yellow", optionsCsv: "White / Yellow=white_yellow,White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue,Custom=custom", helpText: "Carbonless copy paper colour set." }),
-      quoteField({ key: "cover_colour", label: "Cover colour", type: "color", defaultValue: "blue", optionsCsv: "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", helpText: "Cover colour." }),
-      quoteField({ key: "tape_colour", label: "Tape colour", type: "color", defaultValue: "black", optionsCsv: "Black=black,White=white,Blue=blue,Red=red,Green=green", helpText: "Binding tape colour." }),
-      quoteField({ key: "sequential_numbering", label: "Numbering", type: "select", defaultValue: "yes", optionsCsv: "Yes=yes,No=no", helpText: "Sequential numbering." }),
+      quoteField({ key: "copy_set", label: "Copies", type: "select", defaultValue: null, optionsCsv: "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate", helpText: "Duplicate/triplicate copy count per set." }),
+      quoteField({ key: "copy_colours", label: "Copy colours", type: "select", defaultValue: null, optionsCsv: "White / Yellow=white_yellow,White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue,Custom=custom", helpText: "Carbonless copy paper colour set." }),
+      quoteField({ key: "cover_colour", label: "Cover colour", type: "color", defaultValue: null, optionsCsv: "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", helpText: "Cover colour." }),
+      quoteField({ key: "tape_colour", label: "Tape colour", type: "color", defaultValue: null, optionsCsv: "Black=black,White=white,Blue=blue,Red=red,Green=green", helpText: "Binding tape colour." }),
+      quoteField({ key: "sequential_numbering", label: "Numbering", type: "select", defaultValue: null, optionsCsv: "Yes=yes,No=no", helpText: "Sequential numbering." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "10", helpText: "Number of books." })
     );
     components.push(
@@ -651,7 +651,7 @@ export async function addQuickProductQuestionAction(formData: FormData) {
     label: preset.label,
     type: preset.type,
     required: preset.required,
-    defaultValue: preset.type === "quantity" ? "1" : preset.type === "multi_select" ? null : (options[0]?.value ? String(options[0].value) : null),
+    defaultValue: preset.type === "quantity" ? "1" : null,
     helpText: "Shown after this product is selected on a quote.",
     quoteOnly: true,
     showWhen: null,
@@ -1124,7 +1124,7 @@ function buildFieldFromForm(formData: FormData, existingField?: Record<string, a
   if (["select", "size_select", "multi_select", "color", "yes_no"].includes(fieldType)) {
     if (costedRows.length > 0) {
       options = costedRows.map((row) => parseChoice(row.answerLabel));
-      defaultValue = fieldType === "multi_select" ? null : (options[0]?.value ? String(options[0].value) : null);
+      defaultValue = null;
     } else if (defaultAnswer) {
       const parsedDefault = { ...parseChoice(defaultAnswer), priceDelta: defaultPrice };
       defaultValue = parsedDefault.value;
@@ -1439,13 +1439,14 @@ export async function saveProductWorkflowStepAction(formData: FormData) {
 
   if (step === "print_types") {
     const selected = readStringArray(formData, "printType").filter(Boolean);
-    const types = selected.length ? selected : ["direct_print"];
+    if (selected.length === 0) redirectWorkflow(productId, query, "print_types", "Choose at least one print type");
+    const types = selected;
     const options = types.map((value) => value === "roll_stock" ? workflowOption("Roll stock applied", "roll_stock") : workflowOption("Direct print", "direct_print"));
     const nextField = workflowField({
       key: "print_method",
       label: "Print type",
       type: "select",
-      defaultValue: String(options[0]?.value ?? "direct_print"),
+      defaultValue: null,
       helpText: "Staff choose whether this product is direct printed or uses a roll-stock layer.",
       options
     });
@@ -1479,7 +1480,8 @@ export async function saveProductWorkflowStepAction(formData: FormData) {
 
   if (step === "ink") {
     const selected = readStringArray(formData, "inkChoice").filter(Boolean);
-    const choices = selected.length ? selected : ["cmyk"];
+    if (selected.length === 0) redirectWorkflow(productId, query, "ink", "Choose at least one ink option");
+    const choices = selected;
     const optionLabels: Record<string, string> = { cmyk: "CMYK", white: "White", cmyk_white: "CMYK + White" };
     const rates: Record<string, string> = { cmyk: "10", white: "10", cmyk_white: "20" };
     const chargeLabels: Record<string, string> = { cmyk: "CMYK Ink", white: "White Ink", cmyk_white: "CMYK + White Ink" };
@@ -1488,7 +1490,7 @@ export async function saveProductWorkflowStepAction(formData: FormData) {
       key: "ink",
       label: "Ink",
       type: "select",
-      defaultValue: String(options[0]?.value ?? "cmyk"),
+      defaultValue: null,
       helpText: "Staff choose the ink mode. CMYK is $10/m², white adds another $10/m² when available.",
       options,
       showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] }
@@ -1516,7 +1518,7 @@ export async function saveProductWorkflowStepAction(formData: FormData) {
       key: "laminate",
       label: "Laminate",
       type: "select",
-      defaultValue: "none",
+      defaultValue: null,
       helpText: "Staff choose none or one laminate material. Selected laminate is costed from roll length.",
       options
     });

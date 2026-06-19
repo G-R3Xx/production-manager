@@ -225,9 +225,7 @@ function isMultiSelectField(field: Pick<QuoteQuestion, "type" | "key" | "label" 
 function defaultAnswersFor(product: QuoteProduct | undefined): Record<string, string> {
   const next: Record<string, string> = {};
   for (const field of product?.fields ?? []) {
-    const defaultValue = String(field.defaultValue ?? "");
-    const firstChoice = isMultiSelectField(field) ? "" : (field.options?.[0]?.value ? String(field.options[0].value) : "");
-    next[field.key] = defaultValue || firstChoice;
+    next[field.key] = String(field.defaultValue ?? "");
   }
   return next;
 }
@@ -986,6 +984,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                       onChange={(event) => updateAnswer(field.key, event.target.value)}
                       style={inputStyle}
                     >
+                      <option value="">Choose {String(field.label ?? "option").toLowerCase()}</option>
                       {choices.length === 0 ? <option value="">No choices set up</option> : null}
                       {choices.map((choice) => {
                         const choiceValue = String(choice.value ?? choice.label ?? "");
