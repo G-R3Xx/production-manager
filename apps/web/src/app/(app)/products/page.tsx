@@ -933,9 +933,9 @@ function AdvancedQuestionSettings({ fields, field, currentShowWhenKey, showWhenV
   );
 }
 
-function questionAlreadyExists(fields: any[], preset: (typeof quickQuestionPresets)[number]): boolean {
+function matchingQuestionForPreset(fields: any[], preset: (typeof quickQuestionPresets)[number]): any | null {
   const key = String(preset.key ?? "");
-  return fields.some((field: any) => {
+  return fields.find((field: any) => {
     const fieldKey = String(field.key ?? "").toLowerCase();
     const fieldLabel = String(field.label ?? "").toLowerCase();
     const fieldType = String(field.type ?? "").toLowerCase();
@@ -948,7 +948,11 @@ function questionAlreadyExists(fields: any[], preset: (typeof quickQuestionPrese
     if (key === "quantity") return fieldType === "quantity" || fieldKey === "quantity" || fieldLabel === "quantity";
 
     return fieldKey === key;
-  });
+  }) ?? null;
+}
+
+function questionAlreadyExists(fields: any[], preset: (typeof quickQuestionPresets)[number]): boolean {
+  return Boolean(matchingQuestionForPreset(fields, preset));
 }
 
 function QuickQuestionButton({ selectedProductId, preset, activeMaterials }: { selectedProductId: string; preset: (typeof quickQuestionPresets)[number]; activeMaterials: any[] }) {
@@ -966,37 +970,73 @@ function QuickQuestionButton({ selectedProductId, preset, activeMaterials }: { s
   );
 }
 
-function AddedQuestionChip({ preset }: { preset: (typeof quickQuestionPresets)[number] }) {
+function AddedQuestionChip({ preset, field, selectedProductId, query }: { preset: (typeof quickQuestionPresets)[number]; field: any; selectedProductId: string; query: string }) {
+  const fieldId = String(field?.id ?? "");
+  if (!fieldId) {
+    return (
+      <div style={{ ...ghostStyle, minHeight: 54, justifyContent: "space-between", gap: 10, cursor: "default", opacity: 0.72 }}>
+        <span>✓ {preset.label}</span>
+        <small style={{ color: "#64748b", fontWeight: 800 }}>added</small>
+      </div>
+    );
+  }
+
   return (
-    <div style={{ ...ghostStyle, minHeight: 54, justifyContent: "space-between", gap: 10, cursor: "default", opacity: 0.72 }}>
-      <span>✓ {preset.label}</span>
-      <small style={{ color: "#64748b", fontWeight: 800 }}>added</small>
+    <div style={{ ...whitePanelStyle, minHeight: 54, padding: 10, gridTemplateColumns: "1fr", gap: 8, background: "#fff" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+        <strong style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>✓ {field.label ?? preset.label}</strong>
+        <small style={{ color: "#64748b", fontWeight: 900 }}>added</small>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <Link href={editProductUrl(selectedProductId, query, fieldId)} style={{ ...ghostStyle, minHeight: 34, padding: "6px 10px", fontSize: 13 }}>Edit</Link>
+        <form action={deleteProductOptionAction} style={{ margin: 0 }}>
+          <input type="hidden" name="productId" value={selectedProductId} />
+          <input type="hidden" name="fieldId" value={fieldId} />
+          <button type="submit" style={{ ...dangerGhostStyle, minHeight: 34, padding: "6px 10px", fontSize: 13 }}>Remove</button>
+        </form>
+      </div>
     </div>
   );
 }
 
-function AddQuestionPanel({ selectedProduct, activeMaterials, fields }: { selectedProduct: any; activeMaterials: any[]; fields: any[] }) {
-  const addedPresets = quickQuestionPresets.filter((preset) => questionAlreadyExists(fields, preset));
+function AddQuestionPanel({ selectedProduct, activeMaterials, fields, query }: { selectedProduct: any; activeMaterials: any[]; fields: any[]; query: string }) {
+  const addedPresets = quickQuestionPresets
+    .map((preset) => ({ preset, field: matchingQuestionForPreset(fields, preset) }))
+    .filter((item) => Boolean(item.field));
   const missingPresets = quickQuestionPresets.filter((preset) => !questionAlreadyExists(fields, preset));
 
   return (
     <section style={{ ...panelStyle, background: "#f8fafc", borderStyle: "dashed" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "flex-start" }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 22 }}>Add the next question</h3>
-          <p style={{ ...mutedStyle, marginTop: 4 }}>Only missing questions are clickable now. Already-added questions show with a tick so it is obvious what happened.</p>
+          <h3 style={{ margin: 0, fontSize: 22 }}>Quote questions</h3>
+          <p style={{ ...mutedStyle, marginTop: 4 }}>Add the questions staff answer on the quote page. Existing questions can be edited, removed, or reordered below.</p>
         </div>
-        <span style={missingPresets.length ? yellowChipStyle : greenChipStyle}>{missingPresets.length ? "Next" : "All common questions added"}</span>
+        <span style={missingPresets.length ? yellowChipStyle : greenChipStyle}>{missingPresets.length ? "Add missing questions" : "All common questions added"}</span>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
-        {missingPresets.map((preset) => (
-          <QuickQuestionButton key={preset.key} selectedProductId={selectedProduct.id} preset={preset} activeMaterials={activeMaterials} />
-        ))}
-        {addedPresets.map((preset) => (
-          <AddedQuestionChip key={`added-${preset.key}`} preset={preset} />
-        ))}
-      </div>
+      {missingPresets.length ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          <strong>Add common questions</strong>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+            {missingPresets.map((preset) => (
+              <QuickQuestionButton key={preset.key} selectedProductId={selectedProduct.id} preset={preset} activeMaterials={activeMaterials} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {addedPresets.length ? (
+        <div style={{ display: "grid", gap: 8 }}>
+          <strong>Manage existing questions</strong>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
+            {addedPresets.map(({ preset, field }) => (
+              <AddedQuestionChip key={`added-${preset.key}`} preset={preset} field={field} selectedProductId={selectedProduct.id} query={query} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {activeMaterials.length === 0 ? <p style={mutedStyle}>Material-linked choices can be connected after materials are added.</p> : null}
 
       <details style={{ ...whitePanelStyle }}>
@@ -2232,7 +2272,7 @@ function QuoteQuestionsSpreadsheetPanel({ selectedProduct, fields, components, a
         </div>
       )}
 
-      <AddQuestionPanel selectedProduct={selectedProduct} activeMaterials={activeMaterials} fields={fields} />
+      <AddQuestionPanel selectedProduct={selectedProduct} activeMaterials={activeMaterials} fields={fields} query={query} />
     </section>
   );
 }
