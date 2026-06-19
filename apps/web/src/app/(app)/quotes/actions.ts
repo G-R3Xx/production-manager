@@ -50,21 +50,29 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const quoteId = String(formData.get("quoteId") ?? "").trim();
   const productId = String(formData.get("productId") ?? "").trim();
+  const formProductName = String(formData.get("productName") ?? "").trim();
   const quantity = String(formData.get("quantity") ?? "1").trim();
   const unitPrice = String(formData.get("unitPrice") ?? "0").trim();
 
-  if (!quoteId || !productId) {
-    redirect("/quotes?error=Select%20a%20quote%20and%20a%20base%20product");
+  if (!quoteId) {
+    redirect("/quotes?error=Select%20a%20quote%20first");
   }
 
-  const product = await getProductById(activeTenant.tenantId, productId);
-  if (!product) {
-    redirect(`/quotes?selected=${quoteId}&error=Selected%20product%20was%20not%20found`);
+  let productName = formProductName || "Custom material quote line";
+  let savedProductId: string | null = null;
+
+  if (productId) {
+    const product = await getProductById(activeTenant.tenantId, productId);
+    if (!product) {
+      redirect(`/quotes?selected=${quoteId}&error=Selected%20product%20was%20not%20found`);
+    }
+    savedProductId = product.id;
+    productName = product.name;
   }
 
   await addQuoteLine(quoteId, {
-    productId,
-    productName: product.name,
+    productId: savedProductId,
+    productName,
     optionSummary: nullable(formData.get("optionSummary")),
     quantity,
     unitPrice,
