@@ -456,12 +456,13 @@ function StarterTypeGroup({ title, starters, defaultValue }: { title: string; st
 }
 
 function ProductChooser({ products, filteredProducts, selectedProduct, query, activeMaterials }: { products: any[]; filteredProducts: any[]; selectedProduct: any; query: string; activeMaterials: any[] }) {
+  const compactResults = query.trim() ? filteredProducts.slice(0, 8) : [];
   return (
     <details open={!selectedProduct} style={{ ...cardStyle, display: "grid", gap: 14 }}>
       <summary style={{ cursor: "pointer", fontWeight: 950, color: "#1e293b", fontSize: 18 }}>
         {selectedProduct ? "Change product / create another" : "Create or open a product"}
       </summary>
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.9fr) minmax(320px, 1.1fr)", gap: 16, marginTop: 16 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(320px, 1fr) minmax(320px, 0.8fr)", gap: 16, marginTop: 16, alignItems: "start" }}>
         <form action={createProductAction} style={{ ...panelStyle, background: "#f8fafc" }}>
           <div>
             <h2 style={sectionHeadingStyle}>New product</h2>
@@ -508,30 +509,42 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
           <button type="submit" style={blueButtonStyle}>Create and open</button>
         </form>
 
-        <section style={{ ...panelStyle, background: "#fff" }}>
-          <div>
-            <h2 style={sectionHeadingStyle}>Open existing</h2>
-            <p style={{ ...mutedStyle, marginTop: 6 }}>{products.length} products available.</p>
+        <section style={{ ...panelStyle, background: "#fff", gap: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <h2 style={sectionHeadingStyle}>Open existing</h2>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>Search by product name, SKU or category.</p>
+            </div>
+            <span style={plainChipStyle}>{products.length} products</span>
           </div>
-          <form method="get" style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10 }}>
-            <input name="q" defaultValue={query} placeholder="Search products" style={inputStyle} />
-            <button type="submit" style={ghostStyle}>Search</button>
+          <form method="get" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "center" }}>
+            <input name="q" defaultValue={query} placeholder="Search existing products" style={{ ...inputStyle, height: 44, minHeight: 44 }} />
+            <button type="submit" style={{ ...blueButtonStyle, minHeight: 44, padding: "0 18px" }}>Search</button>
           </form>
-          <div style={{ display: "grid", gap: 10, maxHeight: 420, overflow: "auto", paddingRight: 4 }}>
-            {filteredProducts.length === 0 ? (
-              <div style={panelStyle}>No matching products.</div>
-            ) : (
-              filteredProducts.map((product) => (
-                <Link key={product.id} href={selectedProductUrl(product.id, query)} style={{ ...whitePanelStyle, textDecoration: "none", color: "inherit", background: selectedProduct?.id === product.id ? "#eef2ff" : "#fff" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                    <strong>{product.name}</strong>
-                    <span style={selectedProduct?.id === product.id ? blueChipStyle : plainChipStyle}>{selectedProduct?.id === product.id ? "Open" : humanize(product.status)}</span>
-                  </div>
-                  <div style={mutedStyle}>{product.sku || "No SKU"} · {humanize(product.productFamily)}</div>
-                </Link>
-              ))
-            )}
-          </div>
+          {query.trim() ? (
+            <div style={{ display: "grid", gap: 8, maxHeight: 260, overflow: "auto", paddingRight: 4 }}>
+              {compactResults.length === 0 ? (
+                <div style={{ ...whitePanelStyle, color: "#64748b" }}>No matching products.</div>
+              ) : (
+                compactResults.map((product) => (
+                  <Link key={product.id} href={selectedProductUrl(product.id, query)} style={{ ...whitePanelStyle, textDecoration: "none", color: "inherit", background: selectedProduct?.id === product.id ? "#eef2ff" : "#fff", display: "grid", gap: 4 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong>{product.name}</strong>
+                      <span style={selectedProduct?.id === product.id ? blueChipStyle : plainChipStyle}>{selectedProduct?.id === product.id ? "Open" : "Open product"}</span>
+                    </div>
+                    <div style={mutedStyle}>{product.sku || "No SKU"} · {humanize(product.productFamily)}</div>
+                  </Link>
+                ))
+              )}
+              {filteredProducts.length > compactResults.length ? (
+                <div style={{ ...mutedStyle, padding: "0 4px" }}>Showing first {compactResults.length} matches. Refine the search to narrow the list.</div>
+              ) : null}
+            </div>
+          ) : (
+            <div style={{ ...whitePanelStyle, color: "#64748b", background: "#f8fafc" }}>
+              Start typing, then press Search. Product results stay hidden until you search so this page does not turn into a giant product list.
+            </div>
+          )}
         </section>
       </div>
     </details>
