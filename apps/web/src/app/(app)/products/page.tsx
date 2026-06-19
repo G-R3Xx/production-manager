@@ -91,6 +91,13 @@ const starterTypes: StarterType[] = [
     quickAnswers: "Size · Sides · Folds · Qty"
   },
   {
+    value: "books",
+    label: "Books / pads",
+    plainName: "Books / Pads",
+    description: "Small format book or pad product with pages, cover, binding and quantity.",
+    quickAnswers: "Size · Pages · Cover · Binding · Qty"
+  },
+  {
     value: "carbon_books",
     label: "Duplicate / triplicate books",
     plainName: "Carbon Books",
@@ -98,6 +105,10 @@ const starterTypes: StarterType[] = [
     quickAnswers: "Size · Copies · Colours · Numbering"
   }
 ];
+
+function isSmallFormatStarter(value: string): boolean {
+  return ["business_cards", "flyers", "books", "carbon_books"].includes(value);
+}
 
 const optionTypes = [
   { value: "select", label: "Dropdown choices" },
@@ -439,7 +450,7 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
             <span style={labelTextStyle}>Start from</span>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
               {starterTypes.slice(0, 8).map((starter) => (
-                <label key={starter.value} style={{ ...whitePanelStyle, cursor: "pointer", gap: 8 }}>
+                <label key={starter.value} style={{ ...whitePanelStyle, cursor: "pointer", gap: 8, background: isSmallFormatStarter(starter.value) ? "#faf5ff" : "#fff", borderColor: isSmallFormatStarter(starter.value) ? "#e9d5ff" : "#dfe7f2" }}>
                   <input type="radio" name="starterType" value={starter.value} defaultChecked={starter.value === "sign_acm"} />
                   <strong>{starter.label}</strong>
                   <p style={mutedStyle}>{starter.quickAnswers}</p>
@@ -1296,7 +1307,7 @@ type ProductBuildSlot = {
   defaultWaste?: string;
 };
 
-const productBuildSlots: ProductBuildSlot[] = [
+const signageProductBuildSlots: ProductBuildSlot[] = [
   {
     key: "substrate",
     label: "Substrate",
@@ -1389,6 +1400,168 @@ const productBuildSlots: ProductBuildSlot[] = [
   }
 ];
 
+const smallFormatProductBuildSlots: ProductBuildSlot[] = [
+  {
+    key: "paper_stock",
+    label: "Paper / card stock",
+    chooseLabel: "Choose paper stock",
+    description: "Sheets, parent stock, card, NCR or paper this small format item is printed on.",
+    baseUsage: "paper_yield",
+    role: "base_material",
+    kind: "material",
+    componentLabel: "Paper / card stock",
+    materialFilter: "paper_stock",
+    defaultWaste: "5"
+  },
+  {
+    key: "print_charge",
+    label: "Print / click charge",
+    chooseLabel: "Add print charge",
+    description: "Digital print, click charge or press setup. This replaces signage-style ink rows.",
+    baseUsage: "sell_each",
+    role: "quote_sell_charge",
+    kind: "material",
+    componentLabel: "Print charge",
+    materialFilter: "charge",
+    defaultQuantity: "1",
+    defaultWaste: "0"
+  },
+  {
+    key: "cello_coating",
+    label: "Cello / coating",
+    chooseLabel: "Choose cello",
+    description: "Gloss, matt or specialty celloglaze/coating used only when selected on the quote.",
+    baseUsage: "roll_metres",
+    role: "quote_selected_material",
+    kind: "material",
+    componentLabel: "Cello / coating",
+    materialFilter: "cello",
+    triggerOptionKey: "cello",
+    triggerOptionValuesCsv: "gloss_cello,matt_cello,soft_touch,none"
+  },
+  {
+    key: "cover_stock",
+    label: "Cover stock",
+    chooseLabel: "Choose cover stock",
+    description: "Cover card or backing stock for books, pads and carbon books.",
+    baseUsage: "paper_yield",
+    role: "quote_selected_material",
+    kind: "material",
+    componentLabel: "Cover stock",
+    materialFilter: "cover_stock",
+    defaultWaste: "5"
+  },
+  {
+    key: "binding_material",
+    label: "Binding / tape",
+    chooseLabel: "Choose binding material",
+    description: "Binding tape, wire, staples, glue or other bindery consumables.",
+    baseUsage: "each",
+    role: "quote_finishing",
+    kind: "material",
+    componentLabel: "Binding material",
+    materialFilter: "binding_material",
+    triggerOptionKey: "binding_type",
+    triggerOptionValuesCsv: "pad_binding,saddle_stitch,wire_bind,perfect_bind",
+    defaultQuantity: "1",
+    defaultWaste: "0"
+  },
+  {
+    key: "numbering_process",
+    label: "Numbering / personalisation",
+    chooseLabel: "Add numbering",
+    description: "Sequential numbering, variable data or other per-set production steps.",
+    baseUsage: "labour_hours",
+    role: "quote_finishing",
+    kind: "labour",
+    componentLabel: "Numbering",
+    materialFilter: "labour",
+    triggerOptionKey: "sequential_numbering",
+    triggerOptionValuesCsv: "yes",
+    defaultQuantity: "0.10",
+    defaultWaste: "0"
+  },
+  {
+    key: "bindery_labour",
+    label: "Bindery labour",
+    chooseLabel: "Add bindery labour",
+    description: "Cutting, collating, padding, folding, stapling, trimming and packing time.",
+    baseUsage: "labour_hours",
+    role: "factory_labour",
+    kind: "labour",
+    componentLabel: "Bindery labour",
+    materialFilter: "labour",
+    defaultQuantity: "0.25",
+    defaultWaste: "0"
+  },
+  {
+    key: "outsourced",
+    label: "Outsourced",
+    chooseLabel: "Add supplier item",
+    description: "External print, specialty finish, foiling, die cut, mail house or supplier service.",
+    baseUsage: "outsourced_each",
+    role: "outsourced_item",
+    kind: "outsourced",
+    componentLabel: "Outsourced item",
+    materialFilter: "outsourced",
+    defaultQuantity: "1",
+    defaultWaste: "0"
+  }
+];
+
+function isSmallFormatProduct(selectedProduct: any, setupPreset: string): boolean {
+  const preset = lowerText(setupPreset);
+  const department = lowerText(selectedProduct?.department);
+  const family = lowerText(selectedProduct?.productFamily);
+  return department === "small_format" || preset.includes("business") || preset.includes("flyer") || preset.includes("book") || preset.includes("carbon") || family.includes("small_format") || family.includes("book");
+}
+
+function productBuildSlotsFor(selectedProduct: any, setupPreset: string): ProductBuildSlot[] {
+  return isSmallFormatProduct(selectedProduct, setupPreset) ? smallFormatProductBuildSlots : signageProductBuildSlots;
+}
+
+type BuilderTheme = {
+  modeLabel: string;
+  headerBackground: string;
+  headerText: string;
+  eyebrowColor: string;
+  accent: string;
+  accentSoft: string;
+  accentBorder: string;
+  accentText: string;
+  helpBackground: string;
+  helpBorder: string;
+};
+
+function productBuilderTheme(selectedProduct: any, setupPreset: string): BuilderTheme {
+  if (isSmallFormatProduct(selectedProduct, setupPreset)) {
+    return {
+      modeLabel: "Small format builder",
+      headerBackground: "linear-gradient(135deg, #3b0764 0%, #6d28d9 55%, #7c3aed 100%)",
+      headerText: "#ffffff",
+      eyebrowColor: "#ddd6fe",
+      accent: "#7c3aed",
+      accentSoft: "#f5f3ff",
+      accentBorder: "#ddd6fe",
+      accentText: "#5b21b6",
+      helpBackground: "#faf5ff",
+      helpBorder: "#e9d5ff"
+    };
+  }
+  return {
+    modeLabel: "Signage builder",
+    headerBackground: "#111827",
+    headerText: "#ffffff",
+    eyebrowColor: "#93c5fd",
+    accent: "#2563eb",
+    accentSoft: "#eff6ff",
+    accentBorder: "#bfdbfe",
+    accentText: "#1d4ed8",
+    helpBackground: "#ecfdf3",
+    helpBorder: "#abefc6"
+  };
+}
+
 function lowerText(value: unknown): string {
   return String(value ?? "").toLowerCase();
 }
@@ -1465,15 +1638,20 @@ function isSheetMaterial(material: any): boolean {
 
 function materialMatchesPart(material: any, part: string): boolean {
   const text = `${materialTypeText(material)} ${lowerText(material?.name)} ${lowerText(material?.sku)} ${lowerText(material?.notes)}`;
-  if (part === "substrate") return isSheetMaterial(material) && !text.includes("laminate") && !text.includes("cello");
+  if (part === "substrate") return isSheetMaterial(material) && !text.includes("laminate") && !text.includes("cello") && !text.includes("ncr") && !text.includes("carbonless");
   if (part === "print_media") return isRollMaterial(material) && (text.includes("print") || text.includes("sav") || text.includes("vinyl") || text.includes("banner") || text.includes("media") || text.includes("clear") || text.includes("white"));
-  if (part === "laminate") return text.includes("laminate") || text.includes("cello") || text.includes("gloss") || text.includes("matt") || text.includes("matte") || text.includes("anti graffiti");
+  if (part === "laminate") return text.includes("laminate") || text.includes("gloss") || text.includes("matt") || text.includes("matte") || text.includes("anti graffiti");
   if (part === "finishing") return text.includes("fixing") || text.includes("hardware") || text.includes("eyelet") || text.includes("standoff") || text.includes("screw") || text.includes("tape") || text.includes("item") || text.includes("consumable");
+
+  if (part === "paper_stock") return (text.includes("paper") || text.includes("card") || text.includes("gsm") || text.includes("stock") || text.includes("ncr") || text.includes("carbonless") || text.includes("digital") || text.includes("sheet")) && !text.includes("acm") && !text.includes("corflute") && !text.includes("acrylic") && !text.includes("pvc") && !text.includes("vinyl") && !text.includes("laminate") && !text.includes("cello");
+  if (part === "cover_stock") return text.includes("cover") || text.includes("card") || text.includes("board") || text.includes("gsm");
+  if (part === "cello_coating") return text.includes("cello") || text.includes("celloglaze") || text.includes("laminate") || text.includes("lamination") || text.includes("coating") || text.includes("soft touch") || text.includes("gloss") || text.includes("matt") || text.includes("matte");
+  if (part === "binding_material") return text.includes("binding") || text.includes("bind") || text.includes("tape") || text.includes("wire") || text.includes("staple") || text.includes("glue") || text.includes("padding") || text.includes("spine");
   return true;
 }
 
-function slotForKey(part: string): ProductBuildSlot | undefined {
-  return productBuildSlots.find((slot) => slot.key === part);
+function slotForKey(part: string, slots: ProductBuildSlot[] = signageProductBuildSlots): ProductBuildSlot | undefined {
+  return slots.find((slot) => slot.key === part);
 }
 
 function componentMatchesBuildSlot(component: any, slot: ProductBuildSlot): boolean {
@@ -1482,6 +1660,28 @@ function componentMatchesBuildSlot(component: any, slot: ProductBuildSlot): bool
   const kind = lowerText(component?.kind);
   const rule = componentRuleType(component);
   const triggerKey = lowerText(component?.trigger?.optionKey ?? component?.stockUsage?.optionKey);
+
+  if (slot.key === "paper_stock") {
+    return role === "base_material" || label.includes("paper") || label.includes("card") || label.includes("stock") || label.includes("copy sheet") || label.includes("carbonless");
+  }
+  if (slot.key === "print_charge") {
+    return label.includes("print face") || label.includes("print charge") || label.includes("click") || label.includes("digital print") || (role === "quote_consumable" && rule === "per_unit");
+  }
+  if (slot.key === "cello_coating") {
+    return label.includes("cello") || label.includes("coating") || triggerKey.includes("cello");
+  }
+  if (slot.key === "cover_stock") {
+    return label.includes("cover");
+  }
+  if (slot.key === "binding_material") {
+    return label.includes("binding tape") || label.includes("binding material") || label.includes("wire") || label.includes("staple") || label.includes("glue") || (triggerKey.includes("binding") && kind !== "labour");
+  }
+  if (slot.key === "numbering_process") {
+    return label.includes("numbering") || triggerKey.includes("numbering") || label.includes("variable data");
+  }
+  if (slot.key === "bindery_labour") {
+    return (kind === "labour" || rule === "labour_hours") && !label.includes("numbering") && !triggerKey.includes("numbering");
+  }
 
   if (slot.key === "substrate") {
     return role === "base_material" || (label.includes("substrate") || label.includes("base sheet") || label.includes("base material"));
@@ -1564,7 +1764,7 @@ function BuildSlotRow({ slot, selectedProduct, query, components, materials }: {
   );
 }
 
-function ProductPartListSummary({ selectedProduct, fields, components, materials, query }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string }) {
+function ProductPartListSummary({ selectedProduct, fields, components, materials, query, slots, theme, isSmallFormat }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string; slots: ProductBuildSlot[]; theme: BuilderTheme; isSmallFormat: boolean }) {
   return (
     <aside style={{ display: "grid", gap: 14, alignSelf: "start", position: "sticky", top: 16 }}>
       <section style={{ ...whitePanelStyle, padding: 16, boxShadow: "0 12px 30px rgba(15,23,42,0.08)" }}>
@@ -1573,7 +1773,7 @@ function ProductPartListSummary({ selectedProduct, fields, components, materials
           <span style={blueChipStyle}>{components.length} parts</span>
         </div>
         <div style={{ display: "grid", gap: 8, marginTop: 10 }}>
-          {productBuildSlots.map((slot) => {
+          {slots.map((slot) => {
             const selected = selectedComponentForSlot(components, slot);
             return (
               <Link key={slot.key} href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ display: "grid", gridTemplateColumns: "22px 1fr", gap: 8, alignItems: "start", color: "inherit", textDecoration: "none", borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
@@ -1588,14 +1788,14 @@ function ProductPartListSummary({ selectedProduct, fields, components, materials
         </div>
       </section>
 
-      <section style={{ ...whitePanelStyle, background: "#ecfdf3", borderColor: "#abefc6" }}>
-        <strong>Compatibility</strong>
-        <p style={{ ...mutedStyle, marginTop: 6 }}>No hard checks yet. This area will warn if laminate is selected without print, roll width is too small, or eyelet choices need quantity/placement.</p>
+      <section style={{ ...whitePanelStyle, background: theme.helpBackground, borderColor: theme.helpBorder }}>
+        <strong>{isSmallFormat ? "Small format checks" : "Compatibility"}</strong>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>{isSmallFormat ? "No hard checks yet. This area will warn if paper size, page count, copies, cello, binding or numbering choices do not line up." : "No hard checks yet. This area will warn if laminate is selected without print, roll width is too small, or eyelet choices need quantity/placement."}</p>
       </section>
 
       <section style={whitePanelStyle}>
-        <strong>Quote questions</strong>
-        <p style={{ ...mutedStyle, marginTop: 6 }}>{fields.length ? `${fields.length} question${fields.length === 1 ? "" : "s"} ready for the quote page.` : "Add Size, Print type, Laminate, Finishing and Quantity."}</p>
+        <strong>{isSmallFormat ? "Quote choices" : "Quote questions"}</strong>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>{fields.length ? `${fields.length} choice${fields.length === 1 ? "" : "s"} ready for the quote page.` : isSmallFormat ? "Add Size, Sides, Cello, Pages, Copies, Numbering and Quantity as needed." : "Add Size, Print type, Laminate, Finishing and Quantity."}</p>
         <Link href={productBuilderUrl(selectedProduct.id, query, "questions")} style={{ ...ghostStyle, marginTop: 10 }}>Manage questions</Link>
       </section>
     </aside>
@@ -1741,6 +1941,52 @@ function InkBuilderPanel({ selectedProduct, fields }: { selectedProduct: any; fi
   );
 }
 
+function SmallFormatChargePanel({ selectedProduct, fields }: { selectedProduct: any; fields: any[] }) {
+  return (
+    <section style={whitePanelStyle}>
+      <p style={tinyLabelStyle}>Print / click charge</p>
+      <h3 style={{ margin: "4px 0 8px", fontSize: 24 }}>Add small format print charges</h3>
+      <p style={mutedStyle}>Use this for digital click costs, colour/mono print charges or simple per-item production charges. This is separate from signage ink.</p>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 12, marginTop: 14 }}>
+        <form action={addProductComponentAction} style={whitePanelStyle}>
+          <input type="hidden" name="productId" value={selectedProduct.id} />
+          <input type="hidden" name="kind" value="material" />
+          <input type="hidden" name="role" value="quote_sell_charge" />
+          <input type="hidden" name="baseUsage" value="sell_each" />
+          <input type="hidden" name="label" value="Colour print charge" />
+          <input type="hidden" name="sellRate" value="0.10" />
+          <input type="hidden" name="quantity" value="1" />
+          <input type="hidden" name="wastePercent" value="0" />
+          <input type="hidden" name="triggerOptionKey" value="sides" />
+          <input type="hidden" name="triggerOptionValuesCsv" value="single_sided,double_sided" />
+          <input type="hidden" name="notes" value="Small format colour print/click charge. Edit the rate after adding if needed." />
+          <strong>Colour print charge</strong>
+          <p style={mutedStyle}>Starter $ each charge, triggered by front/back choices.</p>
+          <button type="submit" style={blueButtonStyle}>Add colour print charge</button>
+        </form>
+        <form action={addProductComponentAction} style={whitePanelStyle}>
+          <input type="hidden" name="productId" value={selectedProduct.id} />
+          <input type="hidden" name="kind" value="material" />
+          <input type="hidden" name="role" value="quote_sell_charge" />
+          <input type="hidden" name="baseUsage" value="sell_each" />
+          <input type="hidden" name="label" value="Setup / make ready" />
+          <input type="hidden" name="sellRate" value="10" />
+          <input type="hidden" name="quantity" value="1" />
+          <input type="hidden" name="wastePercent" value="0" />
+          <input type="hidden" name="notes" value="Small format setup or make-ready charge." />
+          <strong>Setup / make ready</strong>
+          <p style={mutedStyle}>Simple fixed charge for setup/make-ready.</p>
+          <button type="submit" style={blueButtonStyle}>Add setup charge</button>
+        </form>
+      </div>
+      <details style={{ ...whitePanelStyle, marginTop: 12 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Custom print charge</summary>
+        <div style={{ marginTop: 12 }}><AddChargeRecipeRow productId={selectedProduct.id} fields={fields} /></div>
+      </details>
+    </section>
+  );
+}
+
 function LabourBuilderPanel({ selectedProduct, fields }: { selectedProduct: any; fields: any[] }) {
   return (
     <section style={whitePanelStyle}>
@@ -1778,15 +2024,18 @@ function SupplierOrderingPreview({ materials }: { materials: any[] }) {
   );
 }
 
-function ProductPartPickerBuilder({ selectedProduct, fields, components, materials, query, editOptionId, activePart }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string; editOptionId: string; activePart: string }) {
-  const activeSlot = slotForKey(activePart);
+function ProductPartPickerBuilder({ selectedProduct, fields, components, materials, query, editOptionId, activePart, setupPreset }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string; editOptionId: string; activePart: string; setupPreset: string }) {
+  const slots = productBuildSlotsFor(selectedProduct, setupPreset);
+  const theme = productBuilderTheme(selectedProduct, setupPreset);
+  const isSmallFormat = isSmallFormatProduct(selectedProduct, setupPreset);
+  const activeSlot = slotForKey(activePart, slots);
   const selectedForActiveSlot = activeSlot ? selectedComponentForSlot(components, activeSlot) : null;
 
   return (
     <section style={{ ...canvasStyle, overflow: "visible" }}>
-      <div style={{ background: "#111827", color: "#fff", borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: "18px 22px", display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
+      <div style={{ background: theme.headerBackground, color: theme.headerText, borderTopLeftRadius: 28, borderTopRightRadius: 28, padding: "18px 22px", display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "center" }}>
         <div>
-          <p style={{ margin: 0, color: "#93c5fd", fontSize: 12, fontWeight: 950, letterSpacing: "0.12em", textTransform: "uppercase" }}>Product builder</p>
+          <p style={{ margin: 0, color: theme.eyebrowColor, fontSize: 12, fontWeight: 950, letterSpacing: "0.12em", textTransform: "uppercase" }}>{theme.modeLabel}</p>
           <h2 style={{ margin: "5px 0 0", fontSize: 30, letterSpacing: "-0.04em" }}>{selectedProduct.name}</h2>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1797,16 +2046,16 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
       </div>
 
       <div style={{ padding: 20, display: "grid", gridTemplateColumns: "280px minmax(0, 1fr)", gap: 20, alignItems: "start" }}>
-        <ProductPartListSummary selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} query={query} />
+        <ProductPartListSummary selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} query={query} slots={slots} theme={theme} isSmallFormat={isSmallFormat} />
 
         <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
           <section style={{ ...whitePanelStyle, padding: 0, overflow: "hidden" }}>
             <div style={{ background: "#f8fafc", borderBottom: "1px solid #e5e7eb", padding: 16, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
               <div>
-                <strong style={{ fontSize: 20 }}>Choose your product parts</strong>
-                <p style={{ ...mutedStyle, marginTop: 4 }}>Build the product by selecting the materials and processes it can use.</p>
+                <strong style={{ fontSize: 20 }}>{isSmallFormat ? "Choose your small format parts" : "Choose your product parts"}</strong>
+                <p style={{ ...mutedStyle, marginTop: 4 }}>{isSmallFormat ? "Build this item from paper, card, print charges, cello, binding and bindery processes." : "Build the product by selecting the materials and processes it can use."}</p>
               </div>
-              <span style={components.length ? greenChipStyle : yellowChipStyle}>{components.length ? "Build started" : "Start with substrate"}</span>
+              <span style={components.length ? greenChipStyle : yellowChipStyle}>{components.length ? "Build started" : isSmallFormat ? "Start with paper" : "Start with substrate"}</span>
             </div>
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 900 }}>
@@ -1820,10 +2069,10 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
                   </tr>
                 </thead>
                 <tbody>
-                  {productBuildSlots.map((slot) => <BuildSlotRow key={slot.key} slot={slot} selectedProduct={selectedProduct} query={query} components={components} materials={materials} />)}
+                  {slots.map((slot) => <BuildSlotRow key={slot.key} slot={slot} selectedProduct={selectedProduct} query={query} components={components} materials={materials} />)}
                   <tr style={{ borderTop: "1px solid #e5e7eb" }}>
                     <td style={{ padding: "13px 10px", fontWeight: 900, color: "#2563eb" }}>Quote questions</td>
-                    <td style={{ padding: "13px 10px" }}><strong>{fields.length ? `${fields.length} questions added` : "No questions yet"}</strong><div style={{ color: "#64748b", fontSize: 13 }}>Size, print, laminate, ink, finishing and quantity.</div></td>
+                    <td style={{ padding: "13px 10px" }}><strong>{fields.length ? `${fields.length} questions added` : "No questions yet"}</strong><div style={{ color: "#64748b", fontSize: 13 }}>{isSmallFormat ? "Size, sides, pages, copies, cello, binding, numbering and quantity." : "Size, print, laminate, ink, finishing and quantity."}</div></td>
                     <td style={{ padding: "13px 10px" }}>Shown on quote page</td>
                     <td style={{ padding: "13px 10px" }}>Staff selections</td>
                     <td style={{ padding: "13px 10px", textAlign: "right" }}><Link href={productBuilderUrl(selectedProduct.id, query, "questions")} style={fields.length ? ghostStyle : blueButtonStyle}>{fields.length ? "Manage" : "+ Add questions"}</Link></td>
@@ -1833,12 +2082,13 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
             </div>
           </section>
 
-          {activeSlot && ["substrate", "print_media", "laminate", "finishing"].includes(activeSlot.key) ? (
+          {activeSlot && ["substrate", "print_media", "laminate", "finishing", "paper_stock", "cover_stock", "cello_coating", "binding_material"].includes(activeSlot.key) ? (
             <MaterialPickerForSlot selectedProduct={selectedProduct} slot={activeSlot} materials={materials} existing={selectedForActiveSlot} query={query} />
           ) : null}
 
           {activePart === "ink" ? <InkBuilderPanel selectedProduct={selectedProduct} fields={fields} /> : null}
-          {activePart === "labour" ? <LabourBuilderPanel selectedProduct={selectedProduct} fields={fields} /> : null}
+          {activePart === "print_charge" ? <SmallFormatChargePanel selectedProduct={selectedProduct} fields={fields} /> : null}
+          {activePart === "labour" || activePart === "bindery_labour" || activePart === "numbering_process" ? <LabourBuilderPanel selectedProduct={selectedProduct} fields={fields} /> : null}
           {activePart === "outsourced" ? <section style={whitePanelStyle}><AddOutsourceRecipeRow productId={selectedProduct.id} fields={fields} /></section> : null}
           {activePart === "questions" ? (
             <section style={whitePanelStyle}>
@@ -1849,7 +2099,7 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
           {!activePart ? (
             <section style={{ ...whitePanelStyle, background: "#eff6ff", borderColor: "#bfdbfe" }}>
               <strong style={{ fontSize: 20 }}>How this works</strong>
-              <p style={{ ...mutedStyle, marginTop: 6 }}>Click a row, choose the material or process, and the product build fills in like PCPartPicker. Supplier pricing stays on Materials and can later become purchase ordering.</p>
+              <p style={{ ...mutedStyle, marginTop: 6 }}>{isSmallFormat ? "Click a row, choose paper/card stock, cello, binding, print charges or bindery labour. This builder intentionally avoids signage terms." : "Click a row, choose the material or process, and the product build fills in like PCPartPicker. Supplier pricing stays on Materials and can later become purchase ordering."}</p>
             </section>
           ) : null}
 
@@ -1859,7 +2109,7 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
             <summary style={{ cursor: "pointer", fontWeight: 950 }}>Advanced: old spreadsheet-style rows and starter reset</summary>
             <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
               <ProductBasicsPanel selectedProduct={selectedProduct} />
-              <PresetRowsPanel productId={selectedProduct.id} activeMaterials={materials} selectedStarterType="sign_acm" />
+              <PresetRowsPanel productId={selectedProduct.id} activeMaterials={materials} selectedStarterType={setupPreset} />
               <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} />
             </div>
           </details>
@@ -1943,6 +2193,7 @@ function ProductRecipeCanvas({ selectedProduct, fields, components, activeMateri
       query={query}
       editOptionId={editOptionId}
       activePart={activePart}
+      setupPreset={selectedStarterType}
     />
   );
 }
@@ -1995,9 +2246,9 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           <p style={tinyLabelStyle}>Starter guide</p>
           <h2 style={sectionHeadingStyle}>The product creator starts simple now</h2>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            {starterTypes.slice(0, 4).map((starter) => (
-              <div key={starter.value} style={whitePanelStyle}>
-                <span style={blueChipStyle}>{starter.label}</span>
+            {starterTypes.map((starter) => (
+              <div key={starter.value} style={{ ...whitePanelStyle, background: isSmallFormatStarter(starter.value) ? "#faf5ff" : "#fff", borderColor: isSmallFormatStarter(starter.value) ? "#e9d5ff" : "#dfe7f2" }}>
+                <span style={isSmallFormatStarter(starter.value) ? { ...blueChipStyle, background: "#ede9fe", color: "#6d28d9" } : blueChipStyle}>{starter.label}</span>
                 <strong>{starter.plainName}</strong>
                 <p style={mutedStyle}>{starter.description}</p>
                 <p style={mutedStyle}><b>Starts with:</b> {starterQuickAnswers(starter.value)}</p>

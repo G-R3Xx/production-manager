@@ -62,6 +62,25 @@ function normalizeMaterialType(value: string): string {
   }
 }
 
+function toLegacyMaterialType(value: string): string {
+  const normalized = normalizeMaterialType(value);
+  const allowed = new Set([
+    "sheet_media",
+    "roll_media",
+    "roll_laminate",
+    "card_stock",
+    "paper_stock",
+    "cello_stock",
+    "binding",
+    "finishing",
+    "fixing",
+    "item",
+    "other"
+  ]);
+
+  return allowed.has(normalized) ? normalized : "other";
+}
+
 function presentMaterialType(value: string): string {
   switch (value) {
     case "sheet_media":
@@ -149,16 +168,16 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $4::varchar,
       $5::varchar,
       $6::material_type,
-      NULL,
       $7::varchar,
       $8::varchar,
-      $9::numeric,
+      $9::varchar,
       $10::numeric,
       $11::numeric,
       $12::numeric,
       $13::numeric,
       $14::numeric,
-      $15::varchar,
+      $15::numeric,
+      $16::varchar,
       true,
       now(),
       now()
@@ -169,6 +188,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.sourceProductId,
     input.name,
     input.sku,
+    toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),
     input.stockUom,
     input.purchaseUom,
