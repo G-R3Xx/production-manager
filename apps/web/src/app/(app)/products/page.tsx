@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
@@ -17,7 +17,8 @@ import {
   updateProductAction,
   updateProductComponentAction,
   updateProductOptionAction,
-  deleteProductComponentAction
+  deleteProductComponentAction,
+  saveProductWorkflowStepAction
 } from "./actions";
 
 type ProductsPageProps = {
@@ -2301,16 +2302,446 @@ function LiveSpreadsheetPreview({ fields, components }: { fields: any[]; compone
   );
 }
 
+
+const signageWorkflowSteps = [
+  { key: "main_material", title: "Choose main material", short: "Material", description: "Choose the sheet/board/panel the product starts from." },
+  { key: "print_types", title: "Choose print types", short: "Print", description: "Decide what staff can choose while quoting: direct print, roll stock, or both." },
+  { key: "roll_media", title: "Choose roll media", short: "Media", description: "Only needed if roll stock is available for this product." },
+  { key: "ink", title: "Choose ink choices", short: "Ink", description: "Choose CMYK, white, or both as quote options." },
+  { key: "laminate", title: "Choose laminates", short: "Laminate", description: "None is automatic. Add only the laminate materials staff can quote." },
+  { key: "finishing", title: "Choose finishing", short: "Finishing", description: "Pick finishing processes and hardware staff can tick on a quote." },
+  { key: "review", title: "Review product build", short: "Review", description: "Check the simple build path before quoting." }
+];
+
+function workflowUrl(productId: string, query: string, step: string): string {
+  const params = new URLSearchParams();
+  params.set("selected", productId);
+  if (query) params.set("q", query);
+  params.set("step", step);
+  return `/products?${params.toString()}`;
+}
+
+function workflowFieldByKey(fields: any[], key: string): any | null {
+  return fields.find((field: any) => String(field.key ?? "") === key) ?? null;
+}
+
+function workflowOptions(field: any): any[] {
+  return Array.isArray(field?.options) ? field.options : [];
+}
+
+function hasWorkflowOption(field: any, value: string): boolean {
+  return workflowOptions(field).some((option: any) => String(option.value ?? option.label ?? "") === value);
+}
+
+function workflowComponentName(component: any, materials: any[]): string {
+  if (component?.materialId) {
+    return materials.find((material: any) => String(material.id) === String(component.materialId))?.name ?? String(component.label ?? "Selected material");
+  }
+  return String(component?.label ?? "Not selected");
+}
+
+function firstWorkflowComponent(components: any[], matcher: (item: any) => boolean): any | null {
+  return components.find(matcher) ?? null;
+}
+
+function workflowMainMaterial(components: any[]): any | null {
+  return firstWorkflowComponent(components, (component) => componentMatchesBuildSlot(component, signageProductBuildSlots[0]));
+}
+
+function workflowRollMedia(components: any[]): any | null {
+  return firstWorkflowComponent(components, (component) => componentMatchesBuildSlot(component, signageProductBuildSlots[1]));
+}
+
+function workflowLaminateComponents(components: any[]): any[] {
+  return components.filter((component) => componentMatchesBuildSlot(component, signageProductBuildSlots[3]));
+}
+
+function workflowFinishingComponents(components: any[]): any[] {
+  return components.filter((component) => componentMatchesBuildSlot(component, signageProductBuildSlots[4]));
+}
+
+function workflowInkField(fields: any[]): any | null {
+  return workflowFieldByKey(fields, "ink") ?? workflowFieldByKey(fields, "white_ink");
+}
+
+function workflowStepComplete(step: string, fields: any[], components: any[]): boolean {
+  if (step === "main_material") return Boolean(workflowMainMaterial(components));
+  if (step === "print_types") return Boolean(workflowFieldByKey(fields, "print_method") ?? workflowFieldByKey(fields, "print_type"));
+  if (step === "roll_media") {
+    const printField = workflowFieldByKey(fields, "print_method") ?? workflowFieldByKey(fields, "print_type");
+    if (!hasWorkflowOption(printField, "roll_stock") && !hasWorkflowOption(printField, "roll_stock_applied")) return true;
+    return Boolean(workflowRollMedia(components));
+  }
+  if (step === "ink") return Boolean(workflowInkField(fields));
+  if (step === "laminate") return Boolean(workflowFieldByKey(fields, "laminate"));
+  if (step === "finishing") return Boolean(workflowFieldByKey(fields, "finishing"));
+  return true;
+}
+
+function nextIncompleteWorkflowStep(fields: any[], components: any[]): string {
+  for (const step of signageWorkflowSteps) {
+    if (step.key !== "review" && !workflowStepComplete(step.key, fields, components)) return step.key;
+  }
+  return "review";
+}
+
+function WorkflowStepRail({ selectedProduct, query, activeStep, fields, components, theme }: { selectedProduct: any; query: string; activeStep: string; fields: any[]; components: any[]; theme: BuilderTheme }) {
+  return (
+    <aside style={{ display: "grid", gap: 10, alignSelf: "start" }}>
+      {signageWorkflowSteps.map((step, index) => {
+        const done = workflowStepComplete(step.key, fields, components);
+        const active = step.key === activeStep;
+        return (
+          <Link key={step.key} href={workflowUrl(selectedProduct.id, query, step.key)} style={{ textDecoration: "none", color: "inherit" }}>
+            <div style={{ border: `1px solid ${active ? theme.accent : done ? "#abefc6" : "#dfe7f2"}`, borderRadius: 18, padding: 14, background: active ? theme.accentSoft : done ? "#f6fef9" : "#fff", display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 12, alignItems: "center" }}>
+              <span style={{ width: 34, height: 34, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 950, background: done ? "#dcfae6" : "#f1f5f9", color: done ? "#067647" : "#475569" }}>{done ? "✓" : index + 1}</span>
+              <div style={{ minWidth: 0 }}>
+                <strong style={{ display: "block", color: active ? theme.accentText : "#0f172a" }}>{step.short}</strong>
+                <span style={{ ...mutedStyle, fontSize: 12 }}>{active ? "Current step" : done ? "Done" : "Not set"}</span>
+              </div>
+            </div>
+          </Link>
+        );
+      })}
+    </aside>
+  );
+}
+
+function WorkflowHeader({ selectedProduct, fields, components, activeStep, theme }: { selectedProduct: any; fields: any[]; components: any[]; activeStep: string; theme: BuilderTheme }) {
+  const doneCount = signageWorkflowSteps.filter((step) => step.key !== "review" && workflowStepComplete(step.key, fields, components)).length;
+  const current = signageWorkflowSteps.find((step) => step.key === activeStep) ?? signageWorkflowSteps[0];
+  return (
+    <div style={{ background: theme.headerBackground, color: theme.headerText, padding: 24, borderRadius: "28px 28px 0 0", display: "flex", justifyContent: "space-between", gap: 18, flexWrap: "wrap", alignItems: "center" }}>
+      <div>
+        <p style={{ margin: 0, color: theme.eyebrowColor, textTransform: "uppercase", letterSpacing: "0.14em", fontWeight: 950, fontSize: 12 }}>Guided product builder</p>
+        <h2 style={{ margin: "7px 0 0", fontSize: 34, letterSpacing: "-0.04em" }}>{selectedProduct.name}</h2>
+        <p style={{ margin: "7px 0 0", color: "rgba(255,255,255,0.75)" }}>{current.title}: {current.description}</p>
+      </div>
+      <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ ...chipStyle, background: "rgba(255,255,255,0.12)", color: "#fff" }}>{doneCount}/6 steps done</span>
+        <Link href="/quotes" style={{ ...ghostStyle, background: "transparent", color: "#fff", borderColor: "rgba(255,255,255,0.28)" }}>Go to Quotes</Link>
+      </div>
+    </div>
+  );
+}
+
+function WorkflowNavigation({ selectedProduct, query, currentStep }: { selectedProduct: any; query: string; currentStep: string }) {
+  const index = signageWorkflowSteps.findIndex((step) => step.key === currentStep);
+  const prev = signageWorkflowSteps[Math.max(0, index - 1)]?.key;
+  const next = signageWorkflowSteps[Math.min(signageWorkflowSteps.length - 1, index + 1)]?.key;
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+      {prev && prev !== currentStep ? <Link href={workflowUrl(selectedProduct.id, query, prev)} style={ghostStyle}>← Back</Link> : <span />}
+      {next && next !== currentStep ? <Link href={workflowUrl(selectedProduct.id, query, next)} style={blueButtonStyle}>Next →</Link> : null}
+    </div>
+  );
+}
+
+function MaterialChoiceButton({ productId, query, step, nextStep, material, children }: { productId: string; query: string; step: string; nextStep: string; material: any; children: ReactNode }) {
+  return (
+    <form action={saveProductWorkflowStepAction}>
+      <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="query" value={query} />
+      <input type="hidden" name="workflowStep" value={step} />
+      <input type="hidden" name="nextStep" value={nextStep} />
+      <input type="hidden" name="materialId" value={material.id} />
+      <input type="hidden" name="materialName" value={material.name} />
+      <button type="submit" style={{ ...whitePanelStyle, textAlign: "left", cursor: "pointer", width: "100%" }}>{children}</button>
+    </form>
+  );
+}
+
+function MaterialMiniCard({ material, selected }: { material: any; selected?: boolean }) {
+  const cost = materialPickerCost(material);
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+        <strong style={{ color: selected ? "#1d4ed8" : "#0f172a" }}>{material.name}</strong>
+        <span style={selected ? greenChipStyle : plainChipStyle}>{selected ? "Selected" : cost.primary}</span>
+      </div>
+      <p style={{ ...mutedStyle, fontSize: 13 }}>{material.sku || "No SKU"} · {materialSizeText(material)}</p>
+      <p style={{ ...mutedStyle, fontSize: 13 }}>{cost.secondary}</p>
+    </div>
+  );
+}
+
+function EmptyWorkflowPanel({ title, body }: { title: string; body: string }) {
+  return <div style={{ ...whitePanelStyle, background: "#fffcf5", borderColor: "#fedf89" }}><strong>{title}</strong><p style={mutedStyle}>{body}</p></div>;
+}
+
+function MainMaterialStep({ selectedProduct, query, materials, components }: { selectedProduct: any; query: string; materials: any[]; components: any[] }) {
+  const selected = workflowMainMaterial(components);
+  const substrateMaterials = materials.filter((material) => materialMatchesPart(material, "substrate")).slice(0, 18);
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Step 1 — choose main material</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>This is the ACM, corflute, acrylic, PVC or other sheet the product is made from.</p>
+      </div>
+      {selected ? <div style={{ ...whitePanelStyle, background: "#f6fef9", borderColor: "#abefc6" }}><strong>Current main material: {workflowComponentName(selected, materials)}</strong><p style={mutedStyle}>Choose another material below to replace it.</p></div> : null}
+      {substrateMaterials.length === 0 ? <EmptyWorkflowPanel title="No sheet/substrate materials found" body="Create sheet materials on the Materials page first, then come back here." /> : null}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+        {substrateMaterials.map((material) => (
+          <MaterialChoiceButton key={material.id} productId={selectedProduct.id} query={query} step="main_material" nextStep="print_types" material={material}>
+            <MaterialMiniCard material={material} selected={String(selected?.materialId ?? "") === String(material.id)} />
+          </MaterialChoiceButton>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function PrintTypesStep({ selectedProduct, query, fields }: { selectedProduct: any; query: string; fields: any[] }) {
+  const field = workflowFieldByKey(fields, "print_method") ?? workflowFieldByKey(fields, "print_type");
+  const direct = !field || hasWorkflowOption(field, "direct_print");
+  const roll = hasWorkflowOption(field, "roll_stock") || hasWorkflowOption(field, "roll_stock_applied");
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Step 2 — choose print types for quoting</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>This controls what staff can choose on the quote page.</p>
+      </div>
+      <form action={saveProductWorkflowStepAction} style={{ display: "grid", gap: 14 }}>
+        <input type="hidden" name="productId" value={selectedProduct.id} />
+        <input type="hidden" name="query" value={query} />
+        <input type="hidden" name="workflowStep" value="print_types" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          <label style={{ ...whitePanelStyle, cursor: "pointer" }}>
+            <input type="checkbox" name="printType" value="direct_print" defaultChecked={direct} />
+            <strong style={{ display: "block", marginTop: 10 }}>Direct print</strong>
+            <p style={mutedStyle}>Print directly onto the main material. No roll stock is consumed.</p>
+          </label>
+          <label style={{ ...whitePanelStyle, cursor: "pointer" }}>
+            <input type="checkbox" name="printType" value="roll_stock" defaultChecked={roll} />
+            <strong style={{ display: "block", marginTop: 10 }}>Roll stock applied</strong>
+            <p style={mutedStyle}>The product can use vinyl, SAV, banner media, clear reverse print, etc.</p>
+          </label>
+        </div>
+        <button type="submit" style={blueButtonStyle}>Save print types and continue</button>
+      </form>
+    </section>
+  );
+}
+
+function RollMediaStep({ selectedProduct, query, fields, components, materials }: { selectedProduct: any; query: string; fields: any[]; components: any[]; materials: any[] }) {
+  const printField = workflowFieldByKey(fields, "print_method") ?? workflowFieldByKey(fields, "print_type");
+  const rollAvailable = hasWorkflowOption(printField, "roll_stock") || hasWorkflowOption(printField, "roll_stock_applied");
+  const selected = workflowRollMedia(components);
+  const rollMaterials = materials.filter((material) => materialMatchesPart(material, "print_media")).slice(0, 18);
+  if (!rollAvailable) {
+    return <section style={{ display: "grid", gap: 16 }}><h3 style={sectionHeadingStyle}>Step 3 — roll media skipped</h3><p style={mutedStyle}>Roll stock is not enabled in Step 2, so there is no media to choose.</p><WorkflowNavigation selectedProduct={selectedProduct} query={query} currentStep="roll_media" /></section>;
+  }
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Step 3 — choose the roll media</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>Choose one default roll stock. The quote will only use it when staff select Roll stock applied.</p>
+      </div>
+      {selected ? <div style={{ ...whitePanelStyle, background: "#f6fef9", borderColor: "#abefc6" }}><strong>Current roll media: {workflowComponentName(selected, materials)}</strong><p style={mutedStyle}>Choose another roll below to replace it.</p></div> : null}
+      {rollMaterials.length === 0 ? <EmptyWorkflowPanel title="No roll media found" body="Create roll materials like SAV, vinyl, banner or clear stock on the Materials page first." /> : null}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+        {rollMaterials.map((material) => (
+          <MaterialChoiceButton key={material.id} productId={selectedProduct.id} query={query} step="roll_media" nextStep="ink" material={material}>
+            <MaterialMiniCard material={material} selected={String(selected?.materialId ?? "") === String(material.id)} />
+          </MaterialChoiceButton>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function InkStep({ selectedProduct, query, fields }: { selectedProduct: any; query: string; fields: any[] }) {
+  const field = workflowFieldByKey(fields, "ink");
+  const hasAny = Boolean(field);
+  const cmyk = !hasAny || hasWorkflowOption(field, "cmyk");
+  const white = hasWorkflowOption(field, "white");
+  const both = !hasAny || hasWorkflowOption(field, "cmyk_white");
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Step 4 — choose ink choices</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>These are the choices staff see while quoting. Pricing is automatic: CMYK $10/m², white +$10/m².</p>
+      </div>
+      <form action={saveProductWorkflowStepAction} style={{ display: "grid", gap: 14 }}>
+        <input type="hidden" name="productId" value={selectedProduct.id} />
+        <input type="hidden" name="query" value={query} />
+        <input type="hidden" name="workflowStep" value="ink" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          <label style={{ ...whitePanelStyle, cursor: "pointer" }}><input type="checkbox" name="inkChoice" value="cmyk" defaultChecked={cmyk} /><strong style={{ display: "block", marginTop: 10 }}>CMYK</strong><p style={mutedStyle}>Adds $10/m².</p></label>
+          <label style={{ ...whitePanelStyle, cursor: "pointer" }}><input type="checkbox" name="inkChoice" value="white" defaultChecked={white} /><strong style={{ display: "block", marginTop: 10 }}>White only</strong><p style={mutedStyle}>Adds $10/m².</p></label>
+          <label style={{ ...whitePanelStyle, cursor: "pointer" }}><input type="checkbox" name="inkChoice" value="cmyk_white" defaultChecked={both} /><strong style={{ display: "block", marginTop: 10 }}>CMYK + White</strong><p style={mutedStyle}>Adds $20/m².</p></label>
+        </div>
+        <button type="submit" style={blueButtonStyle}>Save ink choices and continue</button>
+      </form>
+    </section>
+  );
+}
+
+function LaminateStep({ selectedProduct, query, fields, components, materials }: { selectedProduct: any; query: string; fields: any[]; components: any[]; materials: any[] }) {
+  const selectedIds = new Set(workflowLaminateComponents(components).map((component) => String(component.materialId ?? "")).filter(Boolean));
+  const laminateMaterials = materials.filter((material) => materialMatchesPart(material, "laminate")).slice(0, 24);
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Step 5 — choose laminate options</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>None is always available. Tick the actual laminate rolls staff can quote.</p>
+      </div>
+      <form action={saveProductWorkflowStepAction} style={{ display: "grid", gap: 14 }}>
+        <input type="hidden" name="productId" value={selectedProduct.id} />
+        <input type="hidden" name="query" value={query} />
+        <input type="hidden" name="workflowStep" value="laminate" />
+        <div style={{ ...whitePanelStyle, background: "#f8fafc" }}><strong>None</strong><p style={mutedStyle}>Always included as the default quote choice.</p></div>
+        {laminateMaterials.length === 0 ? <EmptyWorkflowPanel title="No laminate rolls found" body="Create laminate materials first, or save this step with None only." /> : null}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12 }}>
+          {laminateMaterials.map((material) => (
+            <label key={material.id} style={{ ...whitePanelStyle, cursor: "pointer" }}>
+              <input type="checkbox" name="laminateMaterialPacked" value={`${material.id}|||${material.name}`} defaultChecked={selectedIds.has(String(material.id))} />
+              <div style={{ marginTop: 10 }}><MaterialMiniCard material={material} selected={selectedIds.has(String(material.id))} /></div>
+            </label>
+          ))}
+        </div>
+        <button type="submit" style={blueButtonStyle}>Save laminate options and continue</button>
+      </form>
+    </section>
+  );
+}
+
+function FinishingStep({ selectedProduct, query, fields, components, materials }: { selectedProduct: any; query: string; fields: any[]; components: any[]; materials: any[] }) {
+  const field = workflowFieldByKey(fields, "finishing");
+  const optionSet = new Set(workflowOptions(field).map((option: any) => String(option.value ?? option.label ?? "")));
+  const eyeletMaterials = materials.filter((material) => materialMatchesPart(material, "finishing") && lowerText(`${material.name} ${material.sku} ${material.notes}`).includes("eyelet"));
+  const selectedEyelet = workflowFinishingComponents(components).find((component) => lowerText(component.label).includes("eyelet") && component.materialId);
+  const finishChoices = [
+    { value: "jingwei_cutting", label: "Jingwei cutting", help: "Adds cutting labour." },
+    { value: "router_cnc_cut", label: "Router/CNC cut", help: "Adds router/CNC labour." },
+    { value: "drill_holes", label: "Drill holes", help: "Adds drill labour." },
+    { value: "eyelets", label: "Eyelets", help: "Asks placement/quantity on the quote." }
+  ];
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Step 6 — choose finishing options</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>Staff can tick multiple finishing options while quoting.</p>
+      </div>
+      <form action={saveProductWorkflowStepAction} style={{ display: "grid", gap: 14 }}>
+        <input type="hidden" name="productId" value={selectedProduct.id} />
+        <input type="hidden" name="query" value={query} />
+        <input type="hidden" name="workflowStep" value="finishing" />
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+          {finishChoices.map((choice) => (
+            <label key={choice.value} style={{ ...whitePanelStyle, cursor: "pointer" }}>
+              <input type="checkbox" name="finishingChoice" value={choice.value} defaultChecked={optionSet.has(choice.value)} />
+              <strong style={{ display: "block", marginTop: 10 }}>{choice.label}</strong>
+              <p style={mutedStyle}>{choice.help}</p>
+            </label>
+          ))}
+        </div>
+        <label style={labelStyle}>
+          <span style={labelTextStyle}>Eyelet material, optional</span>
+          <select name="eyeletMaterialId" defaultValue={selectedEyelet?.materialId ?? ""} style={inputStyle}>
+            <option value="">No eyelet material linked</option>
+            {eyeletMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}
+          </select>
+        </label>
+        <input type="hidden" name="eyeletMaterialName" value={eyeletMaterials.find((material) => String(material.id) === String(selectedEyelet?.materialId ?? ""))?.name ?? "Eyelets"} />
+        <button type="submit" style={blueButtonStyle}>Save finishing and review</button>
+      </form>
+    </section>
+  );
+}
+
+function ReviewStep({ selectedProduct, query, fields, components, materials }: { selectedProduct: any; query: string; fields: any[]; components: any[]; materials: any[] }) {
+  const summary = [
+    { label: "Main material", value: workflowMainMaterial(components) ? workflowComponentName(workflowMainMaterial(components), materials) : "Not selected" },
+    { label: "Print types", value: workflowOptions(workflowFieldByKey(fields, "print_method") ?? workflowFieldByKey(fields, "print_type")).map((o: any) => o.label).join(", ") || "Not selected" },
+    { label: "Roll media", value: workflowRollMedia(components) ? workflowComponentName(workflowRollMedia(components), materials) : "Skipped / not selected" },
+    { label: "Ink", value: workflowOptions(workflowFieldByKey(fields, "ink")).map((o: any) => o.label).join(", ") || "Not selected" },
+    { label: "Laminate", value: workflowOptions(workflowFieldByKey(fields, "laminate")).map((o: any) => o.label).join(", ") || "None / not selected" },
+    { label: "Finishing", value: workflowOptions(workflowFieldByKey(fields, "finishing")).map((o: any) => o.label).join(", ") || "None" }
+  ];
+  return (
+    <section style={{ display: "grid", gap: 16 }}>
+      <div>
+        <h3 style={sectionHeadingStyle}>Review product build</h3>
+        <p style={{ ...mutedStyle, marginTop: 6 }}>This is the clean product path staff will use when quoting.</p>
+      </div>
+      <div style={{ display: "grid", gap: 10 }}>
+        {summary.map((item) => <div key={item.label} style={{ ...whitePanelStyle, gridTemplateColumns: "180px minmax(0, 1fr)", display: "grid", gap: 12 }}><strong>{item.label}</strong><span style={mutedStyle}>{item.value}</span></div>)}
+      </div>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+        <Link href={workflowUrl(selectedProduct.id, query, "main_material")} style={ghostStyle}>Edit from step 1</Link>
+        <Link href="/quotes" style={blueButtonStyle}>Go to Quotes</Link>
+      </div>
+    </section>
+  );
+}
+
+function SignageWorkflowCard({ selectedProduct, fields, components, materials, query, activeStep, theme }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string; activeStep: string; theme: BuilderTheme }) {
+  const step = activeStep || nextIncompleteWorkflowStep(fields, components);
+  return (
+    <section style={{ display: "grid", gap: 18 }}>
+      {step === "main_material" ? <MainMaterialStep selectedProduct={selectedProduct} query={query} materials={materials} components={components} /> : null}
+      {step === "print_types" ? <PrintTypesStep selectedProduct={selectedProduct} query={query} fields={fields} /> : null}
+      {step === "roll_media" ? <RollMediaStep selectedProduct={selectedProduct} query={query} fields={fields} components={components} materials={materials} /> : null}
+      {step === "ink" ? <InkStep selectedProduct={selectedProduct} query={query} fields={fields} /> : null}
+      {step === "laminate" ? <LaminateStep selectedProduct={selectedProduct} query={query} fields={fields} components={components} materials={materials} /> : null}
+      {step === "finishing" ? <FinishingStep selectedProduct={selectedProduct} query={query} fields={fields} components={components} materials={materials} /> : null}
+      {step === "review" ? <ReviewStep selectedProduct={selectedProduct} query={query} fields={fields} components={components} materials={materials} /> : null}
+      <WorkflowNavigation selectedProduct={selectedProduct} query={query} currentStep={step} />
+    </section>
+  );
+}
+
+function WorkflowProductBuilder({ selectedProduct, fields, components, materials, query, editOptionId, setupPreset, activeStep }: { selectedProduct: any; fields: any[]; components: any[]; materials: any[]; query: string; editOptionId: string; setupPreset: string; activeStep: string }) {
+  const theme = productBuilderTheme(selectedProduct, setupPreset);
+  const isSmall = isSmallFormatProduct(selectedProduct, setupPreset);
+  const step = activeStep || nextIncompleteWorkflowStep(fields, components);
+
+  if (isSmall) {
+    return (
+      <section style={canvasStyle}>
+        <WorkflowHeader selectedProduct={selectedProduct} fields={fields} components={components} activeStep="review" theme={theme} />
+        <div style={{ padding: 18, display: "grid", gap: 16 }}>
+          <div style={{ ...whitePanelStyle, background: theme.helpBackground, borderColor: theme.helpBorder }}>
+            <strong>Small format builder is separate</strong>
+            <p style={mutedStyle}>This signage carousel is for large-format products. Small format will keep its separate paper/cello/binding flow so it does not feel like signage with parts removed.</p>
+          </div>
+          <ProductPartPickerBuilder selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} query={query} editOptionId={editOptionId} activePart="" setupPreset={setupPreset} />
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section style={canvasStyle}>
+      <WorkflowHeader selectedProduct={selectedProduct} fields={fields} components={components} activeStep={step} theme={theme} />
+      <div style={{ padding: 18, display: "grid", gridTemplateColumns: "270px minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
+        <WorkflowStepRail selectedProduct={selectedProduct} query={query} activeStep={step} fields={fields} components={components} theme={theme} />
+        <div style={{ ...whitePanelStyle, minHeight: 440 }}>
+          <SignageWorkflowCard selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} query={query} activeStep={step} theme={theme} />
+        </div>
+      </div>
+      <details style={{ margin: 18, marginTop: 0, ...whitePanelStyle }}>
+        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Advanced: edit raw quote questions / recipe rows</summary>
+        <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
+          <QuoteQuestionsSpreadsheetPanel selectedProduct={selectedProduct} fields={fields} components={components} activeMaterials={materials} query={query} editOptionId={editOptionId} />
+          <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} />
+        </div>
+      </details>
+    </section>
+  );
+}
+
 function ProductRecipeCanvas({ selectedProduct, fields, components, activeMaterials, query, editOptionId, selectedStarterType, activePart }: { selectedProduct: any; fields: any[]; components: any[]; activeMaterials: any[]; query: string; editOptionId: string; selectedStarterType: string; activePart: string }) {
   return (
-    <ProductPartPickerBuilder
+    <WorkflowProductBuilder
       selectedProduct={selectedProduct}
       fields={fields}
       components={components}
       materials={activeMaterials}
       query={query}
       editOptionId={editOptionId}
-      activePart={activePart}
+      activeStep={activePart}
       setupPreset={selectedStarterType}
     />
   );
@@ -2328,7 +2759,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const selectedId = readParam(params, "selected");
   const query = readParam(params, "q");
   const editOptionId = readParam(params, "editOption");
-  const activePart = readParam(params, "part");
+  const activePart = readParam(params, "step") || readParam(params, "part");
 
   const [products, materials, selectedProduct] = await Promise.all([
     listProductsForTenant(activeTenant.tenantId),

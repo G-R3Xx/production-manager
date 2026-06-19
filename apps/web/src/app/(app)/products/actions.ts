@@ -1298,6 +1298,386 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
   };
 }
 
+
+function upsertWorkflowField(fields: Array<Record<string, any>>, nextField: Record<string, any>, preferredOrder: string[] = []) {
+  const without = fields.filter((field) => String(field.key ?? "") !== String(nextField.key ?? ""));
+  const merged = [...without, nextField];
+  if (preferredOrder.length === 0) return merged;
+  return merged.sort((a, b) => {
+    const ai = preferredOrder.indexOf(String(a.key ?? ""));
+    const bi = preferredOrder.indexOf(String(b.key ?? ""));
+    return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi);
+  });
+}
+
+function removeWorkflowFields(fields: Array<Record<string, any>>, keys: string[]) {
+  const keySet = new Set(keys);
+  return fields.filter((field) => !keySet.has(String(field.key ?? "")));
+}
+
+function removeWorkflowComponents(components: Array<Record<string, any>>, matcher: (item: Record<string, any>) => boolean) {
+  return components.filter((item) => !matcher(item));
+}
+
+function workflowOption(label: string, value: string) {
+  return {
+    id: randomUUID(),
+    label,
+    value,
+    priceDelta: "0.00",
+    widthMm: null,
+    heightMm: null
+  };
+}
+
+function workflowField(input: { key: string; label: string; type: string; required?: boolean; defaultValue: string | null; helpText: string; options?: Array<Record<string, any>>; showWhen?: Record<string, unknown> | null }) {
+  return {
+    id: randomUUID(),
+    key: input.key,
+    label: input.label,
+    type: input.type,
+    required: input.required ?? true,
+    defaultValue: input.defaultValue,
+    helpText: input.helpText,
+    quoteOnly: true,
+    showWhen: input.showWhen ?? null,
+    options: input.options ?? [],
+    rule: {
+      effectType: "none",
+      effectTarget: null,
+      effectValue: null,
+      effectUnit: null,
+      componentLinkMode: "none"
+    }
+  };
+}
+
+function componentTriggerKey(item: Record<string, any>): string {
+  return String(item.trigger?.optionKey ?? item.stockUsage?.optionKey ?? "");
+}
+
+function componentLabelText(item: Record<string, any>): string {
+  return String(item.label ?? "").toLowerCase();
+}
+
+function isWorkflowBaseMaterial(item: Record<string, any>): boolean {
+  const role = String(item.role ?? "");
+  const label = componentLabelText(item);
+  return role === "base_material" || label.includes("substrate") || label.includes("base material") || label.includes("main material");
+}
+
+function isWorkflowPrintMedia(item: Record<string, any>): boolean {
+  const role = String(item.role ?? "");
+  const label = componentLabelText(item);
+  const triggerKey = componentTriggerKey(item);
+  return (role === "quote_selected_material" && (triggerKey === "print_method" || triggerKey === "print_type")) || label.includes("roll stock") || label.includes("print media");
+}
+
+function isWorkflowInkCharge(item: Record<string, any>): boolean {
+  const label = componentLabelText(item);
+  const rule = String(item.ruleType ?? item.stockUsage?.usageBasis ?? "");
+  const triggerKey = componentTriggerKey(item);
+  return label.includes("ink") || (rule === "sell_sqm" && ["white_ink", "ink", "print_method", "print_type"].includes(triggerKey));
+}
+
+function isWorkflowLaminate(item: Record<string, any>): boolean {
+  const label = componentLabelText(item);
+  const triggerKey = componentTriggerKey(item);
+  return triggerKey === "laminate" || label.includes("laminate") || label.includes("cello");
+}
+
+function isWorkflowFinishing(item: Record<string, any>): boolean {
+  const label = componentLabelText(item);
+  const role = String(item.role ?? "");
+  const triggerKey = componentTriggerKey(item);
+  return triggerKey === "finishing" || role.includes("finishing") || label.includes("jingwei") || label.includes("router") || label.includes("cnc") || label.includes("drill") || label.includes("eyelet");
+}
+
+const workflowFieldOrder = ["finished_size", "size", "print_method", "ink", "white_ink", "laminate", "finishing", "quantity"];
+
+function redirectWorkflow(productId: string, query: string, step: string, message: string) {
+  const params = new URLSearchParams();
+  params.set("selected", productId);
+  if (query) params.set("q", query);
+  if (step) params.set("step", step);
+  params.set("message", message);
+  redirect(`/products?${params.toString()}`);
+}
+
+export async function saveProductWorkflowStepAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  const step = readString(formData, "workflowStep");
+  const nextStep = readString(formData, "nextStep");
+  const query = readString(formData, "query");
+
+  if (!productId) redirect("/products?error=No%20product%20selected");
+  if (!step) redirect(`/products?selected=${productId}&error=No%20workflow%20step%20selected`);
+
+  const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  let fields = Array.isArray(definition.fields) ? [...definition.fields] : [];
+  let components = Array.isArray(definition.components) ? [...definition.components] : [];
+
+  if (step === "main_material") {
+    const materialId = readString(formData, "materialId");
+    if (!materialId) redirectWorkflow(productId, query, "main_material", "Choose a material first");
+    const label = readString(formData, "materialName") || "Main material";
+    components = removeWorkflowComponents(components, isWorkflowBaseMaterial);
+    components.push(component({
+      label,
+      materialId,
+      role: "base_material",
+      ruleType: "yield_based",
+      unit: "sheet",
+      dimensionSource: "finished_size",
+      usageOptionKey: "finished_size",
+      notes: "Main product material selected in the guided workflow. Quote size allocates part of the parent sheet."
+    }));
+    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, { ...definition, version: 3, fields, components });
+    redirectWorkflow(productId, query, nextStep || "print_types", "Main material saved");
+  }
+
+  if (step === "print_types") {
+    const selected = readStringArray(formData, "printType").filter(Boolean);
+    const types = selected.length ? selected : ["direct_print"];
+    const options = types.map((value) => value === "roll_stock" ? workflowOption("Roll stock applied", "roll_stock") : workflowOption("Direct print", "direct_print"));
+    const nextField = workflowField({
+      key: "print_method",
+      label: "Print type",
+      type: "select",
+      defaultValue: String(options[0]?.value ?? "direct_print"),
+      helpText: "Staff choose whether this product is direct printed or uses a roll-stock layer.",
+      options
+    });
+    fields = upsertWorkflowField(removeWorkflowFields(fields, ["print_type"]), nextField, workflowFieldOrder);
+    if (!types.includes("roll_stock")) {
+      components = removeWorkflowComponents(components, isWorkflowPrintMedia);
+    }
+    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, { ...definition, version: 3, fields, components });
+    redirectWorkflow(productId, query, types.includes("roll_stock") ? (nextStep || "roll_media") : "ink", "Print types saved");
+  }
+
+  if (step === "roll_media") {
+    const materialId = readString(formData, "materialId");
+    if (!materialId) redirectWorkflow(productId, query, "roll_media", "Choose one roll stock first");
+    const label = readString(formData, "materialName") || "Roll stock print media";
+    components = removeWorkflowComponents(components, isWorkflowPrintMedia);
+    components.push(component({
+      label,
+      materialId,
+      role: "quote_selected_material",
+      ruleType: "per_linear_metre",
+      unit: "lm",
+      dimensionSource: "finished_size",
+      triggerOptionKey: "print_method",
+      triggerOptionValues: ["roll_stock"],
+      notes: "Roll stock selected in the guided workflow. Only applies when Print type is Roll stock applied."
+    }));
+    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, { ...definition, version: 3, fields, components });
+    redirectWorkflow(productId, query, nextStep || "ink", "Roll stock saved");
+  }
+
+  if (step === "ink") {
+    const selected = readStringArray(formData, "inkChoice").filter(Boolean);
+    const choices = selected.length ? selected : ["cmyk"];
+    const optionLabels: Record<string, string> = { cmyk: "CMYK", white: "White", cmyk_white: "CMYK + White" };
+    const rates: Record<string, string> = { cmyk: "10", white: "10", cmyk_white: "20" };
+    const chargeLabels: Record<string, string> = { cmyk: "CMYK Ink", white: "White Ink", cmyk_white: "CMYK + White Ink" };
+    const options = choices.map((value) => workflowOption(optionLabels[value] ?? labelFromValue(value), value));
+    const nextField = workflowField({
+      key: "ink",
+      label: "Ink",
+      type: "select",
+      defaultValue: String(options[0]?.value ?? "cmyk"),
+      helpText: "Staff choose the ink mode. CMYK is $10/m², white adds another $10/m² when available.",
+      options,
+      showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] }
+    });
+    fields = upsertWorkflowField(removeWorkflowFields(fields, ["white_ink"]), nextField, workflowFieldOrder);
+    components = removeWorkflowComponents(components, isWorkflowInkCharge);
+    components.push(...choices.map((value) => sellChargeComponent({
+      label: chargeLabels[value] ?? `${optionLabels[value] ?? value} Ink`,
+      rate: rates[value] ?? "10",
+      unit: "sqm",
+      triggerOptionKey: "ink",
+      triggerOptionValues: [value],
+      notes: `${optionLabels[value] ?? value} ink charge selected in the guided workflow.`
+    })));
+    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, { ...definition, version: 3, fields, components });
+    redirectWorkflow(productId, query, nextStep || "laminate", "Ink choices saved");
+  }
+
+  if (step === "laminate") {
+    const packed = readStringArray(formData, "laminateMaterialPacked").filter(Boolean);
+    const materialIds = packed.map((entry) => entry.split("|||")[0] ?? "").filter(Boolean);
+    const names = packed.map((entry, index) => entry.split("|||")[1] || `Laminate ${index + 1}`);
+    const options = [workflowOption("None", "none"), ...materialIds.map((materialId, index) => workflowOption(names[index] || `Laminate ${index + 1}`, keyFromLabel(names[index] || materialId)) )];
+    const nextField = workflowField({
+      key: "laminate",
+      label: "Laminate",
+      type: "select",
+      defaultValue: "none",
+      helpText: "Staff choose none or one laminate material. Selected laminate is costed from roll length.",
+      options
+    });
+    fields = upsertWorkflowField(fields, nextField, workflowFieldOrder);
+    components = removeWorkflowComponents(components, isWorkflowLaminate);
+    components.push(...materialIds.map((materialId, index) => component({
+      label: names[index] || `Laminate ${index + 1}`,
+      materialId,
+      role: "quote_selected_material",
+      ruleType: "per_linear_metre",
+      unit: "lm",
+      dimensionSource: "finished_size",
+      triggerOptionKey: "laminate",
+      triggerOptionValues: [keyFromLabel(names[index] || materialId)],
+      notes: "Laminate selected in the guided workflow. Only applies when this laminate is chosen on a quote."
+    })));
+    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, { ...definition, version: 3, fields, components });
+    redirectWorkflow(productId, query, nextStep || "finishing", "Laminate choices saved");
+  }
+
+  if (step === "finishing") {
+    const selected = readStringArray(formData, "finishingChoice").filter(Boolean);
+    const options = selected.map((value) => workflowOption(labelFromValue(value), value));
+    const nextField = workflowField({
+      key: "finishing",
+      label: "Finishing",
+      type: "multi_select",
+      required: false,
+      defaultValue: null,
+      helpText: "Staff can tick multiple finishing processes. Each selected item can add labour or hardware.",
+      options
+    });
+    fields = upsertWorkflowField(fields, nextField, workflowFieldOrder);
+    components = removeWorkflowComponents(components, isWorkflowFinishing);
+
+    const labourHours: Record<string, string> = { jingwei_cutting: "0.25", router_cnc_cut: "0.50", drill_holes: "0.10" };
+    const labelMap: Record<string, string> = { jingwei_cutting: "Jingwei cutting", router_cnc_cut: "Router/CNC cut", drill_holes: "Drill holes", eyelets: "Eyelets" };
+    for (const value of selected) {
+      if (value === "eyelets") {
+        const eyeletMaterialId = readString(formData, "eyeletMaterialId") || null;
+        if (eyeletMaterialId) {
+          const eyeletMaterialName = readString(formData, "eyeletMaterialName") || "Eyelets";
+          components.push({
+            ...component({
+              label: eyeletMaterialName,
+              materialId: eyeletMaterialId,
+              role: "quote_finishing",
+              ruleType: "per_unit",
+              unit: "each",
+              quantity: "1",
+              wastePercent: "0",
+              dimensionSource: "quantity_only",
+              triggerOptionKey: "finishing",
+              triggerOptionValues: ["eyelets"],
+              notes: "Eyelets selected in guided workflow. Quote asks placement/quantity."
+            }),
+            stockUsage: {
+              usageBasis: "per_unit",
+              dimensionSource: "quantity_only",
+              optionKey: "finishing",
+              optionValues: ["eyelets"],
+              widthMm: null,
+              heightMm: null,
+              rollWidthMm: null,
+              partsPerSheet: null,
+              metresPerUnit: null,
+              sheetsPerUnit: null,
+              quantitySource: "follow_up",
+              quantityPrompt: "Eyelet placement",
+              quantityPresets: [
+                { id: randomUUID(), label: "4 corners", value: "four_corners", qty: "4" },
+                { id: randomUUID(), label: "Top corners only", value: "top_corners_only", qty: "2" },
+                { id: randomUUID(), label: "Centre top + bottom", value: "centre_top_bottom", qty: "2" },
+                { id: randomUUID(), label: "2 top + 2 bottom for pole fixing", value: "pole_fixing", qty: "4" },
+                { id: randomUUID(), label: "Custom", value: "__custom", qty: "custom" }
+              ],
+              allowCustomQuantity: true,
+              customQuantityLabel: "Custom eyelet quantity"
+            }
+          });
+        }
+        components.push({
+          id: randomUUID(),
+          kind: "labour",
+          role: "factory_labour",
+          materialId: null,
+          supplierId: null,
+          labourRateName: "Factory",
+          label: "Eyelet install labour",
+          quantity: "0.03",
+          unit: "hr",
+          notes: "Labour per eyelet. Quote placement/quantity multiplies this row.",
+          ruleType: "labour_hours",
+          wastePercent: "0",
+          stockUsage: {
+            usageBasis: "labour_hours",
+            dimensionSource: "quantity_only",
+            optionKey: "finishing",
+            optionValues: ["eyelets"],
+            widthMm: null,
+            heightMm: null,
+            rollWidthMm: null,
+            partsPerSheet: null,
+            metresPerUnit: null,
+            sheetsPerUnit: null,
+            sellRate: "66",
+            chargeName: "Eyelet install labour",
+            quantitySource: "follow_up",
+            quantityPrompt: "Eyelet placement",
+            quantityPresets: [
+              { id: randomUUID(), label: "4 corners", value: "four_corners", qty: "4" },
+              { id: randomUUID(), label: "Top corners only", value: "top_corners_only", qty: "2" },
+              { id: randomUUID(), label: "Centre top + bottom", value: "centre_top_bottom", qty: "2" },
+              { id: randomUUID(), label: "2 top + 2 bottom for pole fixing", value: "pole_fixing", qty: "4" },
+              { id: randomUUID(), label: "Custom", value: "__custom", qty: "custom" }
+            ],
+            allowCustomQuantity: true,
+            customQuantityLabel: "Custom eyelet quantity"
+          },
+          trigger: { optionKey: "finishing", optionValue: null, optionValues: ["eyelets"] }
+        });
+      } else {
+        components.push({
+          id: randomUUID(),
+          kind: "labour",
+          role: "factory_labour",
+          materialId: null,
+          supplierId: null,
+          labourRateName: "Factory",
+          label: `${labelMap[value] ?? labelFromValue(value)} labour`,
+          quantity: labourHours[value] ?? "0.10",
+          unit: "hr",
+          notes: `${labelMap[value] ?? labelFromValue(value)} labour selected in guided workflow.`,
+          ruleType: "labour_hours",
+          wastePercent: "0",
+          stockUsage: {
+            usageBasis: "labour_hours",
+            dimensionSource: "quantity_only",
+            optionKey: "finishing",
+            optionValues: [value],
+            widthMm: null,
+            heightMm: null,
+            rollWidthMm: null,
+            partsPerSheet: null,
+            metresPerUnit: null,
+            sheetsPerUnit: null,
+            sellRate: "66",
+            chargeName: `${labelMap[value] ?? labelFromValue(value)} labour`
+          },
+          trigger: { optionKey: "finishing", optionValue: null, optionValues: [value] }
+        });
+      }
+    }
+
+    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, { ...definition, version: 3, fields, components });
+    redirectWorkflow(productId, query, nextStep || "review", "Finishing choices saved");
+  }
+
+  redirect(`/products?selected=${productId}&error=Unknown%20workflow%20step`);
+}
+
 export async function updateProductOptionAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
