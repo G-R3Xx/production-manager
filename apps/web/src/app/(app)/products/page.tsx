@@ -430,6 +430,31 @@ function ProductFlowHero({ selectedProduct, fields, components, activeMaterials 
   );
 }
 
+function StarterTypeGroup({ title, starters, defaultValue }: { title: string; starters: StarterType[]; defaultValue: string }) {
+  const isSmallGroup = starters.some((starter) => isSmallFormatStarter(starter.value));
+  return (
+    <section style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+        <strong style={{ color: isSmallGroup ? "#6d28d9" : "#1d4ed8" }}>{title}</strong>
+        <span style={isSmallGroup ? { ...plainChipStyle, background: "#ede9fe", color: "#6d28d9" } : plainChipStyle}>{starters.length} template{starters.length === 1 ? "" : "s"}</span>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+        {starters.map((starter) => {
+          const isSmall = isSmallFormatStarter(starter.value);
+          return (
+            <label key={starter.value} style={{ ...whitePanelStyle, cursor: "pointer", gap: 8, background: isSmall ? "#faf5ff" : "#fff", borderColor: isSmall ? "#e9d5ff" : "#dfe7f2" }}>
+              <input type="radio" name="starterType" value={starter.value} defaultChecked={starter.value === defaultValue} />
+              <strong>{starter.label}</strong>
+              <p style={mutedStyle}>{starter.description}</p>
+              <span style={isSmall ? { ...plainChipStyle, background: "#ede9fe", color: "#6d28d9" } : plainChipStyle}>{starter.quickAnswers}</span>
+            </label>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function ProductChooser({ products, filteredProducts, selectedProduct, query, activeMaterials }: { products: any[]; filteredProducts: any[]; selectedProduct: any; query: string; activeMaterials: any[] }) {
   return (
     <details open={!selectedProduct} style={{ ...cardStyle, display: "grid", gap: 14 }}>
@@ -448,14 +473,17 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
           </label>
           <div style={{ display: "grid", gap: 10 }}>
             <span style={labelTextStyle}>Start from</span>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-              {starterTypes.slice(0, 8).map((starter) => (
-                <label key={starter.value} style={{ ...whitePanelStyle, cursor: "pointer", gap: 8, background: isSmallFormatStarter(starter.value) ? "#faf5ff" : "#fff", borderColor: isSmallFormatStarter(starter.value) ? "#e9d5ff" : "#dfe7f2" }}>
-                  <input type="radio" name="starterType" value={starter.value} defaultChecked={starter.value === "sign_acm"} />
-                  <strong>{starter.label}</strong>
-                  <p style={mutedStyle}>{starter.quickAnswers}</p>
-                </label>
-              ))}
+            <div style={{ display: "grid", gap: 14 }}>
+              <StarterTypeGroup
+                title="Signage / large format"
+                starters={starterTypes.filter((starter) => !isSmallFormatStarter(starter.value))}
+                defaultValue="sign_acm"
+              />
+              <StarterTypeGroup
+                title="Small format"
+                starters={starterTypes.filter((starter) => isSmallFormatStarter(starter.value))}
+                defaultValue="sign_acm"
+              />
             </div>
           </div>
           <details style={{ ...whitePanelStyle }}>
