@@ -54,6 +54,7 @@ type StepKey =
   | "laminate"
   | "finishing"
   | "small_type"
+  | "ncr_details"
   | "small_stock"
   | "small_size"
   | "small_sides"
@@ -191,7 +192,10 @@ function isSheetMaterial(material: QuoteMaterial): boolean {
 function isSmallFormatStock(material: QuoteMaterial): boolean {
   const type = String(material.materialType ?? "").toLowerCase();
   const text = materialText(material);
-  return type.includes("paper") || type.includes("card") || type.includes("small") || type.includes("sheet") || text.includes("paper") || text.includes("card") || text.includes("gsm") || text.includes("ncr") || text.includes("carbon") || text.includes("bond");
+  const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
+  const signageWords = ["acm", "aluminium composite", "aluminum composite", "acrylic", "perspex", "pmma", "corflute", "correx", "pvc", "foamboard", "foam board", "banner", "sav", "vinyl", "laminate"];
+  if (signageWords.some((word) => text.includes(word))) return false;
+  return type.includes("paper") || type.includes("card") || type.includes("small") || text.includes("paper") || text.includes("card") || text.includes("gsm") || text.includes("ncr") || text.includes("carbon") || text.includes("bond") || purchaseUom.includes("ream");
 }
 
 function isRollMaterial(material: QuoteMaterial): boolean {
@@ -340,6 +344,17 @@ function selectedKeys<T extends { key: string; label: string }>(items: T[], keys
   return items.filter((item) => keys.includes(item.key)).map((item) => item.label).join(", ");
 }
 
+function ncrCopyCount(value: string): number {
+  if (value === "duplicate") return 2;
+  if (value === "triplicate") return 3;
+  if (value === "quadruplicate") return 4;
+  return 0;
+}
+
+function pageColourSummary(count: number, colours: string[]): string {
+  return colours.slice(0, Math.max(0, count)).map((colour, index) => `Page ${index + 1}: ${colour}`).join(", ");
+}
+
 export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }: QuoteMaterialFlowBuilderProps) {
   const [activeStep, setActiveStep] = useState<StepKey>("flow");
   const [flowType, setFlowType] = useState<FlowType>("");
@@ -365,6 +380,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
 
   const [smallType, setSmallType] = useState<SmallFormatType | "">("");
   const [smallStockId, setSmallStockId] = useState("");
+  const [customSmallStockEnabled, setCustomSmallStockEnabled] = useState(false);
+  const [customSmallStockName, setCustomSmallStockName] = useState("");
+  const [customSmallStockSupplier, setCustomSmallStockSupplier] = useState("");
+  const [customSmallStockCost, setCustomSmallStockCost] = useState("");
+  const [customSmallStockWidthMm, setCustomSmallStockWidthMm] = useState("");
+  const [customSmallStockLengthMm, setCustomSmallStockLengthMm] = useState("");
+  const [customSmallStockGsm, setCustomSmallStockGsm] = useState("");
+  const [ncrCopies, setNcrCopies] = useState("");
+  const [ncrSetsPerBook, setNcrSetsPerBook] = useState("");
+  const [ncrPageColours, setNcrPageColours] = useState(["White", "Yellow", "Pink", "Blue"]);
+  const [ncrCoverColour, setNcrCoverColour] = useState("");
+  const [ncrTapeColour, setNcrTapeColour] = useState("");
   const [smallPrintColour, setSmallPrintColour] = useState<SmallPrintColour>("");
   const [smallCoatingId, setSmallCoatingId] = useState("");
   const [smallFinishings, setSmallFinishings] = useState<string[]>([]);
@@ -401,14 +428,34 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const rollMedia = useMemo(() => materials.filter(isPrintRollMaterial), [materials]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
   const smallStocks = useMemo(() => materials.filter(isSmallFormatStock), [materials]);
+  const customSmallStock = useMemo<QuoteMaterial | undefined>(() => {
+    if (!customSmallStockEnabled || !customSmallStockName.trim()) return undefined;
+    return {
+      id: "custom-small-stock",
+      name: customSmallStockName.trim(),
+      materialType: "Custom small format stock",
+      supplierName: customSmallStockSupplier.trim() || "Custom",
+      sku: "CUSTOM",
+      stockUom: "sheet",
+      purchaseUom: "sheet",
+      stockQuantity: "",
+      purchaseCost: customSmallStockCost,
+      widthMm: customSmallStockWidthMm,
+      lengthMm: customSmallStockLengthMm,
+      gsm: customSmallStockGsm
+    };
+  }, [customSmallStockEnabled, customSmallStockName, customSmallStockSupplier, customSmallStockCost, customSmallStockWidthMm, customSmallStockLengthMm, customSmallStockGsm]);
   const selectedMedia = rollMedia.find((material) => material.id === mediaId);
   const selectedLaminate = laminateMaterials.find((material) => material.id === laminateId);
-  const selectedSmallStock = smallStocks.find((material) => material.id === smallStockId);
+  const selectedSmallStock = customSmallStockEnabled ? customSmallStock : smallStocks.find((material) => material.id === smallStockId);
   const selectedSmallCoating = laminateMaterials.find((material) => material.id === smallCoatingId);
   const eyeletMaterial = materials.find((material) => materialText(material).includes("eyelet")) ?? materials.find((material) => String(material.materialType ?? "").toLowerCase().includes("fix"));
 
   const selectedBase = baseTypes.find((item) => item.key === baseType);
   const selectedSmallType = smallFormatTypes.find((item) => item.key === smallType);
+  const isDuplicateBook = smallType === "duplicate_books";
+  const ncrCopiesCount = ncrCopyCount(ncrCopies);
+  const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
   const printed = printMethod !== "" && printMethod !== "no_print";
   const needsMediaStep = printMethod === "roll_stock" || printMethod === "cut_vinyl";
@@ -426,15 +473,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
 
     if (flowType === "small_format") {
       next.push({ key: "small_type", label: "Print item", complete: Boolean(smallType), icon: "2" });
-      next.push({ key: "small_stock", label: "Stock", complete: Boolean(smallStockId), icon: "3" });
-      next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: "4" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: "5" });
-      next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "6" });
-      next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "7" });
-      next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "8" });
-      next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: "9" });
-      next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: "10" });
-      next.push({ key: "review", label: "Review", complete: Boolean(smallType && selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId), icon: "✓" });
+      if (isDuplicateBook) next.push({ key: "ncr_details", label: "Book details", complete: ncrDetailsComplete, icon: "3" });
+      next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: isDuplicateBook ? "4" : "3" });
+      next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: isDuplicateBook ? "5" : "4" });
+      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: isDuplicateBook ? "6" : "5" });
+      if (!isDuplicateBook) {
+        next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "6" });
+        next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "7" });
+        next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "8" });
+      }
+      next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: isDuplicateBook ? "7" : "9" });
+      next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: isDuplicateBook ? "8" : "10" });
+      next.push({ key: "review", label: "Review", complete: Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId))), icon: "✓" });
       return next;
     }
 
@@ -454,7 +504,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     }
 
     return next;
-  }, [flowType, smallType, smallStockId, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, selectedSmallStock, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours]);
+  }, [flowType, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -473,6 +523,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     setColour("");
     setSmallType("");
     setSmallStockId("");
+    setCustomSmallStockEnabled(false);
+    setCustomSmallStockName("");
+    setCustomSmallStockSupplier("");
+    setCustomSmallStockCost("");
+    setCustomSmallStockWidthMm("");
+    setCustomSmallStockLengthMm("");
+    setCustomSmallStockGsm("");
+    setNcrCopies("");
+    setNcrSetsPerBook("");
+    setNcrPageColours(["White", "Yellow", "Pink", "Blue"]);
+    setNcrCoverColour("");
+    setNcrTapeColour("");
     setWidthMm("");
     setHeightMm("");
     setArtworkChoice("");
@@ -616,14 +678,24 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
         const parentWidth = numberValue(selectedSmallStock.widthMm, 0);
         const parentHeight = numberValue(selectedSmallStock.lengthMm, 0);
         const perSheet = piecesPerSheet(parentWidth, parentHeight, width, height);
-        const sheets = perSheet > 0 ? Math.ceil(quantityNumber / perSheet) : quantityNumber;
+        const setsPerBook = isDuplicateBook ? Math.max(1, numberValue(ncrSetsPerBook, 1)) : 1;
+        const copiesPerSet = isDuplicateBook ? Math.max(1, ncrCopiesCount || 1) : 1;
+        const requiredPieces = quantityNumber * setsPerBook * copiesPerSet;
+        const sheets = perSheet > 0 ? Math.ceil(requiredPieces / perSheet) : requiredPieces;
         const rate = sheetUnitRate(selectedSmallStock);
-        rows.push({ label: "Paper / card stock", detail: selectedSmallStock.name, amount: sheets, unit: "sheet", rate: rate.rate, cost: sheets * rate.rate, note: perSheet > 0 ? `${perSheet} up per parent sheet` : rate.note ?? "parent sheet size missing" });
+        rows.push({ label: isDuplicateBook ? "Carbon/NCR stock" : "Paper / card stock", detail: selectedSmallStock.name, amount: sheets, unit: "sheet", rate: rate.rate, cost: sheets * rate.rate, note: isDuplicateBook ? `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies · ${perSheet > 0 ? `${perSheet} up per parent sheet` : "parent sheet size missing"}` : perSheet > 0 ? `${perSheet} up per parent sheet` : rate.note ?? "parent sheet size missing" });
       }
 
       if (artworkChoice === "required") {
         const hours = numberValue(artworkHours, 0);
         if (hours > 0) rows.push({ label: "Artwork", detail: "Artwork/design time", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+      }
+
+      if (isDuplicateBook && itemArea > 0 && quantityNumber > 0) {
+        const setsPerBook = Math.max(1, numberValue(ncrSetsPerBook, 1));
+        const copiesPerSet = Math.max(1, ncrCopiesCount || 1);
+        const printedArea = itemArea * quantityNumber * setsPerBook * copiesPerSet;
+        rows.push({ label: "Carbon book print", detail: pageColourSummary(copiesPerSet, ncrPageColours), amount: printedArea, unit: "sqm", rate: monoRatePerSqm, cost: printedArea * monoRatePerSqm, note: `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies` });
       }
 
       if (smallPrintColour && itemArea > 0 && quantityNumber > 0) {
@@ -647,7 +719,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours]);
 
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
   const autoUnitPrice = rawCost * sellMultiplier;
@@ -667,6 +739,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     ? [
       selectedSmallType?.label,
       selectedSmallStock?.name,
+      isDuplicateBook && ncrCopies ? `${ncrCopiesCount} part book` : null,
+      isDuplicateBook && ncrSetsPerBook ? `${ncrSetsPerBook} sets/book` : null,
+      isDuplicateBook && ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : null,
+      isDuplicateBook && ncrCoverColour ? `Cover: ${ncrCoverColour}` : null,
+      isDuplicateBook && ncrTapeColour ? `Tape: ${ncrTapeColour}` : null,
       width > 0 && height > 0 ? `${width} × ${height}mm` : null,
       artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
@@ -690,7 +767,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     ].filter(Boolean).join(" · ");
 
   const canSave = flowType === "small_format"
-    ? Boolean(smallType && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && sides && smallPrintColour && smallCoatingId && quantityNumber > 0)
+    ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0)
     : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0));
 
   function stepTitle(): string {
@@ -833,7 +910,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       );
     }
 
-    if (activeStep === "artwork") return renderArtworkStep(flowType === "small_format" ? "small_sides" : "print");
+    if (activeStep === "artwork") return renderArtworkStep(flowType === "small_format" ? (isDuplicateBook ? "small_finishing" : "small_sides") : "print");
 
     if (activeStep === "print") {
       return (
@@ -981,7 +1058,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
           <StepIntro icon="2" title="Choose small format item" text="Small format has its own flow and does not use signage material questions." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
             {smallFormatTypes.map((item) => (
-              <button key={item.key} type="button" onClick={() => { setSmallType(item.key); setActiveStep("small_stock"); }} style={cardButtonStyle(smallType === item.key, "#7c3aed")}>
+              <button key={item.key} type="button" onClick={() => { setSmallType(item.key); setSmallStockId(""); setCustomSmallStockEnabled(false); setNcrCopies(""); setNcrSetsPerBook(""); setNcrCoverColour(""); setNcrTapeColour(""); setActiveStep(item.key === "duplicate_books" ? "ncr_details" : "small_stock"); }} style={cardButtonStyle(smallType === item.key, "#7c3aed")}>
                 <span style={{ fontSize: 34 }}>{item.icon}</span>
                 <strong>{item.label}</strong>
                 <span style={{ color: "#64748b", lineHeight: 1.45 }}>{item.description}</span>
@@ -992,16 +1069,63 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       );
     }
 
+    if (activeStep === "ncr_details") {
+      const copyOptions = [
+        { key: "duplicate", label: "Duplicate", detail: "2 parts: page 1 + page 2" },
+        { key: "triplicate", label: "Triplicate", detail: "3 parts: page 1 + page 2 + page 3" },
+        { key: "quadruplicate", label: "Quadruplicate", detail: "4 parts: page 1 + page 2 + page 3 + page 4" }
+      ];
+      const colourOptions = ["White", "Yellow", "Pink", "Blue", "Green", "Canary", "Custom"];
+      const coverOptions = ["None", "White", "Yellow", "Pink", "Blue", "Green", "Manilla", "Custom"];
+      const tapeOptions = ["Black", "White", "Red", "Blue", "Green", "Yellow", "Clear", "Custom"];
+      const count = ncrCopyCount(ncrCopies);
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="3" title="Set up the carbon book" text="Choose duplicate/triplicate, page colours, cover colour and tape colour before choosing stock." />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+            {copyOptions.map((option) => (
+              <button key={option.key} type="button" onClick={() => setNcrCopies(option.key)} style={cardButtonStyle(ncrCopies === option.key, "#7c3aed")}>
+                <span style={{ fontSize: 34 }}>▱</span>
+                <strong>{option.label}</strong>
+                <span style={{ color: "#64748b" }}>{option.detail}</span>
+              </button>
+            ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+            <label style={{ display: "grid", gap: 6 }}><b>Sets / pages per book</b><input value={ncrSetsPerBook} onChange={(event) => setNcrSetsPerBook(event.target.value)} placeholder="eg 50" type="number" min="1" step="1" style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Cover colour</b><select value={ncrCoverColour} onChange={(event) => setNcrCoverColour(event.target.value)} style={inputStyle}><option value="">Choose cover colour</option>{coverOptions.map((colourName) => <option key={colourName} value={colourName}>{colourName}</option>)}</select></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Tape colour</b><select value={ncrTapeColour} onChange={(event) => setNcrTapeColour(event.target.value)} style={inputStyle}><option value="">Choose tape colour</option>{tapeOptions.map((colourName) => <option key={colourName} value={colourName}>{colourName}</option>)}</select></label>
+          </div>
+          {count > 0 ? (
+            <div style={{ border: "1px solid #e9d5ff", borderRadius: 20, padding: 14, background: "#faf5ff", display: "grid", gap: 10 }}>
+              <strong>Page colours</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+                {Array.from({ length: count }).map((_, index) => (
+                  <label key={index} style={{ display: "grid", gap: 6 }}>
+                    <b>Page {index + 1}</b>
+                    <select value={ncrPageColours[index] ?? ""} onChange={(event) => setNcrPageColours((current) => current.map((colourName, colourIndex) => colourIndex === index ? event.target.value : colourName))} style={inputStyle}>
+                      {colourOptions.map((colourName) => <option key={colourName} value={colourName}>{colourName}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <button type="button" onClick={() => setActiveStep("small_stock")} disabled={!ncrDetailsComplete} style={{ ...primaryButton, opacity: ncrDetailsComplete ? 1 : 0.45 }}>Continue to stock</button>
+        </div>
+      );
+    }
+
     if (activeStep === "small_stock") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="3" title="Choose paper / card stock" text="Pick the actual stock from Materials. Paper/card materials stay separate from signage materials." />
-          {smallStocks.length === 0 ? <EmptyStep text="No paper/card stock found. Create small format materials first." /> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, maxHeight: 480, overflow: "auto", paddingRight: 4 }}>
+          <StepIntro icon={isDuplicateBook ? "4" : "3"} title={isDuplicateBook ? "Choose NCR / carbonless stock" : "Choose paper / card stock"} text="Only small-format stock is shown here. Signage sheets like ACM, acrylic and corflute are hidden from this step." />
+          {smallStocks.length === 0 ? <EmptyStep text="No small-format paper/card/NCR stock found. Use Custom stock below or create a small-format material first." /> : null}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, maxHeight: 420, overflow: "auto", paddingRight: 4 }}>
             {smallStocks.map((material) => {
               const rate = sheetUnitRate(material);
               return (
-                <button key={material.id} type="button" onClick={() => { setSmallStockId(material.id); setActiveStep("small_size"); }} style={cardButtonStyle(smallStockId === material.id, "#7c3aed")}>
+                <button key={material.id} type="button" onClick={() => { setCustomSmallStockEnabled(false); setSmallStockId(material.id); setActiveStep("small_size"); }} style={cardButtonStyle(!customSmallStockEnabled && smallStockId === material.id, "#7c3aed")}>
                   <span style={{ fontSize: 30 }}>▤</span>
                   <strong>{material.name}</strong>
                   <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
@@ -1011,6 +1135,23 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               );
             })}
           </div>
+          <div style={{ border: "1px solid #e9d5ff", borderRadius: 22, padding: 16, background: customSmallStockEnabled ? "#faf5ff" : "#fff", display: "grid", gap: 12 }}>
+            <button type="button" onClick={() => { setCustomSmallStockEnabled(!customSmallStockEnabled); setSmallStockId(""); }} style={{ ...ghostButton, justifySelf: "start" }}>{customSmallStockEnabled ? "Hide custom stock" : "+ Use custom stock for this quote"}</button>
+            {customSmallStockEnabled ? (
+              <div style={{ display: "grid", gap: 12 }}>
+                <p style={{ margin: 0, color: "#64748b" }}>Use this when the material is not in the library yet. It prices this quote line only.</p>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+                  <label style={{ display: "grid", gap: 6 }}><b>Stock name</b><input value={customSmallStockName} onChange={(event) => setCustomSmallStockName(event.target.value)} placeholder="eg NCR White/Yellow/Pink" style={inputStyle} /></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>Supplier</b><input value={customSmallStockSupplier} onChange={(event) => setCustomSmallStockSupplier(event.target.value)} placeholder="eg Custom supplier" style={inputStyle} /></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>Cost per sheet</b><input value={customSmallStockCost} onChange={(event) => setCustomSmallStockCost(event.target.value)} placeholder="eg 0.18" type="number" min="0" step="0.01" style={inputStyle} /></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>Sheet width mm</b><input value={customSmallStockWidthMm} onChange={(event) => setCustomSmallStockWidthMm(event.target.value)} placeholder="eg 210" type="number" min="0" step="1" style={inputStyle} /></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>Sheet height mm</b><input value={customSmallStockLengthMm} onChange={(event) => setCustomSmallStockLengthMm(event.target.value)} placeholder="eg 297" type="number" min="0" step="1" style={inputStyle} /></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>GSM / thickness</b><input value={customSmallStockGsm} onChange={(event) => setCustomSmallStockGsm(event.target.value)} placeholder="eg 80gsm" style={inputStyle} /></label>
+                </div>
+                <button type="button" disabled={!customSmallStock} onClick={() => setActiveStep("small_size")} style={{ ...primaryButton, opacity: customSmallStock ? 1 : 0.45 }}>Use this custom stock</button>
+              </div>
+            ) : null}
+          </div>
         </div>
       );
     }
@@ -1018,7 +1159,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     if (activeStep === "small_size") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="4" title="Choose finished size" text="Finished size calculates paper/card usage and print area." />
+          <StepIntro icon={isDuplicateBook ? "5" : "4"} title="Choose finished size" text={isDuplicateBook ? "Choose the finished form size. The book details decide how many copies/sheets are required." : "Finished size calculates paper/card usage and print area."} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
             {smallSizePresets.map((preset) => {
               const selected = widthMm === preset.width && heightMm === preset.height;
@@ -1192,11 +1333,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               <>
                 <SummaryRow label="Item" value={selectedSmallType?.label} />
                 <SummaryRow label="Stock" value={selectedSmallStock?.name} />
+                {isDuplicateBook ? <SummaryRow label="Book" value={ncrCopies ? `${ncrCopiesCount} part · ${ncrSetsPerBook || "?"} sets/book` : undefined} /> : null}
+                {isDuplicateBook ? <SummaryRow label="Page colours" value={ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : undefined} /> : null}
+                {isDuplicateBook ? <SummaryRow label="Cover / tape" value={ncrCoverColour && ncrTapeColour ? `${ncrCoverColour} cover · ${ncrTapeColour} tape` : undefined} /> : null}
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
-                <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} />
-                <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} />
-                <SummaryRow label="Coating" value={selectedSmallCoatingName || undefined} />
+                {!isDuplicateBook ? <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} /> : null}
+                {!isDuplicateBook ? <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} /> : null}
+                {!isDuplicateBook ? <SummaryRow label="Coating" value={selectedSmallCoatingName || undefined} /> : null}
                 <SummaryRow label="Finishing" value={smallFinishingSummary || undefined} />
               </>
             ) : (
