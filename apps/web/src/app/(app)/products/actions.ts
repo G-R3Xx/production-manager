@@ -1224,6 +1224,13 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
     usageOptionKey = "quantity";
   }
 
+  if (baseUsage === "choice_only") {
+    ruleType = "choice_only";
+    unit = "choice";
+    dimensionSource = "quantity_only";
+    usageOptionKey = triggerOptionKey ?? "quantity";
+  }
+
   if (baseUsage === "sell_sqm") {
     ruleType = "sell_sqm";
     unit = "sqm";
@@ -1259,7 +1266,7 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
     id: existingComponent?.id ?? randomUUID(),
     kind,
     role,
-    materialId: ["sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(baseUsage) ? null : materialId,
+    materialId: ["choice_only", "sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(baseUsage) ? null : materialId,
     supplierId: existingComponent?.supplierId ?? null,
     labourRateName: readString(formData, "labourRateName") || existingComponent?.labourRateName || null,
     label,
@@ -1281,7 +1288,7 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
       metresPerUnit: optionalNumberString(formData, "metresPerUnit", existingStockUsage?.metresPerUnit ?? null),
       sheetsPerUnit: optionalNumberString(formData, "sheetsPerUnit", existingStockUsage?.sheetsPerUnit ?? null),
       sellRate,
-      chargeName: ["sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(baseUsage) ? label : (existingStockUsage?.chargeName ?? null)
+      chargeName: ["choice_only", "sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(baseUsage) ? label : (existingStockUsage?.chargeName ?? null)
     },
     trigger: {
       optionKey: triggerOptionKey,

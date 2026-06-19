@@ -1036,6 +1036,7 @@ function recipeBasisText(component: any): string {
   if (ruleType === "sell_each") return `$${cleanUsageNumber(stockUsage.sellRate ?? component.quantity) || "0"} each`;
   if (ruleType === "labour_hours") return `${cleanUsageNumber(component.quantity) || "0"} hr × $${cleanUsageNumber(stockUsage.sellRate) || "0"}/hr`;
   if (ruleType === "outsourced_each") return `${cleanUsageNumber(component.quantity) || "1"} × $${cleanUsageNumber(stockUsage.sellRate) || "0"}`;
+  if (ruleType === "choice_only") return String(component?.notes ?? "").includes("Direct print") ? "Direct print / no roll stock" : "Choice only";
   if (ruleType === "per_linear_metre") return cleanUsageNumber(stockUsage.metresPerUnit) ? `${cleanUsageNumber(stockUsage.metresPerUnit)} lm each` : "Roll length from size";
   if (ruleType === "per_sqm") return "Square metres from size";
   if (ruleType === "per_unit") return String(component.unit ?? "each") === "sheet" ? `${cleanUsageNumber(stockUsage.sheetsPerUnit) || "1"} sheet each` : `${cleanUsageNumber(component.quantity) || "1"} each`;
@@ -1350,9 +1351,9 @@ const signageProductBuildSlots: ProductBuildSlot[] = [
   },
   {
     key: "print_media",
-    label: "Print media",
-    chooseLabel: "Choose print media",
-    description: "Roll stock or print media used when the product is not direct printed.",
+    label: "Print method",
+    chooseLabel: "Choose print method",
+    description: "Choose Direct print, or choose one roll stock/media if the job is printed onto vinyl, banner or another roll material.",
     baseUsage: "roll_metres",
     role: "quote_selected_material",
     kind: "material",
@@ -1863,9 +1864,32 @@ function SelectMaterialForSlotForm({ selectedProduct, slot, material, existing }
   );
 }
 
+function SelectDirectPrintForSlotForm({ selectedProduct, existing }: { selectedProduct: any; existing: any | null }) {
+  const action = existing ? updateProductComponentAction : addProductComponentAction;
+  return (
+    <form action={action}>
+      <input type="hidden" name="productId" value={selectedProduct.id} />
+      {existing ? <input type="hidden" name="componentId" value={existing.id} /> : null}
+      <input type="hidden" name="label" value="Direct print" />
+      <input type="hidden" name="kind" value="material" />
+      <input type="hidden" name="role" value="quote_selected_material" />
+      <input type="hidden" name="materialId" value="" />
+      <input type="hidden" name="baseUsage" value="choice_only" />
+      <input type="hidden" name="quantity" value="1" />
+      <input type="hidden" name="wastePercent" value="0" />
+      <input type="hidden" name="triggerOptionKey" value="print_type" />
+      <input type="hidden" name="triggerOptionValuesCsv" value="direct_print" />
+      <input type="hidden" name="notes" value="Direct print method selected. No roll stock material is used for this part; ink/print charges can still be added separately." />
+      <button type="submit" style={blueButtonStyle}>{existing ? "Use direct print instead" : "Choose direct print"}</button>
+    </form>
+  );
+}
+
 function MaterialPickerForSlot({ selectedProduct, slot, materials, existing, query }: { selectedProduct: any; slot: ProductBuildSlot; materials: any[]; existing: any | null; query: string }) {
   const rows = materials.filter((material) => materialMatchesPart(material, slot.key));
   const closeHref = productBuilderUrl(selectedProduct.id, query);
+  const isPrintMethodPicker = slot.key === "print_media";
+  const existingIsDirectPrint = lowerText(existing?.label).includes("direct print") && !existing?.materialId;
 
   return (
     <div style={pickerBackdropStyle}>
@@ -1877,17 +1901,30 @@ function MaterialPickerForSlot({ selectedProduct, slot, materials, existing, que
             <p style={mutedStyle}>{slot.description}</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <span style={plainChipStyle}>{rows.length} matching material{rows.length === 1 ? "" : "s"}</span>
+            <span style={plainChipStyle}>{isPrintMethodPicker ? `${rows.length} roll stock option${rows.length === 1 ? "" : "s"}` : `${rows.length} matching material${rows.length === 1 ? "" : "s"}`}</span>
             <Link href={closeHref} style={ghostStyle}>Close</Link>
           </div>
         </div>
+        {isPrintMethodPicker ? (
+          <div style={{ padding: 16, borderBottom: "1px solid #e5e7eb", background: "#fff" }}>
+            <div style={{ ...whitePanelStyle, display: "grid", gridTemplateColumns: "1fr auto", gap: 14, alignItems: "center", borderColor: existingIsDirectPrint ? "#abefc6" : "#dfe7f2", background: existingIsDirectPrint ? "#ecfdf3" : "#ffffff" }}>
+              <div>
+                <strong style={{ fontSize: 17 }}>Direct print</strong>
+                <p style={{ ...mutedStyle, marginTop: 3 }}>Use this when the product is printed directly to the substrate. No roll media is added to the build.</p>
+                <span style={greenChipStyle}>No roll stock cost</span>
+              </div>
+              <SelectDirectPrintForSlotForm selectedProduct={selectedProduct} existing={existing} />
+            </div>
+          </div>
+        ) : null}
         {rows.length === 0 ? (
           <div style={{ padding: 18 }}>
-            <p style={mutedStyle}>No applicable materials found for this part. Add or update stock in Materials first, then come back to choose it here.</p>
+            <p style={mutedStyle}>{isPrintMethodPicker ? "No roll stock/material options found. You can still choose Direct print above, or add roll stock in Materials first." : "No applicable materials found for this part. Add or update stock in Materials first, then come back to choose it here."}</p>
             <Link href="/materials" style={blueButtonStyle}>Go to Materials</Link>
           </div>
         ) : (
-          <div style={{ overflow: "auto", maxHeight: "calc(90vh - 128px)" }}>
+          <div style={{ overflow: "auto", maxHeight: isPrintMethodPicker ? "calc(90vh - 246px)" : "calc(90vh - 128px)" }}>
+            {isPrintMethodPicker ? <p style={{ ...mutedStyle, padding: "14px 16px 0" }}>Or choose one roll stock/media below. Roll materials show the calculated $/lm so the full roll price does not confuse the build cost.</p> : null}
             <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 860 }}>
             <thead>
               <tr style={{ textAlign: "left", color: "#64748b", fontSize: 12, borderBottom: "1px solid #e5e7eb" }}>

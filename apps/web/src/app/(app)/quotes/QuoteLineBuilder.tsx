@@ -585,6 +585,10 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
       const waste = wasteMultiplier(component);
       const componentLabel = String(component.stockUsage?.chargeName ?? component.label ?? "Material");
 
+      if (rawRuleType === "choice_only") {
+        return [];
+      }
+
       if (rawRuleType === "sell_sqm") {
         const area = dimensions ? (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000) : 0;
         const rate = numberValue(component.stockUsage?.sellRate, numberValue(component.quantity, 0));
