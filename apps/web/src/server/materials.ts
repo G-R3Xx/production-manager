@@ -44,6 +44,10 @@ export type CreateMaterialInput = {
   notes: string | null;
 };
 
+export type UpdateMaterialInput = CreateMaterialInput & {
+  id: string;
+};
+
 
 function normalizeMaterialType(value: string): string {
   switch (value) {
@@ -200,4 +204,57 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.gsm,
     input.notes
   ]);
+}
+
+export async function updateMaterial(input: UpdateMaterialInput): Promise<void> {
+  await pool.query(`
+    UPDATE catalog.materials
+    SET
+      supplier_id = $3::uuid,
+      source_product_id = $4::uuid,
+      name = $5::varchar,
+      sku = $6::varchar,
+      type = $7::material_type,
+      material_type = $8::varchar,
+      stock_uom = $9::varchar,
+      purchase_uom = $10::varchar,
+      stock_quantity = $11::numeric,
+      purchase_cost = $12::numeric,
+      width_mm = $13::numeric,
+      length_mm = $14::numeric,
+      roll_width_mm = $15::numeric,
+      gsm = $16::numeric,
+      notes = $17::varchar,
+      updated_at = now()
+    WHERE id = $1::uuid
+      AND tenant_id = $2::uuid
+  `, [
+    input.id,
+    input.tenantId,
+    input.supplierId,
+    input.sourceProductId,
+    input.name,
+    input.sku,
+    toLegacyMaterialType(input.materialType),
+    normalizeMaterialType(input.materialType),
+    input.stockUom,
+    input.purchaseUom,
+    input.stockQuantity,
+    input.purchaseCost,
+    input.widthMm,
+    input.lengthMm,
+    input.rollWidthMm,
+    input.gsm,
+    input.notes
+  ]);
+}
+
+export async function setMaterialActive(tenantId: string, materialId: string, active: boolean): Promise<void> {
+  await pool.query(`
+    UPDATE catalog.materials
+    SET active = $3::boolean,
+        updated_at = now()
+    WHERE id = $1::uuid
+      AND tenant_id = $2::uuid
+  `, [materialId, tenantId, active]);
 }

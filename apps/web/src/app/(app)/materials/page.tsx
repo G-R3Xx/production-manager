@@ -4,7 +4,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listSuppliersForTenant } from "@/server/suppliers";
-import { createMaterialAction } from "./actions";
+import { createMaterialAction, setMaterialActiveAction, updateMaterialAction } from "./actions";
 
 type MaterialsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -18,6 +18,27 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
 
 function formatMaterialType(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function materialTypeSelectValue(value: string): string {
+  switch (value) {
+    case "sheet":
+      return "sheet_media";
+    case "roll":
+      return "roll_media";
+    case "paper":
+      return "paper_stock";
+    case "card stock":
+      return "card_stock";
+    case "roll laminate":
+      return "roll_laminate";
+    case "hardware":
+      return "fixing";
+    case "consumable":
+      return "item";
+    default:
+      return value || "other";
+  }
 }
 
 function isRollType(type: string): boolean {
@@ -58,6 +79,8 @@ const labelStyle: CSSProperties = { display: "grid", gap: 7, minWidth: 0 };
 const labelTextStyle: CSSProperties = { fontWeight: 700, fontSize: 13, color: "#344054" };
 const gridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 };
 const buttonStyle: CSSProperties = { minHeight: 46, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" };
+const secondaryButtonStyle: CSSProperties = { minHeight: 40, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer", padding: "0 14px" };
+const dangerButtonStyle: CSSProperties = { minHeight: 40, borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer", padding: "0 14px" };
 const pillStyle: CSSProperties = { display: "inline-flex", alignItems: "center", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" };
 const mutedTextStyle: CSSProperties = { color: "#667085", fontSize: 13, lineHeight: 1.45 };
 
@@ -220,18 +243,112 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
           ) : (
             <div style={{ display: "grid", gap: 12 }}>
               {materials.map((material) => (
-                <article key={material.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: "#fafafa", display: "grid", gap: 9 }}>
+                <article key={material.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: material.active ? "#fafafa" : "#f9fafb", display: "grid", gap: 12, opacity: material.active ? 1 : 0.78 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
                     <div>
                       <div style={{ fontWeight: 800 }}>{material.name}</div>
                       <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{formatMaterialType(material.materialType)} · Stock {material.stockQuantity ?? "0"} {material.stockUom ?? "units"} · Cost ${material.purchaseCost ?? "0"}/{material.purchaseUom ?? "unit"}</div>
                     </div>
-                    <span style={pillStyle}>{material.active ? "active" : "inactive"}</span>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <span style={pillStyle}>{material.active ? "active" : "inactive"}</span>
+                      <form action={setMaterialActiveAction}>
+                        <input type="hidden" name="materialId" value={material.id} />
+                        <input type="hidden" name="active" value={material.active ? "false" : "true"} />
+                        <button type="submit" style={material.active ? dangerButtonStyle : secondaryButtonStyle}>{material.active ? "Delete" : "Restore"}</button>
+                      </form>
+                    </div>
                   </div>
                   <div style={mutedTextStyle}>Supplier: {material.supplierName ?? "Not linked"} · SKU: {material.sku ?? "—"}</div>
                   <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
                   {material.sourceProductName ? <div style={{ ...mutedTextStyle, color: "#b54708" }}>Legacy source product link: {material.sourceProductName}</div> : null}
                   {material.notes ? <div style={mutedTextStyle}>{material.notes}</div> : null}
+
+                  <details style={{ border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", padding: 12 }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 800 }}>Edit material</summary>
+                    <form action={updateMaterialAction} style={{ display: "grid", gap: 14, marginTop: 14 }}>
+                      <input type="hidden" name="materialId" value={material.id} />
+                      <div style={gridStyle}>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Material name</span>
+                          <input name="name" required defaultValue={material.name} style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Supplier</span>
+                          <select name="supplierId" defaultValue={material.supplierId ?? ""} style={inputStyle}>
+                            <option value="">No supplier linked</option>
+                            {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.displayName}</option>)}
+                          </select>
+                        </label>
+                      </div>
+
+                      <div style={gridStyle}>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Supplier SKU</span>
+                          <input name="sku" defaultValue={material.sku ?? ""} style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Material type</span>
+                          <select name="materialType" defaultValue={materialTypeSelectValue(material.materialType)} style={inputStyle}>
+                            <option value="sheet_media">Sheet media</option>
+                            <option value="roll_media">Roll media</option>
+                            <option value="roll_laminate">Roll laminate</option>
+                            <option value="paper_stock">Paper stock</option>
+                            <option value="card_stock">Card stock</option>
+                            <option value="cello_stock">Celloglaze / cello</option>
+                            <option value="binding">Binding material</option>
+                            <option value="finishing">Finishing consumable</option>
+                            <option value="fixing">Hardware / fixing</option>
+                            <option value="item">Consumable / item</option>
+                            <option value="other">Other</option>
+                          </select>
+                        </label>
+                      </div>
+
+                      <div style={gridStyle}>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Stock UOM</span>
+                          <input name="stockUom" defaultValue={material.stockUom ?? "sheet"} placeholder="sheet, lm, sqm, each" style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Purchase UOM</span>
+                          <input name="purchaseUom" defaultValue={material.purchaseUom ?? "sheet"} placeholder="sheet, roll, box, each" style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Stock qty / roll length</span>
+                          <input name="stockQuantity" defaultValue={material.stockQuantity ?? "0"} style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Purchase cost</span>
+                          <input name="purchaseCost" defaultValue={material.purchaseCost ?? "0"} style={inputStyle} />
+                        </label>
+                      </div>
+
+                      <div style={gridStyle}>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Width mm</span>
+                          <input name="widthMm" defaultValue={material.widthMm ?? ""} placeholder="Sheet width" style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Length mm</span>
+                          <input name="lengthMm" defaultValue={material.lengthMm ?? ""} placeholder="Sheet length" style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>Roll width mm</span>
+                          <input name="rollWidthMm" defaultValue={material.rollWidthMm ?? ""} placeholder="Roll width" style={inputStyle} />
+                        </label>
+                        <label style={labelStyle}>
+                          <span style={labelTextStyle}>GSM / Thickness</span>
+                          <input name="gsm" defaultValue={material.gsm ?? ""} placeholder="eg 250gsm or 3mm" style={inputStyle} />
+                        </label>
+                      </div>
+
+                      <label style={labelStyle}>
+                        <span style={labelTextStyle}>Notes</span>
+                        <textarea name="notes" rows={3} defaultValue={material.notes ?? ""} style={textareaStyle} />
+                      </label>
+                      <button type="submit" style={buttonStyle}>Save material changes</button>
+                    </form>
+                  </details>
                 </article>
               ))}
             </div>
