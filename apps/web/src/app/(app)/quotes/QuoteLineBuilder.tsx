@@ -100,10 +100,16 @@ type CostBreakdownItem = {
   note?: string;
 };
 
+type PricingSettings = {
+  markupMultiplier?: string | number | null;
+  profitMultiplier?: string | number | null;
+};
+
 type QuoteLineBuilderProps = {
   quoteId: string;
   products: QuoteProduct[];
   materials: QuoteMaterial[];
+  pricingSettings?: PricingSettings;
 };
 
 const inputStyle = {
@@ -166,10 +172,15 @@ function humanize(value: string | null | undefined): string {
 }
 
 function numberValue(value: string | number | null | undefined, fallback = 0): number {
-  const text = String(value ?? "").replace(/,/g, "").replace(/\$/g, "").trim();
+  const text = String(value ?? "").replace(/,/g, "").replace(/\$/g, "").replace(/x/gi, "").trim();
   if (!text) return fallback;
   const amount = Number(text);
   return Number.isFinite(amount) ? amount : fallback;
+}
+
+function multiplierValue(value: string | number | null | undefined, fallback: number): number {
+  const amount = numberValue(value, fallback);
+  return Number.isFinite(amount) && amount > 0 ? amount : fallback;
 }
 
 function moneyInput(value: number): string {
@@ -749,7 +760,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
     });
 }
 
-function autoUnitPriceFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): number {
+function autoUnitCostFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): number {
   return componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers).reduce((total, item) => total + item.cost, 0);
 }
 
@@ -762,12 +773,15 @@ function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: R
     .filter((component) => !component.materialId);
 }
 
-export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuilderProps) {
+export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings }: QuoteLineBuilderProps) {
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id ?? "");
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId),
     [products, selectedProductId]
   );
+  const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
+  const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
+  const sellMultiplier = markupMultiplier * profitMultiplier;
   const [answers, setAnswers] = useState<Record<string, string>>(() => defaultAnswersFor(products[0]));
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, string>>({});
   const [customFollowUpAnswers, setCustomFollowUpAnswers] = useState<Record<string, string>>({});
@@ -786,8 +800,11 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
   const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct, selectedProduct.fields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
   const materialBreakdown = useMemo(() => componentCostBreakdownFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
   const missingMaterials = useMemo(() => missingLinkedMaterialRows(selectedProduct, answers), [selectedProduct, answers]);
-  const autoUnitPrice = useMemo(() => autoUnitPriceFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
+  const autoUnitCost = useMemo(() => autoUnitCostFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
+  const markedUpUnitCost = autoUnitCost * markupMultiplier;
+  const autoUnitPrice = markedUpUnitCost * profitMultiplier;
   const autoLineTotal = autoUnitPrice * quantityNumber;
+  const autoLineCost = autoUnitCost * quantityNumber;
 
   useEffect(() => {
     if (!unitPriceOverridden) {
@@ -908,7 +925,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div>
             <strong>2. Answer quote cards</strong>
-            <p style={{ ...mutedStyle, marginTop: 4 }}>These are the quote cards created on the Products page. The price below can include material usage, roll length, ink per m² and fixed charges.</p>
+            <p style={{ ...mutedStyle, marginTop: 4 }}>These are the quote cards created on the Products page. The price below starts from cost, then applies the global markup and profit set in Company settings.</p>
           </div>
           <span style={chipStyle}>{visibleFields.length} option{visibleFields.length === 1 ? "" : "s"}</span>
         </div>
@@ -1038,7 +1055,7 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
             </label>
           ) : null}
           <label style={labelStyle}>
-            <span style={labelTextStyle}>Unit price</span>
+            <span style={labelTextStyle}>Unit sell price</span>
             <input
               name="unitPrice"
               value={unitPrice}
@@ -1056,7 +1073,12 @@ export function QuoteLineBuilder({ quoteId, products, materials }: QuoteLineBuil
 
         <div style={priceCardStyle}>
           <span style={{ fontSize: 12, fontWeight: 900, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated from product setup</span>
-          <strong>{formatMoney(autoUnitPrice)} per unit · {formatMoney(autoLineTotal)} line calculated cost at qty {formatUsage(quantityNumber)}</strong>
+          <strong>{formatMoney(autoUnitPrice)} sell price per unit · {formatMoney(autoLineTotal)} line total at qty {formatUsage(quantityNumber)}</strong>
+          <div style={{ display: "grid", gap: 4, color: "#344054", fontSize: 13 }}>
+            <div><b>Cost before markup:</b> {formatMoney(autoUnitCost)} per unit · {formatMoney(autoLineCost)} line cost</div>
+            <div><b>Global markup:</b> ×{formatUsage(markupMultiplier)} = {formatMoney(markedUpUnitCost)} per unit</div>
+            <div><b>Global profit:</b> ×{formatUsage(profitMultiplier)} · total multiplier ×{formatUsage(sellMultiplier)}</div>
+          </div>
           {materialBreakdown.length > 0 ? (
             <div style={{ display: "grid", gap: 6 }}>
               {materialBreakdown.map((item) => (

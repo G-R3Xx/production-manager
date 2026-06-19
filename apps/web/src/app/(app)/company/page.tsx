@@ -84,6 +84,30 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
           </label>
         </div>
 
+        <section style={{ border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 18, padding: 18, display: "grid", gap: 14 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#2563eb" }}>Global quote pricing</p>
+            <h2 style={{ margin: "6px 0 6px", fontSize: 20 }}>Markup and profit multipliers</h2>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
+              Product, material, ink, labour and supplier values are treated as cost prices. Quotes use: calculated cost × markup × profit.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Global markup multiplier</span>
+              <input name="globalMarkupMultiplier" defaultValue={settings?.globalMarkupMultiplier ?? "1.5"} placeholder="eg 1.5" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Example: x1.5 adds your standard overhead/markup to all quote items.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Global profit multiplier</span>
+              <input name="globalProfitMultiplier" defaultValue={settings?.globalProfitMultiplier ?? "1.2"} placeholder="eg 1.2" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Example: x1.2 adds your profit after markup. x1.5 × x1.2 = x1.8 total.</small>
+            </label>
+          </div>
+        </section>
+
         <label style={{ display: "grid", gap: 8 }}>
           <span style={{ fontWeight: 600 }}>Email</span>
           <input type="email" name="email" defaultValue={settings?.email ?? activeTenant.email ?? ""} style={{ minHeight: 46, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", fontSize: 16 }} />

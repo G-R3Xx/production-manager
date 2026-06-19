@@ -7,6 +7,7 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listProductsForTenant } from "@/server/products";
 import { getConfiguratorTemplateById } from "@/server/configurators";
+import { getCompanySettingsByTenantId } from "@/server/company";
 import { createQuoteDraftAction, deleteQuoteLineAction } from "./actions";
 import { QuoteLineBuilder } from "./QuoteLineBuilder";
 import { getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
@@ -192,13 +193,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const fromSurvey = readParam(params, "fromSurvey");
   const selected = readParam(params, "selected");
 
-  const [quoteDrafts, products, materials, enquiry, survey, selectedQuote] = await Promise.all([
+  const [quoteDrafts, products, materials, enquiry, survey, selectedQuote, companySettings] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId),
     listProductsForTenant(activeTenant.tenantId),
     listMaterialsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
-    selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null)
+    selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
+    getCompanySettingsByTenantId(activeTenant.tenantId)
   ]);
   const [quoteLines, productTemplates] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
@@ -268,7 +270,15 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 <h3 style={{ margin: 0 }}>Selected quote: {selectedQuote.clientName}</h3>
                 <p style={{ margin: "6px 0 0", color: "#667085" }}>Add quote lines by choosing a product, then answering the quote cards you set up on the Products page.</p>
               </div>
-              <QuoteLineBuilder quoteId={selectedQuote.id} products={quoteProducts} materials={materials.filter((material) => material.active)} />
+              <QuoteLineBuilder
+                quoteId={selectedQuote.id}
+                products={quoteProducts}
+                materials={materials.filter((material) => material.active)}
+                pricingSettings={{
+                  markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
+                  profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2"
+                }}
+              />
 
               <div style={{ display: "grid", gap: 10 }}>
                 <div style={{ display: "grid", gap: 4 }}>

@@ -18,6 +18,7 @@ const navItems = [
   { href: "/suppliers", label: "Suppliers", emoji: "▣" },
   { href: "/materials", label: "Materials", emoji: "▥" },
   { href: "/products", label: "Products", emoji: "◇" },
+  { href: "/company", label: "Settings", emoji: "⚙" },
   { href: "/integrations", label: "Integrations", emoji: "↔" }
 ];
 
