@@ -193,8 +193,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
                 <input name="rollWidthMm" placeholder="Roll width" style={inputStyle} />
               </label>
               <label style={labelStyle}>
-                <span style={labelTextStyle}>GSM</span>
-                <input name="gsm" placeholder="Paper/card GSM" style={inputStyle} />
+                <span style={labelTextStyle}>GSM / Thickness</span>
+                <input name="gsm" placeholder="eg 250gsm or 3mm" style={inputStyle} />
               </label>
             </div>
 
@@ -229,7 +229,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
                     <span style={pillStyle}>{material.active ? "active" : "inactive"}</span>
                   </div>
                   <div style={mutedTextStyle}>Supplier: {material.supplierName ?? "Not linked"} · SKU: {material.sku ?? "—"}</div>
-                  <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM {material.gsm ?? "—"}</div>
+                  <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
                   {material.sourceProductName ? <div style={{ ...mutedTextStyle, color: "#b54708" }}>Legacy source product link: {material.sourceProductName}</div> : null}
                   {material.notes ? <div style={mutedTextStyle}>{material.notes}</div> : null}
                 </article>

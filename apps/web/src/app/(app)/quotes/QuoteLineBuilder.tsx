@@ -592,7 +592,11 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
       if (rawRuleType === "sell_sqm") {
         const area = dimensions ? (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000) : 0;
         const rate = numberValue(component.stockUsage?.sellRate, numberValue(component.quantity, 0));
-        const amount = area * allowance;
+        // Sell charges store the dollar rate in stockUsage.sellRate. Some older rows
+        // also stored that same rate in component.quantity, so never use
+        // component.quantity as a square-metre multiplier here. The amount is just
+        // finished area, optionally multiplied by a follow-up quantity preset.
+        const amount = area * followUp.multiplier;
         return [costBreakdownItem({
           componentLabel,
           materialName: "Sell charge",
@@ -601,13 +605,16 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "sqm",
           rate,
           cost: amount * rate,
-          note: "price rule from product answer line"
+          note: ["price rule from product answer line", followUp.note].filter(Boolean).join(" · ")
         })];
       }
 
       if (rawRuleType === "sell_each") {
         const rate = numberValue(component.stockUsage?.sellRate, numberValue(component.quantity, 0));
-        const amount = allowance;
+        // For fixed sell charges, component.quantity is the fallback rate for
+        // older recipe rows. Quantity/placement presets control how many are
+        // charged. Without a preset, charge one item.
+        const amount = followUp.multiplier;
         return [costBreakdownItem({
           componentLabel,
           materialName: "Sell charge",
