@@ -2306,22 +2306,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
 
       <ProductChooser products={products} filteredProducts={filteredProducts} selectedProduct={selectedProduct} query={query} activeMaterials={activeMaterials} />
 
-      {!selectedProduct ? (
-        <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-          <p style={tinyLabelStyle}>Starter guide</p>
-          <h2 style={sectionHeadingStyle}>The product creator starts simple now</h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            {starterTypes.map((starter) => (
-              <div key={starter.value} style={{ ...whitePanelStyle, background: isSmallFormatStarter(starter.value) ? "#faf5ff" : "#fff", borderColor: isSmallFormatStarter(starter.value) ? "#e9d5ff" : "#dfe7f2" }}>
-                <span style={isSmallFormatStarter(starter.value) ? { ...blueChipStyle, background: "#ede9fe", color: "#6d28d9" } : blueChipStyle}>{starter.label}</span>
-                <strong>{starter.plainName}</strong>
-                <p style={mutedStyle}>{starter.description}</p>
-                <p style={mutedStyle}><b>Starts with:</b> {starterQuickAnswers(starter.value)}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : (
+      {selectedProduct ? (
         <ProductRecipeCanvas
           selectedProduct={selectedProduct}
           fields={fields}
@@ -2332,7 +2317,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
           selectedStarterType={selectedStarterType}
           activePart={activePart}
         />
-      )}
+      ) : null}
     </div>
   );
 }
