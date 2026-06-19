@@ -4,7 +4,8 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listSuppliersForTenant } from "@/server/suppliers";
-import { createMaterialAction, setMaterialActiveAction, updateMaterialAction } from "./actions";
+import { setMaterialActiveAction } from "./actions";
+import { CreateMaterialForm, EditMaterialForm } from "./MaterialForms";
 
 type MaterialsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -145,88 +146,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
       <section style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.9fr) minmax(0, 1.1fr)", gap: 16, alignItems: "start" }}>
         <details open style={{ ...cardStyle, display: "grid", gap: 16 }}>
           <summary style={{ cursor: "pointer", fontSize: 22, fontWeight: 800 }}>Create material</summary>
-          <form action={createMaterialAction} style={{ display: "grid", gap: 14, marginTop: 16 }}>
-            <div style={gridStyle}>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Material name</span>
-                <input name="name" required placeholder="3mm ACM 2440 × 1220" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Supplier</span>
-                <select name="supplierId" defaultValue="" style={inputStyle}>
-                  <option value="">No supplier linked</option>
-                  {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.displayName}</option>)}
-                </select>
-              </label>
-            </div>
-
-            <div style={gridStyle}>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Supplier SKU</span>
-                <input name="sku" placeholder="ACM-3-2440" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Material type</span>
-                <select name="materialType" defaultValue="sheet_media" style={inputStyle}>
-                  <option value="sheet_media">Sheet media</option>
-                  <option value="roll_media">Roll media</option>
-                  <option value="roll_laminate">Roll laminate</option>
-                  <option value="paper_stock">Paper stock</option>
-                  <option value="card_stock">Card stock</option>
-                  <option value="cello_stock">Celloglaze / cello</option>
-                  <option value="binding">Binding material</option>
-                  <option value="finishing">Finishing consumable</option>
-                  <option value="fixing">Hardware / fixing</option>
-                  <option value="item">Consumable / item</option>
-                  <option value="other">Other</option>
-                </select>
-              </label>
-            </div>
-
-            <div style={gridStyle}>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Stock UOM</span>
-                <input name="stockUom" defaultValue="sheet" placeholder="sheet, lm, sqm, each" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Purchase UOM</span>
-                <input name="purchaseUom" defaultValue="sheet" placeholder="sheet, roll, box, each" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Stock qty / roll length</span>
-                <input name="stockQuantity" defaultValue="0" placeholder="eg 50 if this roll is 50lm" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Purchase cost</span>
-                <input name="purchaseCost" defaultValue="0" placeholder="cost per sheet, lm, sqm, each or roll" style={inputStyle} />
-              </label>
-            </div>
-
-            <div style={gridStyle}>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Width mm</span>
-                <input name="widthMm" placeholder="Sheet width" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Length mm</span>
-                <input name="lengthMm" placeholder="Sheet length" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>Roll width mm</span>
-                <input name="rollWidthMm" placeholder="Roll width" style={inputStyle} />
-              </label>
-              <label style={labelStyle}>
-                <span style={labelTextStyle}>GSM / Thickness</span>
-                <input name="gsm" placeholder="eg 250gsm or 3mm" style={inputStyle} />
-              </label>
-            </div>
-
-            <label style={labelStyle}>
-              <span style={labelTextStyle}>Notes</span>
-              <textarea name="notes" rows={4} placeholder="Parent sheet size, roll length, supplier notes, nesting/yield assumptions, stock handling. For whole-roll cost, set Stock UOM to lm and Stock qty / roll length to the roll length." style={textareaStyle} />
-            </label>
-            <button type="submit" style={buttonStyle}>Create material</button>
-          </form>
+          <CreateMaterialForm suppliers={suppliers} />
         </details>
 
         <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
@@ -265,89 +185,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
                   <details style={{ border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", padding: 12 }}>
                     <summary style={{ cursor: "pointer", fontWeight: 800 }}>Edit material</summary>
-                    <form action={updateMaterialAction} style={{ display: "grid", gap: 14, marginTop: 14 }}>
-                      <input type="hidden" name="materialId" value={material.id} />
-                      <div style={gridStyle}>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Material name</span>
-                          <input name="name" required defaultValue={material.name} style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Supplier</span>
-                          <select name="supplierId" defaultValue={material.supplierId ?? ""} style={inputStyle}>
-                            <option value="">No supplier linked</option>
-                            {suppliers.map((supplier) => <option key={supplier.id} value={supplier.id}>{supplier.displayName}</option>)}
-                          </select>
-                        </label>
-                      </div>
-
-                      <div style={gridStyle}>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Supplier SKU</span>
-                          <input name="sku" defaultValue={material.sku ?? ""} style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Material type</span>
-                          <select name="materialType" defaultValue={materialTypeSelectValue(material.materialType)} style={inputStyle}>
-                            <option value="sheet_media">Sheet media</option>
-                            <option value="roll_media">Roll media</option>
-                            <option value="roll_laminate">Roll laminate</option>
-                            <option value="paper_stock">Paper stock</option>
-                            <option value="card_stock">Card stock</option>
-                            <option value="cello_stock">Celloglaze / cello</option>
-                            <option value="binding">Binding material</option>
-                            <option value="finishing">Finishing consumable</option>
-                            <option value="fixing">Hardware / fixing</option>
-                            <option value="item">Consumable / item</option>
-                            <option value="other">Other</option>
-                          </select>
-                        </label>
-                      </div>
-
-                      <div style={gridStyle}>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Stock UOM</span>
-                          <input name="stockUom" defaultValue={material.stockUom ?? "sheet"} placeholder="sheet, lm, sqm, each" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Purchase UOM</span>
-                          <input name="purchaseUom" defaultValue={material.purchaseUom ?? "sheet"} placeholder="sheet, roll, box, each" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Stock qty / roll length</span>
-                          <input name="stockQuantity" defaultValue={material.stockQuantity ?? "0"} style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Purchase cost</span>
-                          <input name="purchaseCost" defaultValue={material.purchaseCost ?? "0"} style={inputStyle} />
-                        </label>
-                      </div>
-
-                      <div style={gridStyle}>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Width mm</span>
-                          <input name="widthMm" defaultValue={material.widthMm ?? ""} placeholder="Sheet width" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Length mm</span>
-                          <input name="lengthMm" defaultValue={material.lengthMm ?? ""} placeholder="Sheet length" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>Roll width mm</span>
-                          <input name="rollWidthMm" defaultValue={material.rollWidthMm ?? ""} placeholder="Roll width" style={inputStyle} />
-                        </label>
-                        <label style={labelStyle}>
-                          <span style={labelTextStyle}>GSM / Thickness</span>
-                          <input name="gsm" defaultValue={material.gsm ?? ""} placeholder="eg 250gsm or 3mm" style={inputStyle} />
-                        </label>
-                      </div>
-
-                      <label style={labelStyle}>
-                        <span style={labelTextStyle}>Notes</span>
-                        <textarea name="notes" rows={3} defaultValue={material.notes ?? ""} style={textareaStyle} />
-                      </label>
-                      <button type="submit" style={buttonStyle}>Save material changes</button>
-                    </form>
+                    <EditMaterialForm suppliers={suppliers} material={material} />
                   </details>
                 </article>
               ))}
