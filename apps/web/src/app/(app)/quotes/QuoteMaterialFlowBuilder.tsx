@@ -31,9 +31,10 @@ type QuoteMaterialFlowBuilderProps = {
   pricingSettings?: PricingSettings;
 };
 
-type FlowType = "" | "signage" | "small_format";
+type FlowType = "" | "signage" | "small_format" | "service";
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
+type ServiceType = "" | "pickup" | "delivery" | "install";
 type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl";
 type InkChoice = "" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
@@ -62,6 +63,9 @@ type StepKey =
   | "small_coating"
   | "small_finishing"
   | "small_quantity"
+  | "service_type"
+  | "service_details"
+  | "service_fixings"
   | "review";
 
 type CostRow = {
@@ -139,6 +143,20 @@ const smallFinishingOptions = [
   { key: "staple", label: "Staple / saddle stitch", icon: "⌁", description: "Add booklet finishing labour." },
   { key: "numbering", label: "Sequential numbering", icon: "#", description: "Add numbering setup/labour." },
   { key: "padding", label: "Padding / tape", icon: "▥", description: "Add book padding, tape or binding labour." }
+];
+
+const serviceTypes: Array<{ key: Exclude<ServiceType, "">; label: string; icon: string; description: string }> = [
+  { key: "pickup", label: "Pickup", icon: "↗", description: "Client collects the job. Usually no charge unless you add notes or a manual price." },
+  { key: "delivery", label: "Delivery", icon: "▣", description: "Add a delivery charge as its own quote line." },
+  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, hours and fixing consumables." }
+];
+
+const fixingOptions = [
+  { key: "silicone", label: "Silicone", icon: "◍", unit: "tube", placeholderQty: "eg 1", placeholderRate: "eg 12" },
+  { key: "tape", label: "VHB / double-sided tape", icon: "═", unit: "lm", placeholderQty: "eg 3", placeholderRate: "eg 2.5" },
+  { key: "screws", label: "Screws / anchors", icon: "•", unit: "each", placeholderQty: "eg 12", placeholderRate: "eg 0.25" },
+  { key: "screws_custom", label: "Screms / special fixings", icon: "✦", unit: "each", placeholderQty: "eg 4", placeholderRate: "eg 1" },
+  { key: "other", label: "Other consumables", icon: "+", unit: "allowance", placeholderQty: "eg 1", placeholderRate: "eg 15" }
 ];
 
 const eyeletPresets = [
@@ -436,6 +454,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const [smallFinishings, setSmallFinishings] = useState<string[]>([]);
   const [smallFinishingHours, setSmallFinishingHours] = useState<Record<string, string>>({});
 
+  const [serviceType, setServiceType] = useState<ServiceType>("");
+  const [deliveryCharge, setDeliveryCharge] = useState("");
+  const [installCrewSize, setInstallCrewSize] = useState("1");
+  const [installHours, setInstallHours] = useState("");
+  const [travelCharge, setTravelCharge] = useState("");
+  const [serviceFixings, setServiceFixings] = useState<string[]>([]);
+  const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>({});
+  const [serviceFixingRate, setServiceFixingRate] = useState<Record<string, string>>({});
+
   const [quantity, setQuantity] = useState("1");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
   const [manualUnitPrice, setManualUnitPrice] = useState("0.00");
@@ -510,6 +537,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       { key: "flow", label: "Type", complete: Boolean(flowType), icon: "1" }
     ];
 
+    if (flowType === "service") {
+      next.push({ key: "service_type", label: "Service", complete: Boolean(serviceType), icon: "2" });
+      next.push({ key: "service_details", label: serviceType === "install" ? "Crew / time" : serviceType === "delivery" ? "Charge" : "Details", complete: serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) >= 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0), icon: "3" });
+      if (serviceType === "install") next.push({ key: "service_fixings", label: "Fixings", complete: true, icon: "4" });
+      next.push({ key: "review", label: "Review", complete: Boolean(serviceType), icon: "✓" });
+      return next;
+    }
+
     if (flowType === "small_format") {
       next.push({ key: "small_type", label: "Print item", complete: Boolean(smallType), icon: "2" });
       if (isDuplicateBook) next.push({ key: "ncr_details", label: "Book details", complete: ncrDetailsComplete, icon: "3" });
@@ -543,7 +578,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     }
 
     return next;
-  }, [flowType, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours]);
+  }, [flowType, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -590,8 +625,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     setFinishings([]);
     setSmallFinishings([]);
     setQuantity("1");
+    setServiceType("");
+    setDeliveryCharge("");
+    setInstallCrewSize("1");
+    setInstallHours("");
+    setTravelCharge("");
+    setServiceFixings([]);
+    setServiceFixingQty({});
+    setServiceFixingRate({});
     setUnitPriceOverridden(false);
-    setActiveStep(nextFlow === "small_format" ? "small_type" : "base");
+    setActiveStep(nextFlow === "small_format" ? "small_type" : nextFlow === "service" ? "service_type" : "base");
   }
 
   function resetAfterBase(nextBase: BaseType) {
@@ -641,6 +684,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
 
   function toggleSmallFinishing(key: string) {
     setSmallFinishings((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+    setUnitPriceOverridden(false);
+  }
+
+  function toggleServiceFixing(key: string) {
+    setServiceFixings((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
     setUnitPriceOverridden(false);
   }
 
@@ -758,8 +806,34 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       }
     }
 
+
+    if (flowType === "service") {
+      if (serviceType === "pickup") {
+        rows.push({ label: "Pickup", detail: "Client collection", amount: 1, unit: "each", rate: 0, cost: 0, note: "no charge" });
+      }
+
+      if (serviceType === "delivery") {
+        const charge = numberValue(deliveryCharge, 0);
+        if (charge > 0) rows.push({ label: "Delivery", detail: "Delivery charge", amount: 1, unit: "each", rate: charge, cost: charge });
+      }
+
+      if (serviceType === "install") {
+        const people = Math.max(1, numberValue(installCrewSize, 1));
+        const hours = numberValue(installHours, 0);
+        if (hours > 0) rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount: people * hours, unit: "hr", rate: labourRate, cost: people * hours * labourRate, note: `${usage(hours)}hr on site` });
+        const travel = numberValue(travelCharge, 0);
+        if (travel > 0) rows.push({ label: "Travel / delivery", detail: "Travel or call-out allowance", amount: 1, unit: "each", rate: travel, cost: travel });
+        for (const item of fixingOptions) {
+          if (!serviceFixings.includes(item.key)) continue;
+          const qty = numberValue(serviceFixingQty[item.key], 0);
+          const rate = numberValue(serviceFixingRate[item.key], 0);
+          if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable", amount: qty, unit: item.unit, rate, cost: qty * rate });
+        }
+      }
+    }
+
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate]);
 
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
   const autoUnitPrice = rawCost * sellMultiplier;
@@ -771,12 +845,24 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const finishingSummary = selectedKeys(finishingOptions, finishings);
   const smallFinishingSummary = selectedKeys(smallFinishingOptions, smallFinishings);
 
-  const lineName = flowType === "small_format"
-    ? [selectedSmallType?.label ?? "Small format item", selectedSmallStock?.name].filter(Boolean).join(" - ")
-    : [selectedBase?.label ?? "Material quote line", selectedMainMaterial?.name].filter(Boolean).join(" - ");
+  const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
+  const lineName = flowType === "service"
+    ? serviceLabel ?? "Service item"
+    : flowType === "small_format"
+      ? [selectedSmallType?.label ?? "Small format item", selectedSmallStock?.name].filter(Boolean).join(" - ")
+      : [selectedBase?.label ?? "Material quote line", selectedMainMaterial?.name].filter(Boolean).join(" - ");
 
-  const optionSummary = flowType === "small_format"
+  const optionSummary = flowType === "service"
     ? [
+      serviceLabel,
+      serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
+      serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
+      serviceType === "install" && installHours ? `${installHours}hr install` : null,
+      serviceType === "install" && travelCharge ? `Travel ${money(numberValue(travelCharge, 0))}` : null,
+      serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
+    ].filter(Boolean).join(" · ")
+    : flowType === "small_format"
+      ? [
       selectedSmallType?.label,
       selectedSmallStock?.name,
       isDuplicateBook && ncrCopies ? `${ncrCopiesCount} part book` : null,
@@ -806,9 +892,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       finishingSummary ? `Finishing: ${finishingSummary}` : null
     ].filter(Boolean).join(" · ");
 
-  const canSave = flowType === "small_format"
-    ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0)
-    : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0));
+  const canSave = flowType === "service"
+    ? Boolean(serviceType && (serviceType === "pickup" || serviceType === "delivery" || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
+    : flowType === "small_format"
+      ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0)
+      : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0));
 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
@@ -857,7 +945,94 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               <strong style={{ fontSize: 22 }}>Small format / print</strong>
               <span style={{ color: "#64748b", lineHeight: 1.5 }}>Cards, flyers, brochures, booklets, duplicate books, paper stock, cello and bindery.</span>
             </button>
+            <button type="button" onClick={() => chooseFlow("service")} style={cardButtonStyle(flowType === "service", "#059669")}>
+              <span style={{ fontSize: 38 }}>⚒</span>
+              <strong style={{ fontSize: 22 }}>Pickup / delivery / install</strong>
+              <span style={{ color: "#64748b", lineHeight: 1.5 }}>Pickup notes, delivery charges, install crew time and fixing consumables.</span>
+            </button>
           </div>
+        </div>
+      );
+    }
+
+    if (activeStep === "service_type") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="2" title="Choose service line type" text="Use this for non-production quote lines like pickup, delivery, installation and onsite consumables." />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
+            {serviceTypes.map((item) => (
+              <button key={item.key} type="button" onClick={() => { setServiceType(item.key); setActiveStep("service_details"); }} style={cardButtonStyle(serviceType === item.key, "#059669")}>
+                <span style={{ fontSize: 34 }}>{item.icon}</span>
+                <strong style={{ fontSize: 20 }}>{item.label}</strong>
+                <span style={{ color: "#64748b", lineHeight: 1.45 }}>{item.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      );
+    }
+
+    if (activeStep === "service_details") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="3" title={serviceType === "install" ? "Set install crew and time" : serviceType === "delivery" ? "Set delivery charge" : "Pickup details"} text={serviceType === "install" ? "Install labour is calculated as people × hours × the global labour rate, then markup/profit are applied." : serviceType === "delivery" ? "Enter the delivery/courier charge as a cost price. Markup and profit are applied on the review step." : "Pickup can be saved as a no-charge line if you want it visible on the quote."} />
+          {serviceType === "pickup" ? (
+            <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 10 }}>
+              <strong>Pickup / client collection</strong>
+              <span style={{ color: "#475467" }}>No charge is added unless you override the unit sell price on review.</span>
+              <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review pickup line</button>
+            </div>
+          ) : null}
+          {serviceType === "delivery" ? (
+            <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 16, background: "#f8fbff", display: "grid", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}><b>Delivery charge / courier cost</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="0.01" style={inputStyle} /></label>
+              <span style={{ color: "#475467", fontSize: 13 }}>Enter the cost price. The quote sell price applies global markup × profit.</span>
+              <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review delivery line</button>
+            </div>
+          ) : null}
+          {serviceType === "install" ? (
+            <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 12 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+                <label style={{ display: "grid", gap: 6 }}><b>Installers</b><select value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}>{["1", "2", "3", "4"].map((count) => <option key={count} value={count}>{count} {count === "1" ? "person" : "people"}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Install hours</b><input value={installHours} onChange={(event) => { setInstallHours(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="0" step="0.25" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out cost</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="optional" type="number" min="0" step="0.01" style={inputStyle} /></label>
+              </div>
+              <span style={{ color: "#475467", fontSize: 13 }}>Labour cost: installers × hours × {money(labourRate)}/hr.</span>
+              <button type="button" onClick={() => setActiveStep("service_fixings")} disabled={numberValue(installHours, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(installHours, 0) > 0 ? 1 : 0.45 }}>Continue to fixings</button>
+            </div>
+          ) : null}
+        </div>
+      );
+    }
+
+    if (activeStep === "service_fixings") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="4" title="Add fixings / consumables" text="Tick what the install needs, then enter quantity and cost. Leave everything unticked if there are no extras." />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+            {fixingOptions.map((item) => (
+              <button key={item.key} type="button" onClick={() => toggleServiceFixing(item.key)} style={cardButtonStyle(serviceFixings.includes(item.key), "#059669")}>
+                <span style={{ fontSize: 30 }}>{item.icon}</span>
+                <strong>{item.label}</strong>
+                <span style={{ color: "#64748b" }}>Charge by {item.unit}.</span>
+              </button>
+            ))}
+          </div>
+          {serviceFixings.length > 0 ? (
+            <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 14, background: "#f8fbff", display: "grid", gap: 10 }}>
+              <strong>Quantities and costs</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
+                {fixingOptions.filter((item) => serviceFixings.includes(item.key)).map((item) => (
+                  <div key={item.key} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 12, background: "#fff", display: "grid", gap: 8 }}>
+                    <b>{item.label}</b>
+                    <label style={{ display: "grid", gap: 5 }}><span>Quantity ({item.unit})</span><input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={item.placeholderQty} type="number" min="0" step="0.01" style={inputStyle} /></label>
+                    <label style={{ display: "grid", gap: 5 }}><span>Cost per {item.unit}</span><input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={item.placeholderRate} type="number" min="0" step="0.01" style={inputStyle} /></label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
+          <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review install line</button>
         </div>
       );
     }
@@ -1332,9 +1507,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     );
   }
 
-  const headerGradient = flowType === "small_format"
-    ? "linear-gradient(135deg, #581c87 0%, #7c3aed 58%, #c084fc 100%)"
-    : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
+  const headerGradient = flowType === "service"
+    ? "linear-gradient(135deg, #064e3b 0%, #059669 58%, #34d399 100%)"
+    : flowType === "small_format"
+      ? "linear-gradient(135deg, #581c87 0%, #7c3aed 58%, #c084fc 100%)"
+      : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
 
   return (
     <form action={addQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
@@ -1364,12 +1541,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "270px minmax(0, 1fr)", gap: 18, padding: 20, background: flowType === "small_format" ? "#fbf7ff" : "#f8fbff" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "270px minmax(0, 1fr)", gap: 18, padding: 20, background: flowType === "service" ? "#f0fdf4" : flowType === "small_format" ? "#fbf7ff" : "#f8fbff" }}>
         <aside style={{ display: "grid", gap: 14, alignSelf: "start" }}>
           <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
             <strong>Current build</strong>
-            <SummaryRow label="Flow" value={flowType === "small_format" ? "Small format" : flowType === "signage" ? "Signage" : undefined} />
-            {flowType === "small_format" ? (
+            <SummaryRow label="Flow" value={flowType === "service" ? "Pickup / delivery / install" : flowType === "small_format" ? "Small format" : flowType === "signage" ? "Signage" : undefined} />
+            {flowType === "service" ? (
+              <>
+                <SummaryRow label="Service" value={serviceLabel} />
+                {serviceType === "delivery" ? <SummaryRow label="Delivery charge" value={deliveryCharge ? money(numberValue(deliveryCharge, 0)) : undefined} /> : null}
+                {serviceType === "install" ? <SummaryRow label="Crew" value={`${installCrewSize || "1"} person${numberValue(installCrewSize, 1) === 1 ? "" : "s"}`} /> : null}
+                {serviceType === "install" ? <SummaryRow label="Install time" value={installHours ? `${installHours}hr` : undefined} /> : null}
+                {serviceType === "install" ? <SummaryRow label="Travel" value={travelCharge ? money(numberValue(travelCharge, 0)) : undefined} /> : null}
+                {serviceType === "install" ? <SummaryRow label="Fixings" value={serviceFixings.length ? selectedKeys(fixingOptions, serviceFixings) : undefined} /> : null}
+              </>
+            ) : flowType === "small_format" ? (
               <>
                 <SummaryRow label="Item" value={selectedSmallType?.label} />
                 <SummaryRow label="Stock" value={selectedSmallStock?.name} />
@@ -1409,8 +1595,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
             <button type="button" disabled={!previousStep} onClick={() => previousStep && setActiveStep(previousStep)} style={{ ...ghostButton, opacity: previousStep ? 1 : 0.45 }}>Back</button>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {nextStep ? <button type="button" onClick={() => setActiveStep(nextStep)} style={ghostButton}>Skip / next</button> : null}
-              <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review</button>
+              {activeStep !== "review" && nextStep ? <button type="button" onClick={() => setActiveStep(nextStep)} style={ghostButton}>Skip / next</button> : null}
+              {activeStep === "review" ? (
+                <button type="submit" disabled={!canSave} style={{ ...primaryButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save quote line" : "Complete required cards"}</button>
+              ) : <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review</button>}
             </div>
           </div>
         </section>
@@ -1422,7 +1610,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
           <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current unsaved line</span>
           <span style={{ color: optionSummary ? "#111827" : "#667085" }}>{optionSummary || "Complete the card flow above to build this quote line."}</span>
         </div>
-        <button type="submit" disabled={!canSave} style={{ ...darkButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save current line to quote" : "Complete required cards before saving"}</button>
+        <button type="submit" disabled={!canSave} style={{ ...darkButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save quote line" : "Complete required cards before saving"}</button>
       </div>
     </form>
   );
