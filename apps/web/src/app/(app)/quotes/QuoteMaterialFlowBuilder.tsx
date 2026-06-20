@@ -312,6 +312,29 @@ function sheetAreaSqm(material: QuoteMaterial): number {
   return (dimensions.width / 1000) * (dimensions.length / 1000);
 }
 
+function sheetUsageForItem(material: QuoteMaterial, pieceWidthMm: number, pieceHeightMm: number): { amount: number; note?: string } {
+  const dimensions = bestSheetDimensions(material);
+  if (!dimensions || pieceWidthMm <= 0 || pieceHeightMm <= 0) return { amount: 0, note: "sheet size missing" };
+
+  const parentArea = (dimensions.width / 1000) * (dimensions.length / 1000);
+  const itemArea = (pieceWidthMm / 1000) * (pieceHeightMm / 1000);
+  const perSheet = piecesPerSheet(dimensions.width, dimensions.length, pieceWidthMm, pieceHeightMm);
+
+  if (perSheet > 0) {
+    return {
+      amount: 1 / perSheet,
+      note: `${perSheet} up per parent sheet · ${usage(parentArea)}sqm parent sheet`
+    };
+  }
+
+  if (parentArea > 0 && itemArea > 0) {
+    const fullSheets = Math.max(1, Math.ceil(itemArea / parentArea));
+    return { amount: fullSheets, note: `does not fit one parent sheet; ${usage(parentArea)}sqm parent sheet` };
+  }
+
+  return { amount: 0, note: "sheet size missing" };
+}
+
 function sheetUnitRate(material: QuoteMaterial): { rate: number; note?: string } {
   const purchaseCost = numberValue(material.purchaseCost, 0);
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
@@ -702,10 +725,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
           const rate = rollRate(selectedMainMaterial);
           rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: lm.amount, unit: "lm", rate: rate.rate, cost: lm.amount * rate.rate, note: [lm.note, rate.note].filter(Boolean).join(" · ") || undefined });
         } else {
-          const parentArea = sheetAreaSqm(selectedMainMaterial);
-          const sheets = parentArea > 0 ? areaSqm / parentArea : 0;
-          const rate = numberValue(selectedMainMaterial.purchaseCost, 0);
-          rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: sheets, unit: "sheet", rate, cost: sheets * rate, note: parentArea > 0 ? `based on ${usage(parentArea)}sqm parent sheet` : "sheet size missing" });
+          const sheetUse = sheetUsageForItem(selectedMainMaterial, width, height);
+          const rate = sheetUnitRate(selectedMainMaterial);
+          rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: sheetUse.amount, unit: "sheet", rate: rate.rate, cost: sheetUse.amount * rate.rate, note: [sheetUse.note, rate.note].filter(Boolean).join(" · ") || undefined });
         }
       }
 
