@@ -20,9 +20,20 @@ type QuoteMaterial = {
   notes?: string | null;
 };
 
+type QuoteSizePreset = {
+  label: string;
+  width: string;
+  height: string;
+};
+
 type PricingSettings = {
   markupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
+  labourRate?: string | number | null;
+  inkRatePerSqm?: string | number | null;
+  monoRatePerSqm?: string | number | null;
+  signageSizePresets?: QuoteSizePreset[] | null;
+  smallSizePresets?: QuoteSizePreset[] | null;
 };
 
 type QuoteMaterialFlowBuilderProps = {
@@ -78,9 +89,9 @@ type CostRow = {
   note?: string;
 };
 
-const labourRate = 66;
-const inkRatePerSqm = 10;
-const monoRatePerSqm = 4;
+const defaultLabourRate = 66;
+const defaultInkRatePerSqm = 10;
+const defaultMonoRatePerSqm = 4;
 
 const baseTypes: Array<{ key: BaseType; label: string; icon: string; description: string; accent: string }> = [
   { key: "acrylic", label: "Acrylic", icon: "▣", description: "Clear, opal, white, black or coloured acrylic signs.", accent: "#7c3aed" },
@@ -100,14 +111,14 @@ const smallFormatTypes: Array<{ key: SmallFormatType; label: string; icon: strin
   { key: "stickers", label: "Stickers", icon: "◉", description: "Small-format sticker stock, laminate and cutting." }
 ];
 
-const signageSizePresets = [
+const defaultSignageSizePresets: QuoteSizePreset[] = [
   { label: "450 × 600 mm", width: "450", height: "600" },
   { label: "600 × 900 mm", width: "600", height: "900" },
   { label: "900 × 1200 mm", width: "900", height: "1200" },
   { label: "1200 × 2400 mm", width: "1200", height: "2400" }
 ];
 
-const smallSizePresets = [
+const defaultSmallSizePresets: QuoteSizePreset[] = [
   { label: "Business card 90 × 55", width: "90", height: "55" },
   { label: "DL 99 × 210", width: "99", height: "210" },
   { label: "A6 105 × 148", width: "105", height: "148" },
@@ -123,11 +134,6 @@ const printMethods: Array<{ key: Exclude<PrintMethod, "">; label: string; icon: 
   { key: "cut_vinyl", label: "Cut vinyl", icon: "✂", description: "Pick a roll vinyl material but no ink charge is added." }
 ];
 
-const inkChoices: Array<{ key: Exclude<InkChoice, "">; label: string; icon: string; description: string }> = [
-  { key: "cmyk", label: "CMYK", icon: "●", description: "$10/m² colour ink charge." },
-  { key: "white", label: "White", icon: "○", description: "$10/m² white ink charge." },
-  { key: "both", label: "CMYK + White", icon: "◐", description: "$20/m² total ink charge." }
-];
 
 const finishingOptions = [
   { key: "jingwei", label: "Jingwei cutting", icon: "✦", description: "Add cutting/plotting labour." },
@@ -485,6 +491,18 @@ function pageColourSummary(count: number, colours: string[]): string {
   return colours.slice(0, Math.max(0, count)).map((colour, index) => `Page ${index + 1}: ${colour}`).join(", ");
 }
 
+function normaliseSizePresets(presets: QuoteSizePreset[] | null | undefined, fallback: QuoteSizePreset[]): QuoteSizePreset[] {
+  const cleaned = (presets ?? [])
+    .map((preset) => ({
+      label: String(preset.label ?? "").trim(),
+      width: String(preset.width ?? "").trim(),
+      height: String(preset.height ?? "").trim()
+    }))
+    .filter((preset) => preset.label && numberValue(preset.width, 0) > 0 && numberValue(preset.height, 0) > 0);
+
+  return cleaned.length > 0 ? cleaned : fallback;
+}
+
 export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }: QuoteMaterialFlowBuilderProps) {
   const [activeStep, setActiveStep] = useState<StepKey>("flow");
   const [flowType, setFlowType] = useState<FlowType>("");
@@ -543,6 +561,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
   const sellMultiplier = markupMultiplier * profitMultiplier;
+  const labourRate = numberValue(pricingSettings?.labourRate, defaultLabourRate);
+  const inkRatePerSqm = numberValue(pricingSettings?.inkRatePerSqm, defaultInkRatePerSqm);
+  const monoRatePerSqm = numberValue(pricingSettings?.monoRatePerSqm, defaultMonoRatePerSqm);
+  const signageSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.signageSizePresets, defaultSignageSizePresets), [pricingSettings?.signageSizePresets]);
+  const smallSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.smallSizePresets, defaultSmallSizePresets), [pricingSettings?.smallSizePresets]);
+  const inkChoices = useMemo<Array<{ key: Exclude<InkChoice, "">; label: string; icon: string; description: string }>>(() => [
+    { key: "cmyk", label: "CMYK", icon: "●", description: `${money(inkRatePerSqm)}/m² colour ink charge.` },
+    { key: "white", label: "White", icon: "○", description: `${money(inkRatePerSqm)}/m² white ink charge.` },
+    { key: "both", label: "CMYK + White", icon: "◐", description: `${money(inkRatePerSqm * 2)}/m² total ink charge.` }
+  ], [inkRatePerSqm]);
 
   const baseMaterials = useMemo(() => {
     if (!baseType) return [];
@@ -1312,7 +1340,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
             })}
           </div>
           {laminateSelected ? (
-            <LabourPrompt label="Laminate application hours" value={laminateHours} onChange={setLaminateHours} onContinue={() => setActiveStep("finishing")} />
+            <LabourPrompt label="Laminate application hours" value={laminateHours} onChange={setLaminateHours} onContinue={() => setActiveStep("finishing")} labourRate={labourRate} />
           ) : null}
         </div>
       );
@@ -1342,7 +1370,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               {eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} placeholder="Custom eyelet quantity" type="number" min="0" step="1" style={inputStyle} /> : null}
             </div>
           ) : null}
-          <SelectedLabourHours options={finishingOptions} selected={finishings} values={finishingHours} onChange={setFinishingHours} eachLabelFor="eyelets" />
+          <SelectedLabourHours options={finishingOptions} selected={finishings} values={finishingHours} onChange={setFinishingHours} eachLabelFor="eyelets" labourRate={labourRate} />
           <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review quote line</button>
         </div>
       );
@@ -1548,7 +1576,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               </button>
             ))}
           </div>
-          <SelectedLabourHours options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingHours} onChange={setSmallFinishingHours} />
+          <SelectedLabourHours options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingHours} onChange={setSmallFinishingHours} labourRate={labourRate} />
           <button type="button" onClick={() => setActiveStep("small_quantity")} style={primaryButton}>Continue to quantity</button>
         </div>
       );
@@ -1722,7 +1750,7 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
   );
 }
 
-function LabourPrompt({ label, value, onChange, onContinue }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void }) {
+function LabourPrompt({ label, value, onChange, onContinue, labourRate }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void; labourRate: number }) {
   return (
     <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 14, background: "#f0fdf4", display: "grid", gap: 10 }}>
       <label style={{ display: "grid", gap: 6 }}><b>{label}</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="eg 0.25" type="number" min="0" step="0.05" style={inputStyle} /></label>
@@ -1746,7 +1774,7 @@ function SidesCards({ sides, setSides, onComplete }: { sides: SidesChoice; setSi
   );
 }
 
-function SelectedLabourHours<T extends { key: string; label: string }>({ options, selected, values, onChange, eachLabelFor }: { options: T[]; selected: string[]; values: Record<string, string>; onChange: (value: Record<string, string>) => void; eachLabelFor?: string }) {
+function SelectedLabourHours<T extends { key: string; label: string }>({ options, selected, values, onChange, eachLabelFor, labourRate }: { options: T[]; selected: string[]; values: Record<string, string>; onChange: (value: Record<string, string>) => void; eachLabelFor?: string; labourRate: number }) {
   const chosen = options.filter((item) => selected.includes(item.key));
   if (chosen.length === 0) return null;
   return (

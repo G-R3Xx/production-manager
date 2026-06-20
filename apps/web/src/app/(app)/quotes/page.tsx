@@ -119,7 +119,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 materials={activeMaterials}
                 pricingSettings={{
                   markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
-                  profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2"
+                  profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                  labourRate: companySettings?.quoteLabourRate ?? "66",
+                  inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
+                  monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
+                  signageSizePresets: companySettings?.quoteSignageSizePresets,
+                  smallSizePresets: companySettings?.quoteSmallSizePresets
                 }}
               />
 
