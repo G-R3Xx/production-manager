@@ -381,6 +381,56 @@ function linearMetres(widthMm: number, heightMm: number, material: QuoteMaterial
   return { amount: Math.max(widthMm, heightMm) / 1000, note: "wider than roll; check paneling" };
 }
 
+function roundedRollMetresForQuantity(widthMm: number, heightMm: number, material: QuoteMaterial, pieces: number): { amount: number; unroundedAmount: number; note?: string } {
+  const rollWidthMm = numberValue(material.rollWidthMm, 0);
+  const pieceCount = Math.max(1, Math.ceil(pieces));
+  if (widthMm <= 0 || heightMm <= 0) return { amount: 0, unroundedAmount: 0, note: "size missing" };
+
+  if (rollWidthMm <= 0) {
+    const single = linearMetres(widthMm, heightMm, material);
+    const unroundedAmount = single.amount * pieceCount;
+    const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
+    return { amount, unroundedAmount, note: ["roll width missing", `${usage(unroundedAmount)}lm before whole-metre rounding`].join(" · ") };
+  }
+
+  const layouts = [
+    { pieceAcrossMm: widthMm, lengthMm: heightMm, rotated: false },
+    { pieceAcrossMm: heightMm, lengthMm: widthMm, rotated: true }
+  ]
+    .map((layout) => {
+      const across = Math.floor(rollWidthMm / layout.pieceAcrossMm);
+      if (across <= 0) return null;
+      const rows = Math.ceil(pieceCount / across);
+      return {
+        across,
+        rows,
+        rotated: layout.rotated,
+        unroundedAmount: (rows * layout.lengthMm) / 1000
+      };
+    })
+    .filter((layout): layout is { across: number; rows: number; rotated: boolean; unroundedAmount: number } => Boolean(layout));
+
+  if (layouts.length === 0) {
+    const single = linearMetres(widthMm, heightMm, material);
+    const unroundedAmount = single.amount * pieceCount;
+    const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
+    return { amount, unroundedAmount, note: [single.note, "wider than roll; check paneling", `${usage(unroundedAmount)}lm before whole-metre rounding`].filter(Boolean).join(" · ") };
+  }
+
+  const best = layouts.sort((a, b) => a.unroundedAmount - b.unroundedAmount)[0];
+  const amount = best.unroundedAmount > 0 ? Math.max(1, Math.ceil(best.unroundedAmount)) : 0;
+  return {
+    amount,
+    unroundedAmount: best.unroundedAmount,
+    note: [
+      `${pieceCount} face${pieceCount === 1 ? "" : "s"} nested ${best.across} across × ${best.rows} row${best.rows === 1 ? "" : "s"}`,
+      best.rotated ? "rotated to save roll length" : null,
+      `${usage(best.unroundedAmount)}lm before whole-metre rounding`,
+      `charged as ${usage(amount)}lm`
+    ].filter(Boolean).join(" · ")
+  };
+}
+
 function piecesPerSheet(parentWidth: number, parentHeight: number, pieceWidth: number, pieceHeight: number): number {
   if (parentWidth <= 0 || parentHeight <= 0 || pieceWidth <= 0 || pieceHeight <= 0) return 0;
   const normal = Math.floor(parentWidth / pieceWidth) * Math.floor(parentHeight / pieceHeight);
@@ -755,10 +805,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       }
 
       if (selectedLaminate && laminateId !== "none" && areaSqm > 0) {
-        const lm = linearMetres(width, height, selectedLaminate);
+        const laminateFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
+        const lm = roundedRollMetresForQuantity(width, height, selectedLaminate, laminateFaces);
         const rate = rollRate(selectedLaminate);
-        const amount = lm.amount * sideMultiplier;
-        rows.push({ label: "Laminate", detail: selectedLaminate.name, amount, unit: "lm", rate: rate.rate, cost: amount * rate.rate, note: [lm.note, sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
+        const amount = quantityNumber > 0 ? lm.amount / quantityNumber : lm.amount;
+        rows.push({
+          label: "Laminate",
+          detail: selectedLaminate.name,
+          amount,
+          unit: "lm",
+          rate: rate.rate,
+          cost: amount * rate.rate,
+          note: [lm.note, sides === "double" ? "double sided" : null, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
+        });
         const hours = numberValue(laminateHours, 0);
         if (hours > 0) rows.push({ label: "Laminate labour", detail: "Apply laminate", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
       }
