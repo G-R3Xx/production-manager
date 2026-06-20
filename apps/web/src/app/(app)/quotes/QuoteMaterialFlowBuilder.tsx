@@ -254,11 +254,44 @@ function uniq(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)));
 }
 
+function materialDimensionText(material: QuoteMaterial): string {
+  return [material.name, material.sku, material.gsm, material.notes, material.materialType].filter(Boolean).join(" ");
+}
+
+function parsedDimensionPairs(material: QuoteMaterial): Array<{ width: number; length: number; source: string }> {
+  const pairs: Array<{ width: number; length: number; source: string }> = [];
+  const fieldWidth = numberValue(material.widthMm, 0);
+  const fieldLength = numberValue(material.lengthMm, 0);
+  if (fieldWidth > 0 && fieldLength > 0) {
+    pairs.push({ width: fieldWidth, length: fieldLength, source: "fields" });
+  }
+
+  const text = materialDimensionText(material);
+  const dimensionPattern = /(\d{2,5}(?:\.\d+)?)\s*(?:mm)?\s*[x×]\s*(\d{2,5}(?:\.\d+)?)\s*(?:mm)?/gi;
+  let match: RegExpExecArray | null;
+  while ((match = dimensionPattern.exec(text)) !== null) {
+    const width = numberValue(match[1], 0);
+    const length = numberValue(match[2], 0);
+    if (width > 0 && length > 0) pairs.push({ width, length, source: "name" });
+  }
+
+  return pairs;
+}
+
+function bestSheetDimensions(material: QuoteMaterial): { width: number; length: number; source: string } | null {
+  const pairs = parsedDimensionPairs(material).filter((pair) => pair.width > 0 && pair.length > 0);
+  if (pairs.length === 0) return null;
+
+  // Prefer the largest plausible parent sheet. This protects existing materials where
+  // one dimension was accidentally saved as 1220 × 1220 even though the name says
+  // 2440 × 1220mm.
+  return pairs.sort((a, b) => (b.width * b.length) - (a.width * a.length))[0] ?? null;
+}
+
 function sheetAreaSqm(material: QuoteMaterial): number {
-  const width = numberValue(material.widthMm, 0);
-  const length = numberValue(material.lengthMm, 0);
-  if (width <= 0 || length <= 0) return 0;
-  return (width / 1000) * (length / 1000);
+  const dimensions = bestSheetDimensions(material);
+  if (!dimensions) return 0;
+  return (dimensions.width / 1000) * (dimensions.length / 1000);
 }
 
 function sheetUnitRate(material: QuoteMaterial): { rate: number; note?: string } {
@@ -314,12 +347,18 @@ function piecesPerSheet(parentWidth: number, parentHeight: number, pieceWidth: n
   return Math.max(normal, rotated, 0);
 }
 
+function dimensionMm(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(1);
+}
+
 function materialCardMeta(material: QuoteMaterial): string {
+  const dimensions = bestSheetDimensions(material);
   return [
     material.supplierName,
     material.sku,
     material.gsm,
-    material.widthMm && material.lengthMm ? `${material.widthMm} × ${material.lengthMm}mm` : null,
+    dimensions ? `${dimensionMm(dimensions.width)} × ${dimensionMm(dimensions.length)}mm` : null,
     material.rollWidthMm ? `${material.rollWidthMm}mm roll` : null
   ].filter(Boolean).join(" · ");
 }
@@ -675,8 +714,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     if (flowType === "small_format") {
       const itemArea = areaSqm;
       if (selectedSmallStock && itemArea > 0 && quantityNumber > 0) {
-        const parentWidth = numberValue(selectedSmallStock.widthMm, 0);
-        const parentHeight = numberValue(selectedSmallStock.lengthMm, 0);
+        const stockDimensions = bestSheetDimensions(selectedSmallStock);
+        const parentWidth = stockDimensions?.width ?? 0;
+        const parentHeight = stockDimensions?.length ?? 0;
         const perSheet = piecesPerSheet(parentWidth, parentHeight, width, height);
         const setsPerBook = isDuplicateBook ? Math.max(1, numberValue(ncrSetsPerBook, 1)) : 1;
         const copiesPerSet = isDuplicateBook ? Math.max(1, ncrCopiesCount || 1) : 1;
