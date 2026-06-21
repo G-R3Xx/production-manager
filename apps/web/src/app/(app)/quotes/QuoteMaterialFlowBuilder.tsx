@@ -42,7 +42,7 @@ type QuoteMaterialFlowBuilderProps = {
   pricingSettings?: PricingSettings;
 };
 
-type FlowType = "" | "signage" | "small_format" | "service";
+type FlowType = "" | "signage" | "small_format" | "service" | "component";
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
 type ServiceType = "" | "pickup" | "delivery" | "install";
@@ -77,6 +77,9 @@ type StepKey =
   | "service_type"
   | "service_details"
   | "service_fixings"
+  | "component_details"
+  | "component_parts"
+  | "component_labour"
   | "review";
 
 type CostRow = {
@@ -87,6 +90,16 @@ type CostRow = {
   rate: number;
   cost: number;
   note?: string;
+};
+
+type CustomComponentPart = {
+  id: string;
+  materialId: string;
+  name: string;
+  qty: string;
+  unit: string;
+  unitCost: string;
+  note: string;
 };
 
 const defaultLabourRate = 66;
@@ -164,6 +177,33 @@ const fixingOptions = [
   { key: "screws_custom", label: "Screms / special fixings", icon: "✦", unit: "each", placeholderQty: "eg 4", placeholderRate: "eg 1" },
   { key: "other", label: "Other consumables", icon: "+", unit: "allowance", placeholderQty: "eg 1", placeholderRate: "eg 15" }
 ];
+
+function createBlankComponentPart(): CustomComponentPart {
+  return {
+    id: `part-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    materialId: "",
+    name: "",
+    qty: "",
+    unit: "each",
+    unitCost: "",
+    note: ""
+  };
+}
+
+function rateForComponentUnit(material: QuoteMaterial | undefined, unit: string): { rate: number; note?: string } {
+  if (!material) return { rate: 0 };
+  const normalisedUnit = unit.toLowerCase();
+  if (["lm", "m", "metre", "meter"].includes(normalisedUnit)) return rollRate(material);
+  if (["sheet", "sheets"].includes(normalisedUnit)) return sheetUnitRate(material);
+  if (["sqm", "m2", "m²"].includes(normalisedUnit)) {
+    const sheetRate = sheetUnitRate(material);
+    const dimensions = bestSheetDimensions(material);
+    const parentArea = dimensions ? (dimensions.width / 1000) * (dimensions.length / 1000) : 0;
+    if (parentArea > 0) return { rate: sheetRate.rate / parentArea, note: `${usage(parentArea)}sqm parent sheet` };
+    return sheetRate;
+  }
+  return eachRate(material);
+}
 
 const eyeletPresets = [
   { label: "4 corners", qty: 4 },
@@ -554,6 +594,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>({});
   const [serviceFixingRate, setServiceFixingRate] = useState<Record<string, string>>({});
 
+  const [componentName, setComponentName] = useState("");
+  const [componentDescription, setComponentDescription] = useState("");
+  const [componentParts, setComponentParts] = useState<CustomComponentPart[]>(() => [createBlankComponentPart()]);
+  const [componentLabourLabel, setComponentLabourLabel] = useState("Build / assembly labour");
+  const [componentLabourHours, setComponentLabourHours] = useState("");
+
   const [quantity, setQuantity] = useState("1");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
   const [manualUnitPrice, setManualUnitPrice] = useState("0.00");
@@ -632,6 +678,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const areaSqm = width > 0 && height > 0 ? (width / 1000) * (height / 1000) : 0;
   const sideMultiplier = sides === "double" ? 2 : 1;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
+  const pricedComponentParts = componentParts.filter((part) => {
+    const qty = numberValue(part.qty, 0);
+    const material = materials.find((item) => item.id === part.materialId);
+    const rate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : rateForComponentUnit(material, part.unit).rate;
+    return qty > 0 && rate > 0 && (part.name.trim() || material);
+  });
+  const componentHasCost = pricedComponentParts.length > 0 || numberValue(componentLabourHours, 0) > 0;
 
   const steps = useMemo(() => {
     const next: Array<{ key: StepKey; label: string; complete: boolean; icon: string }> = [
@@ -643,6 +696,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       next.push({ key: "service_details", label: serviceType === "install" ? "Crew / time" : serviceType === "delivery" ? "Charge" : "Details", complete: serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) >= 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0), icon: "3" });
       if (serviceType === "install") next.push({ key: "service_fixings", label: "Fixings", complete: true, icon: "4" });
       next.push({ key: "review", label: "Review", complete: Boolean(serviceType), icon: "✓" });
+      return next;
+    }
+
+    if (flowType === "component") {
+      next.push({ key: "component_details", label: "Component", complete: Boolean(componentName.trim()), icon: "2" });
+      next.push({ key: "component_parts", label: "Parts", complete: pricedComponentParts.length > 0, icon: "3" });
+      next.push({ key: "component_labour", label: "Labour", complete: true, icon: "4" });
+      next.push({ key: "review", label: "Review", complete: Boolean(componentName.trim() && componentHasCost), icon: "✓" });
       return next;
     }
 
@@ -679,7 +740,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     }
 
     return next;
-  }, [flowType, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
+  }, [flowType, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -734,8 +795,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     setServiceFixings([]);
     setServiceFixingQty({});
     setServiceFixingRate({});
+    setComponentName("");
+    setComponentDescription("");
+    setComponentParts([createBlankComponentPart()]);
+    setComponentLabourLabel("Build / assembly labour");
+    setComponentLabourHours("");
     setUnitPriceOverridden(false);
-    setActiveStep(nextFlow === "small_format" ? "small_type" : nextFlow === "service" ? "service_type" : "base");
+    setActiveStep(nextFlow === "small_format" ? "small_type" : nextFlow === "service" ? "service_type" : nextFlow === "component" ? "component_details" : "base");
   }
 
   function resetAfterBase(nextBase: BaseType) {
@@ -790,6 +856,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
 
   function toggleServiceFixing(key: string) {
     setServiceFixings((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
+    setUnitPriceOverridden(false);
+  }
+
+  function updateComponentPart(id: string, patch: Partial<CustomComponentPart>) {
+    setComponentParts((current) => current.map((part) => part.id === id ? { ...part, ...patch } : part));
+    setUnitPriceOverridden(false);
+  }
+
+  function addComponentPart() {
+    setComponentParts((current) => [...current, createBlankComponentPart()]);
+    setUnitPriceOverridden(false);
+  }
+
+  function removeComponentPart(id: string) {
+    setComponentParts((current) => current.length > 1 ? current.filter((part) => part.id !== id) : [createBlankComponentPart()]);
     setUnitPriceOverridden(false);
   }
 
@@ -941,8 +1022,34 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       }
     }
 
+    if (flowType === "component") {
+      for (const part of componentParts) {
+        const material = materials.find((item) => item.id === part.materialId);
+        const qty = numberValue(part.qty, 0);
+        const derivedRate = rateForComponentUnit(material, part.unit);
+        const rate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : derivedRate.rate;
+        const label = part.name.trim() || material?.name || "Component part";
+        if (qty > 0 && rate > 0) {
+          rows.push({
+            label,
+            detail: material ? material.name : "Custom part",
+            amount: qty,
+            unit: part.unit || "each",
+            rate,
+            cost: qty * rate,
+            note: [part.note.trim(), !part.unitCost.trim() ? derivedRate.note : null].filter(Boolean).join(" · ") || undefined
+          });
+        }
+      }
+
+      const hours = numberValue(componentLabourHours, 0);
+      if (hours > 0) {
+        rows.push({ label: componentLabourLabel.trim() || "Assembly labour", detail: componentName.trim() || "Custom component", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+      }
+    }
+
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate]);
 
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
   const autoUnitPrice = rawCost * sellMultiplier;
@@ -955,13 +1062,27 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const smallFinishingSummary = selectedKeys(smallFinishingOptions, smallFinishings);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
-  const lineName = flowType === "service"
+  const componentPartSummary = pricedComponentParts.map((part) => {
+    const material = materials.find((item) => item.id === part.materialId);
+    return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || material?.name || "part"}`;
+  }).join(", ");
+  const lineName = flowType === "component"
+    ? componentName.trim() || "Custom component"
+    : flowType === "service"
     ? serviceLabel ?? "Service item"
     : flowType === "small_format"
       ? [selectedSmallType?.label ?? "Small format item", selectedSmallStock?.name].filter(Boolean).join(" - ")
       : [selectedBase?.label ?? "Material quote line", selectedMainMaterial?.name].filter(Boolean).join(" - ");
 
-  const optionSummary = flowType === "service"
+  const optionSummary = flowType === "component"
+    ? [
+      componentName.trim() || "Custom component",
+      componentPartSummary ? `Parts: ${componentPartSummary}` : null,
+      numberValue(componentLabourHours, 0) > 0 ? `${usage(numberValue(componentLabourHours, 0))}hr ${componentLabourLabel.trim() || "labour"}` : null,
+      componentDescription.trim() || null,
+      `Qty ${quantityNumber}`
+    ].filter(Boolean).join(" · ")
+    : flowType === "service"
     ? [
       serviceLabel,
       serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
@@ -1001,7 +1122,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       finishingSummary ? `Finishing: ${finishingSummary}` : null
     ].filter(Boolean).join(" · ");
 
-  const canSave = flowType === "service"
+  const canSave = flowType === "component"
+    ? Boolean(componentName.trim() && componentHasCost)
+    : flowType === "service"
     ? Boolean(serviceType && (serviceType === "pickup" || serviceType === "delivery" || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
     : flowType === "small_format"
       ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0)
@@ -1059,6 +1182,125 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               <strong style={{ fontSize: 22 }}>Pickup / delivery / install</strong>
               <span style={{ color: "#64748b", lineHeight: 1.5 }}>Pickup notes, delivery charges, install crew time and fixing consumables.</span>
             </button>
+            <button type="button" onClick={() => chooseFlow("component")} style={cardButtonStyle(flowType === "component", "#f97316")}>
+              <span style={{ fontSize: 38 }}>▦</span>
+              <strong style={{ fontSize: 22 }}>Custom component / assembly</strong>
+              <span style={{ color: "#64748b", lineHeight: 1.5 }}>Frames, special builds, panels with parts A+B+C, hardware and assembly labour.</span>
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeStep === "component_details") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="▦" title="Name the custom component" text="Use this when the quote line is an assembly made from multiple parts, like a frame, bracket set, special build or one-off fabrication." />
+          <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
+            <label style={{ display: "grid", gap: 6 }}>
+              <b>Component name</b>
+              <input value={componentName} onChange={(event) => setComponentName(event.target.value)} placeholder="eg Aluminium frame" style={inputStyle} />
+            </label>
+            <label style={{ display: "grid", gap: 6 }}>
+              <b>Description / internal note</b>
+              <textarea value={componentDescription} onChange={(event) => setComponentDescription(event.target.value)} placeholder="eg Frame made from 25mm tube, brackets, screws and assembly labour" style={textareaStyle} />
+            </label>
+            <button type="button" onClick={() => setActiveStep("component_parts")} disabled={!componentName.trim()} style={{ ...primaryButton, opacity: componentName.trim() ? 1 : 0.45 }}>Continue to parts</button>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeStep === "component_parts") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="3" title="Add parts used" text="Add each part that makes up the component. Pick an existing material or type a custom part. Quantity × cost is added to the quote line." />
+          <div style={{ display: "grid", gap: 12 }}>
+            {componentParts.map((part, index) => {
+              const selectedPartMaterial = materials.find((item) => item.id === part.materialId);
+              const suggested = rateForComponentUnit(selectedPartMaterial, part.unit);
+              const shownRate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : suggested.rate;
+              return (
+                <div key={part.id} style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 14, background: "#fffaf0", display: "grid", gap: 12 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                    <strong>Part {index + 1}</strong>
+                    <button type="button" onClick={() => removeComponentPart(part.id)} style={{ ...ghostButton, color: "#b42318" }}>Remove</button>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>From material library</b>
+                      <select value={part.materialId} onChange={(event) => {
+                        const material = materials.find((item) => item.id === event.target.value);
+                        updateComponentPart(part.id, {
+                          materialId: event.target.value,
+                          name: part.name.trim() || material?.name || "",
+                          unit: material ? (isRollMaterial(material) ? "lm" : isSheetMaterial(material) ? "sheet" : "each") : part.unit,
+                          unitCost: part.unitCost
+                        });
+                      }} style={inputStyle}>
+                        <option value="">Custom / not in materials</option>
+                        {materials.map((material) => <option key={material.id} value={material.id}>{material.name}{material.supplierName ? ` · ${material.supplierName}` : ""}</option>)}
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Part name</b>
+                      <input value={part.name} onChange={(event) => updateComponentPart(part.id, { name: event.target.value })} placeholder="eg 25mm aluminium tube" style={inputStyle} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Quantity</b>
+                      <input value={part.qty} onChange={(event) => updateComponentPart(part.id, { qty: event.target.value })} placeholder="eg 4" type="number" min="0" step="0.01" style={inputStyle} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Unit</b>
+                      <select value={part.unit} onChange={(event) => updateComponentPart(part.id, { unit: event.target.value, unitCost: part.unitCost })} style={inputStyle}>
+                        <option value="each">each</option>
+                        <option value="lm">lm</option>
+                        <option value="sheet">sheet</option>
+                        <option value="sqm">sqm</option>
+                        <option value="pack">pack</option>
+                      </select>
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Cost per unit</b>
+                      <input value={part.unitCost} onChange={(event) => updateComponentPart(part.id, { unitCost: event.target.value })} placeholder={selectedPartMaterial && suggested.rate > 0 ? `${money(suggested.rate)} from material` : "eg 12.50"} type="number" min="0" step="0.01" style={inputStyle} />
+                    </label>
+                  </div>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <b>Part note</b>
+                    <input value={part.note} onChange={(event) => updateComponentPart(part.id, { note: event.target.value })} placeholder="optional, eg left and right uprights" style={inputStyle} />
+                  </label>
+                  <span style={{ color: "#9a3412", fontSize: 13, fontWeight: 800 }}>
+                    {numberValue(part.qty, 0) > 0 && shownRate > 0 ? `${usage(numberValue(part.qty, 0))} ${part.unit} × ${money(shownRate)} = ${money(numberValue(part.qty, 0) * shownRate)}` : "Enter a quantity and cost, or pick a material with a usable cost."}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            <button type="button" onClick={addComponentPart} style={ghostButton}>+ Add another part</button>
+            <button type="button" onClick={() => setActiveStep("component_labour")} disabled={pricedComponentParts.length === 0} style={{ ...primaryButton, opacity: pricedComponentParts.length > 0 ? 1 : 0.45 }}>Continue to labour</button>
+          </div>
+        </div>
+      );
+    }
+
+    if (activeStep === "component_labour") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="4" title="Add assembly labour" text="Add the time to cut, assemble, weld, screw, tape, pack or prepare this component. Leave hours blank if the parts only need to be charged." />
+          <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Labour label</b>
+                <input value={componentLabourLabel} onChange={(event) => setComponentLabourLabel(event.target.value)} placeholder="eg Frame assembly labour" style={inputStyle} />
+              </label>
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Hours</b>
+                <input value={componentLabourHours} onChange={(event) => { setComponentLabourHours(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 0.75" type="number" min="0" step="0.05" style={inputStyle} />
+              </label>
+            </div>
+            <span style={{ color: "#9a3412", fontSize: 13 }}>Charged at {money(labourRate)}/hr before global markup and profit.</span>
+            <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review component line</button>
           </div>
         </div>
       );
@@ -1616,7 +1858,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     );
   }
 
-  const headerGradient = flowType === "service"
+  const headerGradient = flowType === "component"
+    ? "linear-gradient(135deg, #7c2d12 0%, #f97316 58%, #fdba74 100%)"
+    : flowType === "service"
     ? "linear-gradient(135deg, #064e3b 0%, #059669 58%, #34d399 100%)"
     : flowType === "small_format"
       ? "linear-gradient(135deg, #581c87 0%, #7c3aed 58%, #c084fc 100%)"
@@ -1650,12 +1894,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
         </div>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "270px minmax(0, 1fr)", gap: 18, padding: 20, background: flowType === "service" ? "#f0fdf4" : flowType === "small_format" ? "#fbf7ff" : "#f8fbff" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "270px minmax(0, 1fr)", gap: 18, padding: 20, background: flowType === "component" ? "#fff7ed" : flowType === "service" ? "#f0fdf4" : flowType === "small_format" ? "#fbf7ff" : "#f8fbff" }}>
         <aside style={{ display: "grid", gap: 14, alignSelf: "start" }}>
           <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
             <strong>Current build</strong>
-            <SummaryRow label="Flow" value={flowType === "service" ? "Pickup / delivery / install" : flowType === "small_format" ? "Small format" : flowType === "signage" ? "Signage" : undefined} />
-            {flowType === "service" ? (
+            <SummaryRow label="Flow" value={flowType === "component" ? "Custom component / assembly" : flowType === "service" ? "Pickup / delivery / install" : flowType === "small_format" ? "Small format" : flowType === "signage" ? "Signage" : undefined} />
+            {flowType === "component" ? (
+              <>
+                <SummaryRow label="Component" value={componentName || undefined} />
+                <SummaryRow label="Parts" value={pricedComponentParts.length ? `${pricedComponentParts.length} costed part${pricedComponentParts.length === 1 ? "" : "s"}` : undefined} />
+                <SummaryRow label="Labour" value={componentLabourHours ? `${componentLabourHours}hr` : undefined} />
+              </>
+            ) : flowType === "service" ? (
               <>
                 <SummaryRow label="Service" value={serviceLabel} />
                 {serviceType === "delivery" ? <SummaryRow label="Delivery charge" value={deliveryCharge ? money(numberValue(deliveryCharge, 0)) : undefined} /> : null}
