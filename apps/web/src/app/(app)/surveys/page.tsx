@@ -94,6 +94,67 @@ const textareaStyle = { minHeight: 110, borderRadius: 12, border: "1px solid #d0
 const buttonStyle = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" } as const;
 
 
+function getSurveyWorkflowStatus(survey: { status: string; installSchedulerJobId: string | null; installSchedulerSyncStatus: string | null; installSchedulerSyncError: string | null }) {
+  if (survey.installSchedulerSyncStatus === "completed" || survey.status === "completed") {
+    return {
+      label: "Survey completed",
+      helper: "Returned from Install Scheduler and ready to quote.",
+      background: "#ecfdf3",
+      color: "#067647",
+      border: "#abefc6"
+    } as const;
+  }
+
+  if (survey.installSchedulerSyncStatus === "error") {
+    return {
+      label: "Sync issue",
+      helper: survey.installSchedulerSyncError || "Install Scheduler did not accept or return this survey yet.",
+      background: "#fff1f3",
+      color: "#b42318",
+      border: "#fecdd3"
+    } as const;
+  }
+
+  if (survey.installSchedulerJobId || survey.installSchedulerSyncStatus === "created") {
+    return {
+      label: "Awaiting survey completion",
+      helper: "Sent to Install Scheduler. Waiting for staff to complete the survey.",
+      background: "#eef2ff",
+      color: "#4338ca",
+      border: "#c7d7fe"
+    } as const;
+  }
+
+  if (survey.status === "booked") {
+    return {
+      label: "Survey booked",
+      helper: "Booked locally. Not yet returned as a completed survey.",
+      background: "#fef7c3",
+      color: "#a15c07",
+      border: "#fde68a"
+    } as const;
+  }
+
+  return {
+    label: "Survey requested",
+    helper: "Created in Production Manager. It can now be sent to Install Scheduler.",
+    background: "#f2f4f7",
+    color: "#475467",
+    border: "#e5e7eb"
+  } as const;
+}
+
+function statusDot(label: string, active: boolean, complete: boolean) {
+  return (
+    <div style={{ display: "grid", gap: 6, justifyItems: "center", color: complete ? "#067647" : active ? "#155eef" : "#98a2b3", fontSize: 12, fontWeight: 850, minWidth: 84 }}>
+      <span style={{ width: 18, height: 18, borderRadius: 999, background: complete ? "#12b76a" : active ? "#155eef" : "#e5e7eb", color: "#fff", display: "grid", placeItems: "center", fontSize: 11 }}>{complete ? "✓" : active ? "•" : ""}</span>
+      <span style={{ textAlign: "center" }}>{label}</span>
+    </div>
+  );
+}
+
+
+
 export default async function SurveysPage({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -142,6 +203,9 @@ export default async function SurveysPage({ searchParams }: PageProps) {
             {surveyRequests.map((survey) => {
               const isOpen = selectedSurveyId === survey.id;
               const surveyPhotos = extractSurveyPhotos(survey.installSchedulerPayload);
+              const workflowStatus = getSurveyWorkflowStatus(survey);
+              const hasInstallJob = Boolean(survey.installSchedulerJobId || survey.installSchedulerJobUrl);
+              const hasCompletedSurvey = survey.installSchedulerSyncStatus === "completed" || survey.status === "completed";
               return (
                 <article key={survey.id} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
@@ -149,28 +213,40 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                       <strong>{survey.clientName}</strong>
                       <div style={{ color: "#475467", marginTop: 4 }}>{survey.siteAddress || "No site address yet"}</div>
                     </div>
-                    <span style={{ borderRadius: 999, background: survey.status === "completed" ? "#ecfdf3" : "#eef2ff", color: survey.status === "completed" ? "#067647" : "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{survey.status}</span>
+                    <span style={{ borderRadius: 999, background: workflowStatus.background, color: workflowStatus.color, padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{workflowStatus.label}</span>
                   </div>
                   <div style={{ color: "#667085", fontSize: 13 }}>
                     {[survey.contactName, survey.phone, survey.dueDate ? `Due ${survey.dueDate}` : null, survey.assignedTo].filter(Boolean).join(" · ")}
                   </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-                    <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#ecfdf3" : survey.installSchedulerSyncStatus === "error" ? "#fff1f3" : survey.installSchedulerJobId ? "#eef2ff" : "#f2f4f7", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : survey.installSchedulerSyncStatus === "error" ? "#b42318" : survey.installSchedulerJobId ? "#4338ca" : "#475467", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>
-                      Install Scheduler: {survey.installSchedulerSyncStatus || "not synced"}
-                    </span>
-                    {survey.installSchedulerJobUrl ? (
-                      <a href={survey.installSchedulerJobUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 800, color: "#155eef", textDecoration: "none" }}>Open Install Scheduler job</a>
-                    ) : null}
-                    {survey.installSchedulerSyncError ? (
-                      <span style={{ fontSize: 13, color: "#b42318" }}>{survey.installSchedulerSyncError}</span>
-                    ) : null}
-                    {surveyPhotos.length ? (
-                      <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{surveyPhotos.length} survey photo{surveyPhotos.length === 1 ? "" : "s"}</span>
-                    ) : null}
+                  <div style={{ border: `1px solid ${workflowStatus.border}`, borderRadius: 16, padding: 12, background: workflowStatus.background, display: "grid", gap: 10 }}>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", overflowX: "auto", paddingBottom: 2 }}>
+                      {statusDot("Requested", true, true)}
+                      <span style={{ flex: 1, height: 2, background: hasInstallJob ? "#155eef" : "#d0d5dd", minWidth: 34 }} />
+                      {statusDot("Sent", hasInstallJob && !hasCompletedSurvey, hasInstallJob)}
+                      <span style={{ flex: 1, height: 2, background: hasCompletedSurvey ? "#12b76a" : "#d0d5dd", minWidth: 34 }} />
+                      {statusDot("Completed", hasCompletedSurvey, hasCompletedSurvey)}
+                      <span style={{ flex: 1, height: 2, background: hasCompletedSurvey ? "#12b76a" : "#d0d5dd", minWidth: 34 }} />
+                      {statusDot("Ready to quote", hasCompletedSurvey, hasCompletedSurvey)}
+                    </div>
+                    <p style={{ margin: 0, color: workflowStatus.color, fontSize: 13, fontWeight: 800 }}>{workflowStatus.helper}</p>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <span style={{ borderRadius: 999, background: "rgba(255,255,255,0.72)", color: workflowStatus.color, padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>
+                        Install Scheduler: {survey.installSchedulerSyncStatus || "not synced"}
+                      </span>
+                      {survey.installSchedulerJobUrl ? (
+                        <a href={survey.installSchedulerJobUrl} target="_blank" rel="noreferrer" style={{ minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 12px", borderRadius: 10, background: "#155eef", color: "#fff", fontSize: 13, fontWeight: 900, textDecoration: "none" }}>Open in Install Scheduler</a>
+                      ) : null}
+                      {survey.installSchedulerSyncError ? (
+                        <span style={{ fontSize: 13, color: "#b42318" }}>{survey.installSchedulerSyncError}</span>
+                      ) : null}
+                      {surveyPhotos.length ? (
+                        <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{surveyPhotos.length} survey photo{surveyPhotos.length === 1 ? "" : "s"}</span>
+                      ) : null}
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
-                    <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote from survey</Link>
+                    <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: hasCompletedSurvey ? "#111827" : "#344054", color: "#fff", fontWeight: 800 }}>{hasCompletedSurvey ? "Create quote from completed survey" : "Create quote from survey notes"}</Link>
                   </div>
                   {isOpen ? (
                     <form action={updateSurveyRequestAction} style={{ borderTop: "1px solid #e5e7eb", paddingTop: 14, display: "grid", gap: 12 }}>

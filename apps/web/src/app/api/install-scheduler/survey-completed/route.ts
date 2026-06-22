@@ -36,12 +36,10 @@ function getPhotoName(photo: unknown, fallback: string): string {
 }
 
 function photoCount(signs: unknown): number {
-  let count = 0;
-  for (const sign of asArray(signs)) {
+  return asArray(signs).reduce<number>((sum, sign) => {
     const photos = asRecord(sign).photos;
-    count += asArray(photos).filter((photo) => getPhotoUrl(photo)).length;
-  }
-  return count;
+    return sum + asArray(photos).filter((photo) => getPhotoUrl(photo)).length;
+  }, 0);
 }
 
 function buildSurveyDetails(payload: UnknownRecord): string {

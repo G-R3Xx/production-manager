@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
@@ -17,6 +18,97 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
   const value = params[key];
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
+}
+
+
+type UnknownRecord = Record<string, unknown>;
+type SurveyPhoto = {
+  url: string;
+  fileName: string;
+  signTitle: string;
+  annotated: boolean;
+};
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getPhotoUrl(photo: unknown): string {
+  if (!isRecord(photo)) return "";
+  return textValue(photo.url) || textValue(photo.downloadUrl) || textValue(photo.photoUrl) || textValue(photo.photoURL);
+}
+
+function getPhotoName(photo: unknown, fallback: string): string {
+  if (!isRecord(photo)) return fallback;
+  return textValue(photo.fileName) || textValue(photo.originalFileName) || textValue(photo.name) || fallback;
+}
+
+function extractSurveyPhotos(payload: unknown): SurveyPhoto[] {
+  if (!isRecord(payload)) return [];
+  const directPhotos = Array.isArray(payload.surveyPhotos) ? payload.surveyPhotos : [];
+  const signs = Array.isArray(payload.signs) ? payload.signs : [];
+  const rawSurvey = isRecord(payload.rawSurvey) ? payload.rawSurvey : {};
+  const rawSigns = Array.isArray(rawSurvey.signs) ? rawSurvey.signs : [];
+  const photoRows: SurveyPhoto[] = [];
+  const seen = new Set<string>();
+
+  directPhotos.forEach((photo, index) => {
+    const url = getPhotoUrl(photo);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    photoRows.push({
+      url,
+      fileName: getPhotoName(photo, `Photo ${index + 1}`),
+      signTitle: isRecord(photo) ? textValue(photo.signTitle) || textValue(photo.location) || "Survey photo" : "Survey photo",
+      annotated: isRecord(photo) ? Boolean(photo.annotated) : false,
+    });
+  });
+
+  [...signs, ...rawSigns].forEach((sign, signIndex) => {
+    if (!isRecord(sign)) return;
+    const signTitle = textValue(sign.title) || textValue(sign.location) || `Sign / location ${signIndex + 1}`;
+    const photos = Array.isArray(sign.photos) ? sign.photos : [];
+    photos.forEach((photo, photoIndex) => {
+      const url = getPhotoUrl(photo);
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      photoRows.push({
+        url,
+        fileName: getPhotoName(photo, `Photo ${photoIndex + 1}`),
+        signTitle,
+        annotated: isRecord(photo) ? Boolean(photo.annotated) : false,
+      });
+    });
+  });
+
+  return photoRows;
+}
+
+function surveyStatusLabel(status: string | null | undefined, syncStatus: string | null | undefined): string {
+  if (syncStatus === "completed" || status === "completed") return "Survey completed · ready to quote";
+  if (syncStatus === "created") return "Sent to Install Scheduler · awaiting completion";
+  if (syncStatus === "error") return "Install Scheduler sync issue";
+  if (status === "booked") return "Survey booked";
+  return "Survey requested";
+}
+
+function buildSurveyQuoteNotes(input: {
+  enquirySummary?: string | null;
+  surveyNotes?: string | null;
+  surveyDetails?: string | null;
+  photos: SurveyPhoto[];
+}): string {
+  const photoLines = input.photos.map((photo, index) => `${index + 1}. ${photo.signTitle}: ${photo.url}`);
+  return [
+    input.enquirySummary ? `Enquiry summary:\n${input.enquirySummary}` : null,
+    input.surveyNotes ? `Survey brief:\n${input.surveyNotes}` : null,
+    input.surveyDetails ? `Survey information collected:\n${input.surveyDetails}` : null,
+    photoLines.length ? `Survey photos:\n${photoLines.join("\n")}` : null,
+  ].filter(Boolean).join("\n\n");
 }
 
 function cardStyle() {
@@ -54,6 +146,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
   const sourceEmail = enquiry?.email ?? "";
   const activeMaterials = materials.filter((material) => material.active);
+  const surveyPhotos = extractSurveyPhotos(survey?.installSchedulerPayload);
+  const defaultQuoteNotes = buildSurveyQuoteNotes({
+    enquirySummary: enquiry?.requestSummary ?? null,
+    surveyNotes: survey?.notes ?? null,
+    surveyDetails: survey?.surveyDetails ?? null,
+    photos: surveyPhotos
+  });
 
   return (
     <div style={{ maxWidth: 1440, margin: "0 auto", display: "grid", gap: 18 }}>
@@ -68,6 +167,38 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
       <div style={{ display: "grid", gridTemplateColumns: "360px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         <div style={{ display: "grid", gap: 14 }}>
+          {survey ? (
+            <section style={{ ...cardStyle(), display: "grid", gap: 12, borderColor: survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe", background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
+                <div style={{ display: "grid", gap: 4 }}>
+                  <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
+                  <h2 style={{ margin: 0, fontSize: 20 }}>{survey.clientName}</h2>
+                </div>
+                <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
+              </div>
+              <p style={{ margin: 0, color: "#475467", lineHeight: 1.55 }}>{survey.siteAddress || "No site address recorded"}</p>
+              {survey.surveyDetails ? (
+                <div style={{ border: "1px solid #d0d5dd", background: "#fff", borderRadius: 16, padding: 12, display: "grid", gap: 6 }}>
+                  <strong>Survey information collected</strong>
+                  <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{survey.surveyDetails}</p>
+                </div>
+              ) : null}
+              {surveyPhotos.length ? (
+                <div style={{ display: "grid", gap: 8 }}>
+                  <strong>{surveyPhotos.length} survey photo{surveyPhotos.length === 1 ? "" : "s"} will be copied into the quote notes</strong>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))", gap: 8 }}>
+                    {surveyPhotos.slice(0, 6).map((photo, index) => (
+                      <a key={`${photo.url}-${index}`} href={photo.url} target="_blank" rel="noreferrer" title={photo.fileName} style={{ display: "grid", gap: 4, textDecoration: "none", color: "#111827" }}>
+                        <img src={photo.url} alt={photo.fileName || "Survey photo"} style={{ width: "100%", height: 70, objectFit: "cover", borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff" }} />
+                        <span style={{ fontSize: 11, color: "#667085", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.signTitle}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+              <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 12, border: "1px solid #cbd5e1", color: "#111827", fontWeight: 900 }}>Open survey summary</Link>
+            </section>
+          ) : null}
           <form action={createQuoteDraftAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
             <h2 style={{ margin: 0 }}>New draft quote</h2>
             <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
@@ -79,7 +210,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <input name="email" defaultValue={sourceEmail} placeholder="Email" style={inputStyle} />
             </div>
             <input name="discountPercent" defaultValue="0" placeholder="Client discount %" style={inputStyle} />
-            <textarea name="notes" defaultValue={[enquiry?.requestSummary, survey?.notes, survey?.surveyDetails].filter(Boolean).join("\n\n")} placeholder="Quote notes" style={textareaStyle} />
+            <textarea name="notes" defaultValue={defaultQuoteNotes} placeholder="Quote notes" style={textareaStyle} />
             <button type="submit" style={buttonStyle}>Create draft quote</button>
           </form>
 
