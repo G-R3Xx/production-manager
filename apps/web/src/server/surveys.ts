@@ -1,4 +1,3 @@
-
 import "server-only";
 
 import { pool } from "@production-manager/db";
@@ -17,31 +16,50 @@ export type SurveyRequestRecord = {
   notes: string | null;
   surveyDetails: string | null;
   status: string;
+  installSchedulerJobId: string | null;
+  installSchedulerJobUrl: string | null;
+  installSchedulerSyncStatus: string | null;
+  installSchedulerSyncError: string | null;
+  installSchedulerSyncedAt: string | null;
+  installSchedulerCompletedSurveyId: string | null;
+  installSchedulerCompletedAt: string | null;
+  installSchedulerPayload: unknown | null;
   createdAt: string;
   updatedAt: string;
   completedAt: string | null;
 };
 
+const surveyRequestSelect = `
+  SELECT
+    id,
+    tenant_id as "tenantId",
+    enquiry_id as "enquiryId",
+    linked_customer_id as "linkedCustomerId",
+    client_name as "clientName",
+    contact_name as "contactName",
+    phone,
+    site_address as "siteAddress",
+    due_date::text as "dueDate",
+    assigned_to as "assignedTo",
+    notes,
+    survey_details as "surveyDetails",
+    status,
+    install_scheduler_job_id as "installSchedulerJobId",
+    install_scheduler_job_url as "installSchedulerJobUrl",
+    install_scheduler_sync_status as "installSchedulerSyncStatus",
+    install_scheduler_sync_error as "installSchedulerSyncError",
+    install_scheduler_synced_at::text as "installSchedulerSyncedAt",
+    install_scheduler_completed_survey_id as "installSchedulerCompletedSurveyId",
+    install_scheduler_completed_at::text as "installSchedulerCompletedAt",
+    install_scheduler_payload as "installSchedulerPayload",
+    created_at as "createdAt",
+    updated_at as "updatedAt",
+    completed_at as "completedAt"
+  FROM app.survey_requests
+`;
+
 export async function listSurveyRequestsForTenant(tenantId: string): Promise<SurveyRequestRecord[]> {
-  const result = await pool.query<SurveyRequestRecord>(`
-    SELECT
-      id,
-      tenant_id as "tenantId",
-      enquiry_id as "enquiryId",
-      linked_customer_id as "linkedCustomerId",
-      client_name as "clientName",
-      contact_name as "contactName",
-      phone,
-      site_address as "siteAddress",
-      due_date::text as "dueDate",
-      assigned_to as "assignedTo",
-      notes,
-      survey_details as "surveyDetails",
-      status,
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      completed_at as "completedAt"
-    FROM app.survey_requests
+  const result = await pool.query<SurveyRequestRecord>(`${surveyRequestSelect}
     WHERE tenant_id = $1::uuid
     ORDER BY created_at DESC
   `, [tenantId]);
@@ -49,25 +67,7 @@ export async function listSurveyRequestsForTenant(tenantId: string): Promise<Sur
 }
 
 export async function getSurveyRequestById(tenantId: string, surveyId: string): Promise<SurveyRequestRecord | null> {
-  const result = await pool.query<SurveyRequestRecord>(`
-    SELECT
-      id,
-      tenant_id as "tenantId",
-      enquiry_id as "enquiryId",
-      linked_customer_id as "linkedCustomerId",
-      client_name as "clientName",
-      contact_name as "contactName",
-      phone,
-      site_address as "siteAddress",
-      due_date::text as "dueDate",
-      assigned_to as "assignedTo",
-      notes,
-      survey_details as "surveyDetails",
-      status,
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      completed_at as "completedAt"
-    FROM app.survey_requests
+  const result = await pool.query<SurveyRequestRecord>(`${surveyRequestSelect}
     WHERE tenant_id = $1::uuid AND id = $2::uuid
     LIMIT 1
   `, [tenantId, surveyId]);
@@ -87,9 +87,9 @@ export async function createSurveyRequestForTenant(tenantId: string, input: {
 }): Promise<{ id: string }> {
   const result = await pool.query<{ id: string }>(`
     INSERT INTO app.survey_requests (
-      tenant_id, enquiry_id, linked_customer_id, client_name, contact_name, phone, site_address, due_date, assigned_to, notes, survey_details, status, created_at, updated_at
+      tenant_id, enquiry_id, linked_customer_id, client_name, contact_name, phone, site_address, due_date, assigned_to, notes, survey_details, status, install_scheduler_sync_status, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::uuid,$3::uuid,$4::varchar,$5::varchar,$6::varchar,$7::text,$8::date,$9::varchar,$10::text,null,'requested',now(),now()
+      $1::uuid,$2::uuid,$3::uuid,$4::varchar,$5::varchar,$6::varchar,$7::text,$8::date,$9::varchar,$10::text,null,'requested','not_synced',now(),now()
     ) RETURNING id
   `, [
     tenantId,
@@ -107,25 +107,7 @@ export async function createSurveyRequestForTenant(tenantId: string, input: {
 }
 
 export async function getLatestSurveyRequestForEnquiry(tenantId: string, enquiryId: string): Promise<SurveyRequestRecord | null> {
-  const result = await pool.query<SurveyRequestRecord>(`
-    SELECT
-      id,
-      tenant_id as "tenantId",
-      enquiry_id as "enquiryId",
-      linked_customer_id as "linkedCustomerId",
-      client_name as "clientName",
-      contact_name as "contactName",
-      phone,
-      site_address as "siteAddress",
-      due_date::text as "dueDate",
-      assigned_to as "assignedTo",
-      notes,
-      survey_details as "surveyDetails",
-      status,
-      created_at as "createdAt",
-      updated_at as "updatedAt",
-      completed_at as "completedAt"
-    FROM app.survey_requests
+  const result = await pool.query<SurveyRequestRecord>(`${surveyRequestSelect}
     WHERE tenant_id = $1::uuid
       AND enquiry_id = $2::uuid
     ORDER BY created_at DESC
@@ -165,5 +147,69 @@ export async function updateSurveyRequestForTenant(tenantId: string, surveyId: s
     input.dueDate ?? null,
     input.notes ?? null,
     input.surveyDetails ?? null
+  ]);
+}
+
+export async function updateSurveyInstallSchedulerLink(tenantId: string, surveyId: string, input: {
+  jobId?: string | null;
+  jobUrl?: string | null;
+  syncStatus: string;
+  syncError?: string | null;
+  payload?: unknown | null;
+}): Promise<void> {
+  await pool.query(`
+    UPDATE app.survey_requests
+    SET install_scheduler_job_id = COALESCE($3::varchar, install_scheduler_job_id),
+        install_scheduler_job_url = COALESCE($4::text, install_scheduler_job_url),
+        install_scheduler_sync_status = $5::varchar,
+        install_scheduler_sync_error = $6::text,
+        install_scheduler_payload = COALESCE($7::jsonb, install_scheduler_payload),
+        install_scheduler_synced_at = CASE WHEN $5::varchar = 'created' THEN now() ELSE install_scheduler_synced_at END,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [
+    tenantId,
+    surveyId,
+    input.jobId ?? null,
+    input.jobUrl ?? null,
+    input.syncStatus,
+    input.syncError ?? null,
+    input.payload == null ? null : JSON.stringify(input.payload)
+  ]);
+}
+
+export async function updateSurveyFromInstallSchedulerCompletion(tenantId: string, surveyId: string, input: {
+  installSchedulerJobId?: string | null;
+  installSchedulerJobUrl?: string | null;
+  installSchedulerSurveyId?: string | null;
+  status?: string | null;
+  surveyDetails: string;
+  payload: unknown;
+}): Promise<void> {
+  await pool.query(`
+    UPDATE app.survey_requests
+    SET status = COALESCE(NULLIF($3::varchar, ''), 'completed'),
+        survey_details = $4::text,
+        install_scheduler_job_id = COALESCE($5::varchar, install_scheduler_job_id),
+        install_scheduler_job_url = COALESCE($6::text, install_scheduler_job_url),
+        install_scheduler_completed_survey_id = COALESCE($7::varchar, install_scheduler_completed_survey_id),
+        install_scheduler_completed_at = now(),
+        install_scheduler_sync_status = 'completed',
+        install_scheduler_sync_error = NULL,
+        install_scheduler_payload = $8::jsonb,
+        completed_at = COALESCE(completed_at, now()),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [
+    tenantId,
+    surveyId,
+    input.status ?? "completed",
+    input.surveyDetails,
+    input.installSchedulerJobId ?? null,
+    input.installSchedulerJobUrl ?? null,
+    input.installSchedulerSurveyId ?? null,
+    JSON.stringify(input.payload ?? {})
   ]);
 }

@@ -86,6 +86,17 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                   <div style={{ color: "#667085", fontSize: 13 }}>
                     {[survey.contactName, survey.phone, survey.dueDate ? `Due ${survey.dueDate}` : null, survey.assignedTo].filter(Boolean).join(" · ")}
                   </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#ecfdf3" : survey.installSchedulerSyncStatus === "error" ? "#fff1f3" : survey.installSchedulerJobId ? "#eef2ff" : "#f2f4f7", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : survey.installSchedulerSyncStatus === "error" ? "#b42318" : survey.installSchedulerJobId ? "#4338ca" : "#475467", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>
+                      Install Scheduler: {survey.installSchedulerSyncStatus || "not synced"}
+                    </span>
+                    {survey.installSchedulerJobUrl ? (
+                      <a href={survey.installSchedulerJobUrl} target="_blank" rel="noreferrer" style={{ fontSize: 13, fontWeight: 800, color: "#155eef", textDecoration: "none" }}>Open Install Scheduler job</a>
+                    ) : null}
+                    {survey.installSchedulerSyncError ? (
+                      <span style={{ fontSize: 13, color: "#b42318" }}>{survey.installSchedulerSyncError}</span>
+                    ) : null}
+                  </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
                     <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote from survey</Link>

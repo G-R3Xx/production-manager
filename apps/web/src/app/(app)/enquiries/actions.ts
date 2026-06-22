@@ -5,7 +5,8 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createEnquiryForTenant, getEnquiryById, updateEnquiryStatusForTenant } from "@/server/enquiries";
-import { createSurveyRequestForTenant, getLatestSurveyRequestForEnquiry } from "@/server/surveys";
+import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
+import { createSurveyRequestForTenant, getLatestSurveyRequestForEnquiry, getSurveyRequestById } from "@/server/surveys";
 
 
 async function requireTenant() {
@@ -78,5 +79,21 @@ export async function createSurveyFromEnquiryAction(formData: FormData): Promise
   });
 
   await updateEnquiryStatusForTenant(activeTenant.tenantId, enquiry.id, "survey_requested");
-  redirect(`/surveys?selected=${created.id}&message=Site%20survey%20request%20created`);
+
+  const survey = await getSurveyRequestById(activeTenant.tenantId, created.id);
+  const bridgeResult = survey
+    ? await createInstallSchedulerSurveyJob({
+        tenantId: activeTenant.tenantId,
+        survey,
+        enquiryRequestSummary: enquiry.requestSummary,
+        enquiryNotes: enquiry.notes,
+        email: enquiry.email,
+      })
+    : { ok: false, error: "Survey was created but could not be reloaded" };
+
+  const message = bridgeResult.ok
+    ? "Site survey request created and sent to Install Scheduler"
+    : `Site survey request created, but Install Scheduler was not created: ${bridgeResult.error || "bridge not configured"}`;
+
+  redirect(`/surveys?selected=${created.id}&message=${encodeURIComponent(message)}`);
 }

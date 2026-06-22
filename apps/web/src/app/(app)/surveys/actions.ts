@@ -4,7 +4,8 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createSurveyRequestForTenant, updateSurveyRequestForTenant } from "@/server/surveys";
+import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
+import { createSurveyRequestForTenant, getSurveyRequestById, updateSurveyRequestForTenant } from "@/server/surveys";
 
 
 async function requireTenant() {
@@ -30,7 +31,7 @@ export async function createSurveyRequestAction(formData: FormData): Promise<voi
     redirect("/surveys?error=Client%20name%20is%20required");
   }
 
-  await createSurveyRequestForTenant(activeTenant.tenantId, {
+  const created = await createSurveyRequestForTenant(activeTenant.tenantId, {
     enquiryId: nullable(formData.get("enquiryId")),
     linkedCustomerId: nullable(formData.get("linkedCustomerId")),
     clientName,
@@ -42,7 +43,16 @@ export async function createSurveyRequestAction(formData: FormData): Promise<voi
     notes: nullable(formData.get("notes"))
   });
 
-  redirect("/surveys?message=Survey%20request%20created");
+  const survey = await getSurveyRequestById(activeTenant.tenantId, created.id);
+  const bridgeResult = survey
+    ? await createInstallSchedulerSurveyJob({ tenantId: activeTenant.tenantId, survey })
+    : { ok: false, error: "Survey was created but could not be reloaded" };
+
+  const message = bridgeResult.ok
+    ? "Survey request created and sent to Install Scheduler"
+    : `Survey request created, but Install Scheduler was not created: ${bridgeResult.error || "bridge not configured"}`;
+
+  redirect(`/surveys?selected=${created.id}&message=${encodeURIComponent(message)}`);
 }
 
 
