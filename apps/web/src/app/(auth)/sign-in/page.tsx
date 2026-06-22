@@ -22,11 +22,13 @@ export default async function SignInPage({ searchParams }: SignInPageProps) {
   return (
     <main style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24, background: "#f6f8fb" }}>
       <div style={{ width: "100%", maxWidth: 520, background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 32, boxShadow: "0 10px 30px rgba(0,0,0,0.04)" }}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>
-          Production Manager
-        </p>
+        <img
+          src="/brand/production-manager-logo.svg"
+          alt="Production Manager"
+          style={{ width: "100%", maxWidth: 320, height: "auto", display: "block", margin: "0 auto 18px" }}
+        />
 
-        <h1 style={{ marginTop: 12, marginBottom: 12 }}>Sign in</h1>
+        <h1 style={{ marginTop: 4, marginBottom: 12 }}>Sign in</h1>
         <p style={{ color: "#475467", lineHeight: 1.6 }}>
           Use Google or request a magic link. After sign-in you will be taken into the tenant-aware app shell.
         </p>

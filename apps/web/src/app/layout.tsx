@@ -3,7 +3,12 @@ import { ReactNode } from "react";
 
 export const metadata: Metadata = {
   title: "Production Manager",
-  description: "Production Manager SaaS platform"
+  description: "Production Manager SaaS platform",
+  icons: {
+    icon: "/brand/production-manager-icon.svg",
+    shortcut: "/brand/production-manager-icon.svg",
+    apple: "/brand/production-manager-icon.svg"
+  }
 };
 
 type RootLayoutProps = {

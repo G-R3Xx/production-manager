@@ -60,33 +60,20 @@ export default async function AppLayout({ children }: AppLayoutProps) {
             padding: "8px 8px 4px"
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div
+          <a href="/enquiries" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
+            <img
+              src="/brand/production-manager-logo.svg"
+              alt="Production Manager"
               style={{
-                width: 42,
-                height: 42,
+                width: "100%",
+                maxWidth: 206,
+                height: "auto",
+                display: "block",
                 borderRadius: 16,
-                background: "linear-gradient(135deg, #1d4ed8 0%, #38bdf8 100%)",
-                boxShadow: "0 14px 28px rgba(29,78,216,0.24)",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                color: "white",
-                fontWeight: 950,
-                letterSpacing: "-0.05em"
+                boxShadow: "0 14px 28px rgba(15,23,42,0.08)"
               }}
-            >
-              PM
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 12, fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase", color: "#2563eb" }}>
-                Production Hub
-              </div>
-              <div style={{ fontSize: 18, fontWeight: 950, color: "#0f172a", lineHeight: 1.1 }}>
-                Manager
-              </div>
-            </div>
-          </div>
+            />
+          </a>
         </div>
 
         <div
