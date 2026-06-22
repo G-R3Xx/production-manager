@@ -4,7 +4,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createSurveyRequestForTenant } from "@/server/surveys";
+import { createSurveyRequestForTenant, updateSurveyRequestForTenant } from "@/server/surveys";
 
 
 async function requireTenant() {
@@ -43,4 +43,24 @@ export async function createSurveyRequestAction(formData: FormData): Promise<voi
   });
 
   redirect("/surveys?message=Survey%20request%20created");
+}
+
+
+export async function updateSurveyRequestAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const surveyId = String(formData.get("surveyId") ?? "").trim();
+
+  if (!surveyId) {
+    redirect("/surveys?error=Choose%20a%20survey%20request%20first");
+  }
+
+  await updateSurveyRequestForTenant(activeTenant.tenantId, surveyId, {
+    status: nullable(formData.get("status")),
+    assignedTo: nullable(formData.get("assignedTo")),
+    dueDate: nullable(formData.get("dueDate")),
+    notes: nullable(formData.get("notes")),
+    surveyDetails: nullable(formData.get("surveyDetails"))
+  });
+
+  redirect(`/surveys?selected=${surveyId}&message=Survey%20request%20updated`);
 }

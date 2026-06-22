@@ -105,3 +105,65 @@ export async function createSurveyRequestForTenant(tenantId: string, input: {
   ]);
   return result.rows[0];
 }
+
+export async function getLatestSurveyRequestForEnquiry(tenantId: string, enquiryId: string): Promise<SurveyRequestRecord | null> {
+  const result = await pool.query<SurveyRequestRecord>(`
+    SELECT
+      id,
+      tenant_id as "tenantId",
+      enquiry_id as "enquiryId",
+      linked_customer_id as "linkedCustomerId",
+      client_name as "clientName",
+      contact_name as "contactName",
+      phone,
+      site_address as "siteAddress",
+      due_date::text as "dueDate",
+      assigned_to as "assignedTo",
+      notes,
+      survey_details as "surveyDetails",
+      status,
+      created_at as "createdAt",
+      updated_at as "updatedAt",
+      completed_at as "completedAt"
+    FROM app.survey_requests
+    WHERE tenant_id = $1::uuid
+      AND enquiry_id = $2::uuid
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [tenantId, enquiryId]);
+  return result.rows[0] ?? null;
+}
+
+export async function updateSurveyRequestForTenant(tenantId: string, surveyId: string, input: {
+  status?: string | null;
+  assignedTo?: string | null;
+  dueDate?: string | null;
+  notes?: string | null;
+  surveyDetails?: string | null;
+}): Promise<void> {
+  const status = input.status?.trim() || "requested";
+  await pool.query(`
+    UPDATE app.survey_requests
+    SET status = $3::varchar,
+        assigned_to = $4::varchar,
+        due_date = NULLIF($5::text, '')::date,
+        notes = $6::text,
+        survey_details = $7::text,
+        completed_at = CASE
+          WHEN $3::varchar = 'completed' AND completed_at IS NULL THEN now()
+          WHEN $3::varchar <> 'completed' THEN NULL
+          ELSE completed_at
+        END,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [
+    tenantId,
+    surveyId,
+    status,
+    input.assignedTo ?? null,
+    input.dueDate ?? null,
+    input.notes ?? null,
+    input.surveyDetails ?? null
+  ]);
+}

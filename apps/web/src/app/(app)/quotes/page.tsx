@@ -79,7 +79,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <input name="email" defaultValue={sourceEmail} placeholder="Email" style={inputStyle} />
             </div>
             <input name="discountPercent" defaultValue="0" placeholder="Client discount %" style={inputStyle} />
-            <textarea name="notes" defaultValue={[enquiry?.requestSummary, survey?.notes].filter(Boolean).join("\n\n")} placeholder="Quote notes" style={textareaStyle} />
+            <textarea name="notes" defaultValue={[enquiry?.requestSummary, survey?.notes, survey?.surveyDetails].filter(Boolean).join("\n\n")} placeholder="Quote notes" style={textareaStyle} />
             <button type="submit" style={buttonStyle}>Create draft quote</button>
           </form>
 

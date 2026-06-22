@@ -102,3 +102,13 @@ export async function createEnquiryForTenant(tenantId: string, input: {
   ]);
   return result.rows[0];
 }
+
+export async function updateEnquiryStatusForTenant(tenantId: string, enquiryId: string, status: string): Promise<void> {
+  await pool.query(`
+    UPDATE app.enquiries
+    SET status = $3::varchar,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [tenantId, enquiryId, status]);
+}

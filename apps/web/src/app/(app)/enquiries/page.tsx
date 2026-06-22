@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listEnquiriesForTenant } from "@/server/enquiries";
-import { createEnquiryAction } from "./actions";
+import { createEnquiryAction, createSurveyFromEnquiryAction } from "./actions";
 
 
 type PageProps = {
@@ -84,7 +84,11 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                   {[enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ")}
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Create survey request</Link>
+                  <form action={createSurveyFromEnquiryAction} style={{ margin: 0 }}>
+                    <input type="hidden" name="enquiryId" value={enquiry.id} />
+                    <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Create site survey request</button>
+                  </form>
+                  <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
                   <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link>
                 </div>
               </article>

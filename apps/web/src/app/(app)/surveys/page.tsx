@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById } from "@/server/enquiries";
-import { createSurveyRequestAction } from "./actions";
+import { createSurveyRequestAction, updateSurveyRequestAction } from "./actions";
 import { listSurveyRequestsForTenant } from "@/server/surveys";
 
 
@@ -35,6 +35,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
   const message = readParam(params, "message");
   const error = readParam(params, "error");
   const fromEnquiry = readParam(params, "fromEnquiry");
+  const selectedSurveyId = readParam(params, "selected");
   const [surveyRequests, enquiry] = await Promise.all([
     listSurveyRequestsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null)
@@ -71,23 +72,60 @@ export default async function SurveysPage({ searchParams }: PageProps) {
             <span style={{ fontSize: 13, color: "#667085" }}>{surveyRequests.length} total</span>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            {surveyRequests.map((survey) => (
-              <article key={survey.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                  <div>
-                    <strong>{survey.clientName}</strong>
-                    <div style={{ color: "#475467", marginTop: 4 }}>{survey.siteAddress || "No site address yet"}</div>
+            {surveyRequests.map((survey) => {
+              const isOpen = selectedSurveyId === survey.id;
+              return (
+                <article key={survey.id} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                    <div>
+                      <strong>{survey.clientName}</strong>
+                      <div style={{ color: "#475467", marginTop: 4 }}>{survey.siteAddress || "No site address yet"}</div>
+                    </div>
+                    <span style={{ borderRadius: 999, background: survey.status === "completed" ? "#ecfdf3" : "#eef2ff", color: survey.status === "completed" ? "#067647" : "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{survey.status}</span>
                   </div>
-                  <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{survey.status}</span>
-                </div>
-                <div style={{ color: "#667085", fontSize: 13 }}>
-                  {[survey.contactName, survey.phone, survey.dueDate ? `Due ${survey.dueDate}` : null, survey.assignedTo].filter(Boolean).join(" · ")}
-                </div>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote from survey</Link>
-                </div>
-              </article>
-            ))}
+                  <div style={{ color: "#667085", fontSize: 13 }}>
+                    {[survey.contactName, survey.phone, survey.dueDate ? `Due ${survey.dueDate}` : null, survey.assignedTo].filter(Boolean).join(" · ")}
+                  </div>
+                  <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                    <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
+                    <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote from survey</Link>
+                  </div>
+                  {isOpen ? (
+                    <form action={updateSurveyRequestAction} style={{ borderTop: "1px solid #e5e7eb", paddingTop: 14, display: "grid", gap: 12 }}>
+                      <input type="hidden" name="surveyId" value={survey.id} />
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                        <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 800 }}>
+                          Status
+                          <select name="status" defaultValue={survey.status} style={inputStyle}>
+                            <option value="requested">Requested</option>
+                            <option value="booked">Booked</option>
+                            <option value="in_progress">In progress</option>
+                            <option value="completed">Completed</option>
+                          </select>
+                        </label>
+                        <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 800 }}>
+                          Due date
+                          <input name="dueDate" type="date" defaultValue={survey.dueDate ?? ""} style={inputStyle} />
+                        </label>
+                        <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 800 }}>
+                          Assigned to
+                          <input name="assignedTo" defaultValue={survey.assignedTo ?? ""} placeholder="Installer / staff" style={inputStyle} />
+                        </label>
+                      </div>
+                      <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 800 }}>
+                        Survey brief / notes
+                        <textarea name="notes" defaultValue={survey.notes ?? ""} placeholder="What needs measuring, access notes, customer requirements" style={textareaStyle} />
+                      </label>
+                      <label style={{ display: "grid", gap: 6, fontSize: 13, fontWeight: 800 }}>
+                        Survey information collected
+                        <textarea name="surveyDetails" defaultValue={survey.surveyDetails ?? ""} placeholder="Measurements, photos taken, fixing notes, wall type, install access, recommendations" style={{ ...textareaStyle, minHeight: 150 }} />
+                      </label>
+                      <button type="submit" style={buttonStyle}>Save survey information</button>
+                    </form>
+                  ) : null}
+                </article>
+              );
+            })}
             {surveyRequests.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No survey requests yet.</p> : null}
           </div>
         </section>
