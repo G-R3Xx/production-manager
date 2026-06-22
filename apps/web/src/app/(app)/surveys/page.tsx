@@ -18,6 +18,73 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
   return value ?? "";
 }
 
+type UnknownRecord = Record<string, unknown>;
+type SurveyPhoto = {
+  url: string;
+  fileName: string;
+  signTitle: string;
+  annotated: boolean;
+};
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return Boolean(value && typeof value === "object" && !Array.isArray(value));
+}
+
+function textValue(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function getPhotoUrl(photo: unknown): string {
+  if (!isRecord(photo)) return "";
+  return textValue(photo.url) || textValue(photo.downloadUrl) || textValue(photo.photoUrl) || textValue(photo.photoURL);
+}
+
+function getPhotoName(photo: unknown, fallback: string): string {
+  if (!isRecord(photo)) return fallback;
+  return textValue(photo.fileName) || textValue(photo.originalFileName) || textValue(photo.name) || fallback;
+}
+
+function extractSurveyPhotos(payload: unknown): SurveyPhoto[] {
+  if (!isRecord(payload)) return [];
+  const directPhotos = Array.isArray(payload.surveyPhotos) ? payload.surveyPhotos : [];
+  const signs = Array.isArray(payload.signs) ? payload.signs : [];
+  const rawSurvey = isRecord(payload.rawSurvey) ? payload.rawSurvey : {};
+  const rawSigns = Array.isArray(rawSurvey.signs) ? rawSurvey.signs : [];
+  const photoRows: SurveyPhoto[] = [];
+  const seen = new Set<string>();
+
+  directPhotos.forEach((photo, index) => {
+    const url = getPhotoUrl(photo);
+    if (!url || seen.has(url)) return;
+    seen.add(url);
+    photoRows.push({
+      url,
+      fileName: getPhotoName(photo, `Photo ${index + 1}`),
+      signTitle: isRecord(photo) ? textValue(photo.signTitle) || textValue(photo.location) || "Survey photo" : "Survey photo",
+      annotated: isRecord(photo) ? Boolean(photo.annotated) : false,
+    });
+  });
+
+  [...signs, ...rawSigns].forEach((sign, signIndex) => {
+    if (!isRecord(sign)) return;
+    const signTitle = textValue(sign.title) || textValue(sign.location) || `Sign / location ${signIndex + 1}`;
+    const photos = Array.isArray(sign.photos) ? sign.photos : [];
+    photos.forEach((photo, photoIndex) => {
+      const url = getPhotoUrl(photo);
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      photoRows.push({
+        url,
+        fileName: getPhotoName(photo, `Photo ${photoIndex + 1}`),
+        signTitle,
+        annotated: isRecord(photo) ? Boolean(photo.annotated) : false,
+      });
+    });
+  });
+
+  return photoRows;
+}
+
 function cardStyle() {
   return { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22 } as const;
 }
@@ -74,6 +141,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
           <div style={{ display: "grid", gap: 12 }}>
             {surveyRequests.map((survey) => {
               const isOpen = selectedSurveyId === survey.id;
+              const surveyPhotos = extractSurveyPhotos(survey.installSchedulerPayload);
               return (
                 <article key={survey.id} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
@@ -95,6 +163,9 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                     ) : null}
                     {survey.installSchedulerSyncError ? (
                       <span style={{ fontSize: 13, color: "#b42318" }}>{survey.installSchedulerSyncError}</span>
+                    ) : null}
+                    {surveyPhotos.length ? (
+                      <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{surveyPhotos.length} survey photo{surveyPhotos.length === 1 ? "" : "s"}</span>
                     ) : null}
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
@@ -131,6 +202,23 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                         Survey information collected
                         <textarea name="surveyDetails" defaultValue={survey.surveyDetails ?? ""} placeholder="Measurements, photos taken, fixing notes, wall type, install access, recommendations" style={{ ...textareaStyle, minHeight: 150 }} />
                       </label>
+                      {surveyPhotos.length ? (
+                        <section style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 16, padding: 14, display: "grid", gap: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+                            <strong>Survey photos returned from Install Scheduler</strong>
+                            <span style={{ color: "#9a3412", fontSize: 13, fontWeight: 800 }}>{surveyPhotos.length} photo{surveyPhotos.length === 1 ? "" : "s"}</span>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
+                            {surveyPhotos.map((photo, index) => (
+                              <a key={`${photo.url}-${index}`} href={photo.url} target="_blank" rel="noreferrer" style={{ display: "grid", gap: 6, textDecoration: "none", color: "#111827" }}>
+                                <img src={photo.url} alt={photo.fileName || "Survey photo"} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 12, border: "1px solid #fdba74", background: "#fff" }} />
+                                <span style={{ fontSize: 12, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.signTitle}</span>
+                                <span style={{ fontSize: 12, color: "#9a3412", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.fileName}{photo.annotated ? " · annotated" : ""}</span>
+                              </a>
+                            ))}
+                          </div>
+                        </section>
+                      ) : null}
                       <button type="submit" style={buttonStyle}>Save survey information</button>
                     </form>
                   ) : null}

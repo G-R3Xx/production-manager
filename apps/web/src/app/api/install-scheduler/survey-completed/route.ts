@@ -17,12 +17,31 @@ function authOk(request: Request): boolean {
   return token.length > 0 && token === expected;
 }
 
+function asRecord(value: unknown): UnknownRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as UnknownRecord : {};
+}
+
+function asArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function getPhotoUrl(photo: unknown): string {
+  const item = asRecord(photo);
+  return cleanText(item.url) || cleanText(item.downloadUrl) || cleanText(item.photoUrl) || cleanText(item.photoURL);
+}
+
+function getPhotoName(photo: unknown, fallback: string): string {
+  const item = asRecord(photo);
+  return cleanText(item.fileName) || cleanText(item.originalFileName) || cleanText(item.name) || fallback;
+}
+
 function photoCount(signs: unknown): number {
-  if (!Array.isArray(signs)) return 0;
-  return signs.reduce((sum, sign) => {
-    const photos = (sign as UnknownRecord)?.photos;
-    return sum + (Array.isArray(photos) ? photos.length : 0);
-  }, 0);
+  let count = 0;
+  for (const sign of asArray(signs)) {
+    const photos = asRecord(sign).photos;
+    count += asArray(photos).filter((photo) => getPhotoUrl(photo)).length;
+  }
+  return count;
 }
 
 function buildSurveyDetails(payload: UnknownRecord): string {
@@ -59,7 +78,14 @@ function buildSurveyDetails(payload: UnknownRecord): string {
       if (cleanText(sign.accessNotes)) lines.push(`Access notes: ${cleanText(sign.accessNotes)}`);
       if (cleanText(sign.powerRequired)) lines.push(`Power: ${cleanText(sign.powerRequired)}`);
       if (cleanText(sign.notes)) lines.push(`Notes: ${cleanText(sign.notes)}`);
-      lines.push(`Photos: ${photos.length}`);
+      const usablePhotos = photos.filter((photo) => getPhotoUrl(photo));
+      lines.push(`Photos: ${usablePhotos.length}`);
+      usablePhotos.forEach((photo, photoIndex) => {
+        const url = getPhotoUrl(photo);
+        const label = getPhotoName(photo, `Photo ${photoIndex + 1}`);
+        const annotated = asRecord(photo).annotated ? " annotated" : "";
+        lines.push(`- ${label}${annotated}: ${url}`);
+      });
     });
   }
 
