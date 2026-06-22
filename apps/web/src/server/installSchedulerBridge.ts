@@ -9,6 +9,8 @@ type CreateSurveyJobInput = {
   enquiryRequestSummary?: string | null;
   enquiryNotes?: string | null;
   email?: string | null;
+  clientLogoUrl?: string | null;
+  clientLogoStoragePath?: string | null;
 };
 
 function cleanBaseUrl(value: string | undefined): string {
@@ -46,6 +48,8 @@ export async function createInstallSchedulerSurveyJob(input: CreateSurveyJobInpu
     contactName: survey.contactName,
     phone: survey.phone,
     email: input.email ?? null,
+    clientLogoUrl: input.clientLogoUrl ?? null,
+    clientLogoStoragePath: input.clientLogoStoragePath ?? null,
     siteAddress: survey.siteAddress,
     dueDate: survey.dueDate,
     assignedTo: survey.assignedTo,

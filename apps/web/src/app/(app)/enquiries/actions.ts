@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createEnquiryForTenant, getEnquiryById, updateEnquiryStatusForTenant } from "@/server/enquiries";
+import { getCustomerById, customerLogoUrl } from "@/server/customers";
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
 import { createSurveyRequestForTenant, getLatestSurveyRequestForEnquiry, getSurveyRequestById } from "@/server/surveys";
 
@@ -27,7 +28,9 @@ function nullable(value: FormDataEntryValue | null): string | null {
 export async function createEnquiryAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
 
-  const clientName = String(formData.get("clientName") ?? "").trim();
+  const linkedCustomerId = nullable(formData.get("linkedCustomerId"));
+  const linkedCustomer = linkedCustomerId ? await getCustomerById(activeTenant.tenantId, linkedCustomerId) : null;
+  const clientName = String(formData.get("clientName") ?? "").trim() || linkedCustomer?.displayName || "";
   const requestSummary = String(formData.get("requestSummary") ?? "").trim();
 
   if (!clientName || !requestSummary) {
@@ -36,14 +39,15 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
 
   await createEnquiryForTenant(activeTenant.tenantId, {
     clientName,
-    contactName: nullable(formData.get("contactName")),
-    email: nullable(formData.get("email")),
-    phone: nullable(formData.get("phone")),
+    contactName: nullable(formData.get("contactName")) ?? ([linkedCustomer?.firstName, linkedCustomer?.lastName].filter(Boolean).join(" ") || null),
+    email: nullable(formData.get("email")) ?? linkedCustomer?.email ?? null,
+    phone: nullable(formData.get("phone")) ?? linkedCustomer?.phone ?? null,
     source: nullable(formData.get("source")),
     urgency: nullable(formData.get("urgency")),
-    siteAddress: nullable(formData.get("siteAddress")),
+    siteAddress: nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress : null),
     requestSummary,
-    notes: nullable(formData.get("notes"))
+    notes: nullable(formData.get("notes")),
+    linkedCustomerId: linkedCustomer?.id ?? null
   });
 
   redirect("/enquiries?message=Enquiry%20created");
@@ -81,6 +85,7 @@ export async function createSurveyFromEnquiryAction(formData: FormData): Promise
   await updateEnquiryStatusForTenant(activeTenant.tenantId, enquiry.id, "survey_requested");
 
   const survey = await getSurveyRequestById(activeTenant.tenantId, created.id);
+  const linkedCustomer = enquiry.linkedCustomerId ? await getCustomerById(activeTenant.tenantId, enquiry.linkedCustomerId) : null;
   const bridgeResult = survey
     ? await createInstallSchedulerSurveyJob({
         tenantId: activeTenant.tenantId,
@@ -88,6 +93,8 @@ export async function createSurveyFromEnquiryAction(formData: FormData): Promise
         enquiryRequestSummary: enquiry.requestSummary,
         enquiryNotes: enquiry.notes,
         email: enquiry.email,
+        clientLogoUrl: customerLogoUrl(linkedCustomer),
+        clientLogoStoragePath: typeof linkedCustomer?.payloadJson.logoStoragePath === "string" ? linkedCustomer.payloadJson.logoStoragePath : null,
       })
     : { ok: false, error: "Survey was created but could not be reloaded" };
 

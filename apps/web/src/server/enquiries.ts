@@ -81,12 +81,13 @@ export async function createEnquiryForTenant(tenantId: string, input: {
   siteAddress?: string | null;
   requestSummary: string;
   notes?: string | null;
+  linkedCustomerId?: string | null;
 }): Promise<{ id: string }> {
   const result = await pool.query<{ id: string }>(`
     INSERT INTO app.enquiries (
       tenant_id, client_name, contact_name, email, phone, source, urgency, site_address, request_summary, notes, status, linked_customer_id, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::varchar,$3::varchar,$4::varchar,$5::varchar,$6::varchar,$7::varchar,$8::text,$9::text,$10::text,'new',null,now(),now()
+      $1::uuid,$2::varchar,$3::varchar,$4::varchar,$5::varchar,$6::varchar,$7::varchar,$8::text,$9::text,$10::text,'new',$11::uuid,now(),now()
     ) RETURNING id
   `, [
     tenantId,
@@ -98,7 +99,8 @@ export async function createEnquiryForTenant(tenantId: string, input: {
     input.urgency ?? null,
     input.siteAddress ?? null,
     input.requestSummary,
-    input.notes ?? null
+    input.notes ?? null,
+    input.linkedCustomerId ?? null
   ]);
   return result.rows[0];
 }

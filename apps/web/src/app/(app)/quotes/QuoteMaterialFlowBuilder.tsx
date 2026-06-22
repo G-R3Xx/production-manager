@@ -26,6 +26,14 @@ type QuoteSizePreset = {
   height: string;
 };
 
+type ClientDiscountRule = {
+  productType: string;
+  minQty: number;
+  maxQty?: number | null;
+  discountPercent: number;
+  note?: string;
+};
+
 type PricingSettings = {
   markupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
@@ -34,6 +42,8 @@ type PricingSettings = {
   monoRatePerSqm?: string | number | null;
   signageSizePresets?: QuoteSizePreset[] | null;
   smallSizePresets?: QuoteSizePreset[] | null;
+  clientDefaultDiscountPercent?: string | number | null;
+  clientDiscountRules?: ClientDiscountRule[] | null;
 };
 
 type QuoteMaterialFlowBuilderProps = {
@@ -241,6 +251,36 @@ function usage(value: number): string {
 function multiplierValue(value: string | number | null | undefined, fallback: number): number {
   const amount = numberValue(value, fallback);
   return Number.isFinite(amount) && amount > 0 ? amount : fallback;
+}
+
+function normaliseProductType(value: string): string {
+  return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
+
+function resolveClientDiscountPercent(input: {
+  rules?: ClientDiscountRule[] | null;
+  defaultDiscount?: string | number | null;
+  productTypes: string[];
+  quantity: number;
+}): { percent: number; reason: string } {
+  const productKeys = input.productTypes.map(normaliseProductType).filter(Boolean);
+  const quantity = Math.max(1, input.quantity || 1);
+  const matchingRules = (input.rules ?? []).filter((rule) => {
+    const ruleKey = normaliseProductType(String(rule.productType ?? ""));
+    const minQty = Number(rule.minQty ?? 0);
+    const maxQty = rule.maxQty == null ? null : Number(rule.maxQty);
+    const percent = Number(rule.discountPercent ?? 0);
+    if (!ruleKey || !Number.isFinite(percent) || percent <= 0) return false;
+    const productMatches = productKeys.some((key) => key === ruleKey || key.includes(ruleKey) || ruleKey.includes(key));
+    const qtyMatches = quantity >= (Number.isFinite(minQty) ? minQty : 0) && (maxQty == null || !Number.isFinite(maxQty) || quantity <= maxQty);
+    return productMatches && qtyMatches;
+  }).sort((a, b) => Number(b.discountPercent ?? 0) - Number(a.discountPercent ?? 0));
+
+  const best = matchingRules[0];
+  if (best) return { percent: Math.max(0, Number(best.discountPercent)), reason: `${best.productType} qty ${usage(quantity)} rule` };
+
+  const fallback = Number(input.defaultDiscount ?? 0);
+  return Number.isFinite(fallback) && fallback > 0 ? { percent: fallback, reason: "client default discount" } : { percent: 0, reason: "" };
 }
 
 function materialText(material: QuoteMaterial): string {
@@ -1051,8 +1091,23 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     return rows;
   }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate]);
 
+  const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
-  const autoUnitPrice = rawCost * sellMultiplier;
+  const lineProductTypes = flowType === "small_format"
+    ? ["small_format", selectedSmallType?.label ?? ""]
+    : flowType === "service"
+      ? ["service", serviceLabel ?? ""]
+      : flowType === "component"
+        ? ["component", componentName.trim()]
+        : ["signage", selectedBase?.label ?? "", baseType];
+  const clientDiscount = resolveClientDiscountPercent({
+    rules: pricingSettings?.clientDiscountRules,
+    defaultDiscount: pricingSettings?.clientDefaultDiscountPercent,
+    productTypes: lineProductTypes,
+    quantity: quantityNumber
+  });
+  const discountMultiplier = Math.max(0, 1 - clientDiscount.percent / 100);
+  const autoUnitPrice = rawCost * sellMultiplier * discountMultiplier;
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
   const selectedMediaName = selectedMedia?.name ?? "";
@@ -1061,7 +1116,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const finishingSummary = selectedKeys(finishingOptions, finishings);
   const smallFinishingSummary = selectedKeys(smallFinishingOptions, smallFinishings);
 
-  const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const componentPartSummary = pricedComponentParts.map((part) => {
     const material = materials.find((item) => item.id === part.materialId);
     return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || material?.name || "part"}`;
@@ -1848,7 +1902,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     return (
       <div style={{ display: "grid", gap: 16 }}>
         <StepIntro icon="✓" title="Review and save" text="This is the current quote line. It is not saved until you press the button below." />
-        <PricePanel rows={costs} rawCost={rawCost} markupMultiplier={markupMultiplier} profitMultiplier={profitMultiplier} unitPrice={unitPrice} lineTotal={lineTotal} quantity={quantityNumber} />
+        <PricePanel rows={costs} rawCost={rawCost} markupMultiplier={markupMultiplier} profitMultiplier={profitMultiplier} clientDiscount={clientDiscount} unitPrice={unitPrice} lineTotal={lineTotal} quantity={quantityNumber} />
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input name="quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="any" style={inputStyle} /></label>
           <label style={{ display: "grid", gap: 6 }}><b>Unit sell price</b><input name="unitPrice" value={unitPriceOverridden ? manualUnitPrice : autoUnitPrice.toFixed(2)} onChange={(event) => { setManualUnitPrice(event.target.value); setUnitPriceOverridden(true); }} type="number" min="0" step="0.01" style={inputStyle} /></label>
@@ -1945,7 +1999,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
           <div style={{ border: "1px solid #bbf7d0", borderRadius: 22, padding: 16, background: "#f0fdf4", display: "grid", gap: 8 }}>
             <span style={{ fontSize: 12, fontWeight: 950, color: "#067647", textTransform: "uppercase" }}>Live price</span>
             <strong style={{ fontSize: 26 }}>{money(unitPrice)}</strong>
-            <span style={{ color: "#475467", fontSize: 13 }}>cost {money(rawCost)} × markup {usage(markupMultiplier)} × profit {usage(profitMultiplier)}</span>
+            <span style={{ color: "#475467", fontSize: 13 }}>cost {money(rawCost)} × markup {usage(markupMultiplier)} × profit {usage(profitMultiplier)}{clientDiscount.percent ? ` - ${usage(clientDiscount.percent)}% ${clientDiscount.reason}` : ""}</span>
           </div>
         </aside>
 
@@ -2043,7 +2097,7 @@ function SelectedLabourHours<T extends { key: string; label: string }>({ options
   );
 }
 
-function PricePanel({ rows, rawCost, markupMultiplier, profitMultiplier, unitPrice, lineTotal, quantity }: { rows: CostRow[]; rawCost: number; markupMultiplier: number; profitMultiplier: number; unitPrice: number; lineTotal: number; quantity: number }) {
+function PricePanel({ rows, rawCost, markupMultiplier, profitMultiplier, clientDiscount, unitPrice, lineTotal, quantity }: { rows: CostRow[]; rawCost: number; markupMultiplier: number; profitMultiplier: number; clientDiscount: { percent: number; reason: string }; unitPrice: number; lineTotal: number; quantity: number }) {
   return (
     <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 10 }}>
       <span style={{ fontSize: 12, fontWeight: 950, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated quote price</span>
@@ -2052,6 +2106,7 @@ function PricePanel({ rows, rawCost, markupMultiplier, profitMultiplier, unitPri
         <div><b>Raw cost:</b> {money(rawCost)}</div>
         <div><b>Global markup:</b> ×{usage(markupMultiplier)}</div>
         <div><b>Global profit:</b> ×{usage(profitMultiplier)}</div>
+        {clientDiscount.percent > 0 ? <div><b>Client discount:</b> -{usage(clientDiscount.percent)}% {clientDiscount.reason ? `(${clientDiscount.reason})` : ""}</div> : null}
       </div>
       {rows.length > 0 ? (
         <div style={{ display: "grid", gap: 7 }}>

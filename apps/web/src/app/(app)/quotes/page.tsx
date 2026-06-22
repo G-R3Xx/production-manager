@@ -5,6 +5,7 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
+import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createQuoteDraftAction, deleteQuoteLineAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
@@ -146,6 +147,11 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
   const sourceEmail = enquiry?.email ?? "";
   const activeMaterials = materials.filter((material) => material.active);
+  const sourceLinkedCustomerId = survey?.linkedCustomerId ?? enquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
+  const linkedClient = sourceLinkedCustomerId ? await getCustomerById(activeTenant.tenantId, sourceLinkedCustomerId) : null;
+  const linkedClientLogoUrl = customerLogoUrl(linkedClient);
+  const linkedClientDefaultDiscount = customerDefaultDiscount(linkedClient);
+  const linkedClientDiscountRules = customerDiscountRules(linkedClient);
   const surveyPhotos = extractSurveyPhotos(survey?.installSchedulerPayload);
   const defaultQuoteNotes = buildSurveyQuoteNotes({
     enquirySummary: enquiry?.requestSummary ?? null,
@@ -199,17 +205,27 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 12, border: "1px solid #cbd5e1", color: "#111827", fontWeight: 900 }}>Open survey summary</Link>
             </section>
           ) : null}
+          {linkedClient ? (
+            <section style={{ ...cardStyle(), display: "grid", gridTemplateColumns: linkedClientLogoUrl ? "72px 1fr" : "1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
+              {linkedClientLogoUrl ? <img src={linkedClientLogoUrl} alt={`${linkedClient.displayName} logo`} style={{ width: 72, height: 72, objectFit: "contain", borderRadius: 18, border: "1px solid #e5e7eb", background: "#fff" }} /> : null}
+              <div style={{ display: "grid", gap: 4 }}>
+                <strong>{linkedClient.displayName}</strong>
+                <span style={{ color: "#667085", fontSize: 13 }}>{linkedClientDefaultDiscount ? `${linkedClientDefaultDiscount}% default discount` : "No default discount"}{linkedClientDiscountRules.length ? ` · ${linkedClientDiscountRules.length} qty discount rule${linkedClientDiscountRules.length === 1 ? "" : "s"}` : ""}</span>
+              </div>
+            </section>
+          ) : null}
           <form action={createQuoteDraftAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
             <h2 style={{ margin: 0 }}>New draft quote</h2>
             <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
             <input type="hidden" name="surveyRequestId" value={survey?.id ?? ""} />
+            <input type="hidden" name="linkedCustomerId" value={sourceLinkedCustomerId ?? ""} />
             <input name="clientName" defaultValue={sourceClientName} placeholder="Client / business name" style={inputStyle} />
             <input name="contactName" defaultValue={sourceContactName} placeholder="Contact name" style={inputStyle} />
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <input name="phone" defaultValue={sourcePhone} placeholder="Phone" style={inputStyle} />
               <input name="email" defaultValue={sourceEmail} placeholder="Email" style={inputStyle} />
             </div>
-            <input name="discountPercent" defaultValue="0" placeholder="Client discount %" style={inputStyle} />
+            <input name="discountPercent" defaultValue={String(linkedClientDefaultDiscount || 0)} placeholder="Client discount %" style={inputStyle} />
             <textarea name="notes" defaultValue={defaultQuoteNotes} placeholder="Quote notes" style={textareaStyle} />
             <button type="submit" style={buttonStyle}>Create draft quote</button>
           </form>
@@ -255,7 +271,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
                   monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
                   signageSizePresets: companySettings?.quoteSignageSizePresets,
-                  smallSizePresets: companySettings?.quoteSmallSizePresets
+                  smallSizePresets: companySettings?.quoteSmallSizePresets,
+                  clientDefaultDiscountPercent: linkedClientDefaultDiscount,
+                  clientDiscountRules: linkedClientDiscountRules
                 }}
               />
 

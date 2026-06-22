@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listEnquiriesForTenant } from "@/server/enquiries";
+import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { createEnquiryAction, createSurveyFromEnquiryAction } from "./actions";
 
 
@@ -33,7 +34,10 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};
   const message = readParam(params, "message");
   const error = readParam(params, "error");
-  const enquiries = await listEnquiriesForTenant(activeTenant.tenantId);
+  const [enquiries, clients] = await Promise.all([
+    listEnquiriesForTenant(activeTenant.tenantId),
+    listCustomersForTenant(activeTenant.tenantId)
+  ]);
 
   return (
     <div style={{ maxWidth: 1300, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -49,7 +53,13 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
       <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
         <form action={createEnquiryAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <h2 style={{ margin: 0 }}>New enquiry</h2>
-          <input name="clientName" placeholder="Client / business name" style={inputStyle} />
+          <select name="linkedCustomerId" defaultValue="" style={inputStyle}>
+            <option value="">New / unlinked client</option>
+            {clients.map((client) => (
+              <option key={client.id} value={client.id}>{client.displayName}</option>
+            ))}
+          </select>
+          <input name="clientName" placeholder="Client / business name (or choose existing above)" style={inputStyle} />
           <input name="contactName" placeholder="Contact name" style={inputStyle} />
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <input name="phone" placeholder="Phone" style={inputStyle} />
@@ -73,13 +83,22 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
           <div style={{ display: "grid", gap: 12 }}>
             {enquiries.map((enquiry) => (
               <article key={enquiry.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 10 }}>
+                {(() => {
+                  const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
+                  const logoUrl = customerLogoUrl(linkedClient);
+                  return (
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                  <div>
-                    <strong>{enquiry.clientName}</strong>
-                    <div style={{ color: "#475467", marginTop: 4 }}>{enquiry.requestSummary}</div>
+                  <div style={{ display: "flex", gap: 12, alignItems: "start" }}>
+                    {logoUrl ? <img src={logoUrl} alt={`${enquiry.clientName} logo`} style={{ width: 46, height: 46, objectFit: "contain", borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff" }} /> : null}
+                    <div>
+                      <strong>{enquiry.clientName}</strong>
+                      <div style={{ color: "#475467", marginTop: 4 }}>{enquiry.requestSummary}</div>
+                    </div>
                   </div>
                   <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status}</span>
                 </div>
+                  );
+                })()}
                 <div style={{ color: "#667085", fontSize: 13 }}>
                   {[enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ")}
                 </div>

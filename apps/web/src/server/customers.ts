@@ -2,6 +2,30 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 
+export type ClientDiscountRule = {
+  productType: string;
+  minQty: number;
+  maxQty: number | null;
+  discountPercent: number;
+  note?: string;
+};
+
+export type CustomerPayload = {
+  source?: string;
+  abn?: string;
+  billingAddress?: string;
+  defaultSiteAddress?: string;
+  notes?: string;
+  logoUrl?: string;
+  logoStoragePath?: string;
+  defaultDiscountPercent?: number;
+  discountRules?: ClientDiscountRule[];
+  archivedAt?: string;
+  deletedAt?: string;
+  deletedReason?: string;
+  [key: string]: unknown;
+};
+
 export type CustomerRecord = {
   id: string;
   tenantId: string;
@@ -13,17 +37,48 @@ export type CustomerRecord = {
   email: string | null;
   phone: string | null;
   isActive: boolean;
-  payloadJson: Record<string, unknown>;
+  payloadJson: CustomerPayload;
   createdAt: string;
   updatedAt: string;
 };
 
-function parseJsonObject(value: unknown): Record<string, unknown> {
+function parseJsonObject(value: unknown): CustomerPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
+  return value as CustomerPayload;
 }
 
-export async function listCustomersForTenant(tenantId: string): Promise<CustomerRecord[]> {
+export function isDeletedCustomer(customer: Pick<CustomerRecord, "payloadJson">): boolean {
+  return Boolean(customer.payloadJson?.deletedAt);
+}
+
+export function customerLogoUrl(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): string {
+  const value = customer?.payloadJson?.logoUrl;
+  return typeof value === "string" ? value.trim() : "";
+}
+
+export function customerDefaultDiscount(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): number {
+  const value = customer?.payloadJson?.defaultDiscountPercent;
+  const parsed = typeof value === "number" ? value : Number(value ?? 0);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
+export function customerDiscountRules(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): ClientDiscountRule[] {
+  const value = customer?.payloadJson?.discountRules;
+  if (!Array.isArray(value)) return [];
+  return value.filter((rule): rule is ClientDiscountRule => {
+    if (!rule || typeof rule !== "object") return false;
+    const candidate = rule as Partial<ClientDiscountRule>;
+    return Boolean(candidate.productType && Number(candidate.minQty) >= 0 && Number(candidate.discountPercent) > 0);
+  }).map((rule) => ({
+    productType: String(rule.productType),
+    minQty: Number(rule.minQty),
+    maxQty: rule.maxQty == null ? null : Number(rule.maxQty),
+    discountPercent: Number(rule.discountPercent),
+    note: rule.note ? String(rule.note) : undefined
+  }));
+}
+
+export async function listCustomersForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<CustomerRecord[]> {
   const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`
     SELECT
       id,
@@ -44,7 +99,35 @@ export async function listCustomersForTenant(tenantId: string): Promise<Customer
     ORDER BY display_name asc
   `,[tenantId]);
 
-  return result.rows.map((row) => ({ ...row, payloadJson: parseJsonObject(row.payloadJson) }));
+  const rows = result.rows.map((row) => ({ ...row, payloadJson: parseJsonObject(row.payloadJson) }));
+  return options?.includeDeleted ? rows : rows.filter((row) => !isDeletedCustomer(row));
+}
+
+export async function getCustomerById(tenantId: string, customerId: string | null | undefined): Promise<CustomerRecord | null> {
+  if (!customerId) return null;
+  const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`
+    SELECT
+      id,
+      tenant_id as "tenantId",
+      myob_uid as "myobUid",
+      display_name as "displayName",
+      company_name as "companyName",
+      first_name as "firstName",
+      last_name as "lastName",
+      email,
+      phone,
+      is_active as "isActive",
+      payload_json as "payloadJson",
+      created_at as "createdAt",
+      updated_at as "updatedAt"
+    FROM app.customers
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+    LIMIT 1
+  `,[tenantId, customerId]);
+
+  const row = result.rows[0];
+  return row ? { ...row, payloadJson: parseJsonObject(row.payloadJson) } : null;
 }
 
 export async function upsertImportedCustomer(tenantId: string, input: {
@@ -73,7 +156,7 @@ export async function upsertImportedCustomer(tenantId: string, input: {
       email = EXCLUDED.email,
       phone = EXCLUDED.phone,
       is_active = EXCLUDED.is_active,
-      payload_json = EXCLUDED.payload_json,
+      payload_json = app.customers.payload_json || EXCLUDED.payload_json,
       updated_at = now()
     RETURNING id
   `,[
@@ -90,4 +173,53 @@ export async function upsertImportedCustomer(tenantId: string, input: {
   ]);
 
   return result.rows[0];
+}
+
+export async function updateCustomerForTenant(tenantId: string, customerId: string, input: {
+  displayName: string;
+  companyName?: string | null;
+  firstName?: string | null;
+  lastName?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  payloadJson?: CustomerPayload;
+  isActive?: boolean;
+}): Promise<void> {
+  await pool.query(`
+    UPDATE app.customers
+    SET
+      display_name = $3::varchar,
+      company_name = $4::varchar,
+      first_name = $5::varchar,
+      last_name = $6::varchar,
+      email = $7::varchar,
+      phone = $8::varchar,
+      payload_json = COALESCE(payload_json, '{}'::jsonb) || $9::jsonb,
+      is_active = COALESCE($10::boolean, is_active),
+      updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [
+    tenantId,
+    customerId,
+    input.displayName,
+    input.companyName ?? null,
+    input.firstName ?? null,
+    input.lastName ?? null,
+    input.email ?? null,
+    input.phone ?? null,
+    JSON.stringify(input.payloadJson ?? {}),
+    input.isActive ?? null
+  ]);
+}
+
+export async function updateCustomerPayloadForTenant(tenantId: string, customerId: string, payloadJson: CustomerPayload, isActive?: boolean): Promise<void> {
+  await pool.query(`
+    UPDATE app.customers
+    SET payload_json = COALESCE(payload_json, '{}'::jsonb) || $3::jsonb,
+        is_active = COALESCE($4::boolean, is_active),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [tenantId, customerId, JSON.stringify(payloadJson), isActive ?? null]);
 }
