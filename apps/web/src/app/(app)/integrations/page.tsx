@@ -2,7 +2,10 @@ import Link from "next/link";
 import {
   disconnectMyobConnectionAction,
   queueMyobSyncAction,
-  saveMyobConnectionAction
+  runMyobReadOnlySyncAction,
+  saveMyobConnectionAction,
+  importMyobCustomersAction,
+  importMyobItemsAction
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
@@ -13,6 +16,8 @@ import {
   type SyncRunRecord
 } from "@/server/integrations";
 import { getRequiredSessionUser } from "@/server/auth/session";
+import { listCustomersForTenant } from "@/server/customers";
+import { listProductsForTenant } from "@/server/products";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 
 function cardStyle() {
@@ -33,6 +38,20 @@ function maskToken(token: string | null | undefined) {
     return "••••••••";
   }
   return `${token.slice(0, 6)}••••••${token.slice(-4)}`;
+}
+
+function formatDateTime(value: string | null | undefined) {
+  if (!value) {
+    return "—";
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+
+  return date.toLocaleString();
 }
 
 export default async function IntegrationsPage({
@@ -58,11 +77,13 @@ export default async function IntegrationsPage({
     );
   }
 
-  const [connection, tokenRecord, mappings, syncRuns] = await Promise.all([
+  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts] = await Promise.all([
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
-    listSyncRunsByTenantId(activeTenant.tenantId)
+    listSyncRunsByTenantId(activeTenant.tenantId),
+    listCustomersForTenant(activeTenant.tenantId),
+    listProductsForTenant(activeTenant.tenantId)
   ]);
 
   return (
@@ -115,7 +136,7 @@ export default async function IntegrationsPage({
             <div style={{ display: "grid", gap: 8 }}>
               <span style={{ fontWeight: 600 }}>Last successful sync</span>
               <div style={{ minHeight: 42, borderRadius: 12, border: "1px solid #e5e7eb", background: "#fafafa", padding: "10px 12px", color: "#667085" }}>
-                {connection?.lastSuccessfulSyncAt ?? "Not synced yet"}
+                {connection?.lastSuccessfulSyncAt ? formatDateTime(connection.lastSuccessfulSyncAt) : "Not synced yet"}
               </div>
             </div>
           </div>
@@ -158,6 +179,20 @@ export default async function IntegrationsPage({
             </span>
           </Link>
 
+          <form action={runMyobReadOnlySyncAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
+              Run read-only MYOB sync
+            </button>
+          </form>
+
+
+
+          <form action={importMyobCustomersAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
+              Import customers + create mappings
+            </button>
+          </form>
+
           <form action={queueMyobSyncAction}>
             <input type="hidden" name="jobType" value="incremental_import" />
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
@@ -187,7 +222,71 @@ export default async function IntegrationsPage({
           </div>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, background: "#fafafa" }}>
             <div style={{ fontWeight: 700 }}>Token expiry</div>
-            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{tokenRecord?.expiresAt ?? "No expiry stored yet"}</div>
+            <div style={{ marginTop: 6, color: "#667085", fontSize: 14 }}>{tokenRecord?.expiresAt ? formatDateTime(tokenRecord.expiresAt) : "No expiry stored yet"}</div>
+          </div>
+        </div>
+      </div>
+
+      {syncRuns[0]?.summaryJson ? (
+        <div style={cardStyle()}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#4f46e5", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            Latest read-only sync
+          </div>
+          <h2 style={{ marginTop: 10 }}>MYOB read summary</h2>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Customers</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.customers === "object" && syncRuns[0].summaryJson.customers && "count" in (syncRuns[0].summaryJson.customers as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.customers as Record<string, unknown>).count ?? 0)
+                  : "—"}
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Suppliers</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.suppliers === "object" && syncRuns[0].summaryJson.suppliers && "count" in (syncRuns[0].summaryJson.suppliers as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.suppliers as Record<string, unknown>).count ?? 0)
+                  : "—"}
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Items</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.items === "object" && syncRuns[0].summaryJson.items && "count" in (syncRuns[0].summaryJson.items as Record<string, unknown>)
+                  ? String((syncRuns[0].summaryJson.items as Record<string, unknown>).count ?? 0)
+                  : "—"}
+              </div>
+            </div>
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+              <div style={{ fontWeight: 700 }}>Company</div>
+              <div style={{ color: "#667085", marginTop: 6 }}>
+                {typeof syncRuns[0].summaryJson.companyName === "string" ? syncRuns[0].summaryJson.companyName : connection?.companyName ?? "—"}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+
+
+      <div style={cardStyle()}>
+        <div style={{ fontSize: 12, fontWeight: 700, color: "#4f46e5", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          Customer import
+        </div>
+        <h2 style={{ marginTop: 10 }}>Local customer import + mapping</h2>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Local customers</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localCustomers.length}</div>
+          </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Customer mappings</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{mappings.filter((mapping) => mapping.entityType === "customer").length}</div>
+          </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Latest company status</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{connection?.status ?? "disconnected"}</div>
           </div>
         </div>
       </div>
@@ -233,8 +332,8 @@ export default async function IntegrationsPage({
                 <div key={run.id} style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12, background: "#fafafa" }}>
                   <div style={{ fontWeight: 700 }}>{run.jobType}</div>
                   <div style={{ fontSize: 13, color: "#667085", marginTop: 4 }}>Status: {run.status}</div>
-                  <div style={{ fontSize: 13, color: "#667085" }}>Started: {run.startedAt ?? "—"}</div>
-                  <div style={{ fontSize: 13, color: "#667085" }}>Finished: {run.finishedAt ?? "—"}</div>
+                  <div style={{ fontSize: 13, color: "#667085" }}>Started: {formatDateTime(run.startedAt)}</div>
+                  <div style={{ fontSize: 13, color: "#667085" }}>Finished: {formatDateTime(run.finishedAt)}</div>
                   {run.errorMessage ? <div style={{ fontSize: 12, color: "#b42318", marginTop: 6 }}>{run.errorMessage}</div> : null}
                 </div>
               ))

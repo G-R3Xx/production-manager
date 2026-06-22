@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { redirect } from "next/navigation";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -10,7 +11,7 @@ export type SessionSummary = {
   user: SessionUser | null;
 };
 
-export async function getSessionUser(): Promise<SessionUser | null> {
+export const getSessionUser = cache(async function getSessionUser(): Promise<SessionUser | null> {
   const supabase = await getSupabaseServerClient();
 
   const {
@@ -26,7 +27,7 @@ export async function getSessionUser(): Promise<SessionUser | null> {
     id: user.id,
     email: user.email ?? null
   };
-}
+});
 
 export async function getSessionSummary(): Promise<SessionSummary> {
   return {
@@ -38,7 +39,7 @@ export async function getRequiredSessionUser(): Promise<SessionUser> {
   const user = await getSessionUser();
 
   if (!user) {
-    redirect("/sign-in");
+    redirect("/sign-in?next=/enquiries");
   }
 
   return user;

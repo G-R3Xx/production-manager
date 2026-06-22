@@ -70,7 +70,7 @@ export async function getAuthenticatedUser(
   return user;
 }
 
-export async function requireAuthenticatedUser(next = "/dashboard", suppliedClient?: SupabaseClient): Promise<User> {
+export async function requireAuthenticatedUser(next = "/enquiries", suppliedClient?: SupabaseClient): Promise<User> {
   const user = await getAuthenticatedUser(suppliedClient);
 
   if (!user) {

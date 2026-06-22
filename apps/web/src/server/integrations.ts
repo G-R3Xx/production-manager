@@ -77,6 +77,13 @@ function parseJsonObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function toIsoOrNull(value: unknown): string | null {
+  if (value == null) return null;
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "string") return value;
+  return String(value);
+}
+
 export async function getMyobConnectionByTenantId(
   tenantId: string
 ): Promise<MyobConnectionRecord | null> {
@@ -101,7 +108,18 @@ export async function getMyobConnectionByTenantId(
     [tenantId]
   );
 
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+
+  return row
+    ? {
+        ...row,
+        connectedAt: toIsoOrNull(row.connectedAt),
+        disconnectedAt: toIsoOrNull(row.disconnectedAt),
+        lastSuccessfulSyncAt: toIsoOrNull(row.lastSuccessfulSyncAt),
+        createdAt: toIsoOrNull(row.createdAt) ?? "",
+        updatedAt: toIsoOrNull(row.updatedAt) ?? ""
+      }
+    : null;
 }
 
 export async function upsertMyobConnectionByTenantId(
@@ -188,7 +206,16 @@ export async function getMyobOauthTokenByTenantId(
     [tenantId]
   );
 
-  return result.rows[0] ?? null;
+  const row = result.rows[0];
+
+  return row
+    ? {
+        ...row,
+        expiresAt: toIsoOrNull(row.expiresAt),
+        createdAt: toIsoOrNull(row.createdAt) ?? "",
+        updatedAt: toIsoOrNull(row.updatedAt) ?? ""
+      }
+    : null;
 }
 
 export async function upsertMyobOauthTokenByTenantId(
@@ -294,6 +321,9 @@ export async function listExternalMappingsByTenantId(
 
   return result.rows.map((row) => ({
     ...row,
+    lastSyncedAt: toIsoOrNull(row.lastSyncedAt),
+    createdAt: toIsoOrNull(row.createdAt) ?? "",
+    updatedAt: toIsoOrNull(row.updatedAt) ?? "",
     payloadJson: parseJsonObject(row.payloadJson)
   }));
 }
@@ -326,6 +356,10 @@ export async function listSyncRunsByTenantId(
 
   return result.rows.map((row) => ({
     ...row,
+    startedAt: toIsoOrNull(row.startedAt),
+    finishedAt: toIsoOrNull(row.finishedAt),
+    createdAt: toIsoOrNull(row.createdAt) ?? "",
+    updatedAt: toIsoOrNull(row.updatedAt) ?? "",
     summaryJson: parseJsonObject(row.summaryJson)
   }));
 }
@@ -406,4 +440,47 @@ export async function listSyncRunsForTenant(
   tenantId: string
 ): Promise<SyncRunRecord[]> {
   return listSyncRunsByTenantId(tenantId);
+}
+
+
+export async function upsertExternalMappingByTenantId(tenantId: string, input: {
+  entityType: "customer" | "supplier" | "product" | "invoice" | "tax_code" | "account" | "quote" | "order";
+  localId: string;
+  externalId: string;
+  syncState?: "pending" | "synced" | "stale" | "error";
+  lastSyncedAt?: string | null;
+  payloadJson?: Record<string, unknown>;
+}): Promise<void> {
+  await pool.query(`
+    INSERT INTO integration.external_mappings (
+      tenant_id, system, entity_type, local_id, external_id, sync_state, last_synced_at, payload_json, created_at, updated_at
+    ) VALUES (
+      $1::uuid, 'myob'::integration_system, $2::external_entity_type, $3::uuid, $4::varchar, $5::sync_state, $6::timestamptz, $7::jsonb, now(), now()
+    )
+    ON CONFLICT (tenant_id, system, entity_type, local_id)
+    DO UPDATE SET
+      external_id = EXCLUDED.external_id,
+      sync_state = EXCLUDED.sync_state,
+      last_synced_at = EXCLUDED.last_synced_at,
+      payload_json = EXCLUDED.payload_json,
+      updated_at = now()
+  `,[tenantId, input.entityType, input.localId, input.externalId, input.syncState ?? 'synced', input.lastSyncedAt ?? null, JSON.stringify(input.payloadJson ?? {})]);
+}
+
+export async function markMyobConnectionHealthy(tenantId: string, input: {
+  environment: "sandbox" | "live";
+  companyFileId: string | null;
+  companyName: string | null;
+  connectedAt?: string | null;
+  lastSuccessfulSyncAt?: string | null;
+}): Promise<void> {
+  await upsertMyobConnectionByTenantId(tenantId, {
+    environment: input.environment,
+    companyFileId: input.companyFileId,
+    companyName: input.companyName,
+    status: 'connected',
+    connectedAt: input.connectedAt ?? new Date().toISOString(),
+    disconnectedAt: null,
+    lastSuccessfulSyncAt: input.lastSuccessfulSyncAt ?? new Date().toISOString()
+  });
 }

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getCompanySettingsByTenantId } from "@/server/company";
+import { defaultSignageSizePresets, defaultSmallSizePresets, getCompanySettingsByTenantId, type QuoteSizePreset } from "@/server/company";
 import { saveCompanySettingsAction } from "./actions";
 
 type CompanyPageProps = {
@@ -15,6 +15,11 @@ function readParam(
   const value = params[key];
   if (Array.isArray(value)) return value[0] ?? "";
   return value ?? "";
+}
+
+function sizePresetText(presets: QuoteSizePreset[] | null | undefined, fallback: QuoteSizePreset[]): string {
+  const list = presets && presets.length > 0 ? presets : fallback;
+  return list.map((preset) => `${preset.label} | ${preset.width} | ${preset.height}`).join("\n");
 }
 
 export default async function CompanyPage({ searchParams }: CompanyPageProps) {
@@ -83,6 +88,74 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
             <input name="defaultCurrency" maxLength={3} defaultValue={settings?.defaultCurrency ?? "AUD"} style={{ minHeight: 46, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", fontSize: 16, textTransform: "uppercase" }} />
           </label>
         </div>
+
+        <section style={{ border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 18, padding: 18, display: "grid", gap: 14 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#2563eb" }}>Global quote pricing</p>
+            <h2 style={{ margin: "6px 0 6px", fontSize: 20 }}>Markup and profit multipliers</h2>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
+              Product, material, ink, labour and supplier values are treated as cost prices. Quotes use: calculated cost × markup × profit.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Global markup multiplier</span>
+              <input name="globalMarkupMultiplier" defaultValue={settings?.globalMarkupMultiplier ?? "1.5"} placeholder="eg 1.5" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Example: x1.5 adds your standard overhead/markup to all quote items.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Global profit multiplier</span>
+              <input name="globalProfitMultiplier" defaultValue={settings?.globalProfitMultiplier ?? "1.2"} placeholder="eg 1.2" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Example: x1.2 adds your profit after markup. x1.5 × x1.2 = x1.8 total.</small>
+            </label>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Factory labour rate / hr</span>
+              <input name="quoteLabourRate" defaultValue={settings?.quoteLabourRate ?? "66"} placeholder="eg 66" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Used for artwork, laminate application, finishing and install time.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>CMYK / white ink rate per m²</span>
+              <input name="quoteInkRatePerSqm" defaultValue={settings?.quoteInkRatePerSqm ?? "10"} placeholder="eg 10" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>CMYK uses this rate. White ink adds this rate again.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Mono print rate per m²</span>
+              <input name="quoteMonoRatePerSqm" defaultValue={settings?.quoteMonoRatePerSqm ?? "4"} placeholder="eg 4" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Used by the small-format print colour step.</small>
+            </label>
+          </div>
+        </section>
+
+        <section style={{ border: "1px solid #ddd6fe", background: "#faf5ff", borderRadius: 18, padding: 18, display: "grid", gap: 14 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#7c3aed" }}>Quote card presets</p>
+            <h2 style={{ margin: "6px 0 6px", fontSize: 20 }}>Editable size buttons</h2>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
+              These control the quick size cards shown on the quote-side builder. Use one preset per line in the format: Label | width mm | height mm.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Signage size presets</span>
+              <textarea name="quoteSignageSizePresetsText" defaultValue={sizePresetText(settings?.quoteSignageSizePresets, defaultSignageSizePresets)} rows={8} style={{ borderRadius: 12, border: "1px solid #c4b5fd", padding: 14, fontSize: 14, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }} />
+              <small style={{ color: "#475467" }}>Example: 600 × 900 mm | 600 | 900</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Small-format size presets</span>
+              <textarea name="quoteSmallSizePresetsText" defaultValue={sizePresetText(settings?.quoteSmallSizePresets, defaultSmallSizePresets)} rows={8} style={{ borderRadius: 12, border: "1px solid #c4b5fd", padding: 14, fontSize: 14, resize: "vertical", fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace" }} />
+              <small style={{ color: "#475467" }}>Example: A5 | 148 | 210</small>
+            </label>
+          </div>
+        </section>
 
         <label style={{ display: "grid", gap: 8 }}>
           <span style={{ fontWeight: 600 }}>Email</span>

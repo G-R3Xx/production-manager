@@ -94,10 +94,31 @@ export const tenantSettings = appSchema.table("tenant_settings", {
   email: varchar("email", { length: 255 }),
   address: text("address"),
   defaultCurrency: varchar("default_currency", { length: 3 }).notNull().default("AUD"),
+  globalMarkupMultiplier: numeric("global_markup_multiplier", { precision: 8, scale: 4 }).notNull().default("1.5"),
+  globalProfitMultiplier: numeric("global_profit_multiplier", { precision: 8, scale: 4 }).notNull().default("1.2"),
   quoteTerms: text("quote_terms"),
   proofTerms: text("proof_terms"),
   jobTerms: text("job_terms"),
   myobEnabled: boolean("myob_enabled").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+
+export const customers = appSchema.table("customers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  myobUid: varchar("myob_uid", { length: 255 }).notNull(),
+  displayName: varchar("display_name", { length: 255 }).notNull(),
+  companyName: varchar("company_name", { length: 255 }),
+  firstName: varchar("first_name", { length: 120 }),
+  lastName: varchar("last_name", { length: 120 }),
+  email: varchar("email", { length: 255 }),
+  phone: varchar("phone", { length: 80 }),
+  isActive: boolean("is_active").notNull().default(true),
+  payloadJson: jsonb("payload_json").notNull().default({}),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
