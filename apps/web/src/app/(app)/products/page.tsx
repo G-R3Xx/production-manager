@@ -2824,11 +2824,24 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const activePart = readParam(params, "step") || readParam(params, "part");
   const filter = readParam(params, "filter");
 
-  const [allProducts, materials, selectedProduct] = await Promise.all([
+  const [productsResult, materialsResult, selectedProductResult] = await Promise.allSettled([
     listProductsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listMaterialsForTenant(activeTenant.tenantId),
     selectedId ? getProductById(activeTenant.tenantId, selectedId) : Promise.resolve(null)
   ]);
+
+  const allProducts = productsResult.status === "fulfilled" ? productsResult.value : [];
+  const materials = materialsResult.status === "fulfilled" ? materialsResult.value : [];
+  const selectedProduct = selectedProductResult.status === "fulfilled" ? selectedProductResult.value : null;
+  const productLoadError = productsResult.status === "rejected"
+    ? "Products could not load. The page has stayed open so you can still access the rest of the app."
+    : "";
+  const materialLoadError = materialsResult.status === "rejected"
+    ? "Materials could not load for product setup. Product costing selectors will be empty until this is fixed."
+    : "";
+  const selectedProductLoadError = selectedProductResult.status === "rejected"
+    ? "The selected product could not load. Try opening another product or reload the page."
+    : "";
 
   const deletedProductCount = allProducts.filter((product) => product.status === "deleted").length;
   const products = filter === "deleted"
@@ -2840,7 +2853,10 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     : products;
 
   const editorTemplate = selectedProduct?.defaultTemplateId
-    ? await getConfiguratorTemplateById(activeTenant.tenantId, selectedProduct.defaultTemplateId)
+    ? await getConfiguratorTemplateById(activeTenant.tenantId, selectedProduct.defaultTemplateId).catch((error) => {
+        console.error("Product template failed to load", error);
+        return null;
+      })
     : null;
 
   const definition = (editorTemplate?.definitionJson ?? {}) as Record<string, any>;
@@ -2853,6 +2869,9 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
     <div style={pageStyle}>
       {message ? <MessageBanner tone="success">{message}</MessageBanner> : null}
       {error ? <MessageBanner tone="error">{error}</MessageBanner> : null}
+      {productLoadError ? <MessageBanner tone="error">{productLoadError}</MessageBanner> : null}
+      {materialLoadError ? <MessageBanner tone="error">{materialLoadError}</MessageBanner> : null}
+      {selectedProductLoadError ? <MessageBanner tone="error">{selectedProductLoadError}</MessageBanner> : null}
 
       <ProductFlowHero selectedProduct={selectedProduct} fields={fields} components={components} activeMaterials={activeMaterials} />
 
