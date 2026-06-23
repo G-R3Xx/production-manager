@@ -17,6 +17,27 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
   return value ?? "";
 }
 
+
+function isPdfArtwork(url: string | null | undefined, fileName?: string | null): boolean {
+  const haystack = `${url ?? ""} ${fileName ?? ""}`.toLowerCase().split("?")[0];
+  return haystack.endsWith(".pdf") || haystack.includes(".pdf ");
+}
+
+function proofArtworkPreview(page: ArtworkApprovalPageRecord, maxHeight = 480) {
+  if (isPdfArtwork(page.imageUrl, page.fileName)) {
+    return (
+      <div style={{ width: "100%", minHeight: Math.min(maxHeight, 420), display: "grid", gap: 10 }}>
+        <object data={page.imageUrl} type="application/pdf" style={{ width: "100%", height: Math.min(maxHeight, 420), border: "none", borderRadius: 12, background: "#fff" }}>
+          <iframe src={page.imageUrl} title={page.title} style={{ width: "100%", height: Math.min(maxHeight, 420), border: "none", borderRadius: 12, background: "#fff" }} />
+        </object>
+        <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#6d28d9", fontWeight: 900, textDecoration: "none", textAlign: "center" }}>Open PDF proof</a>
+      </div>
+    );
+  }
+
+  return <img src={page.imageUrl} alt={page.title} style={{ width: "100%", height: "100%", maxHeight, objectFit: "contain", objectPosition: "center", display: "block" }} />;
+}
+
 function detailsList(page: ArtworkApprovalPageRecord): Array<{ label: string; value: string | null }> {
   const rows = [
     { label: "Qty", value: page.quantity },
@@ -83,14 +104,14 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
               <div style={{ padding: 26, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 14 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                   <div>
-                    <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {page.productionType.replace(/_/g, " ")}</p>
+                    <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {String(page.productionType || "signage").replace(/_/g, " ")}</p>
                     <h2 style={{ margin: "4px 0 0", fontSize: 28 }}>{page.title}</h2>
                     {page.description ? <p style={{ margin: "4px 0 0", color: "#667085" }}>{page.description}</p> : null}
                   </div>
                   <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#6d28d9", fontWeight: 900 }}>Open full size</a>
                 </div>
                 <div style={{ border: "1px solid #e2e8f0", borderRadius: 20, background: "#fff", display: "grid", placeItems: "center", padding: 18, overflow: "hidden" }}>
-                  <img src={page.imageUrl} alt={page.title} style={{ width: "100%", height: "100%", maxHeight: 480, objectFit: "contain", objectPosition: "center", display: "block" }} />
+                  {proofArtworkPreview(page, 480)}
                 </div>
                 {page.notes ? <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{page.notes}</p> : <span />}
               </div>

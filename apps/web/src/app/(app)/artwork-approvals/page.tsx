@@ -64,6 +64,27 @@ function formatDate(value: string | null | undefined): string {
   return new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
+
+function isPdfArtwork(url: string | null | undefined, fileName?: string | null): boolean {
+  const haystack = `${url ?? ""} ${fileName ?? ""}`.toLowerCase().split("?")[0];
+  return haystack.endsWith(".pdf") || haystack.includes(".pdf ");
+}
+
+function proofArtworkPreview(page: ArtworkApprovalPageRecord, maxHeight = 395) {
+  if (isPdfArtwork(page.imageUrl, page.fileName)) {
+    return (
+      <div style={{ width: "100%", minHeight: Math.min(maxHeight, 380), display: "grid", gap: 10 }}>
+        <object data={page.imageUrl} type="application/pdf" style={{ width: "100%", height: Math.min(maxHeight, 380), border: "none", borderRadius: 12, background: "#fff" }}>
+          <iframe src={page.imageUrl} title={page.title} style={{ width: "100%", height: Math.min(maxHeight, 380), border: "none", borderRadius: 12, background: "#fff" }} />
+        </object>
+        <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#6d28d9", fontWeight: 900, textDecoration: "none", textAlign: "center" }}>Open PDF proof</a>
+      </div>
+    );
+  }
+
+  return <img src={page.imageUrl} alt={page.title} style={{ width: "100%", height: "100%", maxHeight, objectFit: "contain", objectPosition: "center", display: "block" }} />;
+}
+
 function statusTone(status: string): { bg: string; fg: string; border: string } {
   if (status === "approved") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6" };
   if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
@@ -327,9 +348,9 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     <label style={labelStyle}>Qty<input name="quantity" defaultValue="1" style={inputStyle} /></label>
                     <label style={labelStyle}>Type<select name="productionType" defaultValue="signage" style={inputStyle}><option value="signage">Signage</option><option value="small_format">Small format</option></select></label>
                   </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                    <label style={labelStyle}>Upload proof image<input name="proofFile" type="file" accept="image/*,.pdf" style={{ ...inputStyle, paddingTop: 10 }} /></label>
-                    <label style={labelStyle}>Or paste proof image URL<input name="imageUrl" placeholder="https://..." style={inputStyle} /></label>
+                  <div style={{ display: "grid", gap: 8 }}>
+                    <label style={labelStyle}>Upload proof image / PDF</label>
+                    <AutoSubmitProofInputs autoSubmit={false} />
                   </div>
                   <label style={labelStyle}>Page description<textarea name="description" placeholder="Brief description shown under the proof title" style={{ ...textareaStyle, minHeight: 68 }} /></label>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
@@ -358,7 +379,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                       <div style={{ padding: 22, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                           <div>
-                            <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {page.productionType.replace(/_/g, " ")}{page.sourceQuoteLineId ? " · from quote line" : ""}</p>
+                            <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {String(page.productionType || "signage").replace(/_/g, " ")}{page.sourceQuoteLineId ? " · from quote line" : ""}</p>
                             <h3 style={{ margin: "4px 0 0", fontSize: 24 }}>{page.title}</h3>
                             {page.description ? <p style={{ margin: "4px 0 0", color: "#667085" }}>{page.description}</p> : null}
                           </div>
@@ -369,7 +390,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                           </form>
                         </div>
                         <div style={{ border: "1px solid #e2e8f0", borderRadius: 18, background: "#fff", display: "grid", placeItems: "center", padding: 16, overflow: "hidden" }}>
-                          <img src={page.imageUrl} alt={page.title} style={{ width: "100%", height: "100%", maxHeight: 395, objectFit: "contain", objectPosition: "center", display: "block" }} />
+                          {proofArtworkPreview(page, 395)}
                         </div>
                         {page.notes ? <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap" }}>{page.notes}</p> : <span />}
                       </div>

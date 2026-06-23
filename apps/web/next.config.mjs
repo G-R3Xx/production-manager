@@ -3,7 +3,11 @@ const nextConfig = {
   reactStrictMode: true,
   experimental: {
     serverActions: {
-      allowedOrigins: ["localhost:3000"]
+      bodySizeLimit: "60mb",
+      allowedOrigins: [
+        "localhost:3000",
+        "production-manager-web.vercel.app"
+      ]
     }
   }
 };

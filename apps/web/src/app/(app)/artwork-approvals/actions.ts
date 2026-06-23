@@ -41,12 +41,17 @@ function numberText(value: FormDataEntryValue | null, fallback = "1"): string {
   return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : fallback;
 }
 
+const MAX_PROOF_FILE_SIZE_BYTES = 50 * 1024 * 1024;
+
 async function uploadProofImageIfPresent(tenantId: string, approvalId: string, formData: FormData): Promise<{ imageUrl?: string; storagePath?: string; fileName?: string }> {
   const rawFile = formData.get("proofFile");
   if (!rawFile || typeof rawFile !== "object" || !("size" in rawFile) || !("arrayBuffer" in rawFile)) return {};
 
   const file = rawFile as unknown as { name?: string; type?: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
   if (!file.size || file.size <= 0) return {};
+  if (file.size > MAX_PROOF_FILE_SIZE_BYTES) {
+    throw new Error("Proof artwork is too large. Please keep uploads under 50MB, or paste a hosted proof URL instead.");
+  }
 
   const safeName = String(file.name || "proof-image")
     .replace(/[^a-z0-9._-]+/gi, "-")
@@ -96,6 +101,8 @@ export async function replaceArtworkApprovalPageProofAction(formData: FormData):
   const approvalId = oneLine(formData.get("approvalId"));
   const pageId = oneLine(formData.get("pageId"));
   const imageUrlFromInput = oneLine(formData.get("imageUrl"));
+  const directStoragePath = nullable(formData.get("imageStoragePath"));
+  const directFileName = nullable(formData.get("fileName"));
 
   if (!approvalId || !pageId) redirect("/artwork-approvals?error=Select%20an%20artwork%20page%20first");
 
@@ -114,8 +121,8 @@ export async function replaceArtworkApprovalPageProofAction(formData: FormData):
 
   await replaceArtworkApprovalPageProofForTenant(activeTenant.tenantId, approvalId, pageId, {
     imageUrl,
-    imageStoragePath: uploaded.storagePath ?? null,
-    fileName: uploaded.fileName ?? null
+    imageStoragePath: uploaded.storagePath ?? directStoragePath,
+    fileName: uploaded.fileName ?? directFileName
   });
 
   redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20image%20updated`);
@@ -173,6 +180,8 @@ export async function addArtworkApprovalPageFromPageAction(formData: FormData): 
   const approvalId = oneLine(formData.get("approvalId"));
   const title = oneLine(formData.get("title"));
   const imageUrlFromInput = oneLine(formData.get("imageUrl"));
+  const directStoragePath = nullable(formData.get("imageStoragePath"));
+  const directFileName = nullable(formData.get("fileName"));
 
   if (!approvalId) {
     redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
@@ -196,8 +205,8 @@ export async function addArtworkApprovalPageFromPageAction(formData: FormData): 
     signCode: nullable(formData.get("signCode")),
     description: nullable(formData.get("description")),
     imageUrl,
-    imageStoragePath: uploaded.storagePath ?? null,
-    fileName: uploaded.fileName ?? nullable(formData.get("fileName")),
+    imageStoragePath: uploaded.storagePath ?? directStoragePath,
+    fileName: uploaded.fileName ?? directFileName,
     notes: nullable(formData.get("notes")),
     productionType: oneLine(formData.get("productionType"), "signage"),
     quantity: numberText(formData.get("quantity"), "1"),
