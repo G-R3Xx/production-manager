@@ -1,13 +1,17 @@
 "use server";
 
+import { Buffer } from "node:buffer";
 import { redirect } from "next/navigation";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   addArtworkApprovalPageForTenant,
   createArtworkApprovalFromQuote,
+  markArtworkApprovalInternallyApprovedForTenant,
   markArtworkApprovalSentForTenant,
-  removeArtworkApprovalPageForTenant
+  removeArtworkApprovalPageForTenant,
+  updateArtworkApprovalDetailsForTenant
 } from "@/server/quotes";
 
 async function requireTenant() {
@@ -16,7 +20,7 @@ async function requireTenant() {
   if (!activeTenant) {
     redirect("/bootstrap?error=Create%20or%20select%20a%20tenant%20first");
   }
-  return activeTenant;
+  return { user, activeTenant };
 }
 
 function nullable(value: FormDataEntryValue | null): string | null {
@@ -24,8 +28,44 @@ function nullable(value: FormDataEntryValue | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function oneLine(value: FormDataEntryValue | null, fallback = ""): string {
+  return String(value ?? fallback).trim();
+}
+
+function numberText(value: FormDataEntryValue | null, fallback = "1"): string {
+  const cleaned = String(value ?? "").replace(/[^0-9.\-]/g, "").trim();
+  if (!cleaned) return fallback;
+  const parsed = Number(cleaned);
+  return Number.isFinite(parsed) && parsed > 0 ? String(parsed) : fallback;
+}
+
+async function uploadProofImageIfPresent(tenantId: string, approvalId: string, formData: FormData): Promise<{ imageUrl?: string; storagePath?: string; fileName?: string }> {
+  const rawFile = formData.get("proofFile");
+  if (!rawFile || typeof rawFile !== "object" || !("size" in rawFile) || !("arrayBuffer" in rawFile)) return {};
+
+  const file = rawFile as unknown as { name?: string; type?: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
+  if (!file.size || file.size <= 0) return {};
+
+  const safeName = String(file.name || "proof-image")
+    .replace(/[^a-z0-9._-]+/gi, "-")
+    .slice(0, 120);
+  const extension = safeName.includes(".") ? "" : ".png";
+  const storagePath = `${tenantId}/artwork-approvals/${approvalId}/${Date.now()}-${safeName}${extension}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const contentType = file.type || "application/octet-stream";
+  const supabase = getSupabaseServiceRoleClient();
+  const bucket = "artwork-approvals";
+
+  await supabase.storage.createBucket(bucket, { public: true }).catch(() => undefined);
+  const { error } = await supabase.storage.from(bucket).upload(storagePath, bytes, { contentType, upsert: true });
+  if (error) throw new Error(`Artwork proof upload failed: ${error.message}`);
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+  return { imageUrl: data.publicUrl, storagePath, fileName: safeName };
+}
+
 export async function createArtworkApprovalFromQuoteAction(formData: FormData): Promise<void> {
-  const activeTenant = await requireTenant();
+  const { activeTenant } = await requireTenant();
   const quoteId = String(formData.get("quoteId") ?? "").trim();
 
   if (!quoteId) {
@@ -36,8 +76,34 @@ export async function createArtworkApprovalFromQuoteAction(formData: FormData): 
   redirect(`/artwork-approvals?selected=${approval.id}&message=Artwork%20approval%20created`);
 }
 
+export async function saveArtworkApprovalDetailsAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
+
+  const clientName = oneLine(formData.get("clientName"));
+  if (!clientName) redirect(`/artwork-approvals?selected=${approvalId}&error=Client%20name%20is%20required`);
+
+  await updateArtworkApprovalDetailsForTenant(activeTenant.tenantId, approvalId, {
+    clientName,
+    contactName: nullable(formData.get("contactName")),
+    email: nullable(formData.get("email")),
+    projectName: nullable(formData.get("projectName")),
+    siteAddress: nullable(formData.get("siteAddress")),
+    drawingTitle: nullable(formData.get("drawingTitle")),
+    drawingNumber: nullable(formData.get("drawingNumber")),
+    revision: nullable(formData.get("revision")),
+    revisionNote: nullable(formData.get("revisionNote")),
+    designerName: nullable(formData.get("designerName")),
+    clientMessage: nullable(formData.get("clientMessage")),
+    internalNotes: nullable(formData.get("internalNotes"))
+  });
+
+  redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20details%20saved`);
+}
+
 export async function sendArtworkApprovalFromPageAction(formData: FormData): Promise<void> {
-  const activeTenant = await requireTenant();
+  const { activeTenant } = await requireTenant();
   const approvalId = String(formData.get("approvalId") ?? "").trim();
 
   if (!approvalId) {
@@ -48,27 +114,60 @@ export async function sendArtworkApprovalFromPageAction(formData: FormData): Pro
   redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20approval%20marked%20as%20sent`);
 }
 
-export async function addArtworkApprovalPageFromPageAction(formData: FormData): Promise<void> {
-  const activeTenant = await requireTenant();
+export async function directApproveArtworkApprovalAction(formData: FormData): Promise<void> {
+  const { user, activeTenant } = await requireTenant();
   const approvalId = String(formData.get("approvalId") ?? "").trim();
-  const title = String(formData.get("title") ?? "").trim();
-  const imageUrl = String(formData.get("imageUrl") ?? "").trim();
-  const notes = nullable(formData.get("notes"));
+  if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
+
+  await markArtworkApprovalInternallyApprovedForTenant(activeTenant.tenantId, approvalId, user.email ?? null);
+  redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20approved%20internally`);
+}
+
+export async function addArtworkApprovalPageFromPageAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  const title = oneLine(formData.get("title"));
+  const imageUrlFromInput = oneLine(formData.get("imageUrl"));
 
   if (!approvalId) {
     redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
   }
 
-  if (!title || !imageUrl) {
-    redirect(`/artwork-approvals?selected=${approvalId}&error=Artwork%20title%20and%20image%20URL%20are%20required`);
+  let uploaded: { imageUrl?: string; storagePath?: string; fileName?: string } = {};
+  try {
+    uploaded = await uploadProofImageIfPresent(activeTenant.tenantId, approvalId, formData);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent(message)}`);
   }
 
-  await addArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, { title, imageUrl, notes });
-  redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20page%20added`);
+  const imageUrl = uploaded.imageUrl || imageUrlFromInput;
+  if (!title || !imageUrl) {
+    redirect(`/artwork-approvals?selected=${approvalId}&error=Proof%20title%20and%20image%20are%20required`);
+  }
+
+  await addArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, {
+    title,
+    signCode: nullable(formData.get("signCode")),
+    description: nullable(formData.get("description")),
+    imageUrl,
+    imageStoragePath: uploaded.storagePath ?? null,
+    fileName: uploaded.fileName ?? nullable(formData.get("fileName")),
+    notes: nullable(formData.get("notes")),
+    productionType: oneLine(formData.get("productionType"), "signage"),
+    quantity: numberText(formData.get("quantity"), "1"),
+    colourSummary: nullable(formData.get("colourSummary")),
+    sizeSummary: nullable(formData.get("sizeSummary")),
+    substrateSummary: nullable(formData.get("substrateSummary")),
+    installSummary: nullable(formData.get("installSummary")),
+    smallFormatSummary: nullable(formData.get("smallFormatSummary"))
+  });
+
+  redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20page%20added`);
 }
 
 export async function removeArtworkApprovalPageFromPageAction(formData: FormData): Promise<void> {
-  const activeTenant = await requireTenant();
+  const { activeTenant } = await requireTenant();
   const approvalId = String(formData.get("approvalId") ?? "").trim();
   const pageId = String(formData.get("pageId") ?? "").trim();
 
@@ -77,5 +176,5 @@ export async function removeArtworkApprovalPageFromPageAction(formData: FormData
   }
 
   await removeArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, pageId);
-  redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20page%20removed`);
+  redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20page%20removed`);
 }

@@ -50,7 +50,21 @@ export type ArtworkApprovalRecord = {
   contactName: string | null;
   email: string | null;
   status: string;
+  projectName: string | null;
+  siteAddress: string | null;
+  drawingTitle: string | null;
+  drawingNumber: string | null;
+  revision: string | null;
+  revisionNote: string | null;
+  designerName: string | null;
+  clientMessage: string | null;
+  internalNotes: string | null;
   clientResponseNotes: string | null;
+  clientSignatoryName: string | null;
+  clientSignatureDataUrl: string | null;
+  clientConfirmedAt: string | null;
+  internallyApprovedAt: string | null;
+  internallyApprovedBy: string | null;
   sentAt: string | null;
   viewedAt: string | null;
   approvedAt: string | null;
@@ -63,10 +77,53 @@ export type ArtworkApprovalPageRecord = {
   id: string;
   approvalId: string;
   title: string;
+  signCode: string | null;
+  description: string | null;
   imageUrl: string;
+  imageStoragePath: string | null;
+  fileName: string | null;
   notes: string | null;
+  productionType: string;
+  quantity: string;
+  colourSummary: string | null;
+  sizeSummary: string | null;
+  substrateSummary: string | null;
+  installSummary: string | null;
+  smallFormatSummary: string | null;
   sortOrder: number;
   createdAt: string;
+};
+
+export type ArtworkApprovalDetailsInput = {
+  clientName: string;
+  contactName?: string | null;
+  email?: string | null;
+  projectName?: string | null;
+  siteAddress?: string | null;
+  drawingTitle?: string | null;
+  drawingNumber?: string | null;
+  revision?: string | null;
+  revisionNote?: string | null;
+  designerName?: string | null;
+  clientMessage?: string | null;
+  internalNotes?: string | null;
+};
+
+export type ArtworkApprovalPageInput = {
+  title: string;
+  signCode?: string | null;
+  description?: string | null;
+  imageUrl: string;
+  imageStoragePath?: string | null;
+  fileName?: string | null;
+  notes?: string | null;
+  productionType?: string | null;
+  quantity?: string | null;
+  colourSummary?: string | null;
+  sizeSummary?: string | null;
+  substrateSummary?: string | null;
+  installSummary?: string | null;
+  smallFormatSummary?: string | null;
 };
 
 function makePublicToken(): string {
@@ -78,6 +135,11 @@ function normaliseMoney(value: string | null | undefined, fallback = "0"): strin
   if (!cleaned) return fallback;
   const parsed = Number(cleaned);
   return Number.isFinite(parsed) ? String(parsed) : fallback;
+}
+
+function nullableText(value: string | null | undefined): string | null {
+  const trimmed = String(value ?? "").trim();
+  return trimmed.length ? trimmed : null;
 }
 
 async function ensureQuoteLifecycleColumns(): Promise<void> {
@@ -126,6 +188,25 @@ async function ensureArtworkApprovalTables(): Promise<void> {
   `);
 
   await pool.query(`
+    ALTER TABLE sales.artwork_approvals
+      ADD COLUMN IF NOT EXISTS project_name varchar(255),
+      ADD COLUMN IF NOT EXISTS site_address text,
+      ADD COLUMN IF NOT EXISTS drawing_title varchar(255),
+      ADD COLUMN IF NOT EXISTS drawing_number varchar(80),
+      ADD COLUMN IF NOT EXISTS revision varchar(40),
+      ADD COLUMN IF NOT EXISTS revision_note text,
+      ADD COLUMN IF NOT EXISTS designer_name varchar(255),
+      ADD COLUMN IF NOT EXISTS client_message text,
+      ADD COLUMN IF NOT EXISTS internal_notes text,
+      ADD COLUMN IF NOT EXISTS client_signatory_name varchar(255),
+      ADD COLUMN IF NOT EXISTS client_signature_data_url text,
+      ADD COLUMN IF NOT EXISTS client_confirmed_at timestamptz,
+      ADD COLUMN IF NOT EXISTS internally_approved_at timestamptz,
+      ADD COLUMN IF NOT EXISTS internally_approved_by varchar(255),
+      ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
+  `);
+
+  await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS artwork_approvals_public_token_unique_idx
       ON sales.artwork_approvals (public_token)
       WHERE public_token IS NOT NULL
@@ -147,6 +228,22 @@ async function ensureArtworkApprovalTables(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now(),
       updated_at timestamptz NOT NULL DEFAULT now()
     )
+  `);
+
+  await pool.query(`
+    ALTER TABLE sales.artwork_approval_pages
+      ADD COLUMN IF NOT EXISTS sign_code varchar(40),
+      ADD COLUMN IF NOT EXISTS description text,
+      ADD COLUMN IF NOT EXISTS image_storage_path text,
+      ADD COLUMN IF NOT EXISTS file_name varchar(255),
+      ADD COLUMN IF NOT EXISTS production_type varchar(50) NOT NULL DEFAULT 'signage',
+      ADD COLUMN IF NOT EXISTS quantity numeric NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS colour_summary text,
+      ADD COLUMN IF NOT EXISTS size_summary text,
+      ADD COLUMN IF NOT EXISTS substrate_summary text,
+      ADD COLUMN IF NOT EXISTS install_summary text,
+      ADD COLUMN IF NOT EXISTS small_format_summary text,
+      ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
 
   await pool.query(`
@@ -335,6 +432,14 @@ export async function respondToQuoteByToken(token: string, response: "accepted" 
   `, [token, response, notes]);
 }
 
+export async function createArtworkApprovalForAcceptedQuoteToken(token: string): Promise<{ id: string } | null> {
+  await ensureQuoteLifecycleColumns();
+  await ensureArtworkApprovalTables();
+  const quote = await getQuoteDraftByPublicToken(token);
+  if (!quote) return null;
+  return createArtworkApprovalFromQuote(quote.tenantId, quote.id);
+}
+
 export async function createArtworkApprovalFromQuote(tenantId: string, quoteId: string): Promise<{ id: string }> {
   await ensureArtworkApprovalTables();
   const quote = await getQuoteDraftById(tenantId, quoteId);
@@ -349,11 +454,36 @@ export async function createArtworkApprovalFromQuote(tenantId: string, quoteId: 
 
   const result = await pool.query<{ id: string }>(`
     INSERT INTO sales.artwork_approvals (
-      tenant_id, quote_id, public_token, client_name, contact_name, email, status, created_at, updated_at
+      tenant_id,
+      quote_id,
+      public_token,
+      client_name,
+      contact_name,
+      email,
+      status,
+      project_name,
+      drawing_title,
+      drawing_number,
+      revision,
+      revision_note,
+      client_message,
+      created_at,
+      updated_at
     ) VALUES (
-      $1::uuid,$2::uuid,$3,$4,$5,$6,'draft',now(),now()
+      $1::uuid,$2::uuid,$3,$4,$5,$6,'draft',$7,$8,$9,'A','Issued for approval',$10,now(),now()
     ) RETURNING id
-  `, [tenantId, quoteId, makePublicToken(), quote.clientName, quote.contactName, quote.email]);
+  `, [
+    tenantId,
+    quoteId,
+    makePublicToken(),
+    quote.clientName,
+    quote.contactName,
+    quote.email,
+    quote.notes ? quote.notes.slice(0, 255) : quote.clientName,
+    quote.quoteNumber ? `Artwork proof for ${quote.quoteNumber}` : "Artwork proof",
+    "S1",
+    "Please review the proof pages below."
+  ]);
 
   return result.rows[0];
 }
@@ -368,7 +498,21 @@ function artworkApprovalSelectSql(): string {
       contact_name as "contactName",
       email,
       status,
+      project_name as "projectName",
+      site_address as "siteAddress",
+      drawing_title as "drawingTitle",
+      drawing_number as "drawingNumber",
+      revision,
+      revision_note as "revisionNote",
+      designer_name as "designerName",
+      client_message as "clientMessage",
+      internal_notes as "internalNotes",
       client_response_notes as "clientResponseNotes",
+      client_signatory_name as "clientSignatoryName",
+      client_signature_data_url as "clientSignatureDataUrl",
+      client_confirmed_at as "clientConfirmedAt",
+      internally_approved_at as "internallyApprovedAt",
+      internally_approved_by as "internallyApprovedBy",
       sent_at as "sentAt",
       viewed_at as "viewedAt",
       approved_at as "approvedAt",
@@ -429,8 +573,19 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
       id,
       approval_id as "approvalId",
       title,
+      sign_code as "signCode",
+      description,
       image_url as "imageUrl",
+      image_storage_path as "imageStoragePath",
+      file_name as "fileName",
       notes,
+      production_type as "productionType",
+      quantity::text as quantity,
+      colour_summary as "colourSummary",
+      size_summary as "sizeSummary",
+      substrate_summary as "substrateSummary",
+      install_summary as "installSummary",
+      small_format_summary as "smallFormatSummary",
       sort_order as "sortOrder",
       created_at as "createdAt"
     FROM sales.artwork_approval_pages
@@ -440,18 +595,103 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
   return result.rows;
 }
 
-export async function addArtworkApprovalPageForTenant(tenantId: string, approvalId: string, input: {
-  title: string;
-  imageUrl: string;
-  notes?: string | null;
-}): Promise<void> {
+export async function updateArtworkApprovalDetailsForTenant(tenantId: string, approvalId: string, input: ArtworkApprovalDetailsInput): Promise<void> {
   await ensureArtworkApprovalTables();
   await pool.query(`
-    INSERT INTO sales.artwork_approval_pages (approval_id, title, image_url, notes, sort_order, created_at, updated_at)
-    SELECT aa.id, $3, $4, $5, COALESCE((SELECT max(sort_order) + 1 FROM sales.artwork_approval_pages WHERE approval_id = aa.id), 1), now(), now()
+    UPDATE sales.artwork_approvals
+    SET client_name = $3::varchar,
+        contact_name = $4::varchar,
+        email = $5::varchar,
+        project_name = $6::varchar,
+        site_address = $7::text,
+        drawing_title = $8::varchar,
+        drawing_number = $9::varchar,
+        revision = $10::varchar,
+        revision_note = $11::text,
+        designer_name = $12::varchar,
+        client_message = $13::text,
+        internal_notes = $14::text,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [
+    tenantId,
+    approvalId,
+    input.clientName,
+    input.contactName ?? null,
+    input.email ?? null,
+    input.projectName ?? null,
+    input.siteAddress ?? null,
+    input.drawingTitle ?? null,
+    input.drawingNumber ?? null,
+    input.revision ?? null,
+    input.revisionNote ?? null,
+    input.designerName ?? null,
+    input.clientMessage ?? null,
+    input.internalNotes ?? null
+  ]);
+}
+
+export async function addArtworkApprovalPageForTenant(tenantId: string, approvalId: string, input: ArtworkApprovalPageInput): Promise<void> {
+  await ensureArtworkApprovalTables();
+  await pool.query(`
+    INSERT INTO sales.artwork_approval_pages (
+      approval_id,
+      title,
+      sign_code,
+      description,
+      image_url,
+      image_storage_path,
+      file_name,
+      notes,
+      production_type,
+      quantity,
+      colour_summary,
+      size_summary,
+      substrate_summary,
+      install_summary,
+      small_format_summary,
+      sort_order,
+      created_at,
+      updated_at
+    )
+    SELECT aa.id,
+           $3,
+           $4,
+           $5,
+           $6,
+           $7,
+           $8,
+           $9,
+           COALESCE(NULLIF($10, ''), 'signage'),
+           NULLIF($11, '')::numeric,
+           $12,
+           $13,
+           $14,
+           $15,
+           $16,
+           COALESCE((SELECT max(sort_order) + 1 FROM sales.artwork_approval_pages WHERE approval_id = aa.id), 1),
+           now(),
+           now()
     FROM sales.artwork_approvals aa
     WHERE aa.tenant_id = $1::uuid AND aa.id = $2::uuid
-  `, [tenantId, approvalId, input.title, input.imageUrl, input.notes ?? null]);
+  `, [
+    tenantId,
+    approvalId,
+    input.title,
+    input.signCode ?? null,
+    input.description ?? null,
+    input.imageUrl,
+    input.imageStoragePath ?? null,
+    input.fileName ?? null,
+    input.notes ?? null,
+    input.productionType ?? "signage",
+    normaliseMoney(input.quantity, "1"),
+    nullableText(input.colourSummary),
+    nullableText(input.sizeSummary),
+    nullableText(input.substrateSummary),
+    nullableText(input.installSummary),
+    nullableText(input.smallFormatSummary)
+  ]);
 }
 
 export async function removeArtworkApprovalPageForTenant(tenantId: string, approvalId: string, pageId: string): Promise<void> {
@@ -478,6 +718,20 @@ export async function markArtworkApprovalSentForTenant(tenantId: string, approva
   `, [tenantId, approvalId, makePublicToken()]);
 }
 
+export async function markArtworkApprovalInternallyApprovedForTenant(tenantId: string, approvalId: string, approvedBy: string | null): Promise<void> {
+  await ensureArtworkApprovalTables();
+  await pool.query(`
+    UPDATE sales.artwork_approvals
+    SET status = 'approved',
+        internally_approved_at = now(),
+        internally_approved_by = $3,
+        approved_at = COALESCE(approved_at, now()),
+        client_response_notes = COALESCE(client_response_notes, 'Internally approved by staff/manager. No client approval request was sent.'),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, approvalId, approvedBy]);
+}
+
 export async function markArtworkApprovalViewedByToken(token: string): Promise<void> {
   await ensureArtworkApprovalTables();
   await pool.query(`
@@ -489,7 +743,7 @@ export async function markArtworkApprovalViewedByToken(token: string): Promise<v
   `, [token]);
 }
 
-export async function respondToArtworkApprovalByToken(token: string, response: "approved" | "changes_requested", notes: string | null): Promise<void> {
+export async function respondToArtworkApprovalByToken(token: string, response: "approved" | "changes_requested", notes: string | null, signatoryName?: string | null, signatureDataUrl?: string | null): Promise<void> {
   await ensureArtworkApprovalTables();
   const timestampColumn = response === "approved" ? "approved_at" : "changes_requested_at";
   await pool.query(`
@@ -497,7 +751,10 @@ export async function respondToArtworkApprovalByToken(token: string, response: "
     SET status = $2,
         ${timestampColumn} = now(),
         client_response_notes = $3,
+        client_signatory_name = CASE WHEN $2 = 'approved' THEN $4 ELSE client_signatory_name END,
+        client_signature_data_url = CASE WHEN $2 = 'approved' THEN $5 ELSE client_signature_data_url END,
+        client_confirmed_at = CASE WHEN $2 = 'approved' THEN now() ELSE client_confirmed_at END,
         updated_at = now()
     WHERE public_token = $1
-  `, [token, response, notes]);
+  `, [token, response, notes, signatoryName ?? null, signatureDataUrl ?? null]);
 }
