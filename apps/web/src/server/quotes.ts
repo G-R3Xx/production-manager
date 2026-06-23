@@ -91,6 +91,7 @@ export type ArtworkApprovalPageRecord = {
   installSummary: string | null;
   smallFormatSummary: string | null;
   sortOrder: number;
+  sourceQuoteLineId: string | null;
   createdAt: string;
 };
 
@@ -124,6 +125,7 @@ export type ArtworkApprovalPageInput = {
   substrateSummary?: string | null;
   installSummary?: string | null;
   smallFormatSummary?: string | null;
+  sourceQuoteLineId?: string | null;
 };
 
 function makePublicToken(): string {
@@ -243,7 +245,14 @@ async function ensureArtworkApprovalTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS substrate_summary text,
       ADD COLUMN IF NOT EXISTS install_summary text,
       ADD COLUMN IF NOT EXISTS small_format_summary text,
+      ADD COLUMN IF NOT EXISTS source_quote_line_id uuid,
       ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS artwork_approval_pages_source_quote_line_unique_idx
+      ON sales.artwork_approval_pages (approval_id, source_quote_line_id)
+      WHERE source_quote_line_id IS NOT NULL
   `);
 
   await pool.query(`
@@ -449,6 +458,7 @@ export async function createArtworkApprovalFromQuote(tenantId: string, quoteId: 
 
   const existing = await getArtworkApprovalForQuote(tenantId, quoteId);
   if (existing) {
+    await prefillArtworkApprovalPagesFromQuoteLines(tenantId, existing.id);
     return { id: existing.id };
   }
 
@@ -485,7 +495,130 @@ export async function createArtworkApprovalFromQuote(tenantId: string, quoteId: 
     "Please review the proof pages below."
   ]);
 
+  await prefillArtworkApprovalPagesFromQuoteLines(tenantId, result.rows[0].id);
   return result.rows[0];
+}
+
+function normaliseForSearch(value: string | null | undefined): string {
+  return String(value ?? "").toLowerCase().replace(/[_/\\-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes">): "signage" | "small_format" | null {
+  const product = normaliseForSearch(line.productName);
+  const combined = normaliseForSearch([line.productName, line.optionSummary, line.notes].filter(Boolean).join(" · "));
+
+  if (/\b(pickup|delivery|install|installation|freight|courier)\b/.test(product)) return null;
+  if (/\b(pickup|delivery charge|client collects|installer|install hr|install\b|travel)\b/.test(combined)) return null;
+  if (/\b(custom component|assembly|parts:)\b/.test(combined)) return null;
+
+  if (/\b(card|cards|business card|flyer|flyers|brochure|brochures|booklet|booklets|book\b|books\b|ncr|duplicate|triplicate|quadruplicate|carbon|gsm|cello|fold|folding|score|creasing|staple|saddle stitch|sequential numbering|padding|tape colour|cover:)\b/.test(combined)) {
+    return "small_format";
+  }
+
+  if (/\b(acrylic|acm|aluminium composite|corflute|coreflute|pvc|foamboard|banner|vinyl|roll stock|laminate|jingwei|router|cnc|drill holes|eyelets|direct print|cut vinyl|clear reverse|reverse print|positive print|white ink|cmyk|signage|sign\b|panel\b)\b/.test(combined)) {
+    return "signage";
+  }
+
+  return null;
+}
+
+function extractFirstMatch(source: string, patterns: RegExp[]): string | null {
+  for (const pattern of patterns) {
+    const match = source.match(pattern);
+    if (match?.[1]) return match[1].trim();
+    if (match?.[0]) return match[0].trim();
+  }
+  return null;
+}
+
+function optionParts(line: Pick<QuoteLineRecord, "optionSummary">): string[] {
+  return String(line.optionSummary ?? "")
+    .split(/\s+·\s+/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function titleCaseSignCode(index: number, kind: "signage" | "small_format"): string {
+  return kind === "small_format" ? `P${index}` : `S${index}`;
+}
+
+function escapeSvg(value: string): string {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function placeholderArtworkImage(line: QuoteLineRecord, code: string): string {
+  const title = `${code} - ${line.productName}`.slice(0, 92);
+  const subtitle = "Upload proof artwork here";
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1000" viewBox="0 0 1600 1000"><rect width="1600" height="1000" fill="#ffffff"/><rect x="80" y="80" width="1440" height="840" rx="36" fill="#f8fafc" stroke="#cbd5e1" stroke-width="4" stroke-dasharray="22 18"/><text x="800" y="450" font-family="Arial, Helvetica, sans-serif" font-size="58" font-weight="700" text-anchor="middle" fill="#334155">${escapeSvg(title)}</text><text x="800" y="535" font-family="Arial, Helvetica, sans-serif" font-size="34" text-anchor="middle" fill="#64748b">${subtitle}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kind: "signage" | "small_format"): ArtworkApprovalPageInput {
+  const parts = optionParts(line);
+  const combined = [line.productName, line.optionSummary, line.notes].filter(Boolean).join(" · ");
+  const size = extractFirstMatch(combined, [/(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm)/i, /(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?)/i]);
+  const code = titleCaseSignCode(index, kind);
+  const qty = normaliseMoney(line.quantity, "1");
+
+  const colourParts = parts.filter((part) => /\b(cmyk|mono|white ink|white|pantone|colour|color|clear|reverse|positive)\b/i.test(part));
+  const materialParts = parts.filter((part) => /\b(acrylic|acm|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|laminate|coating|stock|paper|gsm|satin|gloss|matt|matte|cello)\b/i.test(part));
+  const finishingParts = parts.filter((part) => /\b(finishing|jingwei|router|cnc|drill|holes|eyelet|trim|cutting|fold|score|crease|staple|saddle|numbering|padding|tape|laminate|coating)\b/i.test(part));
+
+  return {
+    title: line.productName || `${kind === "small_format" ? "Small format" : "Sign"} proof`,
+    signCode: code,
+    description: line.optionSummary || line.notes || null,
+    imageUrl: placeholderArtworkImage(line, code),
+    imageStoragePath: null,
+    fileName: null,
+    notes: "Auto-created from quote line. Replace this placeholder by uploading the final proof artwork.",
+    productionType: kind,
+    quantity: qty,
+    colourSummary: colourParts.length ? colourParts.join("\n") : null,
+    sizeSummary: size,
+    substrateSummary: materialParts.length ? [line.productName, ...materialParts].filter(Boolean).join("\n") : line.productName,
+    installSummary: kind === "signage" && finishingParts.length ? finishingParts.join("\n") : null,
+    smallFormatSummary: kind === "small_format" ? parts.join("\n") : null,
+    sourceQuoteLineId: line.id
+  };
+}
+
+export async function countArtworkEligibleQuoteLines(quoteId: string): Promise<number> {
+  const lines = await listQuoteLines(quoteId);
+  return lines.filter((line) => artworkQuoteLineKind(line)).length;
+}
+
+export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string, approvalId: string): Promise<{ created: number; skipped: number }> {
+  await ensureArtworkApprovalTables();
+  const approval = await getArtworkApprovalById(tenantId, approvalId);
+  if (!approval) return { created: 0, skipped: 0 };
+
+  const [lines, existingPages] = await Promise.all([
+    listQuoteLines(approval.quoteId),
+    listArtworkApprovalPages(approval.id)
+  ]);
+  const existingLineIds = new Set(existingPages.map((page) => page.sourceQuoteLineId).filter(Boolean));
+  let created = 0;
+  let skipped = 0;
+  let nextIndex = existingPages.length + 1;
+
+  for (const line of lines) {
+    const kind = artworkQuoteLineKind(line);
+    if (!kind) {
+      skipped += 1;
+      continue;
+    }
+    if (existingLineIds.has(line.id)) {
+      skipped += 1;
+      continue;
+    }
+
+    await addArtworkApprovalPageForTenant(tenantId, approval.id, buildArtworkPageFromQuoteLine(line, nextIndex, kind));
+    created += 1;
+    nextIndex += 1;
+  }
+
+  return { created, skipped };
 }
 
 function artworkApprovalSelectSql(): string {
@@ -587,6 +720,7 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
       install_summary as "installSummary",
       small_format_summary as "smallFormatSummary",
       sort_order as "sortOrder",
+      source_quote_line_id as "sourceQuoteLineId",
       created_at as "createdAt"
     FROM sales.artwork_approval_pages
     WHERE approval_id = $1::uuid
@@ -650,6 +784,7 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
       substrate_summary,
       install_summary,
       small_format_summary,
+      source_quote_line_id,
       sort_order,
       created_at,
       updated_at
@@ -669,6 +804,7 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
            $14,
            $15,
            $16,
+           NULLIF($17::text, '')::uuid,
            COALESCE((SELECT max(sort_order) + 1 FROM sales.artwork_approval_pages WHERE approval_id = aa.id), 1),
            now(),
            now()
@@ -690,7 +826,8 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
     nullableText(input.sizeSummary),
     nullableText(input.substrateSummary),
     nullableText(input.installSummary),
-    nullableText(input.smallFormatSummary)
+    nullableText(input.smallFormatSummary),
+    input.sourceQuoteLineId ?? null
   ]);
 }
 
@@ -704,6 +841,30 @@ export async function removeArtworkApprovalPageForTenant(tenantId: string, appro
       AND p.approval_id = $2::uuid
       AND p.id = $3::uuid
   `, [tenantId, approvalId, pageId]);
+}
+
+export async function replaceArtworkApprovalPageProofForTenant(tenantId: string, approvalId: string, pageId: string, input: {
+  imageUrl: string;
+  imageStoragePath?: string | null;
+  fileName?: string | null;
+}): Promise<void> {
+  await ensureArtworkApprovalTables();
+  await pool.query(`
+    UPDATE sales.artwork_approval_pages p
+    SET image_url = $4::text,
+        image_storage_path = COALESCE($5::text, image_storage_path),
+        file_name = COALESCE($6::varchar, file_name),
+        notes = CASE
+          WHEN notes ILIKE 'Auto-created from quote line.%' THEN NULL
+          ELSE notes
+        END,
+        updated_at = now()
+    FROM sales.artwork_approvals aa
+    WHERE p.approval_id = aa.id
+      AND aa.tenant_id = $1::uuid
+      AND p.approval_id = $2::uuid
+      AND p.id = $3::uuid
+  `, [tenantId, approvalId, pageId, input.imageUrl, input.imageStoragePath ?? null, input.fileName ?? null]);
 }
 
 export async function markArtworkApprovalSentForTenant(tenantId: string, approvalId: string): Promise<void> {

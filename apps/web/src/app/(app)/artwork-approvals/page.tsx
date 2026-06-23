@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
+  artworkQuoteLineKind,
   getArtworkApprovalById,
   getArtworkApprovalForQuote,
   getQuoteDraftById,
@@ -16,7 +17,9 @@ import {
   addArtworkApprovalPageFromPageAction,
   createArtworkApprovalFromQuoteAction,
   directApproveArtworkApprovalAction,
+  prefillArtworkApprovalPagesFromQuoteAction,
   removeArtworkApprovalPageFromPageAction,
+  replaceArtworkApprovalPageProofAction,
   saveArtworkApprovalDetailsAction,
   sendArtworkApprovalFromPageAction
 } from "./actions";
@@ -163,6 +166,9 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   ]);
 
   const quoteTotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
+  const artworkEligibleQuoteLines = quoteLines.filter((line) => artworkQuoteLineKind(line));
+  const quotedPagesAlreadyCreated = proofPages.filter((page) => page.sourceQuoteLineId).length;
+  const missingQuoteLinePages = artworkEligibleQuoteLines.filter((line) => !proofPages.some((page) => page.sourceQuoteLineId === line.id)).length;
   const publicUrl = selectedApproval ? publicArtworkUrl(selectedApproval.publicToken) : "";
   const quoteOptions = quoteDrafts.filter((quote) => quote.id !== quoteForCreate?.id && !approvals.some((approval) => approval.quoteId === quote.id));
   const selectedTone = selectedApproval ? statusTone(selectedApproval.status) : statusTone("draft");
@@ -259,11 +265,21 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     <input type="hidden" name="approvalId" value={selectedApproval.id} />
                     <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Direct approve</button>
                   </form>
+                  <form action={prefillArtworkApprovalPagesFromQuoteAction}>
+                    <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                    <button type="submit" style={{ ...secondaryButtonStyle, background: missingQuoteLinePages > 0 ? "#eef4ff" : "#fff", color: missingQuoteLinePages > 0 ? "#3538cd" : "#344054" }}>Sync pages from quote lines</button>
+                  </form>
                   {publicUrl ? <a href={publicUrl} target="_blank" rel="noreferrer" style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Open client approval</a> : null}
                   {publicUrl && selectedApproval.email ? (
                     <a href={`mailto:${selectedApproval.email}?subject=${encodeURIComponent(`Artwork proof approval - ${selectedApproval.projectName || selectedApproval.clientName}`)}&body=${encodeURIComponent(`Hi ${selectedApproval.contactName || selectedApproval.clientName},\n\nPlease review and approve the artwork proof using the link below:\n\n${publicUrl}\n\nThanks`)}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Email approval link</a>
                   ) : null}
                   <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Back to quote</Link>
+                </div>
+
+                <div style={{ border: "1px solid #dbeafe", background: "#f8fbff", borderRadius: 18, padding: 14, display: "grid", gap: 6 }}>
+                  <strong>Quote line artwork pages</strong>
+                  <p style={{ margin: 0, color: "#475467", fontSize: 13, lineHeight: 1.5 }}>The artwork pack can create one proof page for each signage or small-format quote line. Pickup, delivery, install and custom component lines are ignored.</p>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>{artworkEligibleQuoteLines.length} eligible quote line{artworkEligibleQuoteLines.length === 1 ? "" : "s"}. {quotedPagesAlreadyCreated} already linked. {missingQuoteLinePages} still to create.</p>
                 </div>
               </section>
 
@@ -336,7 +352,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                       <div style={{ padding: 22, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                           <div>
-                            <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {page.productionType.replace(/_/g, " ")}</p>
+                            <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {page.productionType.replace(/_/g, " ")}{page.sourceQuoteLineId ? " · from quote line" : ""}</p>
                             <h3 style={{ margin: "4px 0 0", fontSize: 24 }}>{page.title}</h3>
                             {page.description ? <p style={{ margin: "4px 0 0", color: "#667085" }}>{page.description}</p> : null}
                           </div>
@@ -364,6 +380,14 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                             </div>
                           ))}
                         </div>
+                        <form action={replaceArtworkApprovalPageProofAction} encType="multipart/form-data" style={{ borderTop: "1px solid #e2e8f0", paddingTop: 12, display: "grid", gap: 8 }}>
+                          <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                          <input type="hidden" name="pageId" value={page.id} />
+                          <strong style={{ fontSize: 12 }}>Replace proof artwork</strong>
+                          <input name="proofFile" type="file" accept="image/*,.pdf" style={{ ...inputStyle, minHeight: 38, paddingTop: 8, fontSize: 12 }} />
+                          <input name="imageUrl" placeholder="Or paste proof image URL" style={{ ...inputStyle, minHeight: 38, fontSize: 12 }} />
+                          <button type="submit" style={{ ...buttonStyle, minHeight: 38, fontSize: 12 }}>Update proof</button>
+                        </form>
                         <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 12, fontSize: 12, color: "#64748b" }}>Page {index + 1} of {proofPages.length}</div>
                       </aside>
                     </article>

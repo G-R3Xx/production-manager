@@ -10,7 +10,9 @@ import {
   createArtworkApprovalFromQuote,
   markArtworkApprovalInternallyApprovedForTenant,
   markArtworkApprovalSentForTenant,
+  prefillArtworkApprovalPagesFromQuoteLines,
   removeArtworkApprovalPageForTenant,
+  replaceArtworkApprovalPageProofForTenant,
   updateArtworkApprovalDetailsForTenant
 } from "@/server/quotes";
 
@@ -74,6 +76,49 @@ export async function createArtworkApprovalFromQuoteAction(formData: FormData): 
 
   const approval = await createArtworkApprovalFromQuote(activeTenant.tenantId, quoteId);
   redirect(`/artwork-approvals?selected=${approval.id}&message=Artwork%20approval%20created`);
+}
+
+
+export async function prefillArtworkApprovalPagesFromQuoteAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
+
+  const result = await prefillArtworkApprovalPagesFromQuoteLines(activeTenant.tenantId, approvalId);
+  const message = result.created > 0
+    ? `${result.created} quote line${result.created === 1 ? "" : "s"} added as artwork page${result.created === 1 ? "" : "s"}`
+    : "No new sign or small-format quote lines to add";
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
+}
+
+export async function replaceArtworkApprovalPageProofAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  const pageId = oneLine(formData.get("pageId"));
+  const imageUrlFromInput = oneLine(formData.get("imageUrl"));
+
+  if (!approvalId || !pageId) redirect("/artwork-approvals?error=Select%20an%20artwork%20page%20first");
+
+  let uploaded: { imageUrl?: string; storagePath?: string; fileName?: string } = {};
+  try {
+    uploaded = await uploadProofImageIfPresent(activeTenant.tenantId, approvalId, formData);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent(message)}`);
+  }
+
+  const imageUrl = uploaded.imageUrl || imageUrlFromInput;
+  if (!imageUrl) {
+    redirect(`/artwork-approvals?selected=${approvalId}&error=Upload%20a%20proof%20image%20or%20paste%20a%20proof%20URL`);
+  }
+
+  await replaceArtworkApprovalPageProofForTenant(activeTenant.tenantId, approvalId, pageId, {
+    imageUrl,
+    imageStoragePath: uploaded.storagePath ?? null,
+    fileName: uploaded.fileName ?? null
+  });
+
+  redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20image%20updated`);
 }
 
 export async function saveArtworkApprovalDetailsAction(formData: FormData): Promise<void> {
