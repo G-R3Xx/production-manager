@@ -25,6 +25,12 @@ export type QuoteDraftRecord = {
   declinedAt: string | null;
   changesRequestedAt: string | null;
   clientResponseNotes: string | null;
+  myobOrderUid: string | null;
+  myobOrderNumber: string | null;
+  myobOrderStatus: string | null;
+  myobOrderSyncedAt: string | null;
+  myobOrderSyncError: string | null;
+  myobOrderPayloadJson: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
 };
@@ -157,7 +163,13 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS accepted_at timestamptz,
       ADD COLUMN IF NOT EXISTS declined_at timestamptz,
       ADD COLUMN IF NOT EXISTS changes_requested_at timestamptz,
-      ADD COLUMN IF NOT EXISTS client_response_notes text
+      ADD COLUMN IF NOT EXISTS client_response_notes text,
+      ADD COLUMN IF NOT EXISTS myob_order_uid varchar(120),
+      ADD COLUMN IF NOT EXISTS myob_order_number varchar(120),
+      ADD COLUMN IF NOT EXISTS myob_order_status varchar(50) NOT NULL DEFAULT 'not_synced',
+      ADD COLUMN IF NOT EXISTS myob_order_synced_at timestamptz,
+      ADD COLUMN IF NOT EXISTS myob_order_sync_error text,
+      ADD COLUMN IF NOT EXISTS myob_order_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
 
   await pool.query(`
@@ -284,6 +296,12 @@ function quoteSelectSql(): string {
       declined_at as "declinedAt",
       changes_requested_at as "changesRequestedAt",
       client_response_notes as "clientResponseNotes",
+      myob_order_uid as "myobOrderUid",
+      myob_order_number as "myobOrderNumber",
+      myob_order_status as "myobOrderStatus",
+      myob_order_synced_at as "myobOrderSyncedAt",
+      myob_order_sync_error as "myobOrderSyncError",
+      myob_order_payload_json as "myobOrderPayloadJson",
       created_at as "createdAt",
       updated_at as "updatedAt"
   `;
@@ -430,6 +448,27 @@ export async function setQuoteDraftStatusForTenant(tenantId: string, quoteId: st
   `, [tenantId, quoteId, status]);
 }
 
+export async function updateQuoteMyobOrderSyncForTenant(tenantId: string, quoteId: string, input: {
+  status: "not_synced" | "ready_to_sync" | "syncing" | "synced" | "error";
+  uid?: string | null;
+  orderNumber?: string | null;
+  error?: string | null;
+  payloadJson?: Record<string, unknown>;
+}): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET myob_order_status = $3::varchar,
+        myob_order_uid = COALESCE($4::varchar, myob_order_uid),
+        myob_order_number = COALESCE($5::varchar, myob_order_number),
+        myob_order_sync_error = $6::text,
+        myob_order_payload_json = COALESCE(myob_order_payload_json, '{}'::jsonb) || $7::jsonb,
+        myob_order_synced_at = CASE WHEN $3::varchar = 'synced' THEN now() ELSE myob_order_synced_at END,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, input.status, input.uid ?? null, input.orderNumber ?? null, input.error ?? null, JSON.stringify(input.payloadJson ?? {})]);
+}
+
 export async function markQuoteViewedByToken(token: string): Promise<void> {
   await ensureQuoteLifecycleColumns();
   await pool.query(`
@@ -447,6 +486,7 @@ export async function respondToQuoteByToken(token: string, response: "accepted" 
   await pool.query(`
     UPDATE sales.quote_drafts
     SET status = $2,
+        myob_order_status = CASE WHEN $2 = 'accepted' THEN 'ready_to_sync' ELSE myob_order_status END,
         ${timestampColumn} = now(),
         client_response_notes = $3,
         updated_at = now()

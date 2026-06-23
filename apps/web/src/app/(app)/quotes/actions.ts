@@ -15,6 +15,7 @@ import {
   setQuoteDraftStatusForTenant
 } from "@/server/quotes";
 import { getProductById } from "@/server/products";
+import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -175,4 +176,19 @@ export async function restoreQuoteDraftAction(formData: FormData): Promise<void>
 
   await setQuoteDraftStatusForTenant(activeTenant.tenantId, quoteId, "draft");
   redirect(`/quotes?selected=${quoteId}&message=Quote%20restored`);
+}
+
+
+export async function pushAcceptedQuoteToMyobOrderAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20to%20send%20to%20MYOB");
+
+  try {
+    await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Order`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(message)}`);
+  }
 }

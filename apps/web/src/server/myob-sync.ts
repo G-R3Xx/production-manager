@@ -441,3 +441,222 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
 
   return summary;
 }
+
+export type MyobOrderPushResult = {
+  ok: boolean;
+  quoteId: string;
+  myobOrderUid: string | null;
+  myobOrderNumber: string | null;
+  endpoint: string | null;
+  message: string;
+};
+
+async function sendMyobJson(accessToken: string, companyFileId: string, endpoint: string, method: "POST" | "PUT", body: Record<string, unknown>) {
+  const url = new URL(`${companyFileId}${endpoint}`, `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`);
+  const response = await fetch(url.toString(), {
+    method,
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      "Content-Type": "application/json",
+      "x-myobapi-key": env.MYOB_CLIENT_ID ?? "",
+      "x-myobapi-version": "v2"
+    },
+    body: JSON.stringify(body),
+    cache: "no-store"
+  });
+
+  const text = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const detail = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : text || response.statusText;
+    throw new Error(`${response.status}: ${detail}`);
+  }
+
+  return { url: url.toString(), data: parsed };
+}
+
+function numberValue(value: string | null | undefined): number {
+  const parsed = Number(String(value ?? "0").replace(/[$,]/g, ""));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function textOrNull(value: unknown): string | null {
+  const cleaned = String(value ?? "").trim();
+  return cleaned.length ? cleaned : null;
+}
+
+function readMyobUid(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return textOrNull(record.UID) ?? textOrNull(record.Uid) ?? textOrNull(record.uid);
+}
+
+function readMyobNumber(value: unknown): string | null {
+  if (!value || typeof value !== "object") return null;
+  const record = value as Record<string, unknown>;
+  return textOrNull(record.Number) ?? textOrNull(record.OrderNumber) ?? textOrNull(record.DisplayID) ?? textOrNull(record.UID);
+}
+
+function buildOrderLineDescription(line: import("@/server/quotes").QuoteLineRecord): string {
+  return [line.productName, line.optionSummary, line.notes].filter(Boolean).join("\n").slice(0, 1000);
+}
+
+async function resolveMyobCustomerUid(tenantId: string, quote: import("@/server/quotes").QuoteDraftRecord): Promise<{ uid: string | null; source: string; customerPayload?: Record<string, unknown> }> {
+  if (!quote.linkedCustomerId) {
+    return { uid: null, source: "quote-not-linked-to-client" };
+  }
+
+  const { getCustomerById } = await import("@/server/customers");
+  const customer = await getCustomerById(tenantId, quote.linkedCustomerId);
+  if (!customer) return { uid: null, source: "linked-client-not-found" };
+
+  if (customer.myobUid && !customer.myobUid.startsWith("manual-")) {
+    return { uid: customer.myobUid, source: "linked-client-myob-uid", customerPayload: customer.payloadJson };
+  }
+
+  const mappedUid = typeof customer.payloadJson?.myobUid === "string" ? customer.payloadJson.myobUid : null;
+  if (mappedUid && !mappedUid.startsWith("manual-")) {
+    return { uid: mappedUid, source: "linked-client-payload-myob-uid", customerPayload: customer.payloadJson };
+  }
+
+  return { uid: null, source: "client-is-manual-not-linked-to-myob", customerPayload: customer.payloadJson };
+}
+
+function buildMyobServiceOrderPayload(input: {
+  quote: import("@/server/quotes").QuoteDraftRecord;
+  lines: import("@/server/quotes").QuoteLineRecord[];
+  customerUid: string;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const subtotal = input.lines.reduce((sum, line) => sum + numberValue(line.lineTotal), 0);
+  const lines = input.lines.map((line) => ({
+    Type: "Transaction",
+    Description: buildOrderLineDescription(line),
+    Total: numberValue(line.lineTotal),
+    TaxCode: { Code: "GST" },
+    Job: null
+  }));
+
+  return {
+    Customer: { UID: input.customerUid },
+    Date: today,
+    Number: input.quote.quoteNumber ?? undefined,
+    CustomerPurchaseOrderNumber: input.quote.quoteNumber ?? undefined,
+    JournalMemo: `Production Manager accepted quote ${input.quote.quoteNumber ?? input.quote.id}`,
+    Comment: input.quote.notes ?? undefined,
+    Lines: lines,
+    Freight: 0,
+    FreightTaxCode: { Code: "GST" },
+    IsTaxInclusive: false
+  };
+}
+
+export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, quoteId: string): Promise<MyobOrderPushResult> {
+  const { getQuoteDraftById, listQuoteLines, updateQuoteMyobOrderSyncForTenant } = await import("@/server/quotes");
+  const quote = await getQuoteDraftById(tenantId, quoteId);
+  if (!quote) throw new Error("Quote not found.");
+
+  if (quote.status !== "accepted") {
+    await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
+      status: "error",
+      error: "Only accepted quotes can be pushed to MYOB as open orders.",
+      payloadJson: { attemptedAt: new Date().toISOString(), stage: "preflight" }
+    });
+    throw new Error("Only accepted quotes can be pushed to MYOB as open orders.");
+  }
+
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") {
+    const message = "MYOB is not connected. Connect MYOB before sending accepted quotes to MYOB Orders.";
+    await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, { status: "error", error: message, payloadJson: { attemptedAt: new Date().toISOString(), stage: "connection" } });
+    throw new Error(message);
+  }
+
+  const lines = await listQuoteLines(quoteId);
+  if (!lines.length) {
+    const message = "This quote has no quote lines to send to MYOB.";
+    await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, { status: "error", error: message, payloadJson: { attemptedAt: new Date().toISOString(), stage: "quote-lines" } });
+    throw new Error(message);
+  }
+
+  const customer = await resolveMyobCustomerUid(tenantId, quote);
+  if (!customer.uid) {
+    const message = "The linked client is not mapped to a MYOB customer yet. Import/match the client from MYOB or link this client before creating the MYOB Order.";
+    await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, { status: "error", error: message, payloadJson: { attemptedAt: new Date().toISOString(), stage: "customer", customerSource: customer.source } });
+    throw new Error(message);
+  }
+
+  await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
+    status: "syncing",
+    error: null,
+    payloadJson: { attemptedAt: new Date().toISOString(), stage: "push-start", customerSource: customer.source }
+  });
+
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const payload = buildMyobServiceOrderPayload({ quote, lines, customerUid: customer.uid });
+  const endpoint = "/Sale/Order/Service";
+
+  try {
+    const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload);
+    const uid = readMyobUid(result.data) ?? `pending-${quote.id}`;
+    const number = readMyobNumber(result.data) ?? quote.quoteNumber ?? null;
+    await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
+      status: "synced",
+      uid,
+      orderNumber: number,
+      error: null,
+      payloadJson: {
+        endpoint: result.url,
+        pushedAt: new Date().toISOString(),
+        response: result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : { raw: result.data },
+        requestSummary: {
+          quoteNumber: quote.quoteNumber,
+          lineCount: lines.length,
+          subtotal: lines.reduce((sum, line) => sum + numberValue(line.lineTotal), 0)
+        }
+      }
+    });
+
+    await upsertExternalMappingByTenantId(tenantId, {
+      entityType: "order",
+      localId: quoteId,
+      externalId: uid,
+      syncState: "synced",
+      lastSyncedAt: new Date().toISOString(),
+      payloadJson: { orderNumber: number, quoteNumber: quote.quoteNumber, endpoint: result.url }
+    });
+
+    await createSyncRunForTenant(tenantId, "push_invoices", "success", {
+      source: "pushAcceptedQuoteToMyobOrderForTenant",
+      quoteId,
+      quoteNumber: quote.quoteNumber,
+      myobOrderUid: uid,
+      myobOrderNumber: number,
+      endpoint: result.url
+    }, null);
+
+    return { ok: true, quoteId, myobOrderUid: uid, myobOrderNumber: number, endpoint: result.url, message: "Accepted quote sent to MYOB as an open order." };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
+      status: "error",
+      error: message,
+      payloadJson: { endpoint, failedAt: new Date().toISOString(), request: payload }
+    });
+    await createSyncRunForTenant(tenantId, "push_invoices", "error", {
+      source: "pushAcceptedQuoteToMyobOrderForTenant",
+      quoteId,
+      quoteNumber: quote.quoteNumber,
+      endpoint,
+      request: payload
+    }, message);
+    throw new Error(`MYOB Order sync failed: ${message}`);
+  }
+}

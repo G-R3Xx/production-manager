@@ -14,6 +14,7 @@ import {
   updateProductionItemPrintReadyFileForTenant,
   updateProductionJobDetailsForTenant
 } from "@/server/production";
+import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 
 type ActiveTenant = NonNullable<ActiveTenantContext>;
 type SessionUser = Awaited<ReturnType<typeof getRequiredSessionUser>>;
@@ -130,4 +131,20 @@ export async function attachPrintReadyFileAction(formData: FormData): Promise<vo
     uploadedBy: user.email ?? null
   });
   productionRedirect(result.jobId, "Print-ready artwork attached");
+}
+
+
+export async function pushProductionQuoteToMyobOrderAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const jobId = String(formData.get("jobId") ?? "").trim();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  if (!jobId || !quoteId) redirectToProduction("/production?error=Missing%20quote%20or%20production%20job");
+
+  try {
+    await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    productionRedirect(jobId, "Accepted quote sent to MYOB Order");
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirectToProduction(`/production?selected=${jobId}&error=${encodeURIComponent(message)}`);
+  }
 }

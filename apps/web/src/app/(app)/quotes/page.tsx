@@ -7,7 +7,7 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, restoreQuoteDraftAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 
@@ -129,6 +129,13 @@ function formatMoney(value: number): string {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(value);
 }
 
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "Not yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
 function appBaseUrl(): string {
   const explicit = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL;
   if (explicit) return explicit.replace(/\/$/, "");
@@ -140,6 +147,15 @@ function publicQuoteUrl(token: string | null | undefined): string {
   if (!token) return "";
   const base = appBaseUrl();
   return `${base}/public/quotes/${token}`;
+}
+
+
+function myobOrderTone(status: string | null | undefined): { bg: string; fg: string; border: string; label: string } {
+  if (status === "synced") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6", label: "MYOB order synced" };
+  if (status === "ready_to_sync") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa", label: "Ready for MYOB order" };
+  if (status === "syncing") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe", label: "Syncing to MYOB" };
+  if (status === "error") return { bg: "#fff1f3", fg: "#c01048", border: "#fecdd3", label: "MYOB sync issue" };
+  return { bg: "#f8fafc", fg: "#475467", border: "#e2e8f0", label: "Not in MYOB" };
 }
 
 function quoteStatusTone(status: string): { bg: string; fg: string; border: string } {
@@ -347,6 +363,32 @@ ${quotePublicUrl}
 Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Email quote</a> : null}
                     </div>
                   </div>
+                  {(() => {
+                    const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
+                    const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
+                    return (
+                      <section style={{ border: `1px solid ${myobTone.border}`, borderRadius: 18, background: myobTone.bg, color: myobTone.fg, padding: 14, display: "grid", gap: 10 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                          <div style={{ display: "grid", gap: 4 }}>
+                            <strong>MYOB open job / order</strong>
+                            <span style={{ fontSize: 13 }}>Accepted quotes become open MYOB Orders. Drafts, enquiries and surveys stay in Production Manager only.</span>
+                            {selectedQuote.myobOrderNumber ? <span style={{ fontSize: 13 }}>Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · synced ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</span> : null}
+                            {selectedQuote.myobOrderSyncError ? <span style={{ fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</span> : null}
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <span style={{ borderRadius: 999, border: `1px solid ${myobTone.border}`, background: "rgba(255,255,255,0.75)", color: myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{myobTone.label}</span>
+                            {canPush ? (
+                              <form action={pushAcceptedQuoteToMyobOrderAction}>
+                                <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                                <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
+                              </form>
+                            ) : null}
+                          </div>
+                        </div>
+                      </section>
+                    );
+                  })()}
+
                   {selectedQuote.clientResponseNotes ? <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: 16, padding: 12 }}><strong>Client notes:</strong><br />{selectedQuote.clientResponseNotes}</div> : null}
                 </section>
               </div>

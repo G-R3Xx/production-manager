@@ -21,9 +21,11 @@ import {
   setProductionJobStatusAction,
   syncProductionJobAction,
   toggleProductionStepAction,
-  updateProductionJobDetailsAction
+  updateProductionJobDetailsAction,
+  pushProductionQuoteToMyobOrderAction
 } from "./actions";
 import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
+import { getQuoteDraftById } from "@/server/quotes";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -51,6 +53,15 @@ function formatDateTime(value: string | null | undefined): string {
 
 function statusLabel(value: string): string {
   return value.replace(/_/g, " ");
+}
+
+
+function myobOrderTone(status: string | null | undefined): { bg: string; fg: string; border: string; label: string } {
+  if (status === "synced") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6", label: "MYOB order synced" };
+  if (status === "ready_to_sync") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa", label: "Ready for MYOB order" };
+  if (status === "syncing") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe", label: "Syncing to MYOB" };
+  if (status === "error") return { bg: "#fff1f3", fg: "#c01048", border: "#fecdd3", label: "MYOB sync issue" };
+  return { bg: "#f8fafc", fg: "#475467", border: "#e2e8f0", label: "Not in MYOB" };
 }
 
 function statusTone(status: string): { bg: string; fg: string; border: string } {
@@ -563,8 +574,9 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   const selectedJobMissing = Boolean(selectedParam && !selectedJob);
   let items: ProductionItemRecord[] = [];
   let steps: ProductionStepRecord[] = [];
+  let selectedQuote = null as Awaited<ReturnType<typeof getQuoteDraftById>>;
   if (selectedJob) {
-    [items, steps] = await Promise.all([listProductionItemsForJob(selectedJob.id), listProductionStepsForJob(selectedJob.id)]);
+    [items, steps, selectedQuote] = await Promise.all([listProductionItemsForJob(selectedJob.id), listProductionStepsForJob(selectedJob.id), getQuoteDraftById(tenantId, selectedJob.quoteId)]);
   }
   const complete = pageCompletion(steps);
   const readyCount = allJobs.filter((job) => job.status === "ready_to_start").length;
@@ -711,6 +723,34 @@ export default async function ProductionPage({ searchParams }: PageProps) {
               )}
             </div>
           </section>
+
+          {selectedQuote ? (() => {
+            const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
+            const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
+            return (
+              <section style={{ ...cardStyle, borderColor: myobTone.border, background: myobTone.bg, color: myobTone.fg, display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                  <div style={{ display: "grid", gap: 5 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>MYOB open job / order</p>
+                    <h3 style={{ margin: 0 }}>{myobTone.label}</h3>
+                    <p style={{ margin: 0, fontSize: 13 }}>Production Manager runs the workflow. Accepted quotes are sent to MYOB as open Orders when you choose to sync.</p>
+                    {selectedQuote.myobOrderNumber ? <p style={{ margin: 0, fontSize: 13 }}>MYOB Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</p> : null}
+                    {selectedQuote.myobOrderSyncError ? <p style={{ margin: 0, fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</p> : null}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <span style={{ borderRadius: 999, border: `1px solid ${myobTone.border}`, background: "rgba(255,255,255,0.75)", color: myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{myobTone.label}</span>
+                    {canPush ? (
+                      <form action={pushProductionQuoteToMyobOrderAction}>
+                        <input type="hidden" name="jobId" value={selectedJob.id} />
+                        <input type="hidden" name="quoteId" value={selectedJob.quoteId} />
+                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
+                      </form>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+            );
+          })() : null}
 
           <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <h2 style={{ margin: 0 }}>Job details</h2>
