@@ -103,68 +103,347 @@ function extractDimension(value: string | null | undefined): string | null {
     .trim();
 }
 
+function usage(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/\.00$/, "").replace(/0$/, "");
+}
+
+type DimensionInfo = {
+  raw: string;
+  width: number;
+  height: number;
+  area: number;
+  part: string;
+};
+
+type ProductionRequirement = {
+  label: string;
+  item: string;
+  quantity: string;
+  note?: string;
+};
+
+function parseDimensionText(value: string | null | undefined, partOverride?: string): DimensionInfo | null {
+  const source = String(value ?? "");
+  const match = source.match(/\b(\d+(?:\.\d+)?)\s*(?:mm)?\s*[×x]\s*(\d+(?:\.\d+)?)\s*(?:mm)?\b/i);
+  if (!match?.[1] || !match?.[2]) return null;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) return null;
+  return {
+    raw: `${usage(width)} × ${usage(height)}mm`,
+    width,
+    height,
+    area: width * height,
+    part: partOverride ?? source
+  };
+}
+
+function dimensionCandidates(parts: string[], fallbackText: string | null | undefined): DimensionInfo[] {
+  const fromParts = parts
+    .map((part) => parseDimensionText(part, part))
+    .filter((dimension): dimension is DimensionInfo => Boolean(dimension));
+  const fallback = parseDimensionText(fallbackText ?? "");
+  return fallback ? [...fromParts, fallback] : fromParts;
+}
+
+function isStockLikePart(part: string): boolean {
+  return /\b(stock|sheet|substrate|material|acm|aluminium|composite|acrylic|corflute|coreflute|pvc|foamboard|foam board|paper|gsm|banner|vinyl|sav|roll|laminate|lamination|lam-)\b/i.test(part);
+}
+
+function cleanQuotePart(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/^Laminate:\s*/i, "")
+    .replace(/^Coating:\s*/i, "")
+    .replace(/^Finishing:\s*/i, "")
+    .trim();
+}
+
+function chooseFinishedDimension(parts: string[], item: ProductionItemRecord): DimensionInfo | null {
+  const candidates = dimensionCandidates(parts, item.sizeSummary);
+  if (!candidates.length) return null;
+  const nonStock = candidates.filter((candidate) => !isStockLikePart(candidate.part));
+  if (nonStock.length) {
+    return nonStock.sort((a, b) => b.area - a.area)[0] ?? null;
+  }
+  const itemDimension = parseDimensionText(item.sizeSummary ?? "");
+  return itemDimension ?? candidates.sort((a, b) => b.area - a.area)[0] ?? null;
+}
+
+function stockDimensionFromPart(part: string): DimensionInfo | null {
+  if (!isStockLikePart(part)) return null;
+  return parseDimensionText(part, part);
+}
+
+function quantityNumber(value: string | null | undefined): number {
+  const parsed = Number(String(value ?? "1").replace(/,/g, ""));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+}
+
+function calculateSheetRequirement(finished: DimensionInfo, stock: DimensionInfo, itemQty: number): { quantity: number; note: string } {
+  const fw = finished.width;
+  const fh = finished.height;
+  const sw = stock.width;
+  const sh = stock.height;
+
+  const fitNormal = fw <= sw && fh <= sh;
+  const fitRotated = fw <= sh && fh <= sw;
+  if (fitNormal || fitRotated) {
+    const piecesNormal = fitNormal ? Math.floor(sw / fw) * Math.floor(sh / fh) : 0;
+    const piecesRotated = fitRotated ? Math.floor(sw / fh) * Math.floor(sh / fw) : 0;
+    const piecesPerSheet = Math.max(1, piecesNormal, piecesRotated);
+    return {
+      quantity: Math.ceil(itemQty / piecesPerSheet),
+      note: `${piecesPerSheet} piece${piecesPerSheet === 1 ? "" : "s"}/sheet from ${stock.raw}`
+    };
+  }
+
+  const normalPanels = Math.ceil(fw / sw) * Math.ceil(fh / sh);
+  const rotatedPanels = Math.ceil(fw / sh) * Math.ceil(fh / sw);
+  const panelsPerItem = Math.max(1, Math.min(normalPanels, rotatedPanels));
+  return {
+    quantity: Math.ceil(panelsPerItem * itemQty),
+    note: `${panelsPerItem} panel${panelsPerItem === 1 ? "" : "s"}/item required for ${finished.raw}`
+  };
+}
+
+function calculateRollLm(finished: DimensionInfo, rollWidth: number, itemQty: number): { lm: number; note: string } {
+  const panelsPerItem = Math.max(1, Math.ceil(finished.width / rollWidth));
+  const metres = (finished.height / 1000) * panelsPerItem * itemQty;
+  return {
+    lm: Math.ceil(metres),
+    note: `${panelsPerItem} panel${panelsPerItem === 1 ? "" : "s"}/item on ${usage(rollWidth)}mm roll width`
+  };
+}
+
+function rollWidthFromPart(part: string): number | null {
+  const dimension = parseDimensionText(part);
+  if (dimension) return Math.max(dimension.width, dimension.height);
+  const match = part.match(/\b(\d{3,4})\s*mm\b/i);
+  if (!match?.[1]) return null;
+  const width = Number(match[1]);
+  return Number.isFinite(width) && width > 0 ? width : null;
+}
+
+function formatMaterialName(part: string): string {
+  return cleanQuotePart(part).replace(/\s+/g, " ").trim();
+}
+
+function laminateDisplayName(raw: string | null): string | null {
+  if (!raw) return null;
+  const cleaned = cleanQuotePart(raw);
+  if (/\bnone\b/i.test(cleaned)) return null;
+  if (/\bgloss\b/i.test(cleaned)) return "gloss laminate";
+  if (/\b(matt|matte)\b/i.test(cleaned)) return "matte laminate";
+  if (/anti\s*graffiti/i.test(cleaned)) return "anti-graffiti laminate";
+  if (/whiteboard/i.test(cleaned)) return "whiteboard laminate";
+  return `${cleaned} laminate`;
+}
+
+function printDisplayName(parts: string[], ink: string | null): string | null {
+  const printMethod = parts.find((part) => /\b(direct print|roll stock|cut vinyl|printed|print)\b/i.test(part));
+  const method = printMethod ? cleanQuotePart(printMethod).toLowerCase() : null;
+  if (!method && !ink) return null;
+  return [method, ink].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function baseProductName(item: ProductionItemRecord, parts: string[]): string {
+  const first = parts.find((part) => part && !/^Artwork\b/i.test(part) && !parseDimensionText(part));
+  const fromProduct = String(item.quoteProductName || item.title || "Production item").split(" - ")[0]?.trim();
+  const base = first || fromProduct || "Production item";
+  if (item.productionType === "small_format") return base;
+  if (/\bsign\b/i.test(base)) return base;
+  if (/\b(service|delivery|install|pickup)\b/i.test(base)) return base;
+  return `${base} sign`;
+}
+
+function productionTitleForItem(details: { baseName: string; quoteParts: string[]; inkLabel: string | null; laminateRaw: string | null; finishedSize: DimensionInfo | null }): string {
+  const pieces = [details.baseName];
+  const print = printDisplayName(details.quoteParts, details.inkLabel);
+  const laminate = laminateDisplayName(details.laminateRaw);
+  const process = [print, laminate].filter(Boolean).join(" and ");
+  if (process) pieces.push(`with ${process}`);
+  if (details.finishedSize) pieces.push(details.finishedSize.raw);
+  return pieces.join(" ");
+}
+
+function buildRequirements(item: ProductionItemRecord, details: {
+  quoteParts: string[];
+  finishedSize: DimensionInfo | null;
+  laminateRaw: string | null;
+  inkLabel: string | null;
+}): ProductionRequirement[] {
+  const requirements: ProductionRequirement[] = [];
+  const qty = quantityNumber(item.quantity);
+  const finished = details.finishedSize;
+  const stockParts = details.quoteParts.filter((part) => {
+    if (!stockDimensionFromPart(part)) return false;
+    if (/\b(laminate|lamination|lam-)\b/i.test(part)) return false;
+    if (/\b(vinyl|sav|roll|banner|media)\b/i.test(part)) return false;
+    return isStockLikePart(part);
+  });
+
+  for (const part of stockParts) {
+    const stockDimension = stockDimensionFromPart(part);
+    if (!stockDimension) continue;
+    const sheet = finished ? calculateSheetRequirement(finished, stockDimension, qty) : null;
+    requirements.push({
+      label: "Stock / substrate",
+      item: `${formatMaterialName(part)} (Stock)`,
+      quantity: sheet ? `${sheet.quantity} sheet${sheet.quantity === 1 ? "" : "s"}` : `Qty ${usage(qty)}`,
+      note: sheet?.note
+    });
+  }
+
+  const mediaParts = details.quoteParts.filter((part) => {
+    if (/\b(laminate|lamination|lam-)\b/i.test(part)) return false;
+    if (/\broll stock\b/i.test(part)) return false;
+    return /\b(vinyl|sav|media|banner|roll)\b/i.test(part);
+  });
+  for (const part of mediaParts) {
+    const rollWidth = rollWidthFromPart(part);
+    const lm = finished && rollWidth ? calculateRollLm(finished, rollWidth, qty) : null;
+    requirements.push({
+      label: "Print media",
+      item: formatMaterialName(part),
+      quantity: lm ? `${usage(lm.lm)} lm` : finished ? `Covers ${finished.raw}` : "Use quoted quantity",
+      note: lm?.note ?? "Quoted roll/media stock"
+    });
+  }
+
+  const directPrint = details.quoteParts.find((part) => /\bdirect print\b/i.test(part));
+  if (directPrint || details.inkLabel) {
+    requirements.push({
+      label: "Print",
+      item: [directPrint ? "Direct print" : "Print", details.inkLabel].filter(Boolean).join(" - "),
+      quantity: `${usage(qty)} item${qty === 1 ? "" : "s"}`,
+      note: finished ? `Finished print size ${finished.raw}` : undefined
+    });
+  }
+
+  if (details.laminateRaw && !/\bnone\b/i.test(details.laminateRaw)) {
+    const laminateName = formatMaterialName(details.laminateRaw);
+    const rollWidth = rollWidthFromPart(details.laminateRaw);
+    const lm = finished && rollWidth ? calculateRollLm(finished, rollWidth, qty) : null;
+    requirements.push({
+      label: "Laminate",
+      item: laminateName,
+      quantity: lm ? `${usage(lm.lm)} lm` : finished ? `Covers ${finished.raw}` : "Use quoted quantity",
+      note: lm?.note ?? "Laminate coverage required for quoted size"
+    });
+  }
+
+  const finishingParts = details.quoteParts.filter((part) => /\b(jingwei|router|cnc|cut|cutting|drill|holes|eyelet|eyelets|fold|score|staple|numbering|padding|tape)\b/i.test(part));
+  for (const part of finishingParts) {
+    requirements.push({ label: "Finishing", item: formatMaterialName(part), quantity: "As quoted" });
+  }
+
+  return requirements.filter((requirement, index, list) => {
+    const key = `${requirement.label}|${requirement.item}`.toLowerCase();
+    return list.findIndex((entry) => `${entry.label}|${entry.item}`.toLowerCase() === key) === index;
+  });
+}
+
 function quotedDetailsForItem(item: ProductionItemRecord) {
   const quoteParts = splitQuoteParts(item.quoteOptionSummary);
   const combined = [item.quoteProductName, item.quoteOptionSummary, item.quoteLineNotes, item.title, item.sizeSummary, item.substrateSummary, item.colourSummary, item.finishingSummary]
     .filter(Boolean)
     .join(" · ");
 
-  const size = item.sizeSummary || extractDimension(combined);
-  const material = item.substrateSummary || firstMatchingPart(quoteParts, /\b(acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|substrate|clear|opal|white|black|sheet)\b/i) || item.quoteProductName;
-  const print = item.colourSummary || quoteParts.filter((part) => /\b(cmyk|mono|white ink|white only|direct print|roll stock|cut vinyl|reverse|positive|single sided|double sided|print)\b/i.test(part)).join("\n") || null;
-  const finishing = item.finishingSummary || quoteParts.filter((part) => /\b(laminate|lamination|gloss|matt|matte|anti graffiti|whiteboard|jingwei|router|cnc|cut|drill|holes|eyelet|fold|score|staple|saddle|numbering|padding|tape|finishing|coating)\b/i.test(part)).join("\n") || null;
+  const finishedSize = chooseFinishedDimension(quoteParts, item);
+  const stockPart = quoteParts.find((part) => stockDimensionFromPart(part) && !/\b(laminate|lamination|lam-|vinyl|sav|roll|banner|media)\b/i.test(part));
+  const laminateRaw = firstMatchingPart(quoteParts, /\b(laminate|lamination|lam-|gloss|matt|matte|anti graffiti|whiteboard)\b/i) || item.finishingSummary;
+  const inkLabel = item.colourSummary || firstMatchingPart(quoteParts, /\b(cmyk|mono|white ink|white only|black only)\b/i);
+  const print = printDisplayName(quoteParts, inkLabel);
+  const finishing = laminateDisplayName(laminateRaw) || quoteParts.filter((part) => /\b(jingwei|router|cnc|cut|drill|holes|eyelet|fold|score|staple|numbering|padding|tape|finishing|coating)\b/i.test(part)).join("\n") || null;
+  const baseName = baseProductName(item, quoteParts);
+  const material = item.substrateSummary || stockPart || firstMatchingPart(quoteParts, /\b(acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|substrate|clear|opal|white|black|sheet)\b/i) || item.quoteProductName;
 
-  return {
+  const details = {
+    baseName,
     product: item.quoteProductName || item.title,
-    size,
+    finishedSize,
+    size: finishedSize?.raw ?? item.sizeSummary ?? extractDimension(combined),
     material,
     print,
     finishing,
     quoteParts,
     notes: item.quoteLineNotes,
-    lineTotal: item.quoteLineTotal
+    lineTotal: item.quoteLineTotal,
+    laminateRaw,
+    inkLabel
+  };
+
+  return {
+    ...details,
+    productionTitle: productionTitleForItem(details),
+    requirements: buildRequirements(item, details)
   };
 }
 
 function QuotedDetailsCard({ item }: { item: ProductionItemRecord }) {
   const details = quotedDetailsForItem(item);
   const fields = [
-    ["Product", details.product],
+    ["Finished item", details.productionTitle],
     ["Quantity", item.quantity],
-    ["Size", details.size],
-    ["Material / stock", details.material],
-    ["Print / colour", details.print],
-    ["Finishing", details.finishing]
+    ["Finished size", details.size],
+    ["Primary stock", details.material],
+    ["Print", details.print],
+    ["Laminate / finish", details.finishing]
   ].filter((field): field is [string, string] => Boolean(field[1]));
 
   return (
-    <section style={{ border: "1px solid #bfdbfe", borderRadius: 18, padding: 14, background: "#eff6ff", display: "grid", gap: 12 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start", flexWrap: "wrap" }}>
-        <div>
-          <strong style={{ color: "#1d4ed8" }}>Quoted production details</strong>
-          <p style={{ margin: "4px 0 0", color: "#475467", fontSize: 13 }}>This is the actual quote-line information production needs to make the item.</p>
+    <section style={{ border: "2px solid #93c5fd", borderRadius: 22, padding: 16, background: "linear-gradient(180deg, #eff6ff 0%, #f8fbff 100%)", display: "grid", gap: 14 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gap: 5 }}>
+          <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.1em" }}>Priority production instruction</span>
+          <h3 style={{ margin: 0, color: "#0f172a", fontSize: 24, lineHeight: 1.18 }}>{details.productionTitle}</h3>
+          <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>This is the final item production should make, separated from the stock sheets/media used to make it.</p>
         </div>
-        {details.lineTotal ? <span style={{ borderRadius: 999, background: "#fff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>Quoted total ${details.lineTotal}</span> : null}
+        {details.lineTotal ? <span style={{ borderRadius: 999, background: "#fff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>Quoted total ${details.lineTotal}</span> : null}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10 }}>
         {fields.map(([label, value]) => (
-          <div key={label} style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
+          <div key={label} style={{ border: "1px solid #dbeafe", borderRadius: 16, background: "#fff", padding: 12, display: "grid", gap: 5 }}>
             <span style={{ color: "#667085", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
-            <strong style={{ whiteSpace: "pre-wrap", color: "#0f172a" }}>{value}</strong>
+            <strong style={{ whiteSpace: "pre-wrap", color: "#0f172a", lineHeight: 1.25 }}>{value}</strong>
           </div>
         ))}
       </div>
 
-      {details.quoteParts.length ? (
-        <div style={{ display: "grid", gap: 7 }}>
-          <span style={{ color: "#475467", fontSize: 12, fontWeight: 950 }}>Full quote-line choices</span>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
-            {details.quoteParts.map((part, index) => (
-              <span key={`${part}-${index}`} style={{ borderRadius: 999, background: "#ffffff", border: "1px solid #bfdbfe", color: "#1e3a8a", padding: "6px 9px", fontSize: 12, fontWeight: 850 }}>{part}</span>
+      <div style={{ border: "1px solid #bfdbfe", borderRadius: 18, background: "#fff", overflow: "hidden" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "12px 14px", borderBottom: "1px solid #dbeafe", background: "#f8fbff" }}>
+          <strong style={{ color: "#0f172a" }}>Required stock / media / production requirements</strong>
+          <span style={{ color: "#475467", fontSize: 12, fontWeight: 850 }}>{details.requirements.length} requirement{details.requirements.length === 1 ? "" : "s"}</span>
+        </div>
+        {details.requirements.length ? (
+          <div style={{ display: "grid" }}>
+            {details.requirements.map((requirement, index) => (
+              <div key={`${requirement.label}-${requirement.item}-${index}`} style={{ display: "grid", gridTemplateColumns: "150px minmax(0, 1fr) 140px", gap: 12, padding: "12px 14px", borderTop: index === 0 ? "none" : "1px solid #eef2f7", alignItems: "start" }}>
+                <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.04em" }}>{requirement.label}</span>
+                <div style={{ display: "grid", gap: 3 }}>
+                  <strong style={{ color: "#0f172a", lineHeight: 1.25 }}>{requirement.item}</strong>
+                  {requirement.note ? <span style={{ color: "#667085", fontSize: 12 }}>{requirement.note}</span> : null}
+                </div>
+                <strong style={{ color: "#0f172a", textAlign: "right" }}>{requirement.quantity}</strong>
+              </div>
             ))}
           </div>
-        </div>
+        ) : (
+          <p style={{ margin: 0, padding: 14, color: "#667085" }}>No separate stock/media requirements could be calculated from the quote summary yet. The full quoted choices are shown below.</p>
+        )}
+      </div>
+
+      {details.quoteParts.length ? (
+        <details style={{ border: "1px solid #dbeafe", borderRadius: 16, background: "#fff", padding: 12 }}>
+          <summary style={{ cursor: "pointer", color: "#475467", fontSize: 12, fontWeight: 950 }}>Show full quote-line choices</summary>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 10 }}>
+            {details.quoteParts.map((part, index) => (
+              <span key={`${part}-${index}`} style={{ borderRadius: 999, background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e3a8a", padding: "6px 9px", fontSize: 12, fontWeight: 850 }}>{part}</span>
+            ))}
+          </div>
+        </details>
       ) : null}
 
       {details.notes ? <div style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap" }}><strong>Quote notes:</strong> {details.notes}</div> : null}
@@ -455,6 +734,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             {items.map((item) => {
               const itemSteps = steps.filter((step) => step.itemId === item.id);
               const itemComplete = completionForItem(item, steps);
+              const productionDetails = quotedDetailsForItem(item);
               return (
                 <article key={item.id} style={{ border: "1px solid #dbe4f0", borderRadius: 22, padding: 16, background: "#fbfdff", display: "grid", gap: 14 }}>
                   <QuotedDetailsCard item={item} />
@@ -462,9 +742,9 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                     <div style={{ display: "grid", gap: 10 }}>
                       {proofPreview(item)}
                       <div style={{ display: "grid", gap: 4 }}>
-                        <strong>{item.itemCode ? `${item.itemCode} · ` : ""}{item.title}</strong>
+                        <strong>{item.itemCode ? `${item.itemCode} · ` : ""}{productionDetails.productionTitle}</strong>
                         <span style={{ color: "#667085", fontSize: 13 }}>Qty {item.quantity} · {item.productionType.replace(/_/g, " ")} · {itemComplete.done}/{itemComplete.total} steps</span>
-                        {[item.sizeSummary, item.substrateSummary, item.colourSummary, item.finishingSummary].filter(Boolean).map((line, index) => <span key={index} style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap" }}>{line}</span>)}
+                        <span style={{ color: "#475467", fontSize: 13 }}>Source artwork page: {item.title}</span>
                       </div>
                     </div>
 
