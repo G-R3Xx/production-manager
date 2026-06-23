@@ -186,17 +186,23 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
         <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>This is now the in-app version of the old approval portal: proof pages, client details, approval links, direct approve, signatures and production notes all live away from the quote builder.</p>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "365px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <div style={{ display: "grid", gap: 14 }}>
-          <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <h2 style={{ margin: 0 }}>Create from quote</h2>
-              <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Accepted quotes can create an artwork approval automatically, but you can also start one manually here.</p>
-            </div>
+      <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 260 }}>
+            <h2 style={{ margin: 0 }}>Artwork workflow</h2>
+            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create, switch and manage approval packs without stealing width from the proof/setup area below.</p>
+          </div>
+          <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{approvals.length} approval pack{approvals.length === 1 ? "" : "s"}</span>
+        </div>
+
+        <details open={!selectedApproval || Boolean(quoteForCreate && !existingForQuote)} style={{ border: "1px solid #e9d5ff", borderRadius: 18, background: "#faf5ff", padding: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 950, color: "#5b21b6" }}>Create from quote</summary>
+          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+            <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Accepted quotes can create an artwork approval automatically, but you can also start one manually here.</p>
             {quoteParam && quoteForCreate && existingForQuote ? (
-              <Link href={`/artwork-approvals?selected=${existingForQuote.id}`} style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>Open existing approval for this quote</Link>
+              <Link href={`/artwork-approvals?selected=${existingForQuote.id}`} style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "fit-content" }}>Open existing approval for this quote</Link>
             ) : null}
-            <form action={createArtworkApprovalFromQuoteAction} style={{ display: "grid", gap: 10 }}>
+            <form action={createArtworkApprovalFromQuoteAction} style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10, alignItems: "center" }}>
               <select name="quoteId" defaultValue={quoteForCreate?.id ?? quoteOptions[0]?.id ?? ""} style={inputStyle}>
                 {quoteForCreate && !existingForQuote ? <option value={quoteForCreate.id}>{quoteForCreate.quoteNumber ?? "Draft quote"} · {quoteForCreate.clientName}</option> : null}
                 {quoteOptions.map((quote) => (
@@ -205,38 +211,33 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
               </select>
               <button type="submit" disabled={!quoteForCreate && quoteOptions.length === 0} style={{ ...buttonStyle, background: !quoteForCreate && quoteOptions.length === 0 ? "#94a3b8" : "#6d28d9" }}>Create approval pack</button>
             </form>
-          </section>
+          </div>
+        </details>
 
-          <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <h2 style={{ margin: 0 }}>Approval packs</h2>
-              <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "5px 9px", fontSize: 12, fontWeight: 950 }}>{approvals.length}</span>
-            </div>
-            <div style={{ display: "grid", gap: 8 }}>
-              {approvals.map((approval) => {
-                const tone = statusTone(approval.status);
-                const quote = quoteDrafts.find((item) => item.id === approval.quoteId);
-                const isSelected = selectedApproval?.id === approval.id;
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+          {approvals.map((approval) => {
+            const tone = statusTone(approval.status);
+            const quote = quoteDrafts.find((item) => item.id === approval.quoteId);
+            const isSelected = selectedApproval?.id === approval.id;
 
-                return (
-                  <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}`} style={{ textDecoration: "none", color: "inherit" }}>
-                    <div style={{ border: isSelected ? "1px solid #a78bfa" : "1px solid #e4e7ec", borderRadius: 18, padding: 12, background: isSelected ? "#faf5ff" : "#fff", display: "grid", gap: 7 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
-                        <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
-                        <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950, whiteSpace: "nowrap" }}>{approval.status.replace(/_/g, " ")}</span>
-                      </div>
-                      <span style={{ color: "#667085", fontSize: 12 }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName ?? "Artwork proof"}</span>
-                      <span style={{ color: "#98a2b3", fontSize: 11 }}>Updated {formatDate(approval.updatedAt)}</span>
-                    </div>
-                  </Link>
-                );
-              })}
-              {approvals.length === 0 ? <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>No artwork approvals yet.</p> : null}
-            </div>
-          </section>
+            return (
+              <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}`} style={{ minWidth: 250, textDecoration: "none", color: "inherit" }}>
+                <div style={{ height: "100%", border: isSelected ? "2px solid #8b5cf6" : "1px solid #e4e7ec", borderRadius: 18, padding: 12, background: isSelected ? "#faf5ff" : "#fff", display: "grid", gap: 7 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
+                    <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950, whiteSpace: "nowrap" }}>{approval.status.replace(/_/g, " ")}</span>
+                  </div>
+                  <span style={{ color: "#667085", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName ?? "Artwork proof"}</span>
+                  <span style={{ color: "#98a2b3", fontSize: 11 }}>Updated {formatDate(approval.updatedAt)}</span>
+                </div>
+              </Link>
+            );
+          })}
+          {approvals.length === 0 ? <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>No artwork approvals yet.</p> : null}
         </div>
+      </section>
 
-        <div style={{ display: "grid", gap: 16 }}>
+      <div style={{ display: "grid", gap: 16 }}>
           {selectedApproval && selectedQuote ? (
             <>
               <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
@@ -249,11 +250,11 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                   <span style={{ borderRadius: 999, background: selectedTone.bg, color: selectedTone.fg, border: `1px solid ${selectedTone.border}`, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedApproval.status.replace(/_/g, " ")}</span>
                 </div>
 
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-                  <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fbfdff" }}><strong>{proofPages.length}</strong><br /><span style={{ color: "#667085", fontSize: 12 }}>Proof pages</span></div>
-                  <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fbfdff" }}><strong>{formatDate(selectedApproval.sentAt)}</strong><br /><span style={{ color: "#667085", fontSize: 12 }}>Sent</span></div>
-                  <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fbfdff" }}><strong>{formatDate(selectedApproval.viewedAt)}</strong><br /><span style={{ color: "#667085", fontSize: 12 }}>Viewed</span></div>
-                  <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fbfdff" }}><strong>{formatDate(selectedApproval.approvedAt)}</strong><br /><span style={{ color: "#667085", fontSize: 12 }}>Approved</span></div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}><strong>{proofPages.length}</strong> proof page{proofPages.length === 1 ? "" : "s"}</span>
+                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}>Sent: <strong>{formatDate(selectedApproval.sentAt)}</strong></span>
+                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}>Viewed: <strong>{formatDate(selectedApproval.viewedAt)}</strong></span>
+                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}>Approved: <strong>{formatDate(selectedApproval.approvedAt)}</strong></span>
                 </div>
 
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
@@ -415,7 +416,6 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
             </section>
           )}
         </div>
-      </div>
     </div>
   );
 }

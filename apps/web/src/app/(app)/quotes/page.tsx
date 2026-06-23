@@ -195,7 +195,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   });
 
   return (
-    <div style={{ maxWidth: 1440, margin: "0 auto", display: "grid", gap: 18 }}>
+    <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 18 }}>
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
@@ -205,89 +205,81 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Start with a base material, then move through the card flow: thickness, colour, size, print, ink, laminate and finishing. Products/templates stay in the background as optional shortcuts.</p>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "360px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <div style={{ display: "grid", gap: 14 }}>
-          {survey ? (
-            <section style={{ ...cardStyle(), display: "grid", gap: 12, borderColor: survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe", background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
-                  <h2 style={{ margin: 0, fontSize: 20 }}>{survey.clientName}</h2>
-                </div>
-                <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
-              </div>
-              <p style={{ margin: 0, color: "#475467", lineHeight: 1.55 }}>{survey.siteAddress || "No site address recorded"}</p>
-              {survey.surveyDetails ? (
-                <div style={{ border: "1px solid #d0d5dd", background: "#fff", borderRadius: 16, padding: 12, display: "grid", gap: 6 }}>
-                  <strong>Survey information collected</strong>
-                  <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{survey.surveyDetails}</p>
-                </div>
-              ) : null}
-              {surveyPhotos.length ? (
-                <div style={{ display: "grid", gap: 8 }}>
-                  <strong>{surveyPhotos.length} survey photo{surveyPhotos.length === 1 ? "" : "s"} will be copied into the quote notes</strong>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(92px, 1fr))", gap: 8 }}>
-                    {surveyPhotos.slice(0, 6).map((photo, index) => (
-                      <a key={`${photo.url}-${index}`} href={photo.url} target="_blank" rel="noreferrer" title={photo.fileName} style={{ display: "grid", gap: 4, textDecoration: "none", color: "#111827" }}>
-                        <img src={photo.url} alt={photo.fileName || "Survey photo"} style={{ width: "100%", height: 70, objectFit: "cover", borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff" }} />
-                        <span style={{ fontSize: 11, color: "#667085", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.signTitle}</span>
-                      </a>
-                    ))}
+      <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ minWidth: 260 }}>
+            <h2 style={{ margin: 0 }}>Quote workflow</h2>
+            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create or switch quotes here; the selected quote builder below now gets the full page width.</p>
+          </div>
+          <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
+        </div>
+
+        {(survey || linkedClient) ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
+            {survey ? (
+              <section style={{ border: `1px solid ${survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe"}`, borderRadius: 18, padding: 12, display: "grid", gap: 8, background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
+                  <div style={{ display: "grid", gap: 3 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
+                    <strong>{survey.clientName}</strong>
                   </div>
+                  <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
                 </div>
-              ) : null}
-              <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 12, border: "1px solid #cbd5e1", color: "#111827", fontWeight: 900 }}>Open survey summary</Link>
-            </section>
-          ) : null}
-          {linkedClient ? (
-            <section style={{ ...cardStyle(), display: "grid", gridTemplateColumns: linkedClientLogoUrl ? "72px 1fr" : "1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
-              {linkedClientLogoUrl ? <img src={linkedClientLogoUrl} alt={`${linkedClient.displayName} logo`} style={{ width: 72, height: 72, objectFit: "contain", borderRadius: 18, border: "1px solid #e5e7eb", background: "#fff" }} /> : null}
-              <div style={{ display: "grid", gap: 4 }}>
-                <strong>{linkedClient.displayName}</strong>
-                <span style={{ color: "#667085", fontSize: 13 }}>{linkedClientDefaultDiscount ? `${linkedClientDefaultDiscount}% default discount` : "No default discount"}{linkedClientDiscountRules.length ? ` · ${linkedClientDiscountRules.length} qty discount rule${linkedClientDiscountRules.length === 1 ? "" : "s"}` : ""}</span>
-              </div>
-            </section>
-          ) : null}
-          <form action={createQuoteDraftAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
-            <h2 style={{ margin: 0 }}>New draft quote</h2>
+                <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>{survey.siteAddress || "No site address recorded"}</p>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  {surveyPhotos.length ? <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 9px", fontSize: 12, fontWeight: 850 }}>{surveyPhotos.length} photo{surveyPhotos.length === 1 ? "" : "s"} copied to notes</span> : null}
+                  <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 10, border: "1px solid #cbd5e1", color: "#111827", fontSize: 13, fontWeight: 900, padding: "0 10px" }}>Open survey</Link>
+                </div>
+              </section>
+            ) : null}
+            {linkedClient ? (
+              <section style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gridTemplateColumns: linkedClientLogoUrl ? "56px 1fr" : "1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
+                {linkedClientLogoUrl ? <img src={linkedClientLogoUrl} alt={`${linkedClient.displayName} logo`} style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 14, border: "1px solid #e5e7eb", background: "#fff" }} /> : null}
+                <div style={{ display: "grid", gap: 4 }}>
+                  <strong>{linkedClient.displayName}</strong>
+                  <span style={{ color: "#667085", fontSize: 13 }}>{linkedClientDefaultDiscount ? `${linkedClientDefaultDiscount}% default discount` : "No default discount"}{linkedClientDiscountRules.length ? ` · ${linkedClientDiscountRules.length} qty discount rule${linkedClientDiscountRules.length === 1 ? "" : "s"}` : ""}</span>
+                </div>
+              </section>
+            ) : null}
+          </div>
+        ) : null}
+
+        <details open={!selectedQuote || Boolean(enquiry || survey)} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef" }}>New draft quote</summary>
+          <form action={createQuoteDraftAction} style={{ display: "grid", gap: 10, marginTop: 12 }}>
             <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
             <input type="hidden" name="surveyRequestId" value={survey?.id ?? ""} />
             <input type="hidden" name="linkedCustomerId" value={sourceLinkedCustomerId ?? ""} />
-            <input name="clientName" defaultValue={sourceClientName} placeholder="Client / business name" style={inputStyle} />
-            <input name="contactName" defaultValue={sourceContactName} placeholder="Contact name" style={inputStyle} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+              <input name="clientName" defaultValue={sourceClientName} placeholder="Client / business name" style={inputStyle} />
+              <input name="contactName" defaultValue={sourceContactName} placeholder="Contact name" style={inputStyle} />
               <input name="phone" defaultValue={sourcePhone} placeholder="Phone" style={inputStyle} />
               <input name="email" defaultValue={sourceEmail} placeholder="Email" style={inputStyle} />
+              <input name="discountPercent" defaultValue={String(linkedClientDefaultDiscount || 0)} placeholder="Client discount %" style={inputStyle} />
             </div>
-            <input name="discountPercent" defaultValue={String(linkedClientDefaultDiscount || 0)} placeholder="Client discount %" style={inputStyle} />
-            <textarea name="notes" defaultValue={defaultQuoteNotes} placeholder="Quote notes" style={textareaStyle} />
-            <button type="submit" style={buttonStyle}>Create draft quote</button>
+            <textarea name="notes" defaultValue={defaultQuoteNotes} placeholder="Quote notes" style={{ ...textareaStyle, minHeight: 80 }} />
+            <button type="submit" style={{ ...buttonStyle, width: "fit-content" }}>Create draft quote</button>
           </form>
+        </details>
 
-          <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <h2 style={{ margin: 0 }}>Draft quotes</h2>
-              <span style={{ fontSize: 13, color: "#667085" }}>{quoteDrafts.length} total</span>
-            </div>
-            <div style={{ display: "grid", gap: 10, maxHeight: 420, overflow: "auto", paddingRight: 4 }}>
-              {quoteDrafts.map((quote) => {
-                const active = selectedQuote?.id === quote.id;
-                return (
-                  <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 14, display: "grid", gap: 6, background: active ? "#eff6ff" : "#fbfdff" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                      <strong>{quote.clientName}</strong>
-                      <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{quote.status}</span>
-                    </div>
-                    <div style={{ color: "#667085", fontSize: 13 }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
-                  </a>
-                );
-              })}
-              {quoteDrafts.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No draft quotes yet.</p> : null}
-            </div>
-          </section>
+        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+          {quoteDrafts.map((quote) => {
+            const active = selectedQuote?.id === quote.id;
+            return (
+              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ minWidth: 250, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 6, background: active ? "#eff6ff" : "#fbfdff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
+                  <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.clientName}</strong>
+                  <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>{quote.status}</span>
+                </div>
+                <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
+              </a>
+            );
+          })}
+          {quoteDrafts.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No draft quotes yet.</p> : null}
         </div>
+      </section>
 
-        <section style={{ ...cardStyle(), display: "grid", gap: 16 }}>
+      <section style={{ ...cardStyle(), display: "grid", gap: 16 }}>
           {selectedQuote ? (
             <div style={{ display: "grid", gap: 16 }}>
               <div style={{ display: "grid", gap: 12 }}>
@@ -300,23 +292,11 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 </div>
 
                 <section style={{ border: "1px solid #d9e2ef", borderRadius: 22, background: "linear-gradient(135deg,#ffffff,#f8fbff)", padding: 16, display: "grid", gap: 14 }}>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-                    <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#667085", fontWeight: 850 }}>Quote number</div>
-                      <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong>
-                    </div>
-                    <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#667085", fontWeight: 850 }}>Line items</div>
-                      <strong>{quoteLines.length}</strong>
-                    </div>
-                    <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#667085", fontWeight: 850 }}>Quote total</div>
-                      <strong>{formatMoney(quoteSubtotal)}</strong>
-                    </div>
-                    <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, padding: 12, background: "#fff" }}>
-                      <div style={{ fontSize: 12, color: "#667085", fontWeight: 850 }}>Client response</div>
-                      <strong>{selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</strong>
-                    </div>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
+                    <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}><strong>{quoteLines.length}</strong> line item{quoteLines.length === 1 ? "" : "s"}</span>
+                    <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Total: <strong>{formatMoney(quoteSubtotal)}</strong></span>
+                    <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Client: <strong>{selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</strong></span>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
@@ -411,7 +391,6 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
             </div>
           )}
         </section>
-      </div>
     </div>
   );
 }

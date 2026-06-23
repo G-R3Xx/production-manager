@@ -170,7 +170,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
   ]);
 
   return (
-    <div style={{ maxWidth: 1300, margin: "0 auto", display: "grid", gap: 16 }}>
+    <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 16 }}>
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
       <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
@@ -178,23 +178,27 @@ export default async function SurveysPage({ searchParams }: PageProps) {
         <h1 style={{ margin: 0 }}>Book site work before quoting</h1>
         <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>If a survey is required, book it here, then turn the completed survey into a quote.</p>
       </section>
-      <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <form action={createSurveyRequestAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
-          <h2 style={{ margin: 0 }}>New survey request</h2>
+      <details open={Boolean(enquiry) || surveyRequests.length === 0} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef", fontSize: 18 }}>New survey request</summary>
+        <form action={createSurveyRequestAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
+          <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Create or edit requests here; the current survey workflow below now gets the full page width.</p>
           <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
-          <input name="clientName" defaultValue={enquiry?.clientName ?? ""} placeholder="Client / business name" style={inputStyle} />
-          <input name="contactName" defaultValue={enquiry?.contactName ?? ""} placeholder="Contact name" style={inputStyle} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <input name="clientName" defaultValue={enquiry?.clientName ?? ""} placeholder="Client / business name" style={inputStyle} />
+            <input name="contactName" defaultValue={enquiry?.contactName ?? ""} placeholder="Contact name" style={inputStyle} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
             <input name="phone" defaultValue={enquiry?.phone ?? ""} placeholder="Phone" style={inputStyle} />
             <input name="assignedTo" placeholder="Assigned to" style={inputStyle} />
+            <input name="siteAddress" defaultValue={enquiry?.siteAddress ?? ""} placeholder="Site address" style={inputStyle} />
+            <input name="dueDate" type="date" style={inputStyle} />
           </div>
-          <input name="siteAddress" defaultValue={enquiry?.siteAddress ?? ""} placeholder="Site address" style={inputStyle} />
-          <input name="dueDate" type="date" style={inputStyle} />
           <textarea name="notes" defaultValue={[enquiry?.requestSummary, enquiry?.notes].filter(Boolean).join("\n\n")} placeholder="Survey notes / what needs measuring" style={textareaStyle} />
-          <button type="submit" style={buttonStyle}>Create survey request</button>
+          <button type="submit" style={{ ...buttonStyle, width: "fit-content" }}>Create survey request</button>
         </form>
+      </details>
 
-        <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
+      <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>Current survey requests</h2>
             <span style={{ fontSize: 13, color: "#667085" }}>{surveyRequests.length} total</span>
@@ -304,7 +308,6 @@ export default async function SurveysPage({ searchParams }: PageProps) {
             {surveyRequests.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No survey requests yet.</p> : null}
           </div>
         </section>
-      </div>
     </div>
   );
 }
