@@ -280,7 +280,8 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   ]);
   const deletedJobCount = allJobs.filter((job) => job.status === "deleted").length;
   const jobs = filter === "deleted" ? allJobs.filter((job) => job.status === "deleted") : allJobs.filter((job) => job.status !== "deleted");
-  const selectedJob = selectedParam ? allJobs.find((job) => job.id === selectedParam) ?? jobs[0] ?? null : jobs[0] ?? null;
+  const selectedJob = selectedParam ? allJobs.find((job) => job.id === selectedParam) ?? null : null;
+  const selectedJobMissing = Boolean(selectedParam && !selectedJob);
   let items: ProductionItemRecord[] = [];
   let steps: ProductionStepRecord[] = [];
   if (selectedJob) {
@@ -333,24 +334,44 @@ export default async function ProductionPage({ searchParams }: PageProps) {
           </div>
         </div>
 
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
           {jobs.map((job) => {
             const tone = statusTone(job.status);
             const isSelected = selectedJob?.id === job.id;
             return (
-              <a key={job.id} href={`/production?selected=${job.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ minWidth: 290, border: isSelected ? "1px solid #93c5fd" : "1px solid #dbe4f0", borderRadius: 18, padding: 14, background: isSelected ? "#eff6ff" : "#fff", textDecoration: "none", color: "inherit", display: "grid", gap: 8 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+              <a key={job.id} href={`/production?selected=${job.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ border: isSelected ? "2px solid #2563eb" : "1px solid #dbe4f0", borderRadius: 20, padding: 16, background: isSelected ? "#eff6ff" : "#fff", textDecoration: "none", color: "inherit", display: "grid", gap: 10, boxShadow: isSelected ? "0 16px 34px rgba(37,99,235,0.14)" : "0 10px 24px rgba(15,23,42,0.04)" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
                   <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.clientName}</strong>
                   <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950 }}>{statusLabel(job.status)}</span>
                 </div>
                 <span style={{ color: "#475467", fontSize: 13 }}>{job.quoteNumber ?? "No quote number"}{job.projectName ? ` · ${job.projectName}` : ""}</span>
-                <span style={{ color: "#667085", fontSize: 12 }}>Due {formatDate(job.dueDate)} · {job.assignedTo || "Unassigned"}</span>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#667085", fontSize: 12, flexWrap: "wrap" }}>
+                  <span>Due {formatDate(job.dueDate)}</span>
+                  <span>{job.assignedTo || "Unassigned"}</span>
+                </div>
+                <span style={{ marginTop: 2, color: isSelected ? "#1d4ed8" : "#2563eb", fontWeight: 950, fontSize: 12 }}>{isSelected ? "Open below" : "Click to open details"}</span>
               </a>
             );
           })}
           {jobs.length === 0 ? <div style={{ color: "#667085", padding: 8 }}>No production jobs yet.</div> : null}
         </div>
       </section>
+
+      {selectedJobMissing ? (
+        <section style={{ ...cardStyle, borderColor: "#fed7aa", background: "#fff7ed", color: "#9a3412" }}>
+          That production job could not be found. Pick a current job above to open its details.
+        </section>
+      ) : null}
+
+      {!selectedJob && !selectedJobMissing ? (
+        <section style={{ ...cardStyle, display: "grid", placeItems: "center", textAlign: "center", gap: 10, minHeight: 180, background: "#fbfdff" }}>
+          <div style={{ width: 54, height: 54, borderRadius: 18, display: "grid", placeItems: "center", background: "#eef4ff", color: "#3538cd", fontSize: 24, fontWeight: 950 }}>→</div>
+          <div style={{ display: "grid", gap: 4 }}>
+            <h2 style={{ margin: 0 }}>Select a production job to open it</h2>
+            <p style={{ margin: 0, color: "#667085" }}>This page now starts as a current production job list. Details, print-ready files and checkoff steps only load after you click a job.</p>
+          </div>
+        </section>
+      ) : null}
 
       {approvedArtwork.length > 0 ? (
         <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
