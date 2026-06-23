@@ -224,7 +224,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
             <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted artwork approvals" : "Artwork workflow"}</h2>
-            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create, switch and manage approval packs without stealing width from the proof/setup area below.</p>
+            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Switch and manage approval packs without stealing width from the proof/setup area below. Create lives underneath the imported quote/survey data so the workflow reads top-to-bottom.</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <a href="/artwork-approvals" style={{ color: filter === "deleted" ? "#667085" : "#6d28d9", fontWeight: 900, textDecoration: "none" }}>Active</a>
@@ -232,25 +232,6 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
             <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{approvals.length} approval pack{approvals.length === 1 ? "" : "s"}</span>
           </div>
         </div>
-
-        <details open={!selectedApproval || Boolean(quoteForCreate && !existingForQuote)} style={{ border: "1px solid #e9d5ff", borderRadius: 18, background: "#faf5ff", padding: 12 }}>
-          <summary style={{ cursor: "pointer", fontWeight: 950, color: "#5b21b6" }}>Create from quote</summary>
-          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Accepted quotes can create an artwork approval automatically, but you can also start one manually here.</p>
-            {quoteParam && quoteForCreate && existingForQuote ? (
-              <Link href={`/artwork-approvals?selected=${existingForQuote.id}`} style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "fit-content" }}>Open existing approval for this quote</Link>
-            ) : null}
-            <form action={createArtworkApprovalFromQuoteAction} style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10, alignItems: "center" }}>
-              <select name="quoteId" defaultValue={quoteForCreate?.id ?? quoteOptions[0]?.id ?? ""} style={inputStyle}>
-                {quoteForCreate && !existingForQuote ? <option value={quoteForCreate.id}>{quoteForCreate.quoteNumber ?? "Draft quote"} · {quoteForCreate.clientName}</option> : null}
-                {quoteOptions.map((quote) => (
-                  <option key={quote.id} value={quote.id}>{quote.quoteNumber ?? "Draft quote"} · {quote.clientName} · {quote.status.replace(/_/g, " ")}</option>
-                ))}
-              </select>
-              <button type="submit" disabled={!quoteForCreate && quoteOptions.length === 0} style={{ ...buttonStyle, background: !quoteForCreate && quoteOptions.length === 0 ? "#94a3b8" : "#6d28d9" }}>Create approval pack</button>
-            </form>
-          </div>
-        </details>
 
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
           {approvals.map((approval) => {
@@ -273,6 +254,63 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
           })}
           {approvals.length === 0 ? <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>No artwork approvals yet.</p> : null}
         </div>
+      </section>
+
+      <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "start", flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gap: 4 }}>
+            <h2 style={{ margin: 0 }}>Imported quote / survey data</h2>
+            <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Review the quote/survey source first. Create approval sits underneath this so the page follows the actual workflow.</p>
+          </div>
+          {selectedQuote ? <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Open source quote</Link> : null}
+        </div>
+
+        {selectedQuote ? (
+          <>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Quote</p><strong>{selectedQuote.quoteNumber ?? "Draft quote"}</strong></div>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Client</p><strong>{selectedQuote.clientName}</strong></div>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Quote value</p><strong>{formatMoney(quoteTotal)} ex GST</strong></div>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Artwork lines</p><strong>{artworkEligibleQuoteLines.length} eligible</strong></div>
+            </div>
+
+            <div style={{ border: "1px solid #dbeafe", background: "#f8fbff", borderRadius: 18, padding: 14, display: "grid", gap: 6 }}>
+              <strong>Quote line artwork pages</strong>
+              <p style={{ margin: 0, color: "#475467", fontSize: 13, lineHeight: 1.5 }}>The artwork pack can create one proof page for each signage or small-format quote line. Pickup, delivery, install and custom component lines are ignored.</p>
+              <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>{artworkEligibleQuoteLines.length} eligible quote line{artworkEligibleQuoteLines.length === 1 ? "" : "s"}. {quotedPagesAlreadyCreated} already linked. {missingQuoteLinePages} still to create.</p>
+            </div>
+
+            {selectedQuote.notes ? (
+              <div style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 18, padding: 14, display: "grid", gap: 8 }}>
+                <strong>Imported survey / quote notes</strong>
+                <p style={{ margin: 0, color: "#475467", fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap", maxHeight: 210, overflow: "auto" }}>{selectedQuote.notes}</p>
+              </div>
+            ) : null}
+          </>
+        ) : (
+          <p style={{ margin: 0, color: "#667085", lineHeight: 1.6 }}>Select an approval pack or create one from a quote below. Once selected, this section shows the quote/survey source before the approval setup fields.</p>
+        )}
+      </section>
+
+      <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
+        <details open={!selectedApproval || Boolean(quoteForCreate && !existingForQuote)} style={{ border: "1px solid #e9d5ff", borderRadius: 18, background: "#faf5ff", padding: 12 }}>
+          <summary style={{ cursor: "pointer", fontWeight: 950, color: "#5b21b6" }}>Create approval from quote</summary>
+          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
+            <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Accepted quotes can create an artwork approval automatically, but you can also start one manually here after reviewing the imported quote/survey data above.</p>
+            {quoteParam && quoteForCreate && existingForQuote ? (
+              <Link href={`/artwork-approvals?selected=${existingForQuote.id}`} style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "fit-content" }}>Open existing approval for this quote</Link>
+            ) : null}
+            <form action={createArtworkApprovalFromQuoteAction} style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10, alignItems: "center" }}>
+              <select name="quoteId" defaultValue={quoteForCreate?.id ?? quoteOptions[0]?.id ?? ""} style={inputStyle}>
+                {quoteForCreate && !existingForQuote ? <option value={quoteForCreate.id}>{quoteForCreate.quoteNumber ?? "Draft quote"} · {quoteForCreate.clientName}</option> : null}
+                {quoteOptions.map((quote) => (
+                  <option key={quote.id} value={quote.id}>{quote.quoteNumber ?? "Draft quote"} · {quote.clientName} · {quote.status.replace(/_/g, " ")}</option>
+                ))}
+              </select>
+              <button type="submit" disabled={!quoteForCreate && quoteOptions.length === 0} style={{ ...buttonStyle, background: !quoteForCreate && quoteOptions.length === 0 ? "#94a3b8" : "#6d28d9" }}>Create approval pack</button>
+            </form>
+          </div>
+        </details>
       </section>
 
       <div style={{ display: "grid", gap: 16 }}>
@@ -330,11 +368,6 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
 
                 {selectedApproval.status === "deleted" ? <div style={{ border: "1px solid #fecaca", background: "#fff5f4", color: "#b42318", borderRadius: 18, padding: 14, fontWeight: 900 }}>This artwork approval is deleted. Restore it before sending or editing.</div> : null}
 
-                <div style={{ border: "1px solid #dbeafe", background: "#f8fbff", borderRadius: 18, padding: 14, display: "grid", gap: 6 }}>
-                  <strong>Quote line artwork pages</strong>
-                  <p style={{ margin: 0, color: "#475467", fontSize: 13, lineHeight: 1.5 }}>The artwork pack can create one proof page for each signage or small-format quote line. Pickup, delivery, install and custom component lines are ignored.</p>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>{artworkEligibleQuoteLines.length} eligible quote line{artworkEligibleQuoteLines.length === 1 ? "" : "s"}. {quotedPagesAlreadyCreated} already linked. {missingQuoteLinePages} still to create.</p>
-                </div>
               </section>
 
               <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
