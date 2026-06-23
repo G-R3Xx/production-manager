@@ -453,6 +453,18 @@ function eachRate(material: QuoteMaterial): { rate: number; note?: string } {
   return { rate: purchaseCost };
 }
 
+function panelisedRollMetres(widthMm: number, heightMm: number, rollWidthMm: number): { amount: number; panels: number; panelWidthMm: number; note: string } {
+  const panels = Math.max(1, Math.ceil(widthMm / rollWidthMm));
+  const panelWidthMm = widthMm / panels;
+  const amount = (heightMm / 1000) * panels;
+  return {
+    amount,
+    panels,
+    panelWidthMm,
+    note: `${panels} panel${panels === 1 ? "" : "s"} at ${dimensionMm(panelWidthMm)} × ${dimensionMm(heightMm)}mm because ${dimensionMm(widthMm)}mm is wider than ${dimensionMm(rollWidthMm)}mm roll`
+  };
+}
+
 function linearMetres(widthMm: number, heightMm: number, material: QuoteMaterial): { amount: number; note?: string } {
   const rollWidthMm = numberValue(material.rollWidthMm, 0);
   if (widthMm <= 0 || heightMm <= 0) return { amount: 0, note: "size missing" };
@@ -464,7 +476,9 @@ function linearMetres(widthMm: number, heightMm: number, material: QuoteMaterial
   }
   if (widthFits) return { amount: heightMm / 1000 };
   if (heightFits) return { amount: widthMm / 1000, note: "rotated to fit roll width" };
-  return { amount: Math.max(widthMm, heightMm) / 1000, note: "wider than roll; check paneling" };
+
+  const panelised = panelisedRollMetres(widthMm, heightMm, rollWidthMm);
+  return { amount: panelised.amount, note: panelised.note };
 }
 
 function roundedRollMetresForQuantity(widthMm: number, heightMm: number, material: QuoteMaterial, pieces: number): { amount: number; unroundedAmount: number; note?: string } {
@@ -477,6 +491,28 @@ function roundedRollMetresForQuantity(widthMm: number, heightMm: number, materia
     const unroundedAmount = single.amount * pieceCount;
     const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
     return { amount, unroundedAmount, note: ["roll width missing", `${usage(unroundedAmount)}lm before whole-metre rounding`].join(" · ") };
+  }
+
+  // When neither finished dimension fits the roll, keep the entered width as the
+  // panelled direction. Example: 2000 × 4000mm on a 1370mm roll becomes
+  // 2 panels at 1000 × 4000mm = 8lm before whole-metre rounding.
+  if (widthMm > rollWidthMm && heightMm > rollWidthMm) {
+    const panelised = panelisedRollMetres(widthMm, heightMm, rollWidthMm);
+    const totalPanels = panelised.panels * pieceCount;
+    const panelsAcross = Math.max(1, Math.floor(rollWidthMm / panelised.panelWidthMm));
+    const rows = Math.ceil(totalPanels / panelsAcross);
+    const unroundedAmount = (rows * heightMm) / 1000;
+    const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
+    return {
+      amount,
+      unroundedAmount,
+      note: [
+        panelised.note,
+        `${totalPanels} panel${totalPanels === 1 ? "" : "s"} nested ${panelsAcross} across × ${rows} row${rows === 1 ? "" : "s"}`,
+        `${usage(unroundedAmount)}lm before whole-metre rounding`,
+        `charged as ${usage(amount)}lm`
+      ].filter(Boolean).join(" · ")
+    };
   }
 
   const layouts = [
@@ -500,7 +536,7 @@ function roundedRollMetresForQuantity(widthMm: number, heightMm: number, materia
     const single = linearMetres(widthMm, heightMm, material);
     const unroundedAmount = single.amount * pieceCount;
     const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
-    return { amount, unroundedAmount, note: [single.note, "wider than roll; check paneling", `${usage(unroundedAmount)}lm before whole-metre rounding`].filter(Boolean).join(" · ") };
+    return { amount, unroundedAmount, note: [single.note, "panelled wider-than-roll print", `${usage(unroundedAmount)}lm before whole-metre rounding`].filter(Boolean).join(" · ") };
   }
 
   const best = layouts.sort((a, b) => a.unroundedAmount - b.unroundedAmount)[0];
