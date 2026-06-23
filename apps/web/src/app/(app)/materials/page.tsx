@@ -118,7 +118,7 @@ function groupDescription(group: MaterialGroup): string {
     case "shared":
       return "Eyelets, fixings, hardware, blades, app tape and general consumables.";
     case "all":
-      return "Every active and inactive material record.";
+      return "Every material record, including deleted/inactive housekeeping items.";
   }
 }
 
@@ -202,9 +202,9 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
   const rollMaterials = materials.filter((material) => isRollType(material.materialType));
   const sheetMaterials = materials.filter((material) => isSheetType(material.materialType));
   const groupCounts: Record<MaterialGroup, number> = {
-    signage: materials.filter((material) => materialGroupFor(material) === "signage").length,
-    "small-format": materials.filter((material) => materialGroupFor(material) === "small-format").length,
-    shared: materials.filter((material) => materialGroupFor(material) === "shared").length,
+    signage: materials.filter((material) => material.active && materialGroupFor(material) === "signage").length,
+    "small-format": materials.filter((material) => material.active && materialGroupFor(material) === "small-format").length,
+    shared: materials.filter((material) => material.active && materialGroupFor(material) === "shared").length,
     all: materials.length
   };
 
@@ -212,7 +212,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
   const filteredMaterials = hasBrowseFilter
     ? materials.filter((material) => {
         const matchesGroup = !selectedGroup || selectedGroup === "all" || materialGroupFor(material) === selectedGroup;
-        return matchesGroup && materialMatchesSearch(material, search);
+        const matchesActive = selectedGroup === "all" || material.active;
+        return matchesGroup && matchesActive && materialMatchesSearch(material, search);
       })
     : [];
 

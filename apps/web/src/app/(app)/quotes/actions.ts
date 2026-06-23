@@ -11,7 +11,8 @@ import {
   deleteQuoteLineForTenant,
   markArtworkApprovalSentForTenant,
   markQuoteSentForTenant,
-  removeArtworkApprovalPageForTenant
+  removeArtworkApprovalPageForTenant,
+  setQuoteDraftStatusForTenant
 } from "@/server/quotes";
 import { getProductById } from "@/server/products";
 
@@ -155,4 +156,23 @@ export async function removeArtworkApprovalPageAction(formData: FormData): Promi
 
   await removeArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, pageId);
   redirect(`/quotes?selected=${quoteId}&message=Artwork%20page%20removed`);
+}
+
+
+export async function deleteQuoteDraftAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20to%20delete");
+
+  await setQuoteDraftStatusForTenant(activeTenant.tenantId, quoteId, "deleted");
+  redirect("/quotes?message=Quote%20deleted%20from%20the%20active%20list");
+}
+
+export async function restoreQuoteDraftAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  if (!quoteId) redirect("/quotes?filter=deleted&error=Select%20a%20quote%20to%20restore");
+
+  await setQuoteDraftStatusForTenant(activeTenant.tenantId, quoteId, "draft");
+  redirect(`/quotes?selected=${quoteId}&message=Quote%20restored`);
 }

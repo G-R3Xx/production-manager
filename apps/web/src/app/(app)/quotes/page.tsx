@@ -7,7 +7,7 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 
@@ -147,6 +147,7 @@ function quoteStatusTone(status: string): { bg: string; fg: string; border: stri
   if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
   if (status === "changes_requested") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa" };
   if (status === "declined") return { bg: "#fff1f3", fg: "#c01048", border: "#fecdd3" };
+  if (status === "deleted") return { bg: "#fff5f4", fg: "#b42318", border: "#fecaca" };
   return { bg: "#f8fafc", fg: "#475467", border: "#e2e8f0" };
 }
 
@@ -161,15 +162,21 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const fromEnquiry = readParam(params, "fromEnquiry");
   const fromSurvey = readParam(params, "fromSurvey");
   const selected = readParam(params, "selected");
+  const filter = readParam(params, "filter");
 
-  const [quoteDrafts, materials, enquiry, survey, selectedQuote, companySettings] = await Promise.all([
-    listQuoteDraftsForTenant(activeTenant.tenantId),
+  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings] = await Promise.all([
+    listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listMaterialsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
     getCompanySettingsByTenantId(activeTenant.tenantId)
   ]);
+
+  const deletedQuoteCount = allQuoteDrafts.filter((quote) => quote.status === "deleted").length;
+  const quoteDrafts = filter === "deleted"
+    ? allQuoteDrafts.filter((quote) => quote.status === "deleted")
+    : allQuoteDrafts.filter((quote) => quote.status !== "deleted");
 
   const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
@@ -212,10 +219,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
-            <h2 style={{ margin: 0 }}>Quote workflow</h2>
+            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted quotes" : "Quote workflow"}</h2>
             <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create or switch quotes here; the selected quote builder below now gets the full page width.</p>
           </div>
-          <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <a href="/quotes" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</a>
+            <a href="/quotes?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</a>
+            <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
+          </div>
         </div>
 
         {(survey || linkedClient) ? (
@@ -310,10 +321,23 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       <input readOnly value={quotePublicUrl || "Mark quote as sent to generate/confirm the link"} style={{ ...inputStyle, fontSize: 13 }} />
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                      <form action={markQuoteSentAction}>
-                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                        <button type="submit" style={buttonStyle}>{selectedQuote.sentAt ? "Mark sent again" : "Mark quote sent"}</button>
-                      </form>
+                      {selectedQuote.status !== "deleted" ? (
+                        <form action={markQuoteSentAction}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <button type="submit" style={buttonStyle}>{selectedQuote.sentAt ? "Mark sent again" : "Mark quote sent"}</button>
+                        </form>
+                      ) : null}
+                      {selectedQuote.status === "deleted" ? (
+                        <form action={restoreQuoteDraftAction}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore quote</button>
+                        </form>
+                      ) : (
+                        <form action={deleteQuoteDraftAction}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete quote</button>
+                        </form>
+                      )}
                       {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Open client quote</a> : null}
                       {quotePublicUrl && selectedQuote.email ? <a href={`mailto:${selectedQuote.email}?subject=${encodeURIComponent(`Quote ${selectedQuote.quoteNumber ?? "from Production Manager"}`)}&body=${encodeURIComponent(`Hi ${selectedQuote.contactName ?? selectedQuote.clientName},
 
@@ -327,21 +351,25 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                 </section>
               </div>
 
-              <QuoteMaterialFlowBuilder
-                quoteId={selectedQuote.id}
-                materials={activeMaterials}
-                pricingSettings={{
-                  markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
-                  profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
-                  labourRate: companySettings?.quoteLabourRate ?? "66",
-                  inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
-                  monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
-                  signageSizePresets: companySettings?.quoteSignageSizePresets,
-                  smallSizePresets: companySettings?.quoteSmallSizePresets,
-                  clientDefaultDiscountPercent: linkedClientDefaultDiscount,
-                  clientDiscountRules: linkedClientDiscountRules
-                }}
-              />
+              {selectedQuote.status !== "deleted" ? (
+                <QuoteMaterialFlowBuilder
+                  quoteId={selectedQuote.id}
+                  materials={activeMaterials}
+                  pricingSettings={{
+                    markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
+                    profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                    labourRate: companySettings?.quoteLabourRate ?? "66",
+                    inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
+                    monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
+                    signageSizePresets: companySettings?.quoteSignageSizePresets,
+                    smallSizePresets: companySettings?.quoteSmallSizePresets,
+                    clientDefaultDiscountPercent: linkedClientDefaultDiscount,
+                    clientDiscountRules: linkedClientDiscountRules
+                  }}
+                />
+              ) : (
+                <section style={{ border: "1px solid #fecaca", borderRadius: 18, padding: 16, background: "#fff5f4", color: "#b42318", fontWeight: 800 }}>This quote is deleted. Restore it before editing or sending.</section>
+              )}
 
               <div style={{ display: "grid", gap: 10 }}>
                 <div style={{ display: "grid", gap: 4 }}>

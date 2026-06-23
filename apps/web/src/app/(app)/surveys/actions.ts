@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
-import { createSurveyRequestForTenant, getSurveyRequestById, updateSurveyRequestForTenant } from "@/server/surveys";
+import { createSurveyRequestForTenant, getSurveyRequestById, setSurveyRequestStatusForTenant, updateSurveyRequestForTenant } from "@/server/surveys";
 
 
 async function requireTenant() {
@@ -73,4 +73,23 @@ export async function updateSurveyRequestAction(formData: FormData): Promise<voi
   });
 
   redirect(`/surveys?selected=${surveyId}&message=Survey%20request%20updated`);
+}
+
+
+export async function deleteSurveyRequestAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const surveyId = String(formData.get("surveyId") ?? "").trim();
+  if (!surveyId) redirect("/surveys?error=Choose%20a%20survey%20request%20to%20delete");
+
+  await setSurveyRequestStatusForTenant(activeTenant.tenantId, surveyId, "deleted");
+  redirect("/surveys?message=Survey%20request%20deleted%20from%20the%20active%20list");
+}
+
+export async function restoreSurveyRequestAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const surveyId = String(formData.get("surveyId") ?? "").trim();
+  if (!surveyId) redirect("/surveys?filter=deleted&error=Choose%20a%20survey%20request%20to%20restore");
+
+  await setSurveyRequestStatusForTenant(activeTenant.tenantId, surveyId, "requested");
+  redirect("/surveys?message=Survey%20request%20restored");
 }

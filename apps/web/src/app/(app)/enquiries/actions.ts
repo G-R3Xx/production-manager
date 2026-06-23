@@ -104,3 +104,22 @@ export async function createSurveyFromEnquiryAction(formData: FormData): Promise
 
   redirect(`/surveys?selected=${created.id}&message=${encodeURIComponent(message)}`);
 }
+
+
+export async function deleteEnquiryAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const enquiryId = String(formData.get("enquiryId") ?? "").trim();
+  if (!enquiryId) redirect("/enquiries?error=Choose%20an%20enquiry%20to%20delete");
+
+  await updateEnquiryStatusForTenant(activeTenant.tenantId, enquiryId, "deleted");
+  redirect("/enquiries?message=Enquiry%20deleted%20from%20the%20active%20list");
+}
+
+export async function restoreEnquiryAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const enquiryId = String(formData.get("enquiryId") ?? "").trim();
+  if (!enquiryId) redirect("/enquiries?filter=deleted&error=Choose%20an%20enquiry%20to%20restore");
+
+  await updateEnquiryStatusForTenant(activeTenant.tenantId, enquiryId, "new");
+  redirect("/enquiries?message=Enquiry%20restored");
+}

@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
-import { createProduct, getProductById, updateProduct } from "@/server/products";
+import { createProduct, getProductById, setProductStatusForTenant, updateProduct } from "@/server/products";
 
 function readString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -1795,4 +1795,23 @@ export async function deleteProductComponentAction(formData: FormData) {
   });
 
   redirect(`/products?selected=${productId}&message=Material%20row%20removed`);
+}
+
+
+export async function deleteProductAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  if (!productId) redirect("/products?error=Choose%20a%20product%20to%20delete");
+
+  await setProductStatusForTenant(activeTenant.tenantId, productId, "deleted");
+  redirect("/products?message=Product%20deleted%20from%20the%20active%20list");
+}
+
+export async function restoreProductAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  if (!productId) redirect("/products?filter=deleted&error=Choose%20a%20product%20to%20restore");
+
+  await setProductStatusForTenant(activeTenant.tenantId, productId, "draft");
+  redirect(`/products?selected=${productId}&message=Product%20restored`);
 }

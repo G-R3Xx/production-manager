@@ -18,6 +18,8 @@ import {
   updateProductComponentAction,
   updateProductOptionAction,
   deleteProductComponentAction,
+  deleteProductAction,
+  restoreProductAction,
   saveProductWorkflowStepAction
 } from "./actions";
 
@@ -461,7 +463,7 @@ function StarterTypeGroup({ title, starters, defaultValue }: { title: string; st
   );
 }
 
-function ProductChooser({ products, filteredProducts, selectedProduct, query, activeMaterials }: { products: any[]; filteredProducts: any[]; selectedProduct: any; query: string; activeMaterials: any[] }) {
+function ProductChooser({ products, filteredProducts, selectedProduct, query, activeMaterials, filter, deletedProductCount }: { products: any[]; filteredProducts: any[]; selectedProduct: any; query: string; activeMaterials: any[]; filter: string; deletedProductCount: number }) {
   const compactResults = query.trim() ? filteredProducts.slice(0, 8) : [];
   return (
     <details open={!selectedProduct} style={{ ...cardStyle, display: "grid", gap: 14 }}>
@@ -521,7 +523,11 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
               <h2 style={sectionHeadingStyle}>Open existing</h2>
               <p style={{ ...mutedStyle, marginTop: 6 }}>Search by product name, SKU or category.</p>
             </div>
-            <span style={plainChipStyle}>{products.length} products</span>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+              <a href="/products" style={{ color: filter === "deleted" ? "#64748b" : "#2563eb", fontWeight: 900, textDecoration: "none" }}>Active</a>
+              <a href="/products?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#64748b", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedProductCount})</a>
+              <span style={plainChipStyle}>{products.length} products</span>
+            </div>
           </div>
           <form method="get" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "center" }}>
             <input name="q" defaultValue={query} placeholder="Search existing products" style={{ ...inputStyle, height: 44, minHeight: 44 }} />
@@ -579,6 +585,7 @@ function ProductBasicsPanel({ selectedProduct }: { selectedProduct: any }) {
               <option value="draft">Draft</option>
               <option value="active">Active</option>
               <option value="archived">Archived</option>
+              <option value="deleted">Deleted</option>
             </select>
           </label>
           <label style={labelStyle}>
@@ -594,6 +601,19 @@ function ProductBasicsPanel({ selectedProduct }: { selectedProduct: any }) {
         <input type="hidden" name="productFamily" value={selectedProduct.productFamily ?? "rigid_signage"} />
         <button type="submit" style={buttonStyle}>Save product basics</button>
       </form>
+      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+        {selectedProduct.status === "deleted" ? (
+          <form action={restoreProductAction}>
+            <input type="hidden" name="productId" value={selectedProduct.id} />
+            <button type="submit" style={{ ...blueButtonStyle, background: "#067647" }}>Restore product</button>
+          </form>
+        ) : (
+          <form action={deleteProductAction}>
+            <input type="hidden" name="productId" value={selectedProduct.id} />
+            <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", color: "#b42318" }}>Delete product</button>
+          </form>
+        )}
+      </div>
     </details>
   );
 }
@@ -2802,12 +2822,18 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
   const query = readParam(params, "q");
   const editOptionId = readParam(params, "editOption");
   const activePart = readParam(params, "step") || readParam(params, "part");
+  const filter = readParam(params, "filter");
 
-  const [products, materials, selectedProduct] = await Promise.all([
-    listProductsForTenant(activeTenant.tenantId),
+  const [allProducts, materials, selectedProduct] = await Promise.all([
+    listProductsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listMaterialsForTenant(activeTenant.tenantId),
     selectedId ? getProductById(activeTenant.tenantId, selectedId) : Promise.resolve(null)
   ]);
+
+  const deletedProductCount = allProducts.filter((product) => product.status === "deleted").length;
+  const products = filter === "deleted"
+    ? allProducts.filter((product) => product.status === "deleted")
+    : allProducts.filter((product) => product.status !== "deleted");
 
   const filteredProducts = query
     ? products.filter((product) => matchesQuery(product.name, query) || matchesQuery(product.sku, query) || matchesQuery(product.productFamily, query))
@@ -2830,7 +2856,7 @@ export default async function ProductsPage({ searchParams }: ProductsPageProps) 
 
       <ProductFlowHero selectedProduct={selectedProduct} fields={fields} components={components} activeMaterials={activeMaterials} />
 
-      <ProductChooser products={products} filteredProducts={filteredProducts} selectedProduct={selectedProduct} query={query} activeMaterials={activeMaterials} />
+      <ProductChooser products={products} filteredProducts={filteredProducts} selectedProduct={selectedProduct} query={query} activeMaterials={activeMaterials} filter={filter} deletedProductCount={deletedProductCount} />
 
       {selectedProduct ? (
         <ProductRecipeCanvas

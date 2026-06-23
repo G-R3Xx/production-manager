@@ -17,10 +17,12 @@ import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import {
   addArtworkApprovalPageFromPageAction,
   createArtworkApprovalFromQuoteAction,
+  deleteArtworkApprovalAction,
   directApproveArtworkApprovalAction,
   prefillArtworkApprovalPagesFromQuoteAction,
   removeArtworkApprovalPageFromPageAction,
   replaceArtworkApprovalPageProofAction,
+  restoreArtworkApprovalAction,
   saveArtworkApprovalDetailsAction,
   sendArtworkApprovalFromPageAction
 } from "./actions";
@@ -89,6 +91,7 @@ function statusTone(status: string): { bg: string; fg: string; border: string } 
   if (status === "approved") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6" };
   if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
   if (status === "changes_requested") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa" };
+  if (status === "deleted") return { bg: "#fff5f4", fg: "#b42318", border: "#fecaca" };
   return { bg: "#f5f3ff", fg: "#6d28d9", border: "#ddd6fe" };
 }
 
@@ -170,11 +173,16 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const error = readParam(params, "error");
   const selectedParam = readParam(params, "selected");
   const quoteParam = readParam(params, "quote");
+  const filter = readParam(params, "filter");
 
-  const [quoteDrafts, approvals] = await Promise.all([
+  const [quoteDrafts, allApprovals] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId),
-    listArtworkApprovalsForTenant(activeTenant.tenantId)
+    listArtworkApprovalsForTenant(activeTenant.tenantId, { includeDeleted: true })
   ]);
+  const deletedApprovalCount = allApprovals.filter((approval) => approval.status === "deleted").length;
+  const approvals = filter === "deleted"
+    ? allApprovals.filter((approval) => approval.status === "deleted")
+    : allApprovals.filter((approval) => approval.status !== "deleted");
 
   const [quoteForCreate, existingForQuote] = quoteParam
     ? await Promise.all([
@@ -215,10 +223,14 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
       <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
-            <h2 style={{ margin: 0 }}>Artwork workflow</h2>
+            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted artwork approvals" : "Artwork workflow"}</h2>
             <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create, switch and manage approval packs without stealing width from the proof/setup area below.</p>
           </div>
-          <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{approvals.length} approval pack{approvals.length === 1 ? "" : "s"}</span>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <a href="/artwork-approvals" style={{ color: filter === "deleted" ? "#667085" : "#6d28d9", fontWeight: 900, textDecoration: "none" }}>Active</a>
+            <a href="/artwork-approvals?filter=deleted" style={{ color: filter === "deleted" ? "#6d28d9" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedApprovalCount})</a>
+            <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{approvals.length} approval pack{approvals.length === 1 ? "" : "s"}</span>
+          </div>
         </div>
 
         <details open={!selectedApproval || Boolean(quoteForCreate && !existingForQuote)} style={{ border: "1px solid #e9d5ff", borderRadius: 18, background: "#faf5ff", padding: 12 }}>
@@ -284,14 +296,27 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                 </div>
 
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                  <form action={sendArtworkApprovalFromPageAction}>
-                    <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                    <button type="submit" style={buttonStyle}>Mark sent</button>
-                  </form>
-                  <form action={directApproveArtworkApprovalAction}>
-                    <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                    <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Direct approve</button>
-                  </form>
+                  {selectedApproval.status !== "deleted" ? (
+                    <>
+                      <form action={sendArtworkApprovalFromPageAction}>
+                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                        <button type="submit" style={buttonStyle}>Mark sent</button>
+                      </form>
+                      <form action={directApproveArtworkApprovalAction}>
+                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                        <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Direct approve</button>
+                      </form>
+                      <form action={deleteArtworkApprovalAction}>
+                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                        <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete approval</button>
+                      </form>
+                    </>
+                  ) : (
+                    <form action={restoreArtworkApprovalAction}>
+                      <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                      <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore approval</button>
+                    </form>
+                  )}
                   <form action={prefillArtworkApprovalPagesFromQuoteAction}>
                     <input type="hidden" name="approvalId" value={selectedApproval.id} />
                     <button type="submit" style={{ ...secondaryButtonStyle, background: missingQuoteLinePages > 0 ? "#eef4ff" : "#fff", color: missingQuoteLinePages > 0 ? "#3538cd" : "#344054" }}>Sync pages from quote lines</button>
@@ -302,6 +327,8 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                   ) : null}
                   <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Back to quote</Link>
                 </div>
+
+                {selectedApproval.status === "deleted" ? <div style={{ border: "1px solid #fecaca", background: "#fff5f4", color: "#b42318", borderRadius: 18, padding: 14, fontWeight: 900 }}>This artwork approval is deleted. Restore it before sending or editing.</div> : null}
 
                 <div style={{ border: "1px solid #dbeafe", background: "#f8fbff", borderRadius: 18, padding: 14, display: "grid", gap: 6 }}>
                   <strong>Quote line artwork pages</strong>

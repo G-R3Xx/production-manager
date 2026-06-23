@@ -5,7 +5,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listEnquiriesForTenant } from "@/server/enquiries";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
-import { createEnquiryAction, createSurveyFromEnquiryAction } from "./actions";
+import { createEnquiryAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
 
 
 type PageProps = {
@@ -34,10 +34,15 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};
   const message = readParam(params, "message");
   const error = readParam(params, "error");
-  const [enquiries, clients] = await Promise.all([
-    listEnquiriesForTenant(activeTenant.tenantId),
+  const filter = readParam(params, "filter");
+  const [allEnquiries, clients] = await Promise.all([
+    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listCustomersForTenant(activeTenant.tenantId)
   ]);
+  const deletedCount = allEnquiries.filter((enquiry) => enquiry.status === "deleted").length;
+  const enquiries = filter === "deleted"
+    ? allEnquiries.filter((enquiry) => enquiry.status === "deleted")
+    : allEnquiries.filter((enquiry) => enquiry.status !== "deleted");
 
   return (
     <div style={{ maxWidth: 1300, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -77,8 +82,12 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
 
         <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <h2 style={{ margin: 0 }}>Current enquiries</h2>
-            <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} total</span>
+            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : "Current enquiries"}</h2>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <a href="/enquiries" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</a>
+              <a href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</a>
+              <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} shown</span>
+            </div>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             {enquiries.map((enquiry) => (
@@ -103,12 +112,27 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                   {[enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ")}
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  <form action={createSurveyFromEnquiryAction} style={{ margin: 0 }}>
-                    <input type="hidden" name="enquiryId" value={enquiry.id} />
-                    <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Create site survey request</button>
-                  </form>
-                  <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
-                  <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link>
+                  {enquiry.status !== "deleted" ? (
+                    <>
+                      <form action={createSurveyFromEnquiryAction} style={{ margin: 0 }}>
+                        <input type="hidden" name="enquiryId" value={enquiry.id} />
+                        <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Create site survey request</button>
+                      </form>
+                      <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
+                    </>
+                  ) : null}
+                  {enquiry.status !== "deleted" ? <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
+                  {enquiry.status === "deleted" ? (
+                    <form action={restoreEnquiryAction} style={{ margin: 0 }}>
+                      <input type="hidden" name="enquiryId" value={enquiry.id} />
+                      <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Restore enquiry</button>
+                    </form>
+                  ) : (
+                    <form action={deleteEnquiryAction} style={{ margin: 0 }}>
+                      <input type="hidden" name="enquiryId" value={enquiry.id} />
+                      <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Delete</button>
+                    </form>
+                  )}
                 </div>
               </article>
             ))}

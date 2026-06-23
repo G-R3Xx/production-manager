@@ -21,7 +21,7 @@ export type EnquiryRecord = {
   updatedAt: string;
 };
 
-export async function listEnquiriesForTenant(tenantId: string): Promise<EnquiryRecord[]> {
+export async function listEnquiriesForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<EnquiryRecord[]> {
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,
@@ -41,8 +41,9 @@ export async function listEnquiriesForTenant(tenantId: string): Promise<EnquiryR
       updated_at as "updatedAt"
     FROM app.enquiries
     WHERE tenant_id = $1::uuid
+      AND ($2::boolean OR status <> 'deleted')
     ORDER BY created_at DESC
-  `, [tenantId]);
+  `, [tenantId, Boolean(options?.includeDeleted)]);
   return result.rows;
 }
 

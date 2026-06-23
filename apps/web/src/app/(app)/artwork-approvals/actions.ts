@@ -13,6 +13,7 @@ import {
   prefillArtworkApprovalPagesFromQuoteLines,
   removeArtworkApprovalPageForTenant,
   replaceArtworkApprovalPageProofForTenant,
+  setArtworkApprovalStatusForTenant,
   updateArtworkApprovalDetailsForTenant
 } from "@/server/quotes";
 
@@ -231,4 +232,23 @@ export async function removeArtworkApprovalPageFromPageAction(formData: FormData
 
   await removeArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, pageId);
   redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20page%20removed`);
+}
+
+
+export async function deleteArtworkApprovalAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20to%20delete");
+
+  await setArtworkApprovalStatusForTenant(activeTenant.tenantId, approvalId, "deleted");
+  redirect("/artwork-approvals?message=Artwork%20approval%20deleted%20from%20the%20active%20list");
+}
+
+export async function restoreArtworkApprovalAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  if (!approvalId) redirect("/artwork-approvals?filter=deleted&error=Select%20an%20artwork%20approval%20to%20restore");
+
+  await setArtworkApprovalStatusForTenant(activeTenant.tenantId, approvalId, "draft");
+  redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20approval%20restored`);
 }

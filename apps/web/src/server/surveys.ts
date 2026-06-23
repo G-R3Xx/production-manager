@@ -58,11 +58,12 @@ const surveyRequestSelect = `
   FROM app.survey_requests
 `;
 
-export async function listSurveyRequestsForTenant(tenantId: string): Promise<SurveyRequestRecord[]> {
+export async function listSurveyRequestsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<SurveyRequestRecord[]> {
   const result = await pool.query<SurveyRequestRecord>(`${surveyRequestSelect}
     WHERE tenant_id = $1::uuid
+      AND ($2::boolean OR status <> 'deleted')
     ORDER BY created_at DESC
-  `, [tenantId]);
+  `, [tenantId, Boolean(options?.includeDeleted)]);
   return result.rows;
 }
 
@@ -212,4 +213,14 @@ export async function updateSurveyFromInstallSchedulerCompletion(tenantId: strin
     input.installSchedulerSurveyId ?? null,
     JSON.stringify(input.payload ?? {})
   ]);
+}
+
+export async function setSurveyRequestStatusForTenant(tenantId: string, surveyId: string, status: string): Promise<void> {
+  await pool.query(`
+    UPDATE app.survey_requests
+    SET status = $3::varchar,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [tenantId, surveyId, status]);
 }

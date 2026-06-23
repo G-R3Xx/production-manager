@@ -31,7 +31,7 @@ export type ProductCreateInput = {
   taxCode: string | null;
 };
 
-export async function listProductsForTenant(tenantId: string): Promise<ProductRecord[]> {
+export async function listProductsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<ProductRecord[]> {
   if (!process.env.DATABASE_URL) {
     return [];
   }
@@ -56,9 +56,10 @@ export async function listProductsForTenant(tenantId: string): Promise<ProductRe
       FROM catalog.products p
       LEFT JOIN catalog.configurator_templates ct ON ct.id = p.default_template_id
       WHERE p.tenant_id = $1
+        AND ($2::boolean OR p.status <> 'deleted')
       ORDER BY p.name ASC, p.created_at DESC
     `,
-    [tenantId]
+    [tenantId, Boolean(options?.includeDeleted)]
   );
 
   return result.rows;
@@ -245,6 +246,22 @@ export async function updateProduct(tenantId: string, productId: string, input: 
       input.defaultTemplateId,
       input.taxCode
     ]
+  );
+}
+
+export async function setProductStatusForTenant(tenantId: string, productId: string, status: string): Promise<void> {
+  if (!process.env.DATABASE_URL) {
+    return;
+  }
+
+  await pool.query(
+    `
+      UPDATE catalog.products
+      SET status = $3,
+          updated_at = now()
+      WHERE tenant_id = $1 AND id = $2
+    `,
+    [tenantId, productId, status]
   );
 }
 

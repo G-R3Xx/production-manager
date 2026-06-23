@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById } from "@/server/enquiries";
-import { createSurveyRequestAction, updateSurveyRequestAction } from "./actions";
+import { createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
 import { listSurveyRequestsForTenant } from "@/server/surveys";
 
 
@@ -164,10 +164,15 @@ export default async function SurveysPage({ searchParams }: PageProps) {
   const error = readParam(params, "error");
   const fromEnquiry = readParam(params, "fromEnquiry");
   const selectedSurveyId = readParam(params, "selected");
-  const [surveyRequests, enquiry] = await Promise.all([
-    listSurveyRequestsForTenant(activeTenant.tenantId),
+  const filter = readParam(params, "filter");
+  const [allSurveyRequests, enquiry] = await Promise.all([
+    listSurveyRequestsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null)
   ]);
+  const deletedCount = allSurveyRequests.filter((survey) => survey.status === "deleted").length;
+  const surveyRequests = filter === "deleted"
+    ? allSurveyRequests.filter((survey) => survey.status === "deleted")
+    : allSurveyRequests.filter((survey) => survey.status !== "deleted");
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -200,8 +205,12 @@ export default async function SurveysPage({ searchParams }: PageProps) {
 
       <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <h2 style={{ margin: 0 }}>Current survey requests</h2>
-            <span style={{ fontSize: 13, color: "#667085" }}>{surveyRequests.length} total</span>
+            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted survey requests" : "Current survey requests"}</h2>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <a href="/surveys" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</a>
+              <a href="/surveys?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</a>
+              <span style={{ fontSize: 13, color: "#667085" }}>{surveyRequests.length} shown</span>
+            </div>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
             {surveyRequests.map((survey) => {
@@ -249,10 +258,23 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
-                    <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: hasCompletedSurvey ? "#111827" : "#344054", color: "#fff", fontWeight: 800 }}>{hasCompletedSurvey ? "Create quote from completed survey" : "Create quote from survey notes"}</Link>
+                    {survey.status !== "deleted" ? (
+                      <>
+                        <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
+                        <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: hasCompletedSurvey ? "#111827" : "#344054", color: "#fff", fontWeight: 800 }}>{hasCompletedSurvey ? "Create quote from completed survey" : "Create quote from survey notes"}</Link>
+                        <form action={deleteSurveyRequestAction} style={{ margin: 0 }}>
+                          <input type="hidden" name="surveyId" value={survey.id} />
+                          <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Delete</button>
+                        </form>
+                      </>
+                    ) : (
+                      <form action={restoreSurveyRequestAction} style={{ margin: 0 }}>
+                        <input type="hidden" name="surveyId" value={survey.id} />
+                        <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Restore survey</button>
+                      </form>
+                    )}
                   </div>
-                  {isOpen ? (
+                  {isOpen && survey.status !== "deleted" ? (
                     <form action={updateSurveyRequestAction} style={{ borderTop: "1px solid #e5e7eb", paddingTop: 14, display: "grid", gap: 12 }}>
                       <input type="hidden" name="surveyId" value={survey.id} />
                       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>

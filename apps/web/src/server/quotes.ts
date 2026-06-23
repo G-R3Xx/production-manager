@@ -288,14 +288,15 @@ function quoteSelectSql(): string {
   `;
 }
 
-export async function listQuoteDraftsForTenant(tenantId: string): Promise<QuoteDraftRecord[]> {
+export async function listQuoteDraftsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<QuoteDraftRecord[]> {
   await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
     WHERE tenant_id = $1::uuid
+      AND ($2::boolean OR status <> 'deleted')
     ORDER BY created_at DESC
-  `,[tenantId]);
+  `,[tenantId, Boolean(options?.includeDeleted)]);
   return result.rows;
 }
 
@@ -316,6 +317,7 @@ export async function getQuoteDraftByPublicToken(token: string): Promise<QuoteDr
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
     WHERE public_token = $1
+      AND status <> 'deleted'
     LIMIT 1
   `,[token]);
   return result.rows[0] ?? null;
@@ -415,6 +417,16 @@ export async function markQuoteSentForTenant(tenantId: string, quoteId: string):
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, quoteId, makePublicToken()]);
+}
+
+export async function setQuoteDraftStatusForTenant(tenantId: string, quoteId: string, status: string): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET status = $3::varchar,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, status]);
 }
 
 export async function markQuoteViewedByToken(token: string): Promise<void> {
@@ -655,14 +667,15 @@ function artworkApprovalSelectSql(): string {
   `;
 }
 
-export async function listArtworkApprovalsForTenant(tenantId: string): Promise<ArtworkApprovalRecord[]> {
+export async function listArtworkApprovalsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<ArtworkApprovalRecord[]> {
   await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalRecord>(`
     SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
     WHERE tenant_id = $1::uuid
+      AND ($2::boolean OR status <> 'deleted')
     ORDER BY updated_at DESC, created_at DESC
-  `, [tenantId]);
+  `, [tenantId, Boolean(options?.includeDeleted)]);
   return result.rows;
 }
 
@@ -694,6 +707,7 @@ export async function getArtworkApprovalByPublicToken(token: string): Promise<Ar
     SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
     WHERE public_token = $1
+      AND status <> 'deleted'
     LIMIT 1
   `, [token]);
   return result.rows[0] ?? null;
@@ -877,6 +891,16 @@ export async function markArtworkApprovalSentForTenant(tenantId: string, approva
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, approvalId, makePublicToken()]);
+}
+
+export async function setArtworkApprovalStatusForTenant(tenantId: string, approvalId: string, status: string): Promise<void> {
+  await ensureArtworkApprovalTables();
+  await pool.query(`
+    UPDATE sales.artwork_approvals
+    SET status = $3::varchar,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, approvalId, status]);
 }
 
 export async function markArtworkApprovalInternallyApprovedForTenant(tenantId: string, approvalId: string, approvedBy: string | null): Promise<void> {
