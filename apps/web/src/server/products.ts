@@ -45,7 +45,7 @@ export async function listProductsForTenant(tenantId: string, options?: { includ
         p.name,
         p.department,
         p.product_family AS "productFamily",
-        p.status,
+        p.status::text AS status,
         p.calculator_type AS "calculatorType",
         p.default_template_id AS "defaultTemplateId",
         p.tax_code AS "taxCode",
@@ -56,7 +56,7 @@ export async function listProductsForTenant(tenantId: string, options?: { includ
       FROM catalog.products p
       LEFT JOIN catalog.configurator_templates ct ON ct.id = p.default_template_id
       WHERE p.tenant_id = $1
-        AND ($2::boolean OR p.status <> 'deleted')
+        AND ($2::boolean OR p.status::text <> 'deleted')
       ORDER BY p.name ASC, p.created_at DESC
     `,
     [tenantId, Boolean(options?.includeDeleted)]
@@ -189,7 +189,7 @@ export async function getProductById(tenantId: string, productId: string): Promi
         p.name,
         p.department,
         p.product_family AS "productFamily",
-        p.status,
+        p.status::text AS status,
         p.calculator_type AS "calculatorType",
         p.default_template_id AS "defaultTemplateId",
         p.tax_code AS "taxCode",
