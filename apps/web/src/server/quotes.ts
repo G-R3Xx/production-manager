@@ -358,10 +358,8 @@ export async function createArtworkApprovalFromQuote(tenantId: string, quoteId: 
   return result.rows[0];
 }
 
-export async function getArtworkApprovalForQuote(tenantId: string, quoteId: string): Promise<ArtworkApprovalRecord | null> {
-  await ensureArtworkApprovalTables();
-  const result = await pool.query<ArtworkApprovalRecord>(`
-    SELECT
+function artworkApprovalSelectSql(): string {
+  return `
       id,
       tenant_id as "tenantId",
       quote_id as "quoteId",
@@ -377,6 +375,35 @@ export async function getArtworkApprovalForQuote(tenantId: string, quoteId: stri
       changes_requested_at as "changesRequestedAt",
       created_at as "createdAt",
       updated_at as "updatedAt"
+  `;
+}
+
+export async function listArtworkApprovalsForTenant(tenantId: string): Promise<ArtworkApprovalRecord[]> {
+  await ensureArtworkApprovalTables();
+  const result = await pool.query<ArtworkApprovalRecord>(`
+    SELECT ${artworkApprovalSelectSql()}
+    FROM sales.artwork_approvals
+    WHERE tenant_id = $1::uuid
+    ORDER BY updated_at DESC, created_at DESC
+  `, [tenantId]);
+  return result.rows;
+}
+
+export async function getArtworkApprovalById(tenantId: string, approvalId: string): Promise<ArtworkApprovalRecord | null> {
+  await ensureArtworkApprovalTables();
+  const result = await pool.query<ArtworkApprovalRecord>(`
+    SELECT ${artworkApprovalSelectSql()}
+    FROM sales.artwork_approvals
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+    LIMIT 1
+  `, [tenantId, approvalId]);
+  return result.rows[0] ?? null;
+}
+
+export async function getArtworkApprovalForQuote(tenantId: string, quoteId: string): Promise<ArtworkApprovalRecord | null> {
+  await ensureArtworkApprovalTables();
+  const result = await pool.query<ArtworkApprovalRecord>(`
+    SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
     WHERE tenant_id = $1::uuid AND quote_id = $2::uuid
     LIMIT 1
@@ -387,22 +414,7 @@ export async function getArtworkApprovalForQuote(tenantId: string, quoteId: stri
 export async function getArtworkApprovalByPublicToken(token: string): Promise<ArtworkApprovalRecord | null> {
   await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalRecord>(`
-    SELECT
-      id,
-      tenant_id as "tenantId",
-      quote_id as "quoteId",
-      public_token as "publicToken",
-      client_name as "clientName",
-      contact_name as "contactName",
-      email,
-      status,
-      client_response_notes as "clientResponseNotes",
-      sent_at as "sentAt",
-      viewed_at as "viewedAt",
-      approved_at as "approvedAt",
-      changes_requested_at as "changesRequestedAt",
-      created_at as "createdAt",
-      updated_at as "updatedAt"
+    SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
     WHERE public_token = $1
     LIMIT 1

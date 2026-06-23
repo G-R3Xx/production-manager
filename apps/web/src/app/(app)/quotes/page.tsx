@@ -7,9 +7,9 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { addArtworkApprovalPageAction, createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, removeArtworkApprovalPageAction, sendArtworkApprovalAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
-import { getArtworkApprovalForQuote, getQuoteDraftById, listArtworkApprovalPages, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
+import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -142,12 +142,6 @@ function publicQuoteUrl(token: string | null | undefined): string {
   return `${base}/public/quotes/${token}`;
 }
 
-function publicArtworkUrl(token: string | null | undefined): string {
-  if (!token) return "";
-  const base = appBaseUrl();
-  return `${base}/public/artwork-approvals/${token}`;
-}
-
 function quoteStatusTone(status: string): { bg: string; fg: string; border: string } {
   if (status === "accepted") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6" };
   if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
@@ -180,9 +174,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const quoteLines = selectedQuote ? await listQuoteLines(selectedQuote.id) : [];
   const quoteSubtotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const selectedArtworkApproval = selectedQuote ? await getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : null;
-  const artworkPages = selectedArtworkApproval ? await listArtworkApprovalPages(selectedArtworkApproval.id) : [];
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
-  const artworkPublicUrl = selectedArtworkApproval ? publicArtworkUrl(selectedArtworkApproval.publicToken) : "";
+  const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
   const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
   const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
@@ -389,77 +382,26 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                 {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No saved quote lines yet. Build a line above, then save it to the quote.</p> : null}
               </div>
 
-              <section style={{ border: "1px solid #d9e2ef", borderRadius: 22, padding: 16, background: "#fbfdff", display: "grid", gap: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+              <section style={{ border: "1px solid #e9d5ff", borderRadius: 22, padding: 16, background: "linear-gradient(135deg,#ffffff,#faf5ff)", display: "grid", gap: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                   <div style={{ display: "grid", gap: 4 }}>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approval</p>
-                    <h3 style={{ margin: 0 }}>{selectedArtworkApproval ? "Approval pack" : "Create after quote approval"}</h3>
-                    <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Use this to send proof pages to the client after the quote is accepted. This replaces the separate artwork approval admin flow inside Production Manager.</p>
+                    <h3 style={{ margin: 0 }}>Manage approvals on the Artwork Approvals page</h3>
+                    <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Quotes stay focused on pricing. Proof pages, client approval links and approval status now live in their own workflow page.</p>
                   </div>
                   {selectedArtworkApproval ? <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{selectedArtworkApproval.status.replace(/_/g, " ")}</span> : null}
                 </div>
-
-                {!selectedArtworkApproval ? (
-                  <form action={createArtworkApprovalAction}>
-                    <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                    <button type="submit" style={{ ...buttonStyle, background: selectedQuote.status === "accepted" ? "#6d28d9" : "#334155" }}>{selectedQuote.status === "accepted" ? "Create artwork approval" : "Create artwork approval anyway"}</button>
-                  </form>
-                ) : (
-                  <div style={{ display: "grid", gap: 14 }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
-                      <div style={{ display: "grid", gap: 6 }}>
-                        <strong>Client artwork approval link</strong>
-                        <input readOnly value={artworkPublicUrl || "Mark artwork approval as sent to generate/confirm the link"} style={{ ...inputStyle, fontSize: 13 }} />
-                      </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                        <form action={sendArtworkApprovalAction}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <input type="hidden" name="approvalId" value={selectedArtworkApproval.id} />
-                          <button type="submit" style={{ ...buttonStyle, background: "#6d28d9" }}>{selectedArtworkApproval.sentAt ? "Mark sent again" : "Mark approval sent"}</button>
-                        </form>
-                        {artworkPublicUrl ? <a href={artworkPublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Open approval</a> : null}
-                        {artworkPublicUrl && selectedArtworkApproval.email ? <a href={`mailto:${selectedArtworkApproval.email}?subject=${encodeURIComponent("Artwork approval request")}&body=${encodeURIComponent(`Hi ${selectedArtworkApproval.contactName ?? selectedArtworkApproval.clientName},
-
-Please review and approve your artwork here:
-${artworkPublicUrl}
-
-Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Email approval</a> : null}
-                      </div>
-                    </div>
-
-                    <form action={addArtworkApprovalPageAction} style={{ border: "1px solid #e9d5ff", background: "#fff", borderRadius: 18, padding: 14, display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {selectedArtworkApproval ? (
+                    <Link href={artworkAdminUrl} style={{ ...buttonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", textDecoration: "none", background: "#6d28d9" }}>Open artwork approval</Link>
+                  ) : (
+                    <form action={createArtworkApprovalAction}>
                       <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                      <input type="hidden" name="approvalId" value={selectedArtworkApproval.id} />
-                      <strong>Add proof page</strong>
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1.4fr", gap: 10 }}>
-                        <input name="title" placeholder="Proof title, eg S1 Front elevation" style={inputStyle} />
-                        <input name="imageUrl" placeholder="Artwork/proof image URL" style={inputStyle} />
-                      </div>
-                      <textarea name="notes" placeholder="Notes for this proof page" style={{ ...textareaStyle, minHeight: 72 }} />
-                      <button type="submit" style={{ ...buttonStyle, background: "#6d28d9" }}>Add proof page</button>
+                      <button type="submit" style={{ ...buttonStyle, background: selectedQuote.status === "accepted" ? "#6d28d9" : "#334155" }}>{selectedQuote.status === "accepted" ? "Create artwork approval" : "Create artwork approval anyway"}</button>
                     </form>
-
-                    <div style={{ display: "grid", gap: 10 }}>
-                      {artworkPages.map((page) => (
-                        <div key={page.id} style={{ border: "1px solid #e9d5ff", background: "#fff", borderRadius: 16, padding: 12, display: "grid", gridTemplateColumns: "92px 1fr auto", gap: 12, alignItems: "center" }}>
-                          <a href={page.imageUrl} target="_blank" rel="noreferrer"><img src={page.imageUrl} alt={page.title} style={{ width: 92, height: 70, objectFit: "cover", borderRadius: 12, border: "1px solid #e4e7ec" }} /></a>
-                          <div style={{ display: "grid", gap: 4 }}>
-                            <strong>{page.title}</strong>
-                            {page.notes ? <span style={{ color: "#667085", fontSize: 13 }}>{page.notes}</span> : null}
-                          </div>
-                          <form action={removeArtworkApprovalPageAction}>
-                            <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                            <input type="hidden" name="approvalId" value={selectedArtworkApproval.id} />
-                            <input type="hidden" name="pageId" value={page.id} />
-                            <button type="submit" style={{ border: "1px solid #fecaca", background: "#fff", color: "#b42318", borderRadius: 12, padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Remove</button>
-                          </form>
-                        </div>
-                      ))}
-                      {artworkPages.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No proof pages yet. Add at least one proof image before sending the approval link.</p> : null}
-                    </div>
-                    {selectedArtworkApproval.clientResponseNotes ? <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: 16, padding: 12 }}><strong>Client artwork notes:</strong><br />{selectedArtworkApproval.clientResponseNotes}</div> : null}
-                  </div>
-                )}
+                  )}
+                  <Link href={`/artwork-approvals?quote=${selectedQuote.id}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Go to Artwork Approvals</Link>
+                </div>
               </section>
             </div>
           ) : (

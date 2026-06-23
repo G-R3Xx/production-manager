@@ -14,6 +14,7 @@ const navItems = [
   { href: "/enquiries", label: "Enquiries", emoji: "?" },
   { href: "/surveys", label: "Surveys", emoji: "⌖" },
   { href: "/quotes", label: "Quotes", emoji: "$" },
+  { href: "/artwork-approvals", label: "Artwork", emoji: "▧" },
   { href: "/clients", label: "Clients", emoji: "◉" },
   { href: "/suppliers", label: "Suppliers", emoji: "▣" },
   { href: "/materials", label: "Materials", emoji: "▥" },

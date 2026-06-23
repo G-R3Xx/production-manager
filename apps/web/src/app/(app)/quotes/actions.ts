@@ -116,8 +116,8 @@ export async function createArtworkApprovalAction(formData: FormData): Promise<v
   const quoteId = String(formData.get("quoteId") ?? "").trim();
   if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20first");
 
-  await createArtworkApprovalFromQuote(activeTenant.tenantId, quoteId);
-  redirect(`/quotes?selected=${quoteId}&message=Artwork%20approval%20created`);
+  const approval = await createArtworkApprovalFromQuote(activeTenant.tenantId, quoteId);
+  redirect(`/artwork-approvals?selected=${approval.id}&message=Artwork%20approval%20created`);
 }
 
 export async function sendArtworkApprovalAction(formData: FormData): Promise<void> {
