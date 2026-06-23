@@ -249,12 +249,26 @@ export async function updateProduct(tenantId: string, productId: string, input: 
   );
 }
 
+function looksLikeMissingDeletedStatus(error: unknown): boolean {
+  const candidate = error as { code?: string; message?: string } | null;
+  const message = String(candidate?.message ?? "").toLowerCase();
+  return (
+    candidate?.code === "22P02" ||
+    message.includes("invalid input value for enum product_status") ||
+    message.includes("unsafe use of new value")
+  );
+}
+
+async function ensureDeletedProductStatusValue(): Promise<void> {
+  await pool.query("ALTER TYPE product_status ADD VALUE IF NOT EXISTS 'deleted'");
+}
+
 export async function setProductStatusForTenant(tenantId: string, productId: string, status: string): Promise<void> {
   if (!process.env.DATABASE_URL) {
     return;
   }
 
-  await pool.query(
+  const updateStatus = () => pool.query(
     `
       UPDATE catalog.products
       SET status = $3,
@@ -263,6 +277,17 @@ export async function setProductStatusForTenant(tenantId: string, productId: str
     `,
     [tenantId, productId, status]
   );
+
+  try {
+    await updateStatus();
+  } catch (error) {
+    if (status !== "deleted" || !looksLikeMissingDeletedStatus(error)) {
+      throw error;
+    }
+
+    await ensureDeletedProductStatusValue();
+    await updateStatus();
+  }
 }
 
 export async function listProductsByTenantId(tenantId: string): Promise<ProductRecord[]> {

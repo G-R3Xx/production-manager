@@ -539,13 +539,28 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
                 <div style={{ ...whitePanelStyle, color: "#64748b" }}>No matching products.</div>
               ) : (
                 compactResults.map((product) => (
-                  <Link key={product.id} href={selectedProductUrl(product.id, query)} style={{ ...whitePanelStyle, textDecoration: "none", color: "inherit", background: selectedProduct?.id === product.id ? "#eef2ff" : "#fff", display: "grid", gap: 4 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-                      <strong>{product.name}</strong>
-                      <span style={selectedProduct?.id === product.id ? blueChipStyle : plainChipStyle}>{selectedProduct?.id === product.id ? "Open" : "Open product"}</span>
+                  <div key={product.id} style={{ ...whitePanelStyle, background: selectedProduct?.id === product.id ? "#eef2ff" : "#fff", display: "grid", gap: 8 }}>
+                    <Link href={selectedProductUrl(product.id, query)} style={{ textDecoration: "none", color: "inherit", display: "grid", gap: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                        <strong>{product.name}</strong>
+                        <span style={selectedProduct?.id === product.id ? blueChipStyle : plainChipStyle}>{selectedProduct?.id === product.id ? "Open" : "Open product"}</span>
+                      </div>
+                      <div style={mutedStyle}>{product.sku || "No SKU"} · {humanize(product.productFamily)} · {product.status ?? "draft"}</div>
+                    </Link>
+                    <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                      {product.status === "deleted" ? (
+                        <form action={restoreProductAction} style={{ margin: 0 }}>
+                          <input type="hidden" name="productId" value={product.id} />
+                          <button type="submit" style={{ ...ghostStyle, borderColor: "#bbf7d0", color: "#067647", padding: "8px 12px", minHeight: 34 }}>Restore</button>
+                        </form>
+                      ) : (
+                        <form action={deleteProductAction} style={{ margin: 0 }}>
+                          <input type="hidden" name="productId" value={product.id} />
+                          <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", color: "#b42318", padding: "8px 12px", minHeight: 34 }}>Delete</button>
+                        </form>
+                      )}
                     </div>
-                    <div style={mutedStyle}>{product.sku || "No SKU"} · {humanize(product.productFamily)}</div>
-                  </Link>
+                  </div>
                 ))
               )}
               {filteredProducts.length > compactResults.length ? (
@@ -2182,9 +2197,20 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
           <p style={{ margin: 0, color: theme.eyebrowColor, fontSize: 12, fontWeight: 950, letterSpacing: "0.12em", textTransform: "uppercase" }}>{theme.modeLabel}</p>
           <h2 style={{ margin: "5px 0 0", fontSize: 30, letterSpacing: "-0.04em" }}>{selectedProduct.name}</h2>
         </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ ...plainChipStyle, background: "#1f2937", color: "#e5e7eb" }}>{components.length} selected parts</span>
           <span style={{ ...plainChipStyle, background: "#1f2937", color: "#e5e7eb" }}>{fields.length} quote questions</span>
+          {selectedProduct.status === "deleted" ? (
+            <form action={restoreProductAction} style={{ margin: 0 }}>
+              <input type="hidden" name="productId" value={selectedProduct.id} />
+              <button type="submit" style={{ ...ghostStyle, borderColor: "#bbf7d0", background: "#ecfdf3", color: "#067647" }}>Restore product</button>
+            </form>
+          ) : (
+            <form action={deleteProductAction} style={{ margin: 0 }}>
+              <input type="hidden" name="productId" value={selectedProduct.id} />
+              <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", background: "#fff1f3", color: "#b42318" }}>Delete product</button>
+            </form>
+          )}
           <Link href="/quotes" style={{ ...ghostStyle, borderColor: "#334155", background: "#0f172a", color: "#fff" }}>Go to Quotes</Link>
         </div>
       </div>

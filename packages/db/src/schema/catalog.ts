@@ -34,7 +34,8 @@ export const productFamilyEnum = pgEnum("product_family", [
 export const productStatusEnum = pgEnum("product_status", [
   "draft",
   "active",
-  "archived"
+  "archived",
+  "deleted"
 ]);
 
 export const calculatorTypeEnum = pgEnum("calculator_type", [
