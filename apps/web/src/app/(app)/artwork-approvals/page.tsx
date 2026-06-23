@@ -13,6 +13,7 @@ import {
   listQuoteLines,
   type ArtworkApprovalPageRecord
 } from "@/server/quotes";
+import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import {
   addArtworkApprovalPageFromPageAction,
   createArtworkApprovalFromQuoteAction,
@@ -154,8 +155,12 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
     listArtworkApprovalsForTenant(activeTenant.tenantId)
   ]);
 
-  const quoteForCreate = quoteParam ? await getQuoteDraftById(activeTenant.tenantId, quoteParam) : null;
-  const existingForQuote = quoteParam ? await getArtworkApprovalForQuote(activeTenant.tenantId, quoteParam) : null;
+  const [quoteForCreate, existingForQuote] = quoteParam
+    ? await Promise.all([
+        getQuoteDraftById(activeTenant.tenantId, quoteParam),
+        getArtworkApprovalForQuote(activeTenant.tenantId, quoteParam)
+      ])
+    : [null, null] as const;
   const selectedApproval = selectedParam
     ? await getArtworkApprovalById(activeTenant.tenantId, selectedParam)
     : existingForQuote ?? approvals[0] ?? null;
@@ -385,9 +390,8 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                           <input type="hidden" name="approvalId" value={selectedApproval.id} />
                           <input type="hidden" name="pageId" value={page.id} />
                           <strong style={{ fontSize: 12 }}>Replace proof artwork</strong>
-                          <input name="proofFile" type="file" accept="image/*,.pdf" style={{ ...inputStyle, minHeight: 38, paddingTop: 8, fontSize: 12 }} />
-                          <input name="imageUrl" placeholder="Or paste proof image URL" style={{ ...inputStyle, minHeight: 38, fontSize: 12 }} />
-                          <button type="submit" style={{ ...buttonStyle, minHeight: 38, fontSize: 12 }}>Update proof</button>
+                          <AutoSubmitProofInputs />
+                          <button type="submit" style={{ ...buttonStyle, minHeight: 38, fontSize: 12 }}>Update proof manually</button>
                         </form>
                         <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 12, fontSize: 12, color: "#64748b" }}>Page {index + 1} of {proofPages.length}</div>
                       </aside>

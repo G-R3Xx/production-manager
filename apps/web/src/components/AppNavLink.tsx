@@ -41,6 +41,7 @@ export function AppNavLink({ href, label, emoji }: AppNavLinkProps) {
     }
 
     setClicked(true);
+    window.dispatchEvent(new CustomEvent("pm:loading", { detail: { message: `Loading ${label.toLowerCase()}…` } }));
     startTransition(() => {
       router.push(href);
     });

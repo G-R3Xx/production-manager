@@ -9,7 +9,7 @@ type RouteLoadingShellProps = {
 const cardStyle: CSSProperties = {
   background: "#fff",
   border: "1px solid #e5e7eb",
-  borderRadius: 20,
+  borderRadius: 24,
   padding: 22,
   boxShadow: "0 10px 30px rgba(15, 23, 42, 0.04)"
 };
@@ -53,22 +53,40 @@ export function RouteLoadingShell({
           0% { background-position: 120% 0; }
           100% { background-position: -120% 0; }
         }
+        @keyframes pm-route-logo-pulse {
+          0%, 100% { transform: scale(1); opacity: 0.9; filter: drop-shadow(0 14px 28px rgba(109, 40, 217, 0.16)); }
+          50% { transform: scale(1.04); opacity: 1; filter: drop-shadow(0 20px 38px rgba(109, 40, 217, 0.28)); }
+        }
+        @keyframes pm-loading-dot {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+          40% { transform: translateY(-5px); opacity: 1; }
+        }
       `}</style>
-      <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
-        <div
-          style={{
-            width: 44,
-            height: 6,
-            borderRadius: 999,
-            background: "#4f46e5"
-          }}
+      <section style={{ ...cardStyle, minHeight: 250, display: "grid", placeItems: "center", textAlign: "center", gap: 14, background: "linear-gradient(135deg, #ffffff 0%, #faf5ff 56%, #eef4ff 100%)" }}>
+        <img
+          src="/brand/production-manager-logo.svg"
+          alt="Production Manager"
+          style={{ width: 260, maxWidth: "78%", height: "auto", display: "block", animation: "pm-route-logo-pulse 1.05s ease-in-out infinite" }}
         />
-        <div>
-          <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>
-            Please wait
-          </p>
-          <h1 style={{ margin: "10px 0 8px", fontSize: 32 }}>{title}</h1>
+        <div style={{ display: "grid", gap: 8, justifyItems: "center" }}>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 950, letterSpacing: "0.12em", textTransform: "uppercase", color: "#6d28d9" }}>I&apos;m loading</p>
+          <h1 style={{ margin: 0, fontSize: 34, letterSpacing: "-0.04em" }}>{title}</h1>
           <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>{subtitle}</p>
+          <div style={{ display: "inline-flex", gap: 6, marginTop: 3 }} aria-hidden="true">
+            {[0, 1, 2].map((index) => (
+              <span
+                key={index}
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 999,
+                  background: "#6d28d9",
+                  animation: "pm-loading-dot 1s ease-in-out infinite",
+                  animationDelay: `${index * 0.12}s`
+                }}
+              />
+            ))}
+          </div>
         </div>
       </section>
 

@@ -171,18 +171,22 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     getCompanySettingsByTenantId(activeTenant.tenantId)
   ]);
 
-  const quoteLines = selectedQuote ? await listQuoteLines(selectedQuote.id) : [];
-  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
-  const selectedArtworkApproval = selectedQuote ? await getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : null;
-  const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
-  const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
   const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
   const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
   const sourceEmail = enquiry?.email ?? "";
   const activeMaterials = materials.filter((material) => material.active);
   const sourceLinkedCustomerId = survey?.linkedCustomerId ?? enquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
-  const linkedClient = sourceLinkedCustomerId ? await getCustomerById(activeTenant.tenantId, sourceLinkedCustomerId) : null;
+
+  const [quoteLines, selectedArtworkApproval, linkedClient] = await Promise.all([
+    selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
+    selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null),
+    sourceLinkedCustomerId ? getCustomerById(activeTenant.tenantId, sourceLinkedCustomerId) : Promise.resolve(null)
+  ]);
+
+  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
+  const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
+  const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
   const linkedClientLogoUrl = customerLogoUrl(linkedClient);
   const linkedClientDefaultDiscount = customerDefaultDiscount(linkedClient);
   const linkedClientDiscountRules = customerDiscountRules(linkedClient);

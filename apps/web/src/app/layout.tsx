@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { ReactNode } from "react";
+import { ReactNode, Suspense } from "react";
+import { RouteTransitionOverlay } from "@/components/RouteTransitionOverlay";
 
 export const metadata: Metadata = {
   title: "Production Manager",
@@ -28,6 +29,9 @@ export default function RootLayout({ children }: RootLayoutProps) {
           WebkitFontSmoothing: "antialiased"
         }}
       >
+        <Suspense fallback={null}>
+          <RouteTransitionOverlay />
+        </Suspense>
         {children}
       </body>
     </html>
