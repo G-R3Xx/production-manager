@@ -8,6 +8,7 @@ const PREFETCH_ROUTES = [
   "/surveys",
   "/quotes",
   "/artwork-approvals",
+  "/production",
   "/clients",
   "/materials",
   "/dashboard"

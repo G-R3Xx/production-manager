@@ -2,6 +2,7 @@ import "server-only";
 
 import { randomBytes } from "crypto";
 import { pool } from "@production-manager/db";
+import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
 
 export type QuoteDraftRecord = {
   id: string;
@@ -915,6 +916,7 @@ export async function markArtworkApprovalInternallyApprovedForTenant(tenantId: s
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, approvalId, approvedBy]);
+  await createProductionJobFromArtworkApprovalForTenant(tenantId, approvalId, approvedBy);
 }
 
 export async function markArtworkApprovalViewedByToken(token: string): Promise<void> {
@@ -931,7 +933,7 @@ export async function markArtworkApprovalViewedByToken(token: string): Promise<v
 export async function respondToArtworkApprovalByToken(token: string, response: "approved" | "changes_requested", notes: string | null, signatoryName?: string | null, signatureDataUrl?: string | null): Promise<void> {
   await ensureArtworkApprovalTables();
   const timestampColumn = response === "approved" ? "approved_at" : "changes_requested_at";
-  await pool.query(`
+  const result = await pool.query<{ id: string; tenantId: string }>(`
     UPDATE sales.artwork_approvals
     SET status = $2,
         ${timestampColumn} = now(),
@@ -941,5 +943,13 @@ export async function respondToArtworkApprovalByToken(token: string, response: "
         client_confirmed_at = CASE WHEN $2 = 'approved' THEN now() ELSE client_confirmed_at END,
         updated_at = now()
     WHERE public_token = $1
+    RETURNING id, tenant_id as "tenantId"
   `, [token, response, notes, signatoryName ?? null, signatureDataUrl ?? null]);
+
+  if (response === "approved") {
+    const approvedApproval = result.rows[0];
+    if (approvedApproval) {
+      await createProductionJobFromArtworkApprovalForTenant(approvedApproval.tenantId, approvedApproval.id, signatoryName ?? "client approval");
+    }
+  }
 }
