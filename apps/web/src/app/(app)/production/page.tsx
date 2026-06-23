@@ -80,6 +80,98 @@ function proofPreview(item: ProductionItemRecord) {
   return <img src={item.proofImageUrl} alt={item.title} style={{ width: "100%", height: 220, objectFit: "contain", objectPosition: "center", display: "block", background: "#fff", borderRadius: 16 }} />;
 }
 
+
+function splitQuoteParts(value: string | null | undefined): string[] {
+  return String(value ?? "")
+    .split(/\s+·\s+|\n+/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function firstMatchingPart(parts: string[], pattern: RegExp): string | null {
+  return parts.find((part) => pattern.test(part)) ?? null;
+}
+
+function extractDimension(value: string | null | undefined): string | null {
+  const source = String(value ?? "");
+  const match = source.match(/\b(\d+(?:\.\d+)?\s*(?:mm)?\s*[×x]\s*\d+(?:\.\d+)?\s*(?:mm)?)\b/i);
+  if (!match?.[1]) return null;
+  return match[1]
+    .replace(/\s+/g, " ")
+    .replace(/\s*[x×]\s*/i, " × ")
+    .replace(/mm\s*$/i, "mm")
+    .trim();
+}
+
+function quotedDetailsForItem(item: ProductionItemRecord) {
+  const quoteParts = splitQuoteParts(item.quoteOptionSummary);
+  const combined = [item.quoteProductName, item.quoteOptionSummary, item.quoteLineNotes, item.title, item.sizeSummary, item.substrateSummary, item.colourSummary, item.finishingSummary]
+    .filter(Boolean)
+    .join(" · ");
+
+  const size = item.sizeSummary || extractDimension(combined);
+  const material = item.substrateSummary || firstMatchingPart(quoteParts, /\b(acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|substrate|clear|opal|white|black|sheet)\b/i) || item.quoteProductName;
+  const print = item.colourSummary || quoteParts.filter((part) => /\b(cmyk|mono|white ink|white only|direct print|roll stock|cut vinyl|reverse|positive|single sided|double sided|print)\b/i.test(part)).join("\n") || null;
+  const finishing = item.finishingSummary || quoteParts.filter((part) => /\b(laminate|lamination|gloss|matt|matte|anti graffiti|whiteboard|jingwei|router|cnc|cut|drill|holes|eyelet|fold|score|staple|saddle|numbering|padding|tape|finishing|coating)\b/i.test(part)).join("\n") || null;
+
+  return {
+    product: item.quoteProductName || item.title,
+    size,
+    material,
+    print,
+    finishing,
+    quoteParts,
+    notes: item.quoteLineNotes,
+    lineTotal: item.quoteLineTotal
+  };
+}
+
+function QuotedDetailsCard({ item }: { item: ProductionItemRecord }) {
+  const details = quotedDetailsForItem(item);
+  const fields = [
+    ["Product", details.product],
+    ["Quantity", item.quantity],
+    ["Size", details.size],
+    ["Material / stock", details.material],
+    ["Print / colour", details.print],
+    ["Finishing", details.finishing]
+  ].filter((field): field is [string, string] => Boolean(field[1]));
+
+  return (
+    <section style={{ border: "1px solid #bfdbfe", borderRadius: 18, padding: 14, background: "#eff6ff", display: "grid", gap: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start", flexWrap: "wrap" }}>
+        <div>
+          <strong style={{ color: "#1d4ed8" }}>Quoted production details</strong>
+          <p style={{ margin: "4px 0 0", color: "#475467", fontSize: 13 }}>This is the actual quote-line information production needs to make the item.</p>
+        </div>
+        {details.lineTotal ? <span style={{ borderRadius: 999, background: "#fff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>Quoted total ${details.lineTotal}</span> : null}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+        {fields.map(([label, value]) => (
+          <div key={label} style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
+            <span style={{ color: "#667085", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</span>
+            <strong style={{ whiteSpace: "pre-wrap", color: "#0f172a" }}>{value}</strong>
+          </div>
+        ))}
+      </div>
+
+      {details.quoteParts.length ? (
+        <div style={{ display: "grid", gap: 7 }}>
+          <span style={{ color: "#475467", fontSize: 12, fontWeight: 950 }}>Full quote-line choices</span>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+            {details.quoteParts.map((part, index) => (
+              <span key={`${part}-${index}`} style={{ borderRadius: 999, background: "#ffffff", border: "1px solid #bfdbfe", color: "#1e3a8a", padding: "6px 9px", fontSize: 12, fontWeight: 850 }}>{part}</span>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {details.notes ? <div style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap" }}><strong>Quote notes:</strong> {details.notes}</div> : null}
+    </section>
+  );
+}
+
 function completionForItem(item: ProductionItemRecord, steps: ProductionStepRecord[]): { done: number; total: number } {
   const itemSteps = steps.filter((step) => step.itemId === item.id);
   return { done: itemSteps.filter((step) => step.status === "done").length, total: itemSteps.length };
@@ -344,6 +436,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
               const itemComplete = completionForItem(item, steps);
               return (
                 <article key={item.id} style={{ border: "1px solid #dbe4f0", borderRadius: 22, padding: 16, background: "#fbfdff", display: "grid", gap: 14 }}>
+                  <QuotedDetailsCard item={item} />
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.8fr) minmax(0, 1.2fr)", gap: 16, alignItems: "start" }}>
                     <div style={{ display: "grid", gap: 10 }}>
                       {proofPreview(item)}

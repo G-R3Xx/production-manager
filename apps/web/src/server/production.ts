@@ -42,6 +42,10 @@ export type ProductionItemRecord = {
   printReadyNotes: string | null;
   printReadyUploadedAt: string | null;
   printReadyUploadedBy: string | null;
+  quoteProductName: string | null;
+  quoteOptionSummary: string | null;
+  quoteLineNotes: string | null;
+  quoteLineTotal: string | null;
   status: string;
   sortOrder: number;
   createdAt: string;
@@ -315,38 +319,42 @@ export async function listProductionItemsForJob(jobId: string): Promise<Producti
   await ensureProductionTables();
   const result = await pool.query<ProductionItemRecord>(`
     SELECT
-      id,
-      job_id as "jobId",
-      artwork_page_id as "artworkPageId",
-      source_quote_line_id as "sourceQuoteLineId",
-      item_code as "itemCode",
-      title,
-      production_type as "productionType",
-      quantity::text as quantity,
-      size_summary as "sizeSummary",
-      substrate_summary as "substrateSummary",
-      colour_summary as "colourSummary",
-      finishing_summary as "finishingSummary",
-      proof_image_url as "proofImageUrl",
-      proof_file_name as "proofFileName",
-      print_ready_url as "printReadyUrl",
-      print_ready_storage_path as "printReadyStoragePath",
-      print_ready_file_name as "printReadyFileName",
-      print_ready_file_type as "printReadyFileType",
-      print_ready_notes as "printReadyNotes",
-      print_ready_uploaded_at as "printReadyUploadedAt",
-      print_ready_uploaded_by as "printReadyUploadedBy",
-      status,
-      sort_order as "sortOrder",
-      created_at as "createdAt",
-      updated_at as "updatedAt"
-    FROM production.production_items
-    WHERE job_id = $1::uuid
-    ORDER BY sort_order ASC, created_at ASC
+      pi.id,
+      pi.job_id as "jobId",
+      pi.artwork_page_id as "artworkPageId",
+      pi.source_quote_line_id as "sourceQuoteLineId",
+      pi.item_code as "itemCode",
+      pi.title,
+      pi.production_type as "productionType",
+      pi.quantity::text as quantity,
+      pi.size_summary as "sizeSummary",
+      pi.substrate_summary as "substrateSummary",
+      pi.colour_summary as "colourSummary",
+      pi.finishing_summary as "finishingSummary",
+      pi.proof_image_url as "proofImageUrl",
+      pi.proof_file_name as "proofFileName",
+      pi.print_ready_url as "printReadyUrl",
+      pi.print_ready_storage_path as "printReadyStoragePath",
+      pi.print_ready_file_name as "printReadyFileName",
+      pi.print_ready_file_type as "printReadyFileType",
+      pi.print_ready_notes as "printReadyNotes",
+      pi.print_ready_uploaded_at as "printReadyUploadedAt",
+      pi.print_ready_uploaded_by as "printReadyUploadedBy",
+      ql.product_name as "quoteProductName",
+      ql.option_summary as "quoteOptionSummary",
+      ql.notes as "quoteLineNotes",
+      ql.line_total::text as "quoteLineTotal",
+      pi.status,
+      pi.sort_order as "sortOrder",
+      pi.created_at as "createdAt",
+      pi.updated_at as "updatedAt"
+    FROM production.production_items pi
+    LEFT JOIN sales.quote_lines ql ON ql.id = pi.source_quote_line_id
+    WHERE pi.job_id = $1::uuid
+    ORDER BY pi.sort_order ASC, pi.created_at ASC
   `, [jobId]);
   return result.rows;
 }
-
 export async function listProductionStepsForJob(jobId: string): Promise<ProductionStepRecord[]> {
   await ensureProductionTables();
   const result = await pool.query<ProductionStepRecord>(`
