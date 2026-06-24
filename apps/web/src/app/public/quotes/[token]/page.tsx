@@ -2,12 +2,20 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken } from "@/server/quotes";
+import { getCustomerById } from "@/server/customers";
+import { getEnquiryById } from "@/server/enquiries";
+import { getSurveyRequestById } from "@/server/surveys";
+import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
 import { acceptQuoteAction, declineQuoteAction, requestQuoteChangesAction } from "./actions";
 
 type PageProps = {
   params: Promise<{ token: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
+};
+
+type ClientQuoteLine = {
+  title: string;
+  detail: string | null;
 };
 
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
@@ -25,6 +33,177 @@ function formatMoney(value: number): string {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(value);
 }
 
+function formatDate(value: string | null | undefined): string {
+  if (!value) return "Not yet sent";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium" }).format(date);
+}
+
+function compactText(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function titleCaseLabel(value: string | null | undefined): string {
+  return compactText(value)
+    .split(/\s+/g)
+    .map((word) => {
+      const lower = word.toLowerCase();
+      if (["acm", "pvc", "cmyk", "ncr", "abn", "pms"].includes(lower)) return lower.toUpperCase();
+      if (/^\d/.test(word)) return word;
+      return lower.charAt(0).toUpperCase() + lower.slice(1);
+    })
+    .join(" ");
+}
+
+function summaryParts(line: Pick<QuoteLineRecord, "optionSummary">): string[] {
+  return String(line.optionSummary ?? "")
+    .split(/\s+·\s+/g)
+    .map((part) => compactText(part))
+    .filter(Boolean);
+}
+
+function normaliseDimension(value: string | null | undefined): string {
+  const trimmed = compactText(value).replace(/\s*[×x]\s*/i, "x").replace(/\s+mm$/i, "mm");
+  return trimmed.replace(/x/i, "x");
+}
+
+function findDimension(parts: string[], fallbackSource: string): string | null {
+  const fromParts = parts.find((part) => /\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm/i.test(part));
+  const source = fromParts || fallbackSource;
+  const match = source.match(/\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm/i);
+  return match ? normaliseDimension(match[0]) : null;
+}
+
+function findThickness(source: string): string | null {
+  const match = source.match(/\b\d+(?:\.\d+)?\s*mm\b/i);
+  return match ? compactText(match[0]).replace(/\s+/g, "") : null;
+}
+
+function cleanBaseMaterialName(value: string | null | undefined): string {
+  const productName = compactText(value);
+  const firstPart = compactText(productName.split(" - ")[0] ?? productName);
+  return titleCaseLabel(firstPart || productName || "Quote item");
+}
+
+function cleanSelectedMaterialName(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): string {
+  const parts = summaryParts(line);
+  const productBase = cleanBaseMaterialName(line.productName);
+  const materialPart = parts.find((part) => {
+    const lower = part.toLowerCase();
+    return lower.includes(productBase.toLowerCase()) && /\b\d+(?:\.\d+)?\s*mm\b/i.test(part);
+  });
+  return titleCaseLabel(materialPart || line.productName.replace(/^.+?\s+-\s+/i, "") || productBase);
+}
+
+function friendlyLaminate(raw: string | null | undefined): string | null {
+  const value = compactText(raw).replace(/^laminate:\s*/i, "").replace(/^coating:\s*/i, "");
+  if (!value || /^none$/i.test(value)) return null;
+  const lower = value.toLowerCase();
+  if (lower.includes("gloss")) return "Gloss Laminate";
+  if (lower.includes("matt") || lower.includes("matte")) return "Matt Laminate";
+  if (lower.includes("anti graffiti")) return "Anti Graffiti Laminate";
+  if (lower.includes("whiteboard")) return "Whiteboard Laminate";
+  const cleaned = value
+    .replace(/^lam[-_\s]*/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\b(\d+yr|year|years)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return /laminate/i.test(cleaned) ? titleCaseLabel(cleaned) : `${titleCaseLabel(cleaned)} Laminate`;
+}
+
+function friendlyPrintMethod(value: string | null | undefined): string | null {
+  const lower = compactText(value).toLowerCase();
+  if (!lower || lower === "no print") return null;
+  if (lower === "direct print") return "Direct Print";
+  if (lower === "roll stock") return "Roll Stock";
+  if (lower === "cut vinyl") return "Cut Vinyl";
+  return titleCaseLabel(value);
+}
+
+function friendlySide(value: string | null | undefined): string | null {
+  const lower = compactText(value).toLowerCase();
+  if (lower.includes("double")) return "Double sided";
+  if (lower.includes("single")) return "Single sided";
+  return value ? titleCaseLabel(value) : null;
+}
+
+function isInstallLine(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): boolean {
+  const combined = `${line.productName} · ${line.optionSummary ?? ""}`.toLowerCase();
+  return /\b(sign install|install|installation)\b/.test(combined) && !/\bprint install\b/.test(combined);
+}
+
+function installLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+  const parts = summaryParts(line);
+  const fixings = parts.find((part) => /^fixings:/i.test(part));
+  return {
+    title: "Sign Install",
+    detail: fixings ? fixings.replace(/^fixings:\s*/i, "Fixings: ") : null
+  };
+}
+
+function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+  const parts = summaryParts(line);
+  const combined = [line.productName, line.optionSummary].filter(Boolean).join(" · ");
+  const base = cleanBaseMaterialName(line.productName);
+  const selectedMaterial = cleanSelectedMaterialName(line);
+  const dimension = findDimension(parts, combined);
+  const thickness = findThickness(selectedMaterial);
+  const printMethod = friendlyPrintMethod(parts.find((part) => /^(no print|direct print|roll stock|cut vinyl)$/i.test(part)));
+  const ink = parts.find((part) => /^(cmyk|mono|cmyk \+ white|white ink|cmyk \+ special)$/i.test(part));
+  const side = friendlySide(parts.find((part) => /\bsided\b/i.test(part)));
+  const laminate = friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
+  const materialDescriptor = [base, thickness].filter(Boolean).join(" ");
+  const title = [base, dimension, laminate].filter(Boolean).join(" ") || line.productName;
+  const detailParts = [
+    [materialDescriptor || selectedMaterial, dimension ? `- ${dimension}` : null].filter(Boolean).join(" "),
+    printMethod,
+    ink ? ink.toUpperCase().replace("CMYK + WHITE", "CMYK + White") : null,
+    laminate,
+    side
+  ].filter(Boolean);
+
+  return {
+    title,
+    detail: detailParts.length ? detailParts.join(", ").replace(/, (Single sided|Double sided)$/i, " $1") : null
+  };
+}
+
+function smallFormatLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+  const parts = summaryParts(line);
+  const dimension = findDimension(parts, [line.productName, line.optionSummary].filter(Boolean).join(" · "));
+  const coating = friendlyLaminate(parts.find((part) => /^coating:/i.test(part)));
+  const side = friendlySide(parts.find((part) => /\bsided\b/i.test(part)));
+  const colour = parts.find((part) => /^(cmyk|mono|cmyk \+ special)$/i.test(part));
+  const stock = parts.find((part) => /\b(gsm|satin|gloss|bond|paper|card)\b/i.test(part));
+  const firstName = compactText(line.productName.split(" - ")[0] ?? line.productName);
+  const title = [titleCaseLabel(firstName), dimension, coating].filter(Boolean).join(" ") || line.productName;
+  const detail = [stock, dimension, side, colour ? titleCaseLabel(colour) : null, coating].filter(Boolean).join(", ");
+  return { title, detail: detail || null };
+}
+
+function quoteLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+  if (isInstallLine(line)) return installLineForClient(line);
+  const combined = `${line.productName} · ${line.optionSummary ?? ""}`.toLowerCase();
+  if (/\b(card|flyer|brochure|book|booklet|ncr|duplicate|triplicate|gsm|cello)\b/.test(combined)) return smallFormatLineForClient(line);
+  return signageLineForClient(line);
+}
+
+function deriveJobName(quote: Pick<QuoteDraftRecord, "notes" | "quoteNumber">, lines: QuoteLineRecord[], sourceSummary?: string | null): string {
+  const sourceName = compactText(sourceSummary);
+  if (sourceName) return sourceName.replace(/[,.\s]+$/g, "").slice(0, 90);
+
+  const noteLines = String(quote.notes ?? "")
+    .split(/\r?\n/g)
+    .map((line) => compactText(line.replace(/^enquiry summary:\s*/i, "")))
+    .filter((line) => line && !/^enquiry summary:?$/i.test(line));
+  const firstUsefulNote = noteLines.find((line) => !/^survey|^photos?:|^brief:/i.test(line));
+  if (firstUsefulNote) return firstUsefulNote.replace(/[,.\s]+$/g, "").slice(0, 90);
+  const firstLine = lines[0] ? quoteLineForClient(lines[0]).title : "";
+  return firstLine || quote.quoteNumber || "Quote";
+}
+
 const cardStyle = { background: "rgba(255,255,255,0.96)", border: "1px solid #dfe7f2", borderRadius: 26, padding: 22, boxShadow: "0 18px 48px rgba(15,23,42,0.06)" } as const;
 const textareaStyle = { minHeight: 92, borderRadius: 14, border: "1px solid #cfd9e8", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit", background: "#fff" } as const;
 const buttonStyle = { minHeight: 44, borderRadius: 14, border: "none", background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 16px" } as const;
@@ -37,44 +216,88 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   await markQuoteViewedByToken(token);
 
-  const [lines, companySettings] = await Promise.all([
+  const [lines, companySettings, linkedClient, sourceEnquiry, sourceSurvey] = await Promise.all([
     listQuoteLines(quote.id),
-    getCompanySettingsByTenantId(quote.tenantId)
+    getCompanySettingsByTenantId(quote.tenantId),
+    getCustomerById(quote.tenantId, quote.linkedCustomerId),
+    quote.enquiryId ? getEnquiryById(quote.tenantId, quote.enquiryId) : Promise.resolve(null),
+    quote.surveyRequestId ? getSurveyRequestById(quote.tenantId, quote.surveyRequestId) : Promise.resolve(null)
   ]);
   const subtotal = lines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
+  const legalName = companySettings?.companyLegalName && companySettings.companyLegalName !== companyName ? companySettings.companyLegalName : null;
+  const clientEmail = quote.email || sourceEnquiry?.email || linkedClient?.email || null;
+  const clientPhone = quote.phone || sourceSurvey?.phone || sourceEnquiry?.phone || linkedClient?.phone || null;
+  const clientAddress = linkedClient?.payloadJson.billingAddress || null;
+  const sourceSiteAddress = sourceSurvey?.siteAddress || sourceEnquiry?.siteAddress || linkedClient?.payloadJson.defaultSiteAddress || null;
+  const siteAddress = sourceSiteAddress && sourceSiteAddress !== clientAddress ? sourceSiteAddress : null;
+  const jobName = deriveJobName(quote, lines, sourceEnquiry?.requestSummary || sourceSurvey?.notes || sourceSurvey?.surveyDetails);
 
   return (
     <main style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
       <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
-        <section style={{ ...cardStyle, display: "grid", gridTemplateColumns: "1fr auto", gap: 18, alignItems: "start" }}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote from {companyName}</p>
-            <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>{quote.quoteNumber ?? "Quote"}</h1>
-            <p style={{ margin: 0, color: "#475467" }}>{quote.clientName}{quote.contactName ? ` · ${quote.contactName}` : ""}</p>
+        <section style={{ ...cardStyle, display: "grid", gap: 18 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 20, alignItems: "start" }}>
+            <div style={{ display: "flex", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
+              <img src="/brand/production-manager-logo.svg" alt={`${companyName} logo`} style={{ width: 205, maxWidth: "100%", height: "auto", objectFit: "contain", borderRadius: 16, background: "#fff" }} />
+              <div style={{ display: "grid", gap: 5, minWidth: 230 }}>
+                <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote from</p>
+                <h1 style={{ margin: 0, fontSize: 30, letterSpacing: "-0.04em" }}>{companyName}</h1>
+                {legalName ? <span style={{ color: "#475467", fontSize: 13 }}>{legalName}</span> : null}
+                {companySettings?.abn ? <span style={{ color: "#475467", fontSize: 13 }}>ABN {companySettings.abn}</span> : null}
+                {[companySettings?.phone, companySettings?.email].filter(Boolean).length ? <span style={{ color: "#475467", fontSize: 13 }}>{[companySettings?.phone, companySettings?.email].filter(Boolean).join(" · ")}</span> : null}
+                {companySettings?.address ? <span style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap" }}>{companySettings.address}</span> : null}
+              </div>
+            </div>
+            <div style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 8 }}>
+              <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{quote.status.replace(/_/g, " ")}</span>
+              <div style={{ display: "grid", gap: 4 }}>
+                <span style={{ color: "#667085", fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Quote number</span>
+                <strong style={{ fontSize: 28 }}>{quote.quoteNumber ?? "Quote"}</strong>
+                <span style={{ color: "#667085", fontSize: 13 }}>Issued {formatDate(quote.sentAt ?? quote.createdAt)}</span>
+              </div>
+            </div>
           </div>
-          <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{quote.status.replace(/_/g, " ")}</span>
+
+          <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
+            <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 7 }}>
+              <strong style={{ fontSize: 16 }}>Client details</strong>
+              <span style={{ color: "#111827", fontWeight: 850 }}>{quote.clientName}</span>
+              {quote.contactName ? <span style={{ color: "#475467" }}>Contact: {quote.contactName}</span> : null}
+              {clientEmail ? <span style={{ color: "#475467" }}>Email: {clientEmail}</span> : null}
+              {clientPhone ? <span style={{ color: "#475467" }}>Phone: {clientPhone}</span> : null}
+              {clientAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Address: {String(clientAddress)}</span> : null}
+            </div>
+            <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 7 }}>
+              <strong style={{ fontSize: 16 }}>Job / quote details</strong>
+              <span style={{ color: "#111827", fontWeight: 850 }}>{jobName}</span>
+              <span style={{ color: "#475467" }}>Reference: {quote.quoteNumber ?? "Quote"}</span>
+              {siteAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Site: {String(siteAddress)}</span> : null}
+            </div>
+          </div>
         </section>
 
         <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
           <h2 style={{ margin: 0 }}>Quote details</h2>
           <div style={{ display: "grid", gap: 10 }}>
-            {lines.map((line) => (
-              <div key={line.id} style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, background: "#fbfdff" }}>
-                <div style={{ display: "grid", gap: 5 }}>
-                  <strong>{line.productName}</strong>
-                  {line.optionSummary ? <span style={{ color: "#667085", fontSize: 13 }}>{line.optionSummary}</span> : null}
-                  {line.notes ? <span style={{ color: "#667085", fontSize: 13 }}>{line.notes}</span> : null}
+            {lines.map((line) => {
+              const clientLine = quoteLineForClient(line);
+              return (
+                <div key={line.id} style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, background: "#fbfdff" }}>
+                  <div style={{ display: "grid", gap: 5 }}>
+                    <strong>{clientLine.title}</strong>
+                    {clientLine.detail ? <span style={{ color: "#667085", fontSize: 13 }}>{clientLine.detail}</span> : null}
+                  </div>
+                  <div style={{ textAlign: "right", display: "grid", gap: 4 }}>
+                    <strong>{formatMoney(parseMoney(line.lineTotal))}</strong>
+                    <span style={{ color: "#667085", fontSize: 13 }}>Qty {line.quantity} · {formatMoney(parseMoney(line.unitPrice))} ea</span>
+                  </div>
                 </div>
-                <div style={{ textAlign: "right", display: "grid", gap: 4 }}>
-                  <strong>{formatMoney(parseMoney(line.lineTotal))}</strong>
-                  <span style={{ color: "#667085", fontSize: 13 }}>Qty {line.quantity} · {formatMoney(parseMoney(line.unitPrice))} ea</span>
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {lines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>This quote has no saved line items yet.</p> : null}
           </div>
           <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 14, display: "grid", justifyContent: "end", gap: 6 }}>
