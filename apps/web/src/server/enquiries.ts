@@ -14,6 +14,12 @@ export type EnquiryCorrespondenceRecord = {
   mimeType: string | null;
   sizeBytes: number | null;
   uploadedBy: string | null;
+  previewKind: string | null;
+  emailSubject: string | null;
+  emailFrom: string | null;
+  emailTo: string | null;
+  emailDate: string | null;
+  bodyPreview: string | null;
   createdAt: string;
 };
 
@@ -143,6 +149,12 @@ export async function ensureEnquiryCorrespondenceTable(): Promise<void> {
       mime_type text,
       size_bytes bigint,
       uploaded_by text,
+      preview_kind text,
+      email_subject text,
+      email_from text,
+      email_to text,
+      email_date text,
+      body_preview text,
       created_at timestamptz NOT NULL DEFAULT now()
     )
   `);
@@ -155,6 +167,16 @@ export async function ensureEnquiryCorrespondenceTable(): Promise<void> {
   await pool.query(`
     CREATE INDEX IF NOT EXISTS enquiry_correspondence_tenant_created_idx
       ON app.enquiry_correspondence (tenant_id, created_at DESC)
+  `);
+
+  await pool.query(`
+    ALTER TABLE app.enquiry_correspondence
+      ADD COLUMN IF NOT EXISTS preview_kind text,
+      ADD COLUMN IF NOT EXISTS email_subject text,
+      ADD COLUMN IF NOT EXISTS email_from text,
+      ADD COLUMN IF NOT EXISTS email_to text,
+      ADD COLUMN IF NOT EXISTS email_date text,
+      ADD COLUMN IF NOT EXISTS body_preview text
   `);
 }
 
@@ -171,6 +193,12 @@ export async function listEnquiryCorrespondenceForTenant(tenantId: string): Prom
       mime_type as "mimeType",
       CASE WHEN size_bytes IS NULL THEN NULL ELSE size_bytes::bigint END as "sizeBytes",
       uploaded_by as "uploadedBy",
+      preview_kind as "previewKind",
+      email_subject as "emailSubject",
+      email_from as "emailFrom",
+      email_to as "emailTo",
+      email_date as "emailDate",
+      body_preview as "bodyPreview",
       created_at as "createdAt"
     FROM app.enquiry_correspondence
     WHERE tenant_id = $1::uuid
@@ -190,13 +218,21 @@ export async function createEnquiryCorrespondenceForTenant(tenantId: string, inp
   mimeType?: string | null;
   sizeBytes?: number | null;
   uploadedBy?: string | null;
+  previewKind?: string | null;
+  emailSubject?: string | null;
+  emailFrom?: string | null;
+  emailTo?: string | null;
+  emailDate?: string | null;
+  bodyPreview?: string | null;
 }): Promise<{ id: string }> {
   await ensureEnquiryCorrespondenceTable();
   const result = await pool.query<{ id: string }>(`
     INSERT INTO app.enquiry_correspondence (
-      tenant_id, enquiry_id, file_name, file_url, storage_path, mime_type, size_bytes, uploaded_by, created_at
+      tenant_id, enquiry_id, file_name, file_url, storage_path, mime_type, size_bytes, uploaded_by,
+      preview_kind, email_subject, email_from, email_to, email_date, body_preview, created_at
     ) VALUES (
-      $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::bigint, $8::text, now()
+      $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::bigint, $8::text,
+      $9::text, $10::text, $11::text, $12::text, $13::text, $14::text, now()
     ) RETURNING id
   `, [
     tenantId,
@@ -206,7 +242,13 @@ export async function createEnquiryCorrespondenceForTenant(tenantId: string, inp
     input.storagePath ?? null,
     input.mimeType ?? null,
     input.sizeBytes ?? null,
-    input.uploadedBy ?? null
+    input.uploadedBy ?? null,
+    input.previewKind ?? null,
+    input.emailSubject ?? null,
+    input.emailFrom ?? null,
+    input.emailTo ?? null,
+    input.emailDate ?? null,
+    input.bodyPreview ?? null
   ]);
   return result.rows[0];
 }

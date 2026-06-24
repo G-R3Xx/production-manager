@@ -2,6 +2,7 @@
 
 import { DragEvent, useRef, useState } from "react";
 import { createEnquiryAction } from "./actions";
+import { buildCorrespondencePreviewForFile, type CorrespondencePreviewFields } from "./emailPreview";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type ClientOption = {
@@ -25,6 +26,7 @@ type PendingCorrespondenceUpload = {
   storagePath: string;
   mimeType: string;
   sizeBytes: number;
+  preview: CorrespondencePreviewFields;
 };
 
 type SignedIntakeUpload = {
@@ -142,6 +144,7 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
     try {
       setUploadStatus("Uploading correspondence…");
       window.dispatchEvent(new CustomEvent("pm:loading", { detail: { message: "Uploading enquiry correspondence…" } }));
+      const preview = await buildCorrespondencePreviewForFile(file);
       const upload = await uploadIntakeCorrespondence(file);
       setPendingUploads((current) => [
         ...current,
@@ -151,7 +154,8 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
           fileUrl: upload.publicUrl,
           storagePath: upload.storagePath,
           mimeType: file.type || "application/octet-stream",
-          sizeBytes: file.size
+          sizeBytes: file.size,
+          preview
         }
       ]);
       setUploadStatus("Correspondence uploaded. It will attach when you create the enquiry.");
@@ -242,6 +246,12 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
                 <input type="hidden" name="pendingCorrespondenceStoragePath" value={upload.storagePath} />
                 <input type="hidden" name="pendingCorrespondenceMimeType" value={upload.mimeType} />
                 <input type="hidden" name="pendingCorrespondenceSizeBytes" value={String(upload.sizeBytes)} />
+                <input type="hidden" name="pendingCorrespondencePreviewKind" value={upload.preview.previewKind} />
+                <input type="hidden" name="pendingCorrespondenceEmailSubject" value={upload.preview.emailSubject} />
+                <input type="hidden" name="pendingCorrespondenceEmailFrom" value={upload.preview.emailFrom} />
+                <input type="hidden" name="pendingCorrespondenceEmailTo" value={upload.preview.emailTo} />
+                <input type="hidden" name="pendingCorrespondenceEmailDate" value={upload.preview.emailDate} />
+                <input type="hidden" name="pendingCorrespondenceBodyPreview" value={upload.preview.bodyPreview} />
               </div>
             ))}
           </div>

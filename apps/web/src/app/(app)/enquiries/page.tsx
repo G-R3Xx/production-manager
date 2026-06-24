@@ -7,6 +7,7 @@ import { listEnquiriesForTenant, listEnquiryCorrespondenceForTenant } from "@/se
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { attachEnquiryCorrespondenceAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
 import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
+import { EnquiryCorrespondencePreview } from "./EnquiryCorrespondencePreview";
 import { NewEnquiryForm } from "./NewEnquiryForm";
 
 
@@ -129,31 +130,9 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                         <span style={{ fontSize: 12, color: "#667085" }}>{enquiryCorrespondence.length} attached</span>
                       </div>
                       {enquiryCorrespondence.length > 0 ? (
-                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 8 }}>
                           {enquiryCorrespondence.slice(0, 5).map((item) => (
-                            <a
-                              key={item.id}
-                              href={item.fileUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              style={{
-                                border: "1px solid #dbe6f5",
-                                background: "#fbfdff",
-                                color: "#0f172a",
-                                textDecoration: "none",
-                                borderRadius: 999,
-                                padding: "7px 10px",
-                                fontSize: 12,
-                                fontWeight: 800,
-                                maxWidth: 260,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap"
-                              }}
-                              title={`${item.fileName}${item.uploadedBy ? ` · uploaded by ${item.uploadedBy}` : ""} · ${formatDateTime(item.createdAt)}`}
-                            >
-                              {item.fileName}{formatFileSize(item.sizeBytes) ? ` · ${formatFileSize(item.sizeBytes)}` : ""}
-                            </a>
+                            <EnquiryCorrespondencePreview key={item.id} item={item} />
                           ))}
                         </div>
                       ) : (

@@ -60,6 +60,12 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
   const storagePaths = getAllStrings(formData, "pendingCorrespondenceStoragePath");
   const mimeTypes = getAllStrings(formData, "pendingCorrespondenceMimeType");
   const sizeBytes = getAllStrings(formData, "pendingCorrespondenceSizeBytes");
+  const previewKinds = getAllStrings(formData, "pendingCorrespondencePreviewKind");
+  const emailSubjects = getAllStrings(formData, "pendingCorrespondenceEmailSubject");
+  const emailFroms = getAllStrings(formData, "pendingCorrespondenceEmailFrom");
+  const emailTos = getAllStrings(formData, "pendingCorrespondenceEmailTo");
+  const emailDates = getAllStrings(formData, "pendingCorrespondenceEmailDate");
+  const bodyPreviews = getAllStrings(formData, "pendingCorrespondenceBodyPreview");
 
   for (let index = 0; index < fileNames.length; index += 1) {
     const fileName = fileNames[index] ?? "";
@@ -73,7 +79,13 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
       storagePath: storagePaths[index] || null,
       mimeType: mimeTypes[index] || null,
       sizeBytes: Number.isFinite(rawSizeBytes) && rawSizeBytes > 0 ? rawSizeBytes : null,
-      uploadedBy: user.email ?? user.id
+      uploadedBy: user.email ?? user.id,
+      previewKind: previewKinds[index] || null,
+      emailSubject: emailSubjects[index] || null,
+      emailFrom: emailFroms[index] || null,
+      emailTo: emailTos[index] || null,
+      emailDate: emailDates[index] || null,
+      bodyPreview: bodyPreviews[index] || null
     });
   }
 
@@ -162,6 +174,12 @@ export async function attachEnquiryCorrespondenceAction(formData: FormData): Pro
   const storagePath = nullable(formData.get("storagePath"));
   const mimeType = nullable(formData.get("mimeType"));
   const rawSizeBytes = Number(formData.get("sizeBytes") ?? 0);
+  const previewKind = nullable(formData.get("previewKind"));
+  const emailSubject = nullable(formData.get("emailSubject"));
+  const emailFrom = nullable(formData.get("emailFrom"));
+  const emailTo = nullable(formData.get("emailTo"));
+  const emailDate = nullable(formData.get("emailDate"));
+  const bodyPreview = nullable(formData.get("bodyPreview"));
 
   if (!enquiryId) {
     redirect("/enquiries?error=Choose%20an%20enquiry%20before%20attaching%20correspondence");
@@ -183,7 +201,13 @@ export async function attachEnquiryCorrespondenceAction(formData: FormData): Pro
     storagePath,
     mimeType,
     sizeBytes: Number.isFinite(rawSizeBytes) && rawSizeBytes > 0 ? rawSizeBytes : null,
-    uploadedBy: user.email ?? user.id
+    uploadedBy: user.email ?? user.id,
+    previewKind,
+    emailSubject,
+    emailFrom,
+    emailTo,
+    emailDate,
+    bodyPreview
   });
 
   redirect("/enquiries?message=Correspondence%20attached%20to%20enquiry");

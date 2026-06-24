@@ -1,6 +1,7 @@
 "use client";
 
 import { DragEvent, useRef, useState } from "react";
+import { buildCorrespondencePreviewForFile } from "./emailPreview";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type EnquiryCorrespondenceDropzoneProps = {
@@ -107,12 +108,19 @@ export function EnquiryCorrespondenceDropzone({ inputName = "correspondenceFile"
     try {
       setStatus("Uploading correspondence…");
       window.dispatchEvent(new CustomEvent("pm:loading", { detail: { message: "Uploading enquiry correspondence…" } }));
+      const preview = await buildCorrespondencePreviewForFile(file);
       const upload = await uploadCorrespondenceFileDirectly(form, file);
       setOrCreateHiddenInput(form, "fileName", upload.fileName || file.name);
       setOrCreateHiddenInput(form, "fileUrl", upload.publicUrl);
       setOrCreateHiddenInput(form, "storagePath", upload.storagePath);
       setOrCreateHiddenInput(form, "mimeType", file.type || "application/octet-stream");
       setOrCreateHiddenInput(form, "sizeBytes", String(file.size));
+      setOrCreateHiddenInput(form, "previewKind", preview.previewKind);
+      setOrCreateHiddenInput(form, "emailSubject", preview.emailSubject);
+      setOrCreateHiddenInput(form, "emailFrom", preview.emailFrom);
+      setOrCreateHiddenInput(form, "emailTo", preview.emailTo);
+      setOrCreateHiddenInput(form, "emailDate", preview.emailDate);
+      setOrCreateHiddenInput(form, "bodyPreview", preview.bodyPreview);
       if (inputRef.current) inputRef.current.value = "";
       setStatus("Correspondence uploaded. Saving to enquiry…");
       window.dispatchEvent(new CustomEvent("pm:loading", { detail: { message: "Saving correspondence to enquiry…" } }));
