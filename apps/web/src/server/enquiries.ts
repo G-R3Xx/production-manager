@@ -3,6 +3,20 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 
+
+export type EnquiryCorrespondenceRecord = {
+  id: string;
+  tenantId: string;
+  enquiryId: string;
+  fileName: string;
+  fileUrl: string;
+  storagePath: string | null;
+  mimeType: string | null;
+  sizeBytes: number | null;
+  uploadedBy: string | null;
+  createdAt: string;
+};
+
 export type EnquiryRecord = {
   id: string;
   tenantId: string;
@@ -114,4 +128,85 @@ export async function updateEnquiryStatusForTenant(tenantId: string, enquiryId: 
     WHERE tenant_id = $1::uuid
       AND id = $2::uuid
   `, [tenantId, enquiryId, status]);
+}
+
+
+export async function ensureEnquiryCorrespondenceTable(): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app.enquiry_correspondence (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
+      enquiry_id uuid NOT NULL REFERENCES app.enquiries(id) ON DELETE CASCADE,
+      file_name text NOT NULL,
+      file_url text NOT NULL,
+      storage_path text,
+      mime_type text,
+      size_bytes bigint,
+      uploaded_by text,
+      created_at timestamptz NOT NULL DEFAULT now()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS enquiry_correspondence_enquiry_created_idx
+      ON app.enquiry_correspondence (enquiry_id, created_at DESC)
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS enquiry_correspondence_tenant_created_idx
+      ON app.enquiry_correspondence (tenant_id, created_at DESC)
+  `);
+}
+
+export async function listEnquiryCorrespondenceForTenant(tenantId: string): Promise<EnquiryCorrespondenceRecord[]> {
+  await ensureEnquiryCorrespondenceTable();
+  const result = await pool.query<EnquiryCorrespondenceRecord>(`
+    SELECT
+      id,
+      tenant_id as "tenantId",
+      enquiry_id as "enquiryId",
+      file_name as "fileName",
+      file_url as "fileUrl",
+      storage_path as "storagePath",
+      mime_type as "mimeType",
+      CASE WHEN size_bytes IS NULL THEN NULL ELSE size_bytes::bigint END as "sizeBytes",
+      uploaded_by as "uploadedBy",
+      created_at as "createdAt"
+    FROM app.enquiry_correspondence
+    WHERE tenant_id = $1::uuid
+    ORDER BY created_at DESC
+  `, [tenantId]);
+  return result.rows.map((row) => ({
+    ...row,
+    sizeBytes: row.sizeBytes == null ? null : Number(row.sizeBytes)
+  }));
+}
+
+export async function createEnquiryCorrespondenceForTenant(tenantId: string, input: {
+  enquiryId: string;
+  fileName: string;
+  fileUrl: string;
+  storagePath?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
+  uploadedBy?: string | null;
+}): Promise<{ id: string }> {
+  await ensureEnquiryCorrespondenceTable();
+  const result = await pool.query<{ id: string }>(`
+    INSERT INTO app.enquiry_correspondence (
+      tenant_id, enquiry_id, file_name, file_url, storage_path, mime_type, size_bytes, uploaded_by, created_at
+    ) VALUES (
+      $1::uuid, $2::uuid, $3::text, $4::text, $5::text, $6::text, $7::bigint, $8::text, now()
+    ) RETURNING id
+  `, [
+    tenantId,
+    input.enquiryId,
+    input.fileName,
+    input.fileUrl,
+    input.storagePath ?? null,
+    input.mimeType ?? null,
+    input.sizeBytes ?? null,
+    input.uploadedBy ?? null
+  ]);
+  return result.rows[0];
 }

@@ -3,9 +3,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listEnquiriesForTenant } from "@/server/enquiries";
+import { listEnquiriesForTenant, listEnquiryCorrespondenceForTenant } from "@/server/enquiries";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
-import { createEnquiryAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
+import { attachEnquiryCorrespondenceAction, createEnquiryAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
+import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
 
 
 type PageProps = {
@@ -26,6 +27,30 @@ const inputStyle = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd
 const textareaStyle = { minHeight: 110, borderRadius: 12, border: "1px solid #d0d5dd", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit" } as const;
 const buttonStyle = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" } as const;
 
+const urgencyOptions = ["Low", "Normal", "High", "Urgent", "Critical"];
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "Not yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Not yet";
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function formatFileSize(sizeBytes: number | null | undefined): string {
+  if (!sizeBytes || !Number.isFinite(sizeBytes) || sizeBytes <= 0) return "";
+  if (sizeBytes < 1024) return `${sizeBytes} B`;
+  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 1024)} KB`;
+  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function urgencyBadgeStyle(urgency: string | null | undefined) {
+  const value = String(urgency ?? "Normal").toLowerCase();
+  if (value === "critical" || value === "urgent") return { background: "#fff1f3", color: "#c01048", borderColor: "#fecdd6" } as const;
+  if (value === "high") return { background: "#fff7ed", color: "#c2410c", borderColor: "#fed7aa" } as const;
+  if (value === "low") return { background: "#f0fdf4", color: "#15803d", borderColor: "#bbf7d0" } as const;
+  return { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" } as const;
+}
+
 
 export default async function EnquiriesPage({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
@@ -35,14 +60,21 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const message = readParam(params, "message");
   const error = readParam(params, "error");
   const filter = readParam(params, "filter");
-  const [allEnquiries, clients] = await Promise.all([
+  const [allEnquiries, clients, correspondence] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listCustomersForTenant(activeTenant.tenantId)
+    listCustomersForTenant(activeTenant.tenantId),
+    listEnquiryCorrespondenceForTenant(activeTenant.tenantId)
   ]);
   const deletedCount = allEnquiries.filter((enquiry) => enquiry.status === "deleted").length;
   const enquiries = filter === "deleted"
     ? allEnquiries.filter((enquiry) => enquiry.status === "deleted")
     : allEnquiries.filter((enquiry) => enquiry.status !== "deleted");
+  const correspondenceByEnquiry = new Map<string, typeof correspondence>();
+  for (const item of correspondence) {
+    const existing = correspondenceByEnquiry.get(item.enquiryId) ?? [];
+    existing.push(item);
+    correspondenceByEnquiry.set(item.enquiryId, existing);
+  }
 
   return (
     <div style={{ maxWidth: 1300, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -72,7 +104,11 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <input name="source" placeholder="Source (call / email / walk-in)" style={inputStyle} />
-            <input name="urgency" placeholder="Urgency" style={inputStyle} />
+            <select name="urgency" defaultValue="Normal" style={inputStyle}>
+              {urgencyOptions.map((option) => (
+                <option key={option} value={option}>{option}</option>
+              ))}
+            </select>
           </div>
           <input name="siteAddress" placeholder="Site address if relevant" style={inputStyle} />
           <textarea name="requestSummary" placeholder="Rough idea of what they require" style={textareaStyle} />
@@ -104,13 +140,66 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                       <div style={{ color: "#475467", marginTop: 4 }}>{enquiry.requestSummary}</div>
                     </div>
                   </div>
-                  <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status}</span>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <span style={{ borderRadius: 999, border: `1px solid ${urgencyBadgeStyle(enquiry.urgency).borderColor}`, ...urgencyBadgeStyle(enquiry.urgency), padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{enquiry.urgency || "Normal"}</span>
+                    <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status}</span>
+                  </div>
                 </div>
                   );
                 })()}
                 <div style={{ color: "#667085", fontSize: 13 }}>
                   {[enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ")}
                 </div>
+
+                {(() => {
+                  const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
+                  return (
+                    <section style={{ display: "grid", gap: 8, borderTop: "1px solid #eef2f7", paddingTop: 10 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                        <strong style={{ fontSize: 13 }}>Correspondence</strong>
+                        <span style={{ fontSize: 12, color: "#667085" }}>{enquiryCorrespondence.length} attached</span>
+                      </div>
+                      {enquiryCorrespondence.length > 0 ? (
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          {enquiryCorrespondence.slice(0, 5).map((item) => (
+                            <a
+                              key={item.id}
+                              href={item.fileUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                border: "1px solid #dbe6f5",
+                                background: "#fbfdff",
+                                color: "#0f172a",
+                                textDecoration: "none",
+                                borderRadius: 999,
+                                padding: "7px 10px",
+                                fontSize: 12,
+                                fontWeight: 800,
+                                maxWidth: 260,
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                                whiteSpace: "nowrap"
+                              }}
+                              title={`${item.fileName}${item.uploadedBy ? ` · uploaded by ${item.uploadedBy}` : ""} · ${formatDateTime(item.createdAt)}`}
+                            >
+                              {item.fileName}{formatFileSize(item.sizeBytes) ? ` · ${formatFileSize(item.sizeBytes)}` : ""}
+                            </a>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: "#98a2b3", fontSize: 12 }}>No email correspondence attached yet.</span>
+                      )}
+                      {enquiry.status !== "deleted" ? (
+                        <form action={attachEnquiryCorrespondenceAction} style={{ margin: 0 }}>
+                          <input type="hidden" name="enquiryId" value={enquiry.id} />
+                          <EnquiryCorrespondenceDropzone />
+                        </form>
+                      ) : null}
+                    </section>
+                  );
+                })()}
+
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {enquiry.status !== "deleted" ? (
                     <>

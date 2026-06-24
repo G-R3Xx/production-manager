@@ -4,7 +4,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createEnquiryForTenant, getEnquiryById, updateEnquiryStatusForTenant } from "@/server/enquiries";
+import { createEnquiryCorrespondenceForTenant, createEnquiryForTenant, getEnquiryById, updateEnquiryStatusForTenant } from "@/server/enquiries";
 import { getCustomerById, customerLogoUrl } from "@/server/customers";
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
 import { createSurveyRequestForTenant, getLatestSurveyRequestForEnquiry, getSurveyRequestById } from "@/server/surveys";
@@ -122,4 +122,41 @@ export async function restoreEnquiryAction(formData: FormData): Promise<void> {
 
   await updateEnquiryStatusForTenant(activeTenant.tenantId, enquiryId, "new");
   redirect("/enquiries?message=Enquiry%20restored");
+}
+
+
+export async function attachEnquiryCorrespondenceAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const user = await getRequiredSessionUser();
+  const enquiryId = String(formData.get("enquiryId") ?? "").trim();
+  const fileName = String(formData.get("fileName") ?? "").trim();
+  const fileUrl = String(formData.get("fileUrl") ?? "").trim();
+  const storagePath = nullable(formData.get("storagePath"));
+  const mimeType = nullable(formData.get("mimeType"));
+  const rawSizeBytes = Number(formData.get("sizeBytes") ?? 0);
+
+  if (!enquiryId) {
+    redirect("/enquiries?error=Choose%20an%20enquiry%20before%20attaching%20correspondence");
+  }
+
+  if (!fileName || !fileUrl) {
+    redirect("/enquiries?error=Drop%20or%20choose%20an%20email%20correspondence%20file%20first");
+  }
+
+  const enquiry = await getEnquiryById(activeTenant.tenantId, enquiryId);
+  if (!enquiry) {
+    redirect("/enquiries?error=Enquiry%20was%20not%20found");
+  }
+
+  await createEnquiryCorrespondenceForTenant(activeTenant.tenantId, {
+    enquiryId,
+    fileName,
+    fileUrl,
+    storagePath,
+    mimeType,
+    sizeBytes: Number.isFinite(rawSizeBytes) && rawSizeBytes > 0 ? rawSizeBytes : null,
+    uploadedBy: user.email ?? user.id
+  });
+
+  redirect("/enquiries?message=Correspondence%20attached%20to%20enquiry");
 }
