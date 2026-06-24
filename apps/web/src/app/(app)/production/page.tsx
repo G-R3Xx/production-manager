@@ -170,6 +170,47 @@ function cleanQuotePart(value: string | null | undefined): string {
     .trim();
 }
 
+function summaryKey(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function tidySummaryLine(value: string): string {
+  return value
+    .replace(/^([a-z0-9 ]{2,24})\s+-\s+(.+)$/i, (full, prefix, rest) => {
+      const prefixKey = summaryKey(String(prefix));
+      const restKey = summaryKey(String(rest));
+      return restKey.includes(prefixKey) ? String(rest).trim() : full;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanProductionSummary(value: string | null | undefined, options?: { exclude?: RegExp }): string | null {
+  const seen = new Set<string>();
+  const lines = String(value ?? "")
+    .split(/\n+/g)
+    .map((line) => tidySummaryLine(line))
+    .filter(Boolean)
+    .filter((line) => !options?.exclude?.test(line))
+    .filter((line) => {
+      const key = summaryKey(line);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  const specific = lines.filter((line, index, list) => {
+    const key = summaryKey(line);
+    return !list.some((other, otherIndex) => {
+      if (otherIndex === index) return false;
+      const otherKey = summaryKey(other);
+      return otherKey.length > key.length && otherKey.includes(key);
+    });
+  });
+
+  return specific.length ? specific.join("\n") : null;
+}
+
 function chooseFinishedDimension(parts: string[], item: ProductionItemRecord): DimensionInfo | null {
   const candidates = dimensionCandidates(parts, item.sizeSummary);
   if (!candidates.length) return null;
@@ -368,7 +409,7 @@ function quotedDetailsForItem(item: ProductionItemRecord) {
   const print = printDisplayName(quoteParts, inkLabel);
   const finishing = laminateDisplayName(laminateRaw) || quoteParts.filter((part) => /\b(jingwei|router|cnc|cut|drill|holes|eyelet|fold|score|staple|numbering|padding|tape|finishing|coating)\b/i.test(part)).join("\n") || null;
   const baseName = baseProductName(item, quoteParts);
-  const material = item.substrateSummary || stockPart || firstMatchingPart(quoteParts, /\b(acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|substrate|clear|opal|white|black|sheet)\b/i) || item.quoteProductName;
+  const material = cleanProductionSummary(item.substrateSummary, { exclude: /\b(laminate|lamination|lam-|gloss laminate|matt laminate|matte laminate|coating)\b/i }) || stockPart || firstMatchingPart(quoteParts, /\b(acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|substrate|clear|opal|white|black|sheet)\b/i) || item.quoteProductName;
 
   const details = {
     baseName,

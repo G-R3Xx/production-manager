@@ -591,6 +591,48 @@ function optionParts(line: Pick<QuoteLineRecord, "optionSummary">): string[] {
     .filter(Boolean);
 }
 
+function summaryKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(mm|millimetres|millimeters)\b/g, "mm")
+    .trim();
+}
+
+function tidyArtworkSummaryLine(value: string): string {
+  return value
+    .replace(/^([a-z0-9 ]{2,24})\s+-\s+(.+)$/i, (full, prefix, rest) => {
+      const prefixKey = summaryKey(String(prefix));
+      const restKey = summaryKey(String(rest));
+      return restKey.includes(prefixKey) ? String(rest).trim() : full;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function uniqueSpecificSummaryLines(lines: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>();
+  const cleaned = lines
+    .map((line) => tidyArtworkSummaryLine(String(line ?? "")))
+    .filter(Boolean)
+    .filter((line) => {
+      const key = summaryKey(line);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  return cleaned.filter((line, index, list) => {
+    const key = summaryKey(line);
+    if (!key) return false;
+    return !list.some((other, otherIndex) => {
+      if (otherIndex === index) return false;
+      const otherKey = summaryKey(other);
+      return otherKey.length > key.length && otherKey.includes(key);
+    });
+  });
+}
+
 function titleCaseSignCode(index: number, kind: "signage" | "small_format"): string {
   return kind === "small_format" ? `P${index}` : `S${index}`;
 }
@@ -613,9 +655,13 @@ function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kin
   const code = titleCaseSignCode(index, kind);
   const qty = normaliseMoney(line.quantity, "1");
 
-  const colourParts = parts.filter((part) => /\b(cmyk|mono|white ink|white|pantone|colour|color|clear|reverse|positive)\b/i.test(part));
-  const materialParts = parts.filter((part) => /\b(acrylic|acm|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|laminate|coating|stock|paper|gsm|satin|gloss|matt|matte|cello)\b/i.test(part));
-  const finishingParts = parts.filter((part) => /\b(finishing|jingwei|router|cnc|drill|holes|eyelet|trim|cutting|fold|score|crease|staple|saddle|numbering|padding|tape|laminate|coating)\b/i.test(part));
+  const colourParts = uniqueSpecificSummaryLines(parts.filter((part) => /\b(cmyk|mono|white ink|white|pantone|colour|color|clear|reverse|positive)\b/i.test(part)));
+  const materialParts = uniqueSpecificSummaryLines(parts.filter((part) =>
+    /\b(acrylic|acm|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|satin|cello|sheet)\b/i.test(part)
+    && !/\b(laminate|lamination|lam-|gloss laminate|matt laminate|matte laminate|coating)\b/i.test(part)
+  ));
+  const finishingParts = uniqueSpecificSummaryLines(parts.filter((part) => /\b(finishing|jingwei|router|cnc|drill|holes|eyelet|trim|cutting|fold|score|crease|staple|saddle|numbering|padding|tape|laminate|lamination|lam-|coating)\b/i.test(part)));
+  const fallbackSubstrate = uniqueSpecificSummaryLines([line.productName, ...materialParts]).join("\n") || line.productName;
 
   return {
     title: line.productName || `${kind === "small_format" ? "Small format" : "Sign"} proof`,
@@ -629,7 +675,7 @@ function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kin
     quantity: qty,
     colourSummary: colourParts.length ? colourParts.join("\n") : null,
     sizeSummary: size,
-    substrateSummary: materialParts.length ? [line.productName, ...materialParts].filter(Boolean).join("\n") : line.productName,
+    substrateSummary: fallbackSubstrate || null,
     installSummary: kind === "signage" && finishingParts.length ? finishingParts.join("\n") : null,
     smallFormatSummary: kind === "small_format" ? parts.join("\n") : null,
     sourceQuoteLineId: line.id

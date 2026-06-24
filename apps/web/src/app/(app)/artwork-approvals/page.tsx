@@ -95,13 +95,66 @@ function statusTone(status: string): { bg: string; fg: string; border: string } 
   return { bg: "#f5f3ff", fg: "#6d28d9", border: "#ddd6fe" };
 }
 
+function summaryKey(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\b(mm|millimetres|millimeters)\b/g, "mm")
+    .trim();
+}
+
+function tidySummaryLine(value: string): string {
+  return value
+    .replace(/^([a-z0-9 ]{2,24})\s+-\s+(.+)$/i, (full, prefix, rest) => {
+      const prefixKey = summaryKey(String(prefix));
+      const restKey = summaryKey(String(rest));
+      return restKey.includes(prefixKey) ? String(rest).trim() : full;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cleanSummaryLines(value: string | null | undefined, options?: { exclude?: RegExp }): string | null {
+  const seen = new Set<string>();
+  const lines = String(value ?? "")
+    .split(/\n+/g)
+    .map((line) => tidySummaryLine(line))
+    .filter(Boolean)
+    .filter((line) => !options?.exclude?.test(line))
+    .filter((line) => {
+      const key = summaryKey(line);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  const specific = lines.filter((line, index, list) => {
+    const key = summaryKey(line);
+    return !list.some((other, otherIndex) => {
+      if (otherIndex === index) return false;
+      const otherKey = summaryKey(other);
+      return otherKey.length > key.length && otherKey.includes(key);
+    });
+  });
+
+  return specific.length ? specific.join("\n") : null;
+}
+
+function cleanSubstrateSummary(value: string | null | undefined): string | null {
+  return cleanSummaryLines(value, { exclude: /\b(laminate|lamination|lam-|gloss laminate|matt laminate|matte laminate|coating)\b/i });
+}
+
+function cleanFinishingSummary(value: string | null | undefined): string | null {
+  return cleanSummaryLines(value);
+}
+
 function detailsList(page: ArtworkApprovalPageRecord): Array<{ label: string; value: string | null }> {
   const rows = [
     { label: "Qty", value: page.quantity },
     { label: "Size", value: page.sizeSummary },
-    { label: "Colours", value: page.colourSummary },
-    { label: "Substrate / stock", value: page.substrateSummary },
-    { label: page.productionType === "small_format" ? "Small format" : "Install / finishing", value: page.productionType === "small_format" ? page.smallFormatSummary : page.installSummary }
+    { label: "Colours", value: cleanSummaryLines(page.colourSummary) },
+    { label: "Substrate / stock", value: cleanSubstrateSummary(page.substrateSummary) },
+    { label: page.productionType === "small_format" ? "Small format" : "Install / finishing", value: page.productionType === "small_format" ? cleanSummaryLines(page.smallFormatSummary) : cleanFinishingSummary(page.installSummary) }
   ];
 
   return rows.filter((row) => String(row.value ?? "").trim().length > 0);
