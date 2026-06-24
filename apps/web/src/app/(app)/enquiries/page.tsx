@@ -25,20 +25,6 @@ function cardStyle() {
   return { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22 } as const;
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return "Not yet";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not yet";
-  return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" }).format(date);
-}
-
-function formatFileSize(sizeBytes: number | null | undefined): string {
-  if (!sizeBytes || !Number.isFinite(sizeBytes) || sizeBytes <= 0) return "";
-  if (sizeBytes < 1024) return `${sizeBytes} B`;
-  if (sizeBytes < 1024 * 1024) return `${Math.round(sizeBytes / 1024)} KB`;
-  return `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`;
-}
-
 function urgencyBadgeStyle(urgency: string | null | undefined) {
   const value = String(urgency ?? "Normal").toLowerCase();
   if (value === "critical" || value === "urgent") return { background: "#fff1f3", color: "#c01048", borderColor: "#fecdd6" } as const;
@@ -74,6 +60,12 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
 
   return (
     <div style={{ maxWidth: 1300, margin: "0 auto", display: "grid", gap: 16 }}>
+      <style>{`
+        .enquiry-preview-summary::-webkit-details-marker { display: none; }
+        .enquiry-preview-summary::marker { content: ""; }
+        .enquiry-preview-card .enquiry-preview-summary:hover { background: #f8fbff; }
+        .enquiry-preview-card[open] .enquiry-preview-summary { background: #fbfdff; }
+      `}</style>
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
@@ -96,35 +88,33 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
             </div>
           </div>
           <div style={{ display: "grid", gap: 12 }}>
-            {enquiries.map((enquiry) => (
-              <article key={enquiry.id} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 10 }}>
-                {(() => {
-                  const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
-                  const logoUrl = customerLogoUrl(linkedClient);
-                  return (
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                  <div style={{ display: "flex", gap: 12, alignItems: "start" }}>
-                    {logoUrl ? <img src={logoUrl} alt={`${enquiry.clientName} logo`} style={{ width: 46, height: 46, objectFit: "contain", borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff" }} /> : null}
-                    <div>
-                      <strong>{enquiry.clientName}</strong>
-                      <div style={{ color: "#475467", marginTop: 4 }}>{enquiry.requestSummary}</div>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <span style={{ borderRadius: 999, border: `1px solid ${urgencyBadgeStyle(enquiry.urgency).borderColor}`, ...urgencyBadgeStyle(enquiry.urgency), padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{enquiry.urgency || "Normal"}</span>
-                    <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status}</span>
-                  </div>
-                </div>
-                  );
-                })()}
-                <div style={{ color: "#667085", fontSize: 13 }}>
-                  {[enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ")}
-                </div>
+            {enquiries.map((enquiry) => {
+              const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
+              const logoUrl = customerLogoUrl(linkedClient);
+              const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
+              const contactLine = [enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ");
 
-                {(() => {
-                  const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
-                  return (
-                    <section style={{ display: "grid", gap: 8, borderTop: "1px solid #eef2f7", paddingTop: 10 }}>
+              return (
+                <details key={enquiry.id} className="enquiry-preview-card" style={{ border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", overflow: "hidden" }}>
+                  <summary className="enquiry-preview-summary" style={{ cursor: "pointer", listStyle: "none", padding: 12, display: "grid", gap: 8 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                      <div style={{ display: "flex", gap: 12, alignItems: "start", minWidth: 0 }}>
+                        {logoUrl ? <img src={logoUrl} alt={`${enquiry.clientName} logo`} style={{ width: 46, height: 46, objectFit: "contain", borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff", flex: "0 0 auto" }} /> : null}
+                        <div style={{ minWidth: 0 }}>
+                          <strong style={{ overflowWrap: "anywhere" }}>{enquiry.clientName}</strong>
+                          <div style={{ color: "#475467", marginTop: 4, overflowWrap: "anywhere" }}>{enquiry.requestSummary}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
+                        <span style={{ borderRadius: 999, border: `1px solid ${urgencyBadgeStyle(enquiry.urgency).borderColor}`, ...urgencyBadgeStyle(enquiry.urgency), padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{enquiry.urgency || "Normal"}</span>
+                        <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status}</span>
+                      </div>
+                    </div>
+                    {contactLine ? <div style={{ color: "#667085", fontSize: 13 }}>{contactLine}</div> : null}
+                  </summary>
+
+                  <div style={{ display: "grid", gap: 10, borderTop: "1px solid #eef2f7", padding: "10px 12px 12px" }}>
+                    <section style={{ display: "grid", gap: 8 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                         <strong style={{ fontSize: 13 }}>Correspondence</strong>
                         <span style={{ fontSize: 12, color: "#667085" }}>{enquiryCorrespondence.length} attached</span>
@@ -145,34 +135,34 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                         </form>
                       ) : null}
                     </section>
-                  );
-                })()}
 
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {enquiry.status !== "deleted" ? (
-                    <>
-                      <form action={createSurveyFromEnquiryAction} style={{ margin: 0 }}>
-                        <input type="hidden" name="enquiryId" value={enquiry.id} />
-                        <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Create site survey request</button>
-                      </form>
-                      <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
-                    </>
-                  ) : null}
-                  {enquiry.status !== "deleted" ? <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
-                  {enquiry.status === "deleted" ? (
-                    <form action={restoreEnquiryAction} style={{ margin: 0 }}>
-                      <input type="hidden" name="enquiryId" value={enquiry.id} />
-                      <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Restore enquiry</button>
-                    </form>
-                  ) : (
-                    <form action={deleteEnquiryAction} style={{ margin: 0 }}>
-                      <input type="hidden" name="enquiryId" value={enquiry.id} />
-                      <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Delete</button>
-                    </form>
-                  )}
-                </div>
-              </article>
-            ))}
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                      {enquiry.status !== "deleted" ? (
+                        <>
+                          <form action={createSurveyFromEnquiryAction} style={{ margin: 0 }}>
+                            <input type="hidden" name="enquiryId" value={enquiry.id} />
+                            <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Create site survey request</button>
+                          </form>
+                          <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
+                        </>
+                      ) : null}
+                      {enquiry.status !== "deleted" ? <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
+                      {enquiry.status === "deleted" ? (
+                        <form action={restoreEnquiryAction} style={{ margin: 0 }}>
+                          <input type="hidden" name="enquiryId" value={enquiry.id} />
+                          <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Restore enquiry</button>
+                        </form>
+                      ) : (
+                        <form action={deleteEnquiryAction} style={{ margin: 0 }}>
+                          <input type="hidden" name="enquiryId" value={enquiry.id} />
+                          <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Delete</button>
+                        </form>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              );
+            })}
             {enquiries.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No enquiries yet.</p> : null}
           </div>
         </section>
