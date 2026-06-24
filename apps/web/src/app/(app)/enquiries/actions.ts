@@ -24,9 +24,14 @@ function nullable(value: FormDataEntryValue | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function getAllStrings(formData: FormData, key: string): string[] {
+  return formData.getAll(key).map((value) => String(value ?? "").trim());
+}
+
 
 export async function createEnquiryAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
+  const user = await getRequiredSessionUser();
 
   const linkedCustomerId = nullable(formData.get("linkedCustomerId"));
   const linkedCustomer = linkedCustomerId ? await getCustomerById(activeTenant.tenantId, linkedCustomerId) : null;
@@ -37,20 +42,43 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     redirect("/enquiries?error=Client%20name%20and%20request%20summary%20are%20required");
   }
 
-  await createEnquiryForTenant(activeTenant.tenantId, {
+  const created = await createEnquiryForTenant(activeTenant.tenantId, {
     clientName,
     contactName: nullable(formData.get("contactName")) ?? ([linkedCustomer?.firstName, linkedCustomer?.lastName].filter(Boolean).join(" ") || null),
     email: nullable(formData.get("email")) ?? linkedCustomer?.email ?? null,
     phone: nullable(formData.get("phone")) ?? linkedCustomer?.phone ?? null,
     source: nullable(formData.get("source")),
-    urgency: nullable(formData.get("urgency")),
+    urgency: nullable(formData.get("urgency")) ?? "Normal",
     siteAddress: nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress : null),
     requestSummary,
     notes: nullable(formData.get("notes")),
     linkedCustomerId: linkedCustomer?.id ?? null
   });
 
-  redirect("/enquiries?message=Enquiry%20created");
+  const fileNames = getAllStrings(formData, "pendingCorrespondenceFileName");
+  const fileUrls = getAllStrings(formData, "pendingCorrespondenceFileUrl");
+  const storagePaths = getAllStrings(formData, "pendingCorrespondenceStoragePath");
+  const mimeTypes = getAllStrings(formData, "pendingCorrespondenceMimeType");
+  const sizeBytes = getAllStrings(formData, "pendingCorrespondenceSizeBytes");
+
+  for (let index = 0; index < fileNames.length; index += 1) {
+    const fileName = fileNames[index] ?? "";
+    const fileUrl = fileUrls[index] ?? "";
+    if (!fileName || !fileUrl) continue;
+    const rawSizeBytes = Number(sizeBytes[index] ?? 0);
+    await createEnquiryCorrespondenceForTenant(activeTenant.tenantId, {
+      enquiryId: created.id,
+      fileName,
+      fileUrl,
+      storagePath: storagePaths[index] || null,
+      mimeType: mimeTypes[index] || null,
+      sizeBytes: Number.isFinite(rawSizeBytes) && rawSizeBytes > 0 ? rawSizeBytes : null,
+      uploadedBy: user.email ?? user.id
+    });
+  }
+
+  const message = fileNames.length > 0 ? "Enquiry created and correspondence attached" : "Enquiry created";
+  redirect(`/enquiries?message=${encodeURIComponent(message)}`);
 }
 
 

@@ -5,8 +5,9 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listEnquiriesForTenant, listEnquiryCorrespondenceForTenant } from "@/server/enquiries";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
-import { attachEnquiryCorrespondenceAction, createEnquiryAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
+import { attachEnquiryCorrespondenceAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
 import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
+import { NewEnquiryForm } from "./NewEnquiryForm";
 
 
 type PageProps = {
@@ -22,12 +23,6 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
 function cardStyle() {
   return { background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22 } as const;
 }
-
-const inputStyle = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", width: "100%", boxSizing: "border-box" } as const;
-const textareaStyle = { minHeight: 110, borderRadius: 12, border: "1px solid #d0d5dd", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit" } as const;
-const buttonStyle = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" } as const;
-
-const urgencyOptions = ["Low", "Normal", "High", "Urgent", "Critical"];
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "Not yet";
@@ -88,33 +83,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
       </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <form action={createEnquiryAction} style={{ ...cardStyle(), display: "grid", gap: 12 }}>
-          <h2 style={{ margin: 0 }}>New enquiry</h2>
-          <select name="linkedCustomerId" defaultValue="" style={inputStyle}>
-            <option value="">New / unlinked client</option>
-            {clients.map((client) => (
-              <option key={client.id} value={client.id}>{client.displayName}</option>
-            ))}
-          </select>
-          <input name="clientName" placeholder="Client / business name (or choose existing above)" style={inputStyle} />
-          <input name="contactName" placeholder="Contact name" style={inputStyle} />
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <input name="phone" placeholder="Phone" style={inputStyle} />
-            <input name="email" placeholder="Email" style={inputStyle} />
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-            <input name="source" placeholder="Source (call / email / walk-in)" style={inputStyle} />
-            <select name="urgency" defaultValue="Normal" style={inputStyle}>
-              {urgencyOptions.map((option) => (
-                <option key={option} value={option}>{option}</option>
-              ))}
-            </select>
-          </div>
-          <input name="siteAddress" placeholder="Site address if relevant" style={inputStyle} />
-          <textarea name="requestSummary" placeholder="Rough idea of what they require" style={textareaStyle} />
-          <textarea name="notes" placeholder="Internal notes" style={textareaStyle} />
-          <button type="submit" style={buttonStyle}>Create enquiry</button>
-        </form>
+        <NewEnquiryForm clients={clients} />
 
         <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
