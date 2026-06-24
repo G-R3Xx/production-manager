@@ -76,14 +76,14 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return "No date";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+  return date.toLocaleDateString("en-AU", { timeZone: "Australia/Sydney", day: "numeric", month: "short" });
 }
 
 function formatDateTime(value: string | null | undefined): string {
   if (!value) return "No date";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("en-AU", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  return date.toLocaleString("en-AU", { timeZone: "Australia/Sydney", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
 }
 
 function plural(value: number, label: string): string {

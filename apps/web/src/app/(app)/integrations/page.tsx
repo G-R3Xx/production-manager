@@ -51,7 +51,7 @@ function formatDateTime(value: string | null | undefined) {
     return value;
   }
 
-  return date.toLocaleString();
+  return date.toLocaleString("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" });
 }
 
 export default async function IntegrationsPage({

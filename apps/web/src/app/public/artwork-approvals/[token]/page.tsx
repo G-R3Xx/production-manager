@@ -53,7 +53,7 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return "";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat("en-AU", { dateStyle: "medium" }).format(date);
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium" }).format(date);
 }
 
 const cardStyle = { background: "rgba(255,255,255,0.96)", border: "1px solid #e9d5ff", borderRadius: 26, padding: 22, boxShadow: "0 18px 48px rgba(88,28,135,0.08)" } as const;

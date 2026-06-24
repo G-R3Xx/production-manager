@@ -63,7 +63,7 @@ function formatDate(value: string | null | undefined): string {
   if (!value) return "Not yet";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "Not yet";
-  return new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" }).format(date);
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" }).format(date);
 }
 
 
