@@ -631,6 +631,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>("");
   const [artworkHours, setArtworkHours] = useState("");
   const [printMethod, setPrintMethod] = useState<PrintMethod>("");
+  const [printSetupHours, setPrintSetupHours] = useState("");
   const [mediaId, setMediaId] = useState("");
   const [ink, setInk] = useState<InkChoice>("");
   const [sides, setSides] = useState<SidesChoice>("");
@@ -747,6 +748,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
   const printed = printMethod !== "" && printMethod !== "no_print";
+  const printSetupComplete = !printed || numberValue(printSetupHours, 0) > 0;
   const needsMediaStep = printMethod === "roll_stock" || printMethod === "cut_vinyl";
   const needsInkStep = printMethod === "direct_print" || printMethod === "roll_stock";
   const width = numberValue(widthMm, 0);
@@ -806,17 +808,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       next.push({ key: "colour", label: "Colour", complete: Boolean(colour && selectedMainMaterial), icon: "4" });
       next.push({ key: "size", label: "Size", complete: width > 0 && height > 0, icon: "5" });
       next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: "6" });
-      next.push({ key: "print", label: "Print method", complete: Boolean(printMethod), icon: "7" });
+      next.push({ key: "print", label: "Print method", complete: Boolean(printMethod && printSetupComplete), icon: "7" });
       if (needsMediaStep) next.push({ key: "media", label: printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
       if (needsInkStep) next.push({ key: "ink", label: "Ink", complete: Boolean(ink), icon: "9" });
       if (printed) next.push({ key: "sides", label: isClearAcrylic ? "Sides / direction" : "Sides", complete: Boolean(sides && (!isClearAcrylic || printDirection)), icon: "•" });
       if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId && (laminateId === "none" || laminateHours.trim().length > 0)), icon: "•" });
       next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
-      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && printMethod), icon: "✓" });
+      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && printMethod && printSetupComplete), icon: "✓" });
     }
 
     return next;
-  }, [flowType, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
+  }, [flowType, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -852,6 +854,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     setArtworkChoice("");
     setArtworkHours("");
     setPrintMethod("");
+    setPrintSetupHours("");
     setMediaId("");
     setInk("");
     setSides("");
@@ -889,6 +892,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     setArtworkChoice("");
     setArtworkHours("");
     setPrintMethod("");
+    setPrintSetupHours("");
     setMediaId("");
     setInk("");
     setSides("");
@@ -906,8 +910,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     setActiveStep(next);
   }
 
+  function nextStepAfterPrint(method: PrintMethod): StepKey {
+    if (method === "roll_stock" || method === "cut_vinyl") return "media";
+    if (method === "direct_print") return "ink";
+    return "finishing";
+  }
+
   function setPrint(nextMethod: Exclude<PrintMethod, "">) {
     setPrintMethod(nextMethod);
+    setPrintSetupHours("");
     setMediaId("");
     if (nextMethod === "no_print" || nextMethod === "cut_vinyl") setInk("");
     if (nextMethod === "no_print") {
@@ -915,9 +926,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       setPrintDirection("");
       setLaminateId("none");
       setLaminateHours("");
+      setActiveStep("finishing");
     }
     setUnitPriceOverridden(false);
-    setTimeout(() => setActiveStep(nextMethod === "roll_stock" || nextMethod === "cut_vinyl" ? "media" : nextMethod === "direct_print" ? "ink" : "finishing"), 0);
   }
 
   function toggleFinishing(key: string) {
@@ -969,6 +980,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       if (artworkChoice === "required") {
         const hours = numberValue(artworkHours, 0);
         if (hours > 0) rows.push({ label: "Artwork", detail: "Artwork/design time", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+      }
+
+      if (printed) {
+        const hours = numberValue(printSetupHours, 0);
+        const methodLabel = printMethods.find((item) => item.key === printMethod)?.label ?? "Print";
+        if (hours > 0) rows.push({ label: "Print setup labour", detail: methodLabel, amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
       }
 
       if (selectedMedia && needsMediaStep && areaSqm > 0) {
@@ -1125,7 +1142,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, printed, printSetupHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1204,6 +1221,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       width > 0 && height > 0 ? `${width} × ${height}mm` : null,
       artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       printMethods.find((item) => item.key === printMethod)?.label,
+      printed && numberValue(printSetupHours, 0) > 0 ? `Print setup ${usage(numberValue(printSetupHours, 0))}hr` : null,
       selectedMediaName || null,
       inkChoices.find((item) => item.key === ink)?.label,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
@@ -1218,7 +1236,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     ? Boolean(serviceType && (serviceType === "pickup" || serviceType === "delivery" || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
     : flowType === "small_format"
       ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0)
-      : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0));
+      : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0));
 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
@@ -1581,6 +1599,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               </button>
             ))}
           </div>
+          {printed ? (
+            <LabourPrompt
+              label="Print setup labour hours"
+              value={printSetupHours}
+              onChange={(value) => { setPrintSetupHours(value); setUnitPriceOverridden(false); }}
+              onContinue={() => setActiveStep(nextStepAfterPrint(printMethod))}
+              labourRate={labourRate}
+            />
+          ) : null}
         </div>
       );
     }
@@ -2025,6 +2052,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 <SummaryRow label="Print" value={printMethods.find((item) => item.key === printMethod)?.label} />
+                <SummaryRow label="Print setup" value={printed && printSetupHours ? `${usage(numberValue(printSetupHours, 0))}hr` : undefined} />
                 <SummaryRow label="Media" value={selectedMedia?.name} />
                 <SummaryRow label="Ink" value={inkChoices.find((item) => item.key === ink)?.label} />
                 <SummaryRow label="Laminate" value={selectedLaminateName || undefined} />
