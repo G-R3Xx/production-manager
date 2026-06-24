@@ -47,8 +47,10 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           backdropFilter: "blur(12px)",
           padding: 18,
           display: "grid",
-          gridTemplateRows: "auto auto 1fr auto",
+          gridTemplateRows: "auto auto minmax(0, 1fr) auto",
           gap: 16,
+          minHeight: 0,
+          overflow: "hidden",
           position: "sticky",
           top: 0,
           height: "100vh",
@@ -139,13 +141,24 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           ) : null}
         </div>
 
-        <nav style={{ display: "grid", gap: 4, alignContent: "start" }}>
+        <nav
+          style={{
+            display: "grid",
+            gap: 4,
+            alignContent: "start",
+            minHeight: 0,
+            overflowY: "auto",
+            paddingRight: 4,
+            overscrollBehavior: "contain"
+          }}
+          aria-label="Primary navigation"
+        >
           {navItems.map((item) => (
             <AppNavLink key={item.href} href={item.href} label={item.label} emoji={item.emoji} />
           ))}
         </nav>
 
-        <div style={{ display: "grid", gap: 10 }}>
+        <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
           <div style={{ fontSize: 12, color: "#64748b", lineHeight: 1.5, padding: "0 8px", overflow: "hidden", textOverflow: "ellipsis" }}>
             Signed in as <strong style={{ color: "#334155" }}>{user.email ?? "Unknown user"}</strong>
           </div>
