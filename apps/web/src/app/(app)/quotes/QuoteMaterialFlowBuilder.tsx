@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
 
 type QuoteMaterial = {
@@ -1975,6 +1975,22 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     );
   }
 
+  const handleBuilderKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
+    const target = event.target as HTMLElement | null;
+    const tagName = target?.tagName?.toLowerCase();
+    const isPlainEnter = event.key === "Enter" && !event.shiftKey && !event.ctrlKey && !event.altKey && !event.metaKey;
+
+    if (isPlainEnter && (tagName === "input" || tagName === "select")) {
+      event.preventDefault();
+    }
+  };
+
+  const handleBuilderSubmit = (event: FormEvent<HTMLFormElement>) => {
+    if (activeStep !== "review" || !canSave) {
+      event.preventDefault();
+    }
+  };
+
   const headerGradient = flowType === "component"
     ? "linear-gradient(135deg, #7c2d12 0%, #f97316 58%, #fdba74 100%)"
     : flowType === "service"
@@ -1984,7 +2000,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
 
   return (
-    <form action={addQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
+    <form action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="productName" value={lineName} />
       <input type="hidden" name="optionSummary" value={optionSummary} />
@@ -2087,7 +2103,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
           <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current unsaved line</span>
           <span style={{ color: optionSummary ? "#111827" : "#667085" }}>{optionSummary || "Complete the card flow above to build this quote line."}</span>
         </div>
-        <button type="submit" disabled={!canSave} style={{ ...darkButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save quote line" : "Complete required cards before saving"}</button>
+        <button type="submit" disabled={!canSave || activeStep !== "review"} style={{ ...darkButton, opacity: canSave && activeStep === "review" ? 1 : 0.45, cursor: canSave && activeStep === "review" ? "pointer" : "not-allowed" }}>{activeStep === "review" ? canSave ? "Save quote line" : "Complete required cards before saving" : "Review before saving"}</button>
       </div>
     </form>
   );
