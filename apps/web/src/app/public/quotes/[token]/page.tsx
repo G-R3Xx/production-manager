@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { getCustomerById } from "@/server/customers";
+import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
@@ -216,19 +216,23 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   await markQuoteViewedByToken(token);
 
-  const [lines, companySettings, linkedClient, sourceEnquiry, sourceSurvey] = await Promise.all([
+  const [lines, companySettings, linkedClient, sourceSurvey] = await Promise.all([
     listQuoteLines(quote.id),
     getCompanySettingsByTenantId(quote.tenantId),
     getCustomerById(quote.tenantId, quote.linkedCustomerId),
-    quote.enquiryId ? getEnquiryById(quote.tenantId, quote.enquiryId) : Promise.resolve(null),
     quote.surveyRequestId ? getSurveyRequestById(quote.tenantId, quote.surveyRequestId) : Promise.resolve(null)
   ]);
+
+  const sourceEnquiryId = quote.enquiryId || sourceSurvey?.enquiryId || null;
+  const sourceEnquiry = sourceEnquiryId ? await getEnquiryById(quote.tenantId, sourceEnquiryId) : null;
   const subtotal = lines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
   const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const legalName = companySettings?.companyLegalName && companySettings.companyLegalName !== companyName ? companySettings.companyLegalName : null;
+  const clientLogoUrl = customerLogoUrl(linkedClient);
+  const clientPurchaseOrderNumber = sourceEnquiry?.clientPurchaseOrderNumber || null;
   const clientEmail = quote.email || sourceEnquiry?.email || linkedClient?.email || null;
   const clientPhone = quote.phone || sourceSurvey?.phone || sourceEnquiry?.phone || linkedClient?.phone || null;
   const clientAddress = linkedClient?.payloadJson.billingAddress || null;
@@ -241,41 +245,43 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
       <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
         <section style={{ ...cardStyle, display: "grid", gap: 18 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 20, alignItems: "start" }}>
-            <div style={{ display: "flex", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
-              <img src={companyLogoUrl} alt={`${companyName} logo`} style={{ width: 205, maxWidth: "100%", maxHeight: 115, height: "auto", objectFit: "contain", borderRadius: 16, background: "#fff" }} />
-              <div style={{ display: "grid", gap: 5, minWidth: 230 }}>
-                <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote from</p>
-                <h1 style={{ margin: 0, fontSize: 30, letterSpacing: "-0.04em" }}>{companyName}</h1>
-                {legalName ? <span style={{ color: "#475467", fontSize: 13 }}>{legalName}</span> : null}
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 28, alignItems: "start" }}>
+            <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
+              <img src={companyLogoUrl} alt={`${companyName} logo`} style={{ width: 230, maxWidth: "100%", maxHeight: 105, height: "auto", objectFit: "contain", objectPosition: "left center", borderRadius: 14, background: "#fff" }} />
+              <div style={{ display: "grid", gap: 5, maxWidth: 420 }}>
+                {legalName ? <strong style={{ color: "#111827", fontSize: 14 }}>{legalName}</strong> : null}
                 {companySettings?.abn ? <span style={{ color: "#475467", fontSize: 13 }}>ABN {companySettings.abn}</span> : null}
                 {[companySettings?.phone, companySettings?.email].filter(Boolean).length ? <span style={{ color: "#475467", fontSize: 13 }}>{[companySettings?.phone, companySettings?.email].filter(Boolean).join(" · ")}</span> : null}
-                {companySettings?.address ? <span style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap" }}>{companySettings.address}</span> : null}
+                {companySettings?.address ? <span style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{companySettings.address}</span> : null}
               </div>
             </div>
-            <div style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 8 }}>
+            <div style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 10, minWidth: 235 }}>
               <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{quote.status.replace(/_/g, " ")}</span>
-              <div style={{ display: "grid", gap: 4 }}>
+              <div style={{ display: "grid", gap: 5 }}>
                 <span style={{ color: "#667085", fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Quote number</span>
-                <strong style={{ fontSize: 28 }}>{quote.quoteNumber ?? "Quote"}</strong>
+                <h1 style={{ margin: 0, fontSize: 30, letterSpacing: "-0.04em" }}>{quote.quoteNumber ?? "Quote"}</h1>
                 <span style={{ color: "#667085", fontSize: 13 }}>Issued {formatDate(quote.sentAt ?? quote.createdAt)}</span>
               </div>
             </div>
           </div>
 
           <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
-            <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 7 }}>
-              <strong style={{ fontSize: 16 }}>Client details</strong>
-              <span style={{ color: "#111827", fontWeight: 850 }}>{quote.clientName}</span>
-              {quote.contactName ? <span style={{ color: "#475467" }}>Contact: {quote.contactName}</span> : null}
-              {clientEmail ? <span style={{ color: "#475467" }}>Email: {clientEmail}</span> : null}
-              {clientPhone ? <span style={{ color: "#475467" }}>Phone: {clientPhone}</span> : null}
-              {clientAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Address: {String(clientAddress)}</span> : null}
+            <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gridTemplateColumns: clientLogoUrl ? "72px 1fr" : "1fr", gap: 12, alignItems: "start" }}>
+              {clientLogoUrl ? <img src={clientLogoUrl} alt={`${quote.clientName} logo`} style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 14, border: "1px solid #e5e7eb", background: "#fff", padding: 4 }} /> : null}
+              <div style={{ display: "grid", gap: 7 }}>
+                <strong style={{ fontSize: 16 }}>Client details</strong>
+                <span style={{ color: "#111827", fontWeight: 850 }}>{quote.clientName}</span>
+                {quote.contactName ? <span style={{ color: "#475467" }}>Contact: {quote.contactName}</span> : null}
+                {clientEmail ? <span style={{ color: "#475467" }}>Email: {clientEmail}</span> : null}
+                {clientPhone ? <span style={{ color: "#475467" }}>Phone: {clientPhone}</span> : null}
+                {clientAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Address: {String(clientAddress)}</span> : null}
+              </div>
             </div>
             <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 7 }}>
               <strong style={{ fontSize: 16 }}>Job / quote details</strong>
               <span style={{ color: "#111827", fontWeight: 850 }}>{jobName}</span>
               <span style={{ color: "#475467" }}>Reference: {quote.quoteNumber ?? "Quote"}</span>
+              {clientPurchaseOrderNumber ? <span style={{ color: "#475467" }}>Client PO: <strong>{clientPurchaseOrderNumber}</strong></span> : null}
               {siteAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Site: {String(siteAddress)}</span> : null}
             </div>
           </div>

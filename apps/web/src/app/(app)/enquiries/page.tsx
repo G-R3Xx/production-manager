@@ -93,6 +93,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
               const logoUrl = customerLogoUrl(linkedClient);
               const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
               const contactLine = [enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ");
+              const purchaseOrderLine = enquiry.clientPurchaseOrderNumber ? `PO: ${enquiry.clientPurchaseOrderNumber}` : "";
 
               return (
                 <details key={enquiry.id} className="enquiry-preview-card" style={{ border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", overflow: "hidden" }}>
@@ -111,6 +112,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                       </div>
                     </div>
                     {contactLine ? <div style={{ color: "#667085", fontSize: 13 }}>{contactLine}</div> : null}
+                    {purchaseOrderLine ? <div style={{ color: "#475467", fontSize: 13, fontWeight: 800 }}>{purchaseOrderLine}</div> : null}
                   </summary>
 
                   <div style={{ display: "grid", gap: 10, borderTop: "1px solid #eef2f7", padding: "10px 12px 12px" }}>

@@ -210,6 +210,7 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
         </select>
       </div>
       <input name="siteAddress" value={siteAddress} onChange={(event) => setSiteAddress(event.currentTarget.value)} placeholder="Site address if relevant" style={inputStyle} />
+      <input name="clientPurchaseOrderNumber" placeholder="Client purchase order number (optional)" style={inputStyle} />
       <textarea name="requestSummary" placeholder="Rough idea of what they require" style={textareaStyle} />
       <textarea name="notes" placeholder="Internal notes" style={textareaStyle} />
 

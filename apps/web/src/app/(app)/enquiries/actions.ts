@@ -51,6 +51,7 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     urgency: nullable(formData.get("urgency")) ?? "Normal",
     siteAddress: nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress : null),
     requestSummary,
+    clientPurchaseOrderNumber: nullable(formData.get("clientPurchaseOrderNumber")),
     notes: nullable(formData.get("notes")),
     linkedCustomerId: linkedCustomer?.id ?? null
   });

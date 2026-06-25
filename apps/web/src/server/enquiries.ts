@@ -34,6 +34,7 @@ export type EnquiryRecord = {
   urgency: string | null;
   siteAddress: string | null;
   requestSummary: string;
+  clientPurchaseOrderNumber: string | null;
   notes: string | null;
   status: string;
   linkedCustomerId: string | null;
@@ -41,7 +42,17 @@ export type EnquiryRecord = {
   updatedAt: string;
 };
 
+async function ensureEnquiryClientPurchaseOrderColumn(): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+
+  await pool.query(`
+    ALTER TABLE app.enquiries
+      ADD COLUMN IF NOT EXISTS client_purchase_order_number varchar(120)
+  `);
+}
+
 export async function listEnquiriesForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<EnquiryRecord[]> {
+  await ensureEnquiryClientPurchaseOrderColumn();
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,
@@ -54,6 +65,7 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
       urgency,
       site_address as "siteAddress",
       request_summary as "requestSummary",
+      client_purchase_order_number as "clientPurchaseOrderNumber",
       notes,
       status,
       linked_customer_id as "linkedCustomerId",
@@ -68,6 +80,7 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
 }
 
 export async function getEnquiryById(tenantId: string, enquiryId: string): Promise<EnquiryRecord | null> {
+  await ensureEnquiryClientPurchaseOrderColumn();
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,
@@ -80,6 +93,7 @@ export async function getEnquiryById(tenantId: string, enquiryId: string): Promi
       urgency,
       site_address as "siteAddress",
       request_summary as "requestSummary",
+      client_purchase_order_number as "clientPurchaseOrderNumber",
       notes,
       status,
       linked_customer_id as "linkedCustomerId",
@@ -101,14 +115,16 @@ export async function createEnquiryForTenant(tenantId: string, input: {
   urgency?: string | null;
   siteAddress?: string | null;
   requestSummary: string;
+  clientPurchaseOrderNumber?: string | null;
   notes?: string | null;
   linkedCustomerId?: string | null;
 }): Promise<{ id: string }> {
+  await ensureEnquiryClientPurchaseOrderColumn();
   const result = await pool.query<{ id: string }>(`
     INSERT INTO app.enquiries (
-      tenant_id, client_name, contact_name, email, phone, source, urgency, site_address, request_summary, notes, status, linked_customer_id, created_at, updated_at
+      tenant_id, client_name, contact_name, email, phone, source, urgency, site_address, request_summary, client_purchase_order_number, notes, status, linked_customer_id, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::varchar,$3::varchar,$4::varchar,$5::varchar,$6::varchar,$7::varchar,$8::text,$9::text,$10::text,'new',$11::uuid,now(),now()
+      $1::uuid,$2::varchar,$3::varchar,$4::varchar,$5::varchar,$6::varchar,$7::varchar,$8::text,$9::text,$10::varchar,$11::text,'new',$12::uuid,now(),now()
     ) RETURNING id
   `, [
     tenantId,
@@ -120,6 +136,7 @@ export async function createEnquiryForTenant(tenantId: string, input: {
     input.urgency ?? null,
     input.siteAddress ?? null,
     input.requestSummary,
+    input.clientPurchaseOrderNumber ?? null,
     input.notes ?? null,
     input.linkedCustomerId ?? null
   ]);

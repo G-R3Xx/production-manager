@@ -257,6 +257,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
                 </div>
                 <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>{survey.siteAddress || "No site address recorded"}</p>
+                {enquiry?.clientPurchaseOrderNumber ? <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>PO: <strong>{enquiry.clientPurchaseOrderNumber}</strong></p> : null}
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   {surveyPhotos.length ? <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 9px", fontSize: 12, fontWeight: 850 }}>{surveyPhotos.length} photo{surveyPhotos.length === 1 ? "" : "s"} copied to notes</span> : null}
                   <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 10, border: "1px solid #cbd5e1", color: "#111827", fontSize: 13, fontWeight: 900, padding: "0 10px" }}>Open survey</Link>
@@ -278,7 +279,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         <details open={!selectedQuote || Boolean(enquiry || survey)} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
           <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef" }}>New draft quote</summary>
           <form action={createQuoteDraftAction} style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
+            <input type="hidden" name="enquiryId" value={enquiry?.id ?? survey?.enquiryId ?? ""} />
             <input type="hidden" name="surveyRequestId" value={survey?.id ?? ""} />
             <input type="hidden" name="linkedCustomerId" value={sourceLinkedCustomerId ?? ""} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
