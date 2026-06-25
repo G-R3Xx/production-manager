@@ -59,7 +59,7 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
         </p>
       </section>
 
-      <form action={saveCompanySettingsAction} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 24, display: "grid", gap: 16 }}>
+      <form action={saveCompanySettingsAction} encType="multipart/form-data" style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 24, display: "grid", gap: 16 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
           <label style={{ display: "grid", gap: 8 }}>
             <span style={{ fontWeight: 600 }}>Legal name</span>
@@ -88,6 +88,39 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
             <input name="defaultCurrency" maxLength={3} defaultValue={settings?.defaultCurrency ?? "AUD"} style={{ minHeight: 46, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", fontSize: 16, textTransform: "uppercase" }} />
           </label>
         </div>
+
+        <section style={{ border: "1px solid #dbeafe", background: "#f8fbff", borderRadius: 18, padding: 18, display: "grid", gap: 14 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#2563eb" }}>Client correspondence branding</p>
+            <h2 style={{ margin: "6px 0 6px", fontSize: 20 }}>Workspace company logo</h2>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
+              This logo is used on client-facing correspondence such as public quote links and artwork approval pages.
+            </p>
+          </div>
+
+          {settings?.companyLogoUrl ? (
+            <div style={{ border: "1px solid #d0d5dd", background: "#fff", borderRadius: 16, padding: 14, display: "inline-grid", width: "fit-content", gap: 8 }}>
+              <img src={settings.companyLogoUrl} alt="Current workspace company logo" style={{ maxWidth: 240, maxHeight: 120, objectFit: "contain", display: "block" }} />
+              <small style={{ color: "#667085" }}>Current client correspondence logo</small>
+            </div>
+          ) : null}
+
+          <input type="hidden" name="companyLogoStoragePath" defaultValue={settings?.companyLogoStoragePath ?? ""} />
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Upload / change logo</span>
+              <input type="file" name="companyLogoFile" accept="image/*" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #bfdbfe", padding: "10px 14px", fontSize: 15, background: "#fff" }} />
+              <small style={{ color: "#475467" }}>PNG, SVG, JPG or WebP. Keep it under 5MB.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Logo URL</span>
+              <input name="companyLogoUrl" defaultValue={settings?.companyLogoUrl ?? ""} placeholder="or paste logo URL" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #bfdbfe", padding: "0 14px", fontSize: 16, background: "#fff" }} />
+              <small style={{ color: "#475467" }}>Clear this field and save to remove the workspace logo.</small>
+            </label>
+          </div>
+        </section>
 
         <section style={{ border: "1px solid #bfdbfe", background: "#eff6ff", borderRadius: 18, padding: 18, display: "grid", gap: 14 }}>
           <div>

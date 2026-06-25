@@ -93,6 +93,8 @@ export const tenantSettings = appSchema.table("tenant_settings", {
   phone: varchar("phone", { length: 50 }),
   email: varchar("email", { length: 255 }),
   address: text("address"),
+  companyLogoUrl: text("company_logo_url"),
+  companyLogoStoragePath: text("company_logo_storage_path"),
   defaultCurrency: varchar("default_currency", { length: 3 }).notNull().default("AUD"),
   globalMarkupMultiplier: numeric("global_markup_multiplier", { precision: 8, scale: 4 }).notNull().default("1.5"),
   globalProfitMultiplier: numeric("global_profit_multiplier", { precision: 8, scale: 4 }).notNull().default("1.2"),

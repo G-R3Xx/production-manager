@@ -227,6 +227,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
+  const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const legalName = companySettings?.companyLegalName && companySettings.companyLegalName !== companyName ? companySettings.companyLegalName : null;
   const clientEmail = quote.email || sourceEnquiry?.email || linkedClient?.email || null;
   const clientPhone = quote.phone || sourceSurvey?.phone || sourceEnquiry?.phone || linkedClient?.phone || null;
@@ -242,7 +243,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
         <section style={{ ...cardStyle, display: "grid", gap: 18 }}>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 20, alignItems: "start" }}>
             <div style={{ display: "flex", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
-              <img src="/brand/production-manager-logo.svg" alt={`${companyName} logo`} style={{ width: 205, maxWidth: "100%", height: "auto", objectFit: "contain", borderRadius: 16, background: "#fff" }} />
+              <img src={companyLogoUrl} alt={`${companyName} logo`} style={{ width: 205, maxWidth: "100%", maxHeight: 115, height: "auto", objectFit: "contain", borderRadius: 16, background: "#fff" }} />
               <div style={{ display: "grid", gap: 5, minWidth: 230 }}>
                 <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote from</p>
                 <h1 style={{ margin: 0, fontSize: 30, letterSpacing: "-0.04em" }}>{companyName}</h1>

@@ -34,6 +34,8 @@ export type CompanySettingsRecord = {
   phone: string | null;
   email: string | null;
   address: string | null;
+  companyLogoUrl: string | null;
+  companyLogoStoragePath: string | null;
   defaultCurrency: string;
   globalMarkupMultiplier: string;
   globalProfitMultiplier: string;
@@ -80,6 +82,8 @@ async function ensurePricingSettingsColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS quote_labour_rate numeric(10,2) NOT NULL DEFAULT 66,
       ADD COLUMN IF NOT EXISTS quote_ink_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 10,
       ADD COLUMN IF NOT EXISTS quote_mono_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 4,
+      ADD COLUMN IF NOT EXISTS company_logo_url text,
+      ADD COLUMN IF NOT EXISTS company_logo_storage_path text,
       ADD COLUMN IF NOT EXISTS quote_signage_size_presets_json jsonb NOT NULL DEFAULT '${sizePresetDefaultSql(defaultSignageSizePresets)}'::jsonb,
       ADD COLUMN IF NOT EXISTS quote_small_size_presets_json jsonb NOT NULL DEFAULT '${sizePresetDefaultSql(defaultSmallSizePresets)}'::jsonb
   `);
@@ -104,6 +108,8 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
         ts.phone AS "phone",
         ts.email AS "email",
         ts.address AS "address",
+        ts.company_logo_url AS "companyLogoUrl",
+        ts.company_logo_storage_path AS "companyLogoStoragePath",
         COALESCE(ts.default_currency, 'AUD') AS "defaultCurrency",
         COALESCE(ts.global_markup_multiplier, 1.5)::text AS "globalMarkupMultiplier",
         COALESCE(ts.global_profit_multiplier, 1.2)::text AS "globalProfitMultiplier",
@@ -153,6 +159,8 @@ export async function updateCompanySettingsByTenantId(
         phone,
         email,
         address,
+        company_logo_url,
+        company_logo_storage_path,
         default_currency,
         global_markup_multiplier,
         global_profit_multiplier,
@@ -165,7 +173,7 @@ export async function updateCompanySettingsByTenantId(
         proof_terms,
         job_terms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::numeric,$10::numeric,$11::numeric,$12::numeric,$13::numeric,$14::jsonb,$15::jsonb,$16,$17,$18)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::jsonb,$17::jsonb,$18,$19,$20)
       ON CONFLICT (tenant_id)
       DO UPDATE SET
         company_legal_name = EXCLUDED.company_legal_name,
@@ -174,6 +182,8 @@ export async function updateCompanySettingsByTenantId(
         phone = EXCLUDED.phone,
         email = EXCLUDED.email,
         address = EXCLUDED.address,
+        company_logo_url = EXCLUDED.company_logo_url,
+        company_logo_storage_path = EXCLUDED.company_logo_storage_path,
         default_currency = EXCLUDED.default_currency,
         global_markup_multiplier = EXCLUDED.global_markup_multiplier,
         global_profit_multiplier = EXCLUDED.global_profit_multiplier,
@@ -195,6 +205,8 @@ export async function updateCompanySettingsByTenantId(
       input.phone,
       input.email,
       input.address,
+      input.companyLogoUrl,
+      input.companyLogoStoragePath,
       input.defaultCurrency,
       input.globalMarkupMultiplier || "1.5",
       input.globalProfitMultiplier || "1.2",

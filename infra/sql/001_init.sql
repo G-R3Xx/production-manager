@@ -128,6 +128,8 @@ CREATE TABLE IF NOT EXISTS app.tenant_settings (
   phone varchar(50),
   email varchar(255),
   address text,
+  company_logo_url text,
+  company_logo_storage_path text,
   default_currency varchar(3) NOT NULL DEFAULT 'AUD',
   quote_terms text,
   proof_terms text,

@@ -129,6 +129,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
     getCompanySettingsByTenantId(approval.tenantId)
   ]);
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
+  const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const isApproved = approval.status === "approved";
   const hasChanges = approval.status === "changes_requested";
 
@@ -139,11 +140,14 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
         {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
         <section style={{ ...cardStyle, display: "grid", gridTemplateColumns: "1fr auto", gap: 18, alignItems: "start" }}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approval from {companyName}</p>
-            <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>{approval.projectName || approval.drawingTitle || approval.clientName}</h1>
-            <p style={{ margin: 0, color: "#667085" }}>{approval.clientName}{approval.contactName ? ` · ${approval.contactName}` : ""}</p>
-            {approval.clientMessage ? <p style={{ margin: "4px 0 0", color: "#475467", lineHeight: 1.6 }}>{approval.clientMessage}</p> : <p style={{ margin: "4px 0 0", color: "#475467", lineHeight: 1.6 }}>Please review the proof pages below.</p>}
+          <div style={{ display: "flex", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
+            <img src={companyLogoUrl} alt={`${companyName} logo`} style={{ width: 170, maxWidth: "100%", maxHeight: 92, height: "auto", objectFit: "contain", borderRadius: 16, background: "#fff" }} />
+            <div style={{ display: "grid", gap: 8, minWidth: 260 }}>
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approval from {companyName}</p>
+              <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>{approval.projectName || approval.drawingTitle || approval.clientName}</h1>
+              <p style={{ margin: 0, color: "#667085" }}>{approval.clientName}{approval.contactName ? ` · ${approval.contactName}` : ""}</p>
+              {approval.clientMessage ? <p style={{ margin: "4px 0 0", color: "#475467", lineHeight: 1.6 }}>{approval.clientMessage}</p> : <p style={{ margin: "4px 0 0", color: "#475467", lineHeight: 1.6 }}>Please review the proof pages below.</p>}
+            </div>
           </div>
           <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
             <span style={{ borderRadius: 999, background: isApproved ? "#dcfae6" : hasChanges ? "#fff7ed" : "#f5f3ff", color: isApproved ? "#067647" : hasChanges ? "#c2410c" : "#6d28d9", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{approval.status.replace(/_/g, " ")}</span>
