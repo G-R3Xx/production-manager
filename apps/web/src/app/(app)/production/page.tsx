@@ -25,7 +25,9 @@ import {
   pushProductionQuoteToMyobOrderAction
 } from "./actions";
 import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
-import { getQuoteDraftById } from "@/server/quotes";
+import { getQuoteDraftById, listQuoteDraftsForTenant } from "@/server/quotes";
+import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -605,9 +607,11 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   const selectedParam = readParam(params, "selected");
   const filter = readParam(params, "filter");
 
-  const [allJobs, approvedArtwork] = await Promise.all([
+  const [allJobs, approvedArtwork, quoteDrafts, clients] = await Promise.all([
     listProductionJobsForTenant(tenantId, { includeDeleted: true }),
-    listApprovedArtworkReadyForProduction(tenantId)
+    listApprovedArtworkReadyForProduction(tenantId),
+    listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
+    listCustomersForTenant(tenantId)
   ]);
   const deletedJobCount = allJobs.filter((job) => job.status === "deleted").length;
   const jobs = filter === "deleted" ? allJobs.filter((job) => job.status === "deleted") : allJobs.filter((job) => job.status !== "deleted");
@@ -619,6 +623,13 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   if (selectedJob) {
     [items, steps, selectedQuote] = await Promise.all([listProductionItemsForJob(selectedJob.id), listProductionStepsForJob(selectedJob.id), getQuoteDraftById(tenantId, selectedJob.quoteId)]);
   }
+  const customerById = new Map(clients.map((client) => [client.id, client]));
+  const quoteById = new Map(quoteDrafts.map((quote) => [quote.id, quote]));
+  const logoForQuoteId = (quoteId: string | null | undefined) => {
+    const quote = quoteId ? quoteById.get(quoteId) : null;
+    return customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+  };
+  const selectedJobLogoUrl = logoForQuoteId(selectedJob?.quoteId);
   const complete = pageCompletion(steps);
   const readyCount = allJobs.filter((job) => job.status === "ready_to_start").length;
   const inProductionCount = allJobs.filter((job) => job.status === "in_production").length;
@@ -670,10 +681,14 @@ export default async function ProductionPage({ searchParams }: PageProps) {
           {jobs.map((job) => {
             const tone = statusTone(job.status);
             const isSelected = selectedJob?.id === job.id;
+            const jobLogoUrl = logoForQuoteId(job.quoteId);
             return (
               <a key={job.id} href={`/production?selected=${job.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ border: isSelected ? "2px solid #2563eb" : "1px solid #dbe4f0", borderRadius: 20, padding: 16, background: isSelected ? "#eff6ff" : "#fff", textDecoration: "none", color: "inherit", display: "grid", gap: 10, boxShadow: isSelected ? "0 16px 34px rgba(37,99,235,0.14)" : "0 10px 24px rgba(15,23,42,0.04)" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
-                  <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.clientName}</strong>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={jobLogoUrl} name={job.clientName} size={44} radius={12} padding={4} />
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.clientName}</strong>
+                  </div>
                   <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950 }}>{statusLabel(job.status)}</span>
                 </div>
                 <span style={{ color: "#475467", fontSize: 13 }}>{job.quoteNumber ?? "No quote number"}{job.projectName ? ` · ${job.projectName}` : ""}</span>
@@ -712,15 +727,21 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             <p style={{ margin: "4px 0 0", color: "#667085" }}>Approved artwork packs that do not yet have a production job.</p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-            {approvedArtwork.map((approval) => (
-              <form key={approval.approvalId} action={createProductionJobFromArtworkAction} style={{ border: "1px solid #dbe4f0", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 8 }}>
-                <input type="hidden" name="approvalId" value={approval.approvalId} />
-                <strong>{approval.clientName}</strong>
-                <span style={{ color: "#475467", fontSize: 13 }}>{approval.quoteNumber ?? "Quote"}{approval.projectName ? ` · ${approval.projectName}` : ""}</span>
-                <span style={{ color: "#667085", fontSize: 12 }}>{approval.pageCount} approved proof page{approval.pageCount === "1" ? "" : "s"} · Approved {formatDateTime(approval.approvedAt)}</span>
-                <button type="submit" style={buttonStyle}>Create production job</button>
-              </form>
-            ))}
+            {approvedArtwork.map((approval) => {
+              const approvalLogoUrl = logoForQuoteId(approval.quoteId);
+              return (
+                <form key={approval.approvalId} action={createProductionJobFromArtworkAction} style={{ border: "1px solid #dbe4f0", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 8 }}>
+                  <input type="hidden" name="approvalId" value={approval.approvalId} />
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={approvalLogoUrl} name={approval.clientName} size={44} radius={12} padding={4} />
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
+                  </div>
+                  <span style={{ color: "#475467", fontSize: 13 }}>{approval.quoteNumber ?? "Quote"}{approval.projectName ? ` · ${approval.projectName}` : ""}</span>
+                  <span style={{ color: "#667085", fontSize: 12 }}>{approval.pageCount} approved proof page{approval.pageCount === "1" ? "" : "s"} · Approved {formatDateTime(approval.approvedAt)}</span>
+                  <button type="submit" style={buttonStyle}>Create production job</button>
+                </form>
+              );
+            })}
           </div>
         </section>
       ) : null}
@@ -729,10 +750,13 @@ export default async function ProductionPage({ searchParams }: PageProps) {
         <section style={{ display: "grid", gap: 18 }}>
           <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "start" }}>
-              <div style={{ display: "grid", gap: 6 }}>
-                <p style={{ margin: 0, color: "#667085", fontWeight: 850 }}>{selectedJob.quoteNumber ?? "Production job"}</p>
-                <h2 style={{ margin: 0, fontSize: 32 }}>{selectedJob.clientName}</h2>
-                <p style={{ margin: 0, color: "#475467" }}>{selectedJob.projectName ?? "Production from approved artwork"}{selectedJob.contactName ? ` · ${selectedJob.contactName}` : ""}</p>
+              <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
+                <ClientLogoBadge logoUrl={selectedJobLogoUrl} name={selectedJob.clientName} size={62} radius={18} padding={5} />
+                <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
+                  <p style={{ margin: 0, color: "#667085", fontWeight: 850 }}>{selectedJob.quoteNumber ?? "Production job"}</p>
+                  <h2 style={{ margin: 0, fontSize: 32, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedJob.clientName}</h2>
+                  <p style={{ margin: 0, color: "#475467" }}>{selectedJob.projectName ?? "Production from approved artwork"}{selectedJob.contactName ? ` · ${selectedJob.contactName}` : ""}</p>
+                </div>
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <span style={{ borderRadius: 999, background: statusTone(selectedJob.status).bg, color: statusTone(selectedJob.status).fg, border: `1px solid ${statusTone(selectedJob.status).border}`, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{statusLabel(selectedJob.status)}</span>

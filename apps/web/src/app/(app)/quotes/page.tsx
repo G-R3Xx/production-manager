@@ -5,11 +5,12 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
-import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById } from "@/server/customers";
+import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -180,13 +181,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const selected = readParam(params, "selected");
   const filter = readParam(params, "filter");
 
-  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings] = await Promise.all([
+  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listMaterialsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
-    getCompanySettingsByTenantId(activeTenant.tenantId)
+    getCompanySettingsByTenantId(activeTenant.tenantId),
+    listCustomersForTenant(activeTenant.tenantId)
   ]);
 
   const deletedQuoteCount = allQuoteDrafts.filter((quote) => quote.status === "deleted").length;
@@ -199,6 +201,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
   const sourceEmail = enquiry?.email ?? "";
   const activeMaterials = materials.filter((material) => material.active);
+  const customerById = new Map(clients.map((client) => [client.id, client]));
   const sourceLinkedCustomerId = survey?.linkedCustomerId ?? enquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
 
   const [quoteLines, selectedArtworkApproval, linkedClient] = await Promise.all([
@@ -250,9 +253,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             {survey ? (
               <section style={{ border: `1px solid ${survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe"}`, borderRadius: 18, padding: 12, display: "grid", gap: 8, background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
-                  <div style={{ display: "grid", gap: 3 }}>
-                    <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
-                    <strong>{survey.clientName}</strong>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={survey.clientName} size={46} radius={12} padding={4} />
+                    <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                      <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
+                      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{survey.clientName}</strong>
+                    </div>
                   </div>
                   <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
                 </div>
@@ -265,8 +271,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               </section>
             ) : null}
             {linkedClient ? (
-              <section style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gridTemplateColumns: linkedClientLogoUrl ? "56px 1fr" : "1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
-                {linkedClientLogoUrl ? <img src={linkedClientLogoUrl} alt={`${linkedClient.displayName} logo`} style={{ width: 56, height: 56, objectFit: "contain", borderRadius: 14, border: "1px solid #e5e7eb", background: "#fff" }} /> : null}
+              <section style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gridTemplateColumns: "56px 1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
+                <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={linkedClient.displayName} size={56} radius={14} padding={5} />
                 <div style={{ display: "grid", gap: 4 }}>
                   <strong>{linkedClient.displayName}</strong>
                   <span style={{ color: "#667085", fontSize: 13 }}>{linkedClientDefaultDiscount ? `${linkedClientDefaultDiscount}% default discount` : "No default discount"}{linkedClientDiscountRules.length ? ` · ${linkedClientDiscountRules.length} qty discount rule${linkedClientDiscountRules.length === 1 ? "" : "s"}` : ""}</span>
@@ -297,10 +303,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
           {quoteDrafts.map((quote) => {
             const active = selectedQuote?.id === quote.id;
+            const quoteLogoUrl = customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
             return (
-              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ minWidth: 250, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 6, background: active ? "#eff6ff" : "#fbfdff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12 }}>
-                  <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.clientName}</strong>
+              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ minWidth: 280, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 8, background: active ? "#eff6ff" : "#fbfdff" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                  <div style={{ display: "flex", gap: 10, minWidth: 0, alignItems: "center" }}>
+                    <ClientLogoBadge logoUrl={quoteLogoUrl} name={quote.clientName} size={42} radius={12} padding={4} />
+                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.clientName}</strong>
+                  </div>
                   <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>{quote.status}</span>
                 </div>
                 <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
@@ -316,9 +326,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             <div style={{ display: "grid", gap: 16 }}>
               <div style={{ display: "grid", gap: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                  <div>
-                    <h2 style={{ margin: 0 }}>Selected quote: {selectedQuote.clientName}</h2>
-                    <p style={{ margin: "6px 0 0", color: "#667085" }}>Add line items by building from your material library. Start with Acrylic, ACM, Corflute, PVC, Banner or another sheet material.</p>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={selectedQuote.clientName} size={58} radius={16} padding={5} />
+                    <div style={{ minWidth: 0 }}>
+                      <h2 style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Selected quote: {selectedQuote.clientName}</h2>
+                      <p style={{ margin: "6px 0 0", color: "#667085" }}>Add line items by building from your material library. Start with Acrylic, ACM, Corflute, PVC, Banner or another sheet material.</p>
+                    </div>
                   </div>
                   {(() => { const tone = quoteStatusTone(selectedQuote.status); return <span style={{ border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedQuote.status.replace(/_/g, " ")}</span>; })()}
                 </div>

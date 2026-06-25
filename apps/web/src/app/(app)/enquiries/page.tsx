@@ -9,6 +9,7 @@ import { attachEnquiryCorrespondenceAction, createSurveyFromEnquiryAction, delet
 import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
 import { EnquiryCorrespondencePreview } from "./EnquiryCorrespondencePreview";
 import { NewEnquiryForm } from "./NewEnquiryForm";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 
 type PageProps = {
@@ -100,7 +101,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                   <summary className="enquiry-preview-summary" style={{ cursor: "pointer", listStyle: "none", padding: 12, display: "grid", gap: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                       <div style={{ display: "flex", gap: 12, alignItems: "start", minWidth: 0 }}>
-                        {logoUrl ? <img src={logoUrl} alt={`${enquiry.clientName} logo`} style={{ width: 46, height: 46, objectFit: "contain", borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff", flex: "0 0 auto" }} /> : null}
+                        <ClientLogoBadge logoUrl={logoUrl} name={enquiry.clientName} size={46} radius={12} padding={4} />
                         <div style={{ minWidth: 0 }}>
                           <strong style={{ overflowWrap: "anywhere" }}>{enquiry.clientName}</strong>
                           <div style={{ color: "#475467", marginTop: 4, overflowWrap: "anywhere" }}>{enquiry.requestSummary}</div>

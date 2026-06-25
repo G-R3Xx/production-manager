@@ -6,6 +6,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getEnquiryById } from "@/server/enquiries";
 import { createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
 import { listSurveyRequestsForTenant } from "@/server/surveys";
+import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 
 type PageProps = {
@@ -165,14 +167,17 @@ export default async function SurveysPage({ searchParams }: PageProps) {
   const fromEnquiry = readParam(params, "fromEnquiry");
   const selectedSurveyId = readParam(params, "selected");
   const filter = readParam(params, "filter");
-  const [allSurveyRequests, enquiry] = await Promise.all([
+  const [allSurveyRequests, enquiry, clients] = await Promise.all([
     listSurveyRequestsForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null)
+    fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
+    listCustomersForTenant(activeTenant.tenantId)
   ]);
   const deletedCount = allSurveyRequests.filter((survey) => survey.status === "deleted").length;
   const surveyRequests = filter === "deleted"
     ? allSurveyRequests.filter((survey) => survey.status === "deleted")
     : allSurveyRequests.filter((survey) => survey.status !== "deleted");
+  const customerById = new Map(clients.map((client) => [client.id, client]));
+  const sourceClientLogoUrl = customerLogoUrl(enquiry?.linkedCustomerId ? customerById.get(enquiry.linkedCustomerId) : null);
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -188,6 +193,15 @@ export default async function SurveysPage({ searchParams }: PageProps) {
         <form action={createSurveyRequestAction} style={{ display: "grid", gap: 12, marginTop: 14 }}>
           <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Create or edit requests here; the current survey workflow below now gets the full page width.</p>
           <input type="hidden" name="enquiryId" value={enquiry?.id ?? ""} />
+          {enquiry ? (
+            <section style={{ border: "1px solid #dbeafe", borderRadius: 16, padding: 12, background: "#f8fbff", display: "flex", gap: 12, alignItems: "center" }}>
+              <ClientLogoBadge logoUrl={sourceClientLogoUrl} name={enquiry.clientName} size={48} radius={14} padding={4} />
+              <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{enquiry.clientName}</strong>
+                <span style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{enquiry.requestSummary}</span>
+              </div>
+            </section>
+          ) : null}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
             <input name="clientName" defaultValue={enquiry?.clientName ?? ""} placeholder="Client / business name" style={inputStyle} />
             <input name="contactName" defaultValue={enquiry?.contactName ?? ""} placeholder="Contact name" style={inputStyle} />
@@ -219,12 +233,16 @@ export default async function SurveysPage({ searchParams }: PageProps) {
               const workflowStatus = getSurveyWorkflowStatus(survey);
               const hasInstallJob = Boolean(survey.installSchedulerJobId || survey.installSchedulerJobUrl);
               const hasCompletedSurvey = survey.installSchedulerSyncStatus === "completed" || survey.status === "completed";
+              const surveyLogoUrl = customerLogoUrl(survey.linkedCustomerId ? customerById.get(survey.linkedCustomerId) : null);
               return (
                 <article key={survey.id} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                    <div>
-                      <strong>{survey.clientName}</strong>
-                      <div style={{ color: "#475467", marginTop: 4 }}>{survey.siteAddress || "No site address yet"}</div>
+                    <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+                      <ClientLogoBadge logoUrl={surveyLogoUrl} name={survey.clientName} size={48} radius={14} padding={4} />
+                      <div style={{ minWidth: 0 }}>
+                        <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{survey.clientName}</strong>
+                        <div style={{ color: "#475467", marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{survey.siteAddress || "No site address yet"}</div>
+                      </div>
                     </div>
                     <span style={{ borderRadius: 999, background: workflowStatus.background, color: workflowStatus.color, padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{workflowStatus.label}</span>
                   </div>

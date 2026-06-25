@@ -5,7 +5,8 @@ import { listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
 import { listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
 import { listQuoteDraftsForTenant, listQuoteLines, type QuoteDraftRecord } from "@/server/quotes";
 import { listMaterialsForTenant, type MaterialRecord } from "@/server/materials";
-import { listCustomersForTenant } from "@/server/customers";
+import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 const pageStyle = { maxWidth: 1420, margin: "0 auto", display: "grid", gap: 18 } as const;
 const panelStyle = {
@@ -48,6 +49,8 @@ type ActivityItem = {
   href: string;
   date: string | null;
   tone: "blue" | "green" | "orange" | "purple" | "slate";
+  logoUrl?: string;
+  clientName?: string;
 };
 
 const tones = {
@@ -181,7 +184,7 @@ function ActivityList({ title, items, emptyText }: { title: string; items: Activ
           const tone = tones[item.tone];
           return (
             <Link key={`${item.type}-${item.href}-${index}`} href={item.href} style={{ display: "grid", gridTemplateColumns: "36px 1fr auto", gap: 12, alignItems: "center", padding: 12, borderRadius: 16, border: "1px solid #e2e8f0", background: "#fff", color: "inherit", textDecoration: "none" }}>
-              <span style={{ width: 36, height: 36, borderRadius: 14, background: tone.bg, color: tone.fg, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 12, fontWeight: 950 }}>{item.type.slice(0, 2).toUpperCase()}</span>
+              <ClientLogoBadge logoUrl={item.logoUrl} name={item.clientName ?? item.title} size={36} radius={14} padding={3} style={{ borderColor: tone.border }} />
               <span style={{ minWidth: 0 }}>
                 <strong style={{ display: "block", color: "#0f172a", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</strong>
                 <span style={{ display: "block", marginTop: 2, color: "#64748b", fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.detail}</span>
@@ -233,6 +236,9 @@ export default async function DashboardPage() {
     listCustomersForTenant(activeTenant.tenantId)
   ]);
 
+  const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const logoForClientId = (clientId: string | null | undefined) => customerLogoUrl(clientId ? customerById.get(clientId) : null);
+
   const recentQuotes = quotes.slice(0, 24);
   const quoteLinePairs = await Promise.all(recentQuotes.map(async (quote) => ({ quote, lines: await listQuoteLines(quote.id) })));
   const quoteTotals = new Map<string, number>(quoteLinePairs.map(({ quote, lines }) => [quote.id, lines.reduce((sum, line) => sum + asMoney(line.lineTotal), 0)]));
@@ -274,7 +280,9 @@ export default async function DashboardPage() {
       detail: `${enquiryStatusLabel(enquiry.status)} · ${enquiry.requestSummary}`,
       href: "/enquiries",
       date: enquiry.updatedAt ?? enquiry.createdAt,
-      tone: "blue" as const
+      tone: "blue" as const,
+      logoUrl: logoForClientId(enquiry.linkedCustomerId),
+      clientName: enquiry.clientName
     })),
     ...surveys.slice(0, 8).map((survey) => ({
       type: "Survey",
@@ -282,7 +290,9 @@ export default async function DashboardPage() {
       detail: `${isCompletedSurvey(survey) ? "Completed" : isSurveySent(survey) ? "Awaiting completion" : "Requested"} · ${survey.siteAddress ?? "No site address"}`,
       href: "/surveys",
       date: survey.updatedAt ?? survey.createdAt,
-      tone: isCompletedSurvey(survey) ? "green" as const : "purple" as const
+      tone: isCompletedSurvey(survey) ? "green" as const : "purple" as const,
+      logoUrl: logoForClientId(survey.linkedCustomerId),
+      clientName: survey.clientName
     })),
     ...quotes.slice(0, 8).map((quote) => ({
       type: "Quote",
@@ -290,7 +300,9 @@ export default async function DashboardPage() {
       detail: `${quoteStatusLabel(quote.status)} · ${formatMoney(quoteTotals.get(quote.id) ?? 0)}`,
       href: "/quotes",
       date: quote.updatedAt ?? quote.createdAt,
-      tone: "orange" as const
+      tone: "orange" as const,
+      logoUrl: logoForClientId(quote.linkedCustomerId),
+      clientName: quote.clientName
     }))
   ].sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()).slice(0, 10);
 
@@ -301,7 +313,9 @@ export default async function DashboardPage() {
       detail: `${survey.dueDate ? "Due" : "Requested"} · ${survey.siteAddress ?? "No site address"}`,
       href: "/surveys",
       date: survey.dueDate ?? survey.createdAt,
-      tone: "purple" as const
+      tone: "purple" as const,
+      logoUrl: logoForClientId(survey.linkedCustomerId),
+      clientName: survey.clientName
     })),
     ...completedSurveysNotQuoted.slice(0, 6).map((survey) => ({
       type: "Quote",
@@ -309,7 +323,9 @@ export default async function DashboardPage() {
       detail: "Survey completed — quote required",
       href: "/surveys",
       date: survey.installSchedulerCompletedAt ?? survey.completedAt ?? survey.updatedAt,
-      tone: "green" as const
+      tone: "green" as const,
+      logoUrl: logoForClientId(survey.linkedCustomerId),
+      clientName: survey.clientName
     })),
     ...lowStock.map((material) => ({
       type: "Stock",

@@ -2,9 +2,11 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { getArtworkApprovalByPublicToken, listArtworkApprovalPages, markArtworkApprovalViewedByToken, type ArtworkApprovalPageRecord } from "@/server/quotes";
+import { getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, markArtworkApprovalViewedByToken, type ArtworkApprovalPageRecord } from "@/server/quotes";
 import { approveArtworkAction, requestArtworkChangesAction } from "./actions";
 import { SignaturePad } from "./SignaturePad";
+import { customerLogoUrl, getCustomerById } from "@/server/customers";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type PageProps = {
   params: Promise<{ token: string }>;
@@ -124,10 +126,13 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
 
   await markArtworkApprovalViewedByToken(token);
 
-  const [pages, companySettings] = await Promise.all([
+  const [pages, companySettings, sourceQuote] = await Promise.all([
     listArtworkApprovalPages(approval.id),
-    getCompanySettingsByTenantId(approval.tenantId)
+    getCompanySettingsByTenantId(approval.tenantId),
+    getQuoteDraftById(approval.tenantId, approval.quoteId)
   ]);
+  const linkedClient = sourceQuote?.linkedCustomerId ? await getCustomerById(approval.tenantId, sourceQuote.linkedCustomerId) : null;
+  const clientLogoUrl = customerLogoUrl(linkedClient);
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
   const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const isApproved = approval.status === "approved";
@@ -145,7 +150,10 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             <div style={{ display: "grid", gap: 8, minWidth: 260 }}>
               <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approval from {companyName}</p>
               <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>{approval.projectName || approval.drawingTitle || approval.clientName}</h1>
-              <p style={{ margin: 0, color: "#667085" }}>{approval.clientName}{approval.contactName ? ` · ${approval.contactName}` : ""}</p>
+              <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                <ClientLogoBadge logoUrl={clientLogoUrl} name={approval.clientName} size={44} radius={12} padding={4} />
+                <p style={{ margin: 0, color: "#667085" }}>{approval.clientName}{approval.contactName ? ` · ${approval.contactName}` : ""}</p>
+              </div>
               {approval.clientMessage ? <p style={{ margin: "4px 0 0", color: "#475467", lineHeight: 1.6 }}>{approval.clientMessage}</p> : <p style={{ margin: "4px 0 0", color: "#475467", lineHeight: 1.6 }}>Please review the proof pages below.</p>}
             </div>
           </div>
@@ -174,9 +182,12 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
               </div>
               <aside style={{ borderLeft: "1px solid #e2e8f0", background: "#f8fafc", padding: 20, display: "grid", alignContent: "space-between", gap: 14 }}>
                 <div style={{ display: "grid", gap: 12 }}>
-                  <div>
-                    <p style={{ margin: 0, color: "#64748b", fontSize: 12, fontWeight: 950, textTransform: "uppercase" }}>Client</p>
-                    <strong>{approval.clientName}</strong>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <ClientLogoBadge logoUrl={clientLogoUrl} name={approval.clientName} size={42} radius={12} padding={4} />
+                    <span style={{ minWidth: 0 }}>
+                      <p style={{ margin: 0, color: "#64748b", fontSize: 12, fontWeight: 950, textTransform: "uppercase" }}>Client</p>
+                      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{approval.clientName}</strong>
+                    </span>
                   </div>
                   {approval.siteAddress ? (
                     <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>

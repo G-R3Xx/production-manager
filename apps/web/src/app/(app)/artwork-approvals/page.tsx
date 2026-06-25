@@ -13,6 +13,8 @@ import {
   listQuoteLines,
   type ArtworkApprovalPageRecord
 } from "@/server/quotes";
+import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import {
   addArtworkApprovalPageFromPageAction,
@@ -228,9 +230,10 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const quoteParam = readParam(params, "quote");
   const filter = readParam(params, "filter");
 
-  const [quoteDrafts, allApprovals] = await Promise.all([
+  const [quoteDrafts, allApprovals, clients] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId),
-    listArtworkApprovalsForTenant(activeTenant.tenantId, { includeDeleted: true })
+    listArtworkApprovalsForTenant(activeTenant.tenantId, { includeDeleted: true }),
+    listCustomersForTenant(activeTenant.tenantId)
   ]);
   const deletedApprovalCount = allApprovals.filter((approval) => approval.status === "deleted").length;
   const approvals = filter === "deleted"
@@ -253,6 +256,9 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   ]);
 
   const quoteTotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
+  const customerById = new Map(clients.map((client) => [client.id, client]));
+  const logoForQuote = (quote: typeof quoteDrafts[number] | null | undefined) => customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+  const selectedQuoteLogoUrl = logoForQuote(selectedQuote);
   const artworkEligibleQuoteLines = quoteLines.filter((line) => artworkQuoteLineKind(line));
   const quotedPagesAlreadyCreated = proofPages.filter((page) => page.sourceQuoteLineId).length;
   const missingQuoteLinePages = artworkEligibleQuoteLines.filter((line) => !proofPages.some((page) => page.sourceQuoteLineId === line.id)).length;
@@ -291,12 +297,16 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
             const tone = statusTone(approval.status);
             const quote = quoteDrafts.find((item) => item.id === approval.quoteId);
             const isSelected = selectedApproval?.id === approval.id;
+            const approvalLogoUrl = logoForQuote(quote);
 
             return (
               <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}`} style={{ minWidth: 250, textDecoration: "none", color: "inherit" }}>
                 <div style={{ height: "100%", border: isSelected ? "2px solid #8b5cf6" : "1px solid #e4e7ec", borderRadius: 18, padding: 12, background: isSelected ? "#faf5ff" : "#fff", display: "grid", gap: 7 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
-                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
+                    <div style={{ display: "flex", gap: 10, minWidth: 0, alignItems: "center" }}>
+                      <ClientLogoBadge logoUrl={approvalLogoUrl} name={approval.clientName} size={42} radius={12} padding={4} />
+                      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
+                    </div>
                     <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950, whiteSpace: "nowrap" }}>{approval.status.replace(/_/g, " ")}</span>
                   </div>
                   <span style={{ color: "#667085", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName ?? "Artwork proof"}</span>
@@ -322,7 +332,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
               <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Quote</p><strong>{selectedQuote.quoteNumber ?? "Draft quote"}</strong></div>
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Client</p><strong>{selectedQuote.clientName}</strong></div>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12, display: "grid", gridTemplateColumns: "44px 1fr", gap: 10, alignItems: "center" }}><ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={44} radius={12} padding={4} /><span style={{ minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Client</p><strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{selectedQuote.clientName}</strong></span></div>
               <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Quote value</p><strong>{formatMoney(quoteTotal)} ex GST</strong></div>
               <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Artwork lines</p><strong>{artworkEligibleQuoteLines.length} eligible</strong></div>
             </div>
@@ -371,10 +381,13 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
             <>
               <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "start" }}>
-                  <div style={{ display: "grid", gap: 5 }}>
-                    <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>{selectedQuote.quoteNumber ?? "Quote"} · {formatMoney(quoteTotal)} ex GST</p>
-                    <h2 style={{ margin: 0, fontSize: 30 }}>{selectedApproval.projectName || selectedApproval.clientName}</h2>
-                    <p style={{ margin: 0, color: "#475467" }}>{selectedApproval.clientName}{selectedApproval.contactName ? ` · ${selectedApproval.contactName}` : ""}</p>
+                  <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedApproval.clientName} size={58} radius={16} padding={5} />
+                    <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
+                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>{selectedQuote.quoteNumber ?? "Quote"} · {formatMoney(quoteTotal)} ex GST</p>
+                      <h2 style={{ margin: 0, fontSize: 30, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedApproval.projectName || selectedApproval.clientName}</h2>
+                      <p style={{ margin: 0, color: "#475467" }}>{selectedApproval.clientName}{selectedApproval.contactName ? ` · ${selectedApproval.contactName}` : ""}</p>
+                    </div>
                   </div>
                   <span style={{ borderRadius: 999, background: selectedTone.bg, color: selectedTone.fg, border: `1px solid ${selectedTone.border}`, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedApproval.status.replace(/_/g, " ")}</span>
                 </div>
@@ -509,9 +522,12 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                       </div>
                       <aside style={{ borderLeft: "1px solid #e2e8f0", background: "#f8fafc", padding: 18, display: "grid", alignContent: "space-between", gap: 14 }}>
                         <div style={{ display: "grid", gap: 12 }}>
-                          <div>
-                            <p style={{ margin: 0, color: "#64748b", fontSize: 12, fontWeight: 950, textTransform: "uppercase" }}>Client</p>
-                            <strong>{selectedApproval.clientName}</strong>
+                          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                            <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedApproval.clientName} size={42} radius={12} padding={4} />
+                            <span style={{ minWidth: 0 }}>
+                              <p style={{ margin: 0, color: "#64748b", fontSize: 12, fontWeight: 950, textTransform: "uppercase" }}>Client</p>
+                              <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{selectedApproval.clientName}</strong>
+                            </span>
                           </div>
                           {detailsList(page).map((row) => (
                             <div key={row.label} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
