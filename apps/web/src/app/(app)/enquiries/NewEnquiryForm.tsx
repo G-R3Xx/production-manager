@@ -187,7 +187,7 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
   }
 
   return (
-    <form action={createEnquiryAction} style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22, display: "grid", gap: 12 }}>
+    <form action={createEnquiryAction} encType="multipart/form-data" style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22, display: "grid", gap: 12 }}>
       <h2 style={{ margin: 0 }}>New enquiry</h2>
       <select name="linkedCustomerId" value={selectedClientId} onChange={(event) => applySelectedClient(event.currentTarget.value)} style={inputStyle}>
         <option value="">New / unlinked client</option>
@@ -196,6 +196,12 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
         ))}
       </select>
       <input name="clientName" value={clientName} onChange={(event) => setClientName(event.currentTarget.value)} placeholder="Client / business name (or choose existing above)" style={inputStyle} />
+      <section style={{ border: "1px dashed #c7d7fe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 8 }}>
+        <strong style={{ fontSize: 13 }}>Client logo (optional)</strong>
+        <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>Add a logo for a new/unlinked client. Existing linked clients already use their saved client logo.</span>
+        <input type="file" name="clientLogoFile" accept="image/*" style={{ ...inputStyle, minHeight: 38, paddingTop: 8, background: "#fff" }} />
+        <input name="clientLogoUrl" placeholder="or paste client logo URL" style={{ ...inputStyle, background: "#fff" }} />
+      </section>
       <input name="contactName" value={contactName} onChange={(event) => setContactName(event.currentTarget.value)} placeholder="Contact name" style={inputStyle} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <input name="phone" value={phone} onChange={(event) => setPhone(event.currentTarget.value)} placeholder="Phone" style={inputStyle} />

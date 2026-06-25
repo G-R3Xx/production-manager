@@ -231,7 +231,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
   const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const legalName = companySettings?.companyLegalName && companySettings.companyLegalName !== companyName ? companySettings.companyLegalName : null;
-  const clientLogoUrl = customerLogoUrl(linkedClient);
+  const clientLogoUrl = sourceEnquiry?.clientLogoUrl || customerLogoUrl(linkedClient);
   const clientPurchaseOrderNumber = sourceEnquiry?.clientPurchaseOrderNumber || null;
   const clientEmail = quote.email || sourceEnquiry?.email || linkedClient?.email || null;
   const clientPhone = quote.phone || sourceSurvey?.phone || sourceEnquiry?.phone || linkedClient?.phone || null;
@@ -239,6 +239,13 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   const sourceSiteAddress = sourceSurvey?.siteAddress || sourceEnquiry?.siteAddress || linkedClient?.payloadJson.defaultSiteAddress || null;
   const siteAddress = sourceSiteAddress && sourceSiteAddress !== clientAddress ? sourceSiteAddress : null;
   const jobName = deriveJobName(quote, lines, sourceEnquiry?.requestSummary || sourceSurvey?.notes || sourceSurvey?.surveyDetails);
+  const responseStatus = quote.status === "accepted"
+    ? "accepted"
+    : quote.status === "declined"
+      ? "declined"
+      : quote.status === "changes_requested"
+        ? "changes requested"
+        : null;
 
   return (
     <main style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
@@ -316,19 +323,27 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
         {quote.notes ? <section style={{ ...cardStyle, display: "grid", gap: 8 }}><h2 style={{ margin: 0 }}>Notes</h2><p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{quote.notes}</p></section> : null}
 
-        <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-          <h2 style={{ margin: 0 }}>Respond to quote</h2>
-          <p style={{ margin: 0, color: "#667085" }}>Accept this quote, request changes, or decline. Your response goes straight back to Production Manager.</p>
-          <form action={acceptQuoteAction} style={{ display: "grid", gap: 10 }}>
-            <input type="hidden" name="token" value={token} />
-            <textarea name="notes" placeholder="Optional notes" style={textareaStyle} />
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Accept quote</button>
-              <button formAction={requestQuoteChangesAction} type="submit" style={{ ...buttonStyle, background: "#c2410c" }}>Request changes</button>
-              <button formAction={declineQuoteAction} type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Decline</button>
-            </div>
-          </form>
-        </section>
+        {responseStatus ? (
+          <section style={{ ...cardStyle, display: "grid", gap: 10, borderColor: quote.status === "accepted" ? "#abefc6" : "#fed7aa" }}>
+            <h2 style={{ margin: 0 }}>Response received</h2>
+            <p style={{ margin: 0, color: "#475467" }}>This quote has been marked as <strong>{responseStatus}</strong>. Tender Edge has received the response.</p>
+            {quote.clientResponseNotes ? <p style={{ margin: 0, color: "#667085", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>Notes: {quote.clientResponseNotes}</p> : null}
+          </section>
+        ) : (
+          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+            <h2 style={{ margin: 0 }}>Respond to quote</h2>
+            <p style={{ margin: 0, color: "#667085" }}>Accept this quote, request changes, or decline. Your response goes straight back to Production Manager.</p>
+            <form action={acceptQuoteAction} style={{ display: "grid", gap: 10 }}>
+              <input type="hidden" name="token" value={token} />
+              <textarea name="notes" placeholder="Optional notes" style={textareaStyle} />
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Accept quote</button>
+                <button formAction={requestQuoteChangesAction} type="submit" style={{ ...buttonStyle, background: "#c2410c" }}>Request changes</button>
+                <button formAction={declineQuoteAction} type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Decline</button>
+              </div>
+            </form>
+          </section>
+        )}
       </div>
     </main>
   );

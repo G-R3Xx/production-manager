@@ -1,10 +1,12 @@
 
 "use server";
 
+import { Buffer } from "node:buffer";
 import { redirect } from "next/navigation";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createEnquiryCorrespondenceForTenant, createEnquiryForTenant, getEnquiryById, updateEnquiryStatusForTenant } from "@/server/enquiries";
+import { createEnquiryCorrespondenceForTenant, createEnquiryForTenant, getEnquiryById, updateEnquiryClientLogoForTenant, updateEnquiryStatusForTenant } from "@/server/enquiries";
 import { getCustomerById, customerLogoUrl } from "@/server/customers";
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
 import { createSurveyRequestForTenant, getLatestSurveyRequestForEnquiry, getSurveyRequestById } from "@/server/surveys";
@@ -28,6 +30,41 @@ function getAllStrings(formData: FormData, key: string): string[] {
   return formData.getAll(key).map((value) => String(value ?? "").trim());
 }
 
+function isValidHttpUrl(value: string | null): boolean {
+  if (!value) return true;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function uploadEnquiryLogoIfPresent(tenantId: string, enquiryId: string, formData: FormData): Promise<{ logoUrl?: string; logoStoragePath?: string }> {
+  const rawFile = formData.get("clientLogoFile");
+  if (!rawFile || typeof rawFile !== "object" || !("size" in rawFile) || !("arrayBuffer" in rawFile)) return {};
+
+  const file = rawFile as unknown as { name?: string; type?: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
+  if (!file.size || file.size <= 0) return {};
+  if (file.size > 5 * 1024 * 1024) throw new Error("Client logo upload failed: please keep the logo under 5MB.");
+  if (file.type && !file.type.startsWith("image/")) throw new Error("Client logo upload failed: please upload an image file.");
+
+  const safeName = String(file.name || "client-logo").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 120);
+  const extension = safeName.includes(".") ? "" : ".png";
+  const storagePath = `${tenantId}/enquiries/${enquiryId}/client-logo-${Date.now()}-${safeName}${extension}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const contentType = file.type || "image/png";
+  const supabase = getSupabaseServiceRoleClient();
+  const bucket = "client-assets";
+
+  await supabase.storage.createBucket(bucket, { public: true }).catch(() => undefined);
+  const { error } = await supabase.storage.from(bucket).upload(storagePath, bytes, { contentType, upsert: true });
+  if (error) throw new Error(`Client logo upload failed: ${error.message}`);
+
+  const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+  return { logoUrl: data.publicUrl, logoStoragePath: storagePath };
+}
+
 
 export async function createEnquiryAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
@@ -42,6 +79,11 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     redirect("/enquiries?error=Client%20name%20and%20request%20summary%20are%20required");
   }
 
+  const pastedClientLogoUrl = nullable(formData.get("clientLogoUrl"));
+  if (!isValidHttpUrl(pastedClientLogoUrl)) {
+    redirect("/enquiries?error=Client%20logo%20URL%20must%20start%20with%20http%20or%20https");
+  }
+
   const created = await createEnquiryForTenant(activeTenant.tenantId, {
     clientName,
     contactName: nullable(formData.get("contactName")) ?? ([linkedCustomer?.firstName, linkedCustomer?.lastName].filter(Boolean).join(" ") || null),
@@ -52,9 +94,20 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     siteAddress: nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress : null),
     requestSummary,
     clientPurchaseOrderNumber: nullable(formData.get("clientPurchaseOrderNumber")),
+    clientLogoUrl: pastedClientLogoUrl,
     notes: nullable(formData.get("notes")),
     linkedCustomerId: linkedCustomer?.id ?? null
   });
+
+  try {
+    const uploadedLogo = await uploadEnquiryLogoIfPresent(activeTenant.tenantId, created.id, formData);
+    if (uploadedLogo.logoUrl) {
+      await updateEnquiryClientLogoForTenant(activeTenant.tenantId, created.id, uploadedLogo);
+    }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(`/enquiries?error=${encodeURIComponent(message)}`);
+  }
 
   const fileNames = getAllStrings(formData, "pendingCorrespondenceFileName");
   const fileUrls = getAllStrings(formData, "pendingCorrespondenceFileUrl");
@@ -134,8 +187,8 @@ export async function createSurveyFromEnquiryAction(formData: FormData): Promise
         enquiryRequestSummary: enquiry.requestSummary,
         enquiryNotes: enquiry.notes,
         email: enquiry.email,
-        clientLogoUrl: customerLogoUrl(linkedCustomer),
-        clientLogoStoragePath: typeof linkedCustomer?.payloadJson.logoStoragePath === "string" ? linkedCustomer.payloadJson.logoStoragePath : null,
+        clientLogoUrl: enquiry.clientLogoUrl || customerLogoUrl(linkedCustomer),
+        clientLogoStoragePath: enquiry.clientLogoStoragePath || (typeof linkedCustomer?.payloadJson.logoStoragePath === "string" ? linkedCustomer.payloadJson.logoStoragePath : null),
       })
     : { ok: false, error: "Survey was created but could not be reloaded" };
 

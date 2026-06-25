@@ -35,6 +35,8 @@ export type EnquiryRecord = {
   siteAddress: string | null;
   requestSummary: string;
   clientPurchaseOrderNumber: string | null;
+  clientLogoUrl: string | null;
+  clientLogoStoragePath: string | null;
   notes: string | null;
   status: string;
   linkedCustomerId: string | null;
@@ -42,17 +44,19 @@ export type EnquiryRecord = {
   updatedAt: string;
 };
 
-async function ensureEnquiryClientPurchaseOrderColumn(): Promise<void> {
+async function ensureEnquiryExtraColumns(): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
   await pool.query(`
     ALTER TABLE app.enquiries
-      ADD COLUMN IF NOT EXISTS client_purchase_order_number varchar(120)
+      ADD COLUMN IF NOT EXISTS client_purchase_order_number varchar(120),
+      ADD COLUMN IF NOT EXISTS client_logo_url text,
+      ADD COLUMN IF NOT EXISTS client_logo_storage_path text
   `);
 }
 
 export async function listEnquiriesForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<EnquiryRecord[]> {
-  await ensureEnquiryClientPurchaseOrderColumn();
+  await ensureEnquiryExtraColumns();
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,
@@ -66,6 +70,8 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
       site_address as "siteAddress",
       request_summary as "requestSummary",
       client_purchase_order_number as "clientPurchaseOrderNumber",
+      client_logo_url as "clientLogoUrl",
+      client_logo_storage_path as "clientLogoStoragePath",
       notes,
       status,
       linked_customer_id as "linkedCustomerId",
@@ -80,7 +86,7 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
 }
 
 export async function getEnquiryById(tenantId: string, enquiryId: string): Promise<EnquiryRecord | null> {
-  await ensureEnquiryClientPurchaseOrderColumn();
+  await ensureEnquiryExtraColumns();
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,
@@ -94,6 +100,8 @@ export async function getEnquiryById(tenantId: string, enquiryId: string): Promi
       site_address as "siteAddress",
       request_summary as "requestSummary",
       client_purchase_order_number as "clientPurchaseOrderNumber",
+      client_logo_url as "clientLogoUrl",
+      client_logo_storage_path as "clientLogoStoragePath",
       notes,
       status,
       linked_customer_id as "linkedCustomerId",
@@ -116,15 +124,17 @@ export async function createEnquiryForTenant(tenantId: string, input: {
   siteAddress?: string | null;
   requestSummary: string;
   clientPurchaseOrderNumber?: string | null;
+  clientLogoUrl?: string | null;
+  clientLogoStoragePath?: string | null;
   notes?: string | null;
   linkedCustomerId?: string | null;
 }): Promise<{ id: string }> {
-  await ensureEnquiryClientPurchaseOrderColumn();
+  await ensureEnquiryExtraColumns();
   const result = await pool.query<{ id: string }>(`
     INSERT INTO app.enquiries (
-      tenant_id, client_name, contact_name, email, phone, source, urgency, site_address, request_summary, client_purchase_order_number, notes, status, linked_customer_id, created_at, updated_at
+      tenant_id, client_name, contact_name, email, phone, source, urgency, site_address, request_summary, client_purchase_order_number, client_logo_url, client_logo_storage_path, notes, status, linked_customer_id, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::varchar,$3::varchar,$4::varchar,$5::varchar,$6::varchar,$7::varchar,$8::text,$9::text,$10::varchar,$11::text,'new',$12::uuid,now(),now()
+      $1::uuid,$2::varchar,$3::varchar,$4::varchar,$5::varchar,$6::varchar,$7::varchar,$8::text,$9::text,$10::varchar,$11::text,$12::text,$13::text,'new',$14::uuid,now(),now()
     ) RETURNING id
   `, [
     tenantId,
@@ -137,10 +147,28 @@ export async function createEnquiryForTenant(tenantId: string, input: {
     input.siteAddress ?? null,
     input.requestSummary,
     input.clientPurchaseOrderNumber ?? null,
+    input.clientLogoUrl ?? null,
+    input.clientLogoStoragePath ?? null,
     input.notes ?? null,
     input.linkedCustomerId ?? null
   ]);
   return result.rows[0];
+}
+
+
+export async function updateEnquiryClientLogoForTenant(tenantId: string, enquiryId: string, input: {
+  logoUrl?: string | null;
+  logoStoragePath?: string | null;
+}): Promise<void> {
+  await ensureEnquiryExtraColumns();
+  await pool.query(`
+    UPDATE app.enquiries
+    SET client_logo_url = $3::text,
+        client_logo_storage_path = $4::text,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [tenantId, enquiryId, input.logoUrl ?? null, input.logoStoragePath ?? null]);
 }
 
 export async function updateEnquiryStatusForTenant(tenantId: string, enquiryId: string, status: string): Promise<void> {

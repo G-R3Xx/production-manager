@@ -6,6 +6,7 @@ import { getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApproval
 import { approveArtworkAction, requestArtworkChangesAction } from "./actions";
 import { SignaturePad } from "./SignaturePad";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
+import { getEnquiryById } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type PageProps = {
@@ -131,8 +132,11 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
     getCompanySettingsByTenantId(approval.tenantId),
     getQuoteDraftById(approval.tenantId, approval.quoteId)
   ]);
-  const linkedClient = sourceQuote?.linkedCustomerId ? await getCustomerById(approval.tenantId, sourceQuote.linkedCustomerId) : null;
-  const clientLogoUrl = customerLogoUrl(linkedClient);
+  const [linkedClient, sourceEnquiry] = await Promise.all([
+    sourceQuote?.linkedCustomerId ? getCustomerById(approval.tenantId, sourceQuote.linkedCustomerId) : Promise.resolve(null),
+    sourceQuote?.enquiryId ? getEnquiryById(approval.tenantId, sourceQuote.enquiryId) : Promise.resolve(null)
+  ]);
+  const clientLogoUrl = sourceEnquiry?.clientLogoUrl || customerLogoUrl(linkedClient);
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
   const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const isApproved = approval.status === "approved";

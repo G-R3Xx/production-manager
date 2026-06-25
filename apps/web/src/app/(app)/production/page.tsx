@@ -27,6 +27,7 @@ import {
 import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
 import { getQuoteDraftById, listQuoteDraftsForTenant } from "@/server/quotes";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type PageProps = {
@@ -607,11 +608,12 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   const selectedParam = readParam(params, "selected");
   const filter = readParam(params, "filter");
 
-  const [allJobs, approvedArtwork, quoteDrafts, clients] = await Promise.all([
+  const [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries] = await Promise.all([
     listProductionJobsForTenant(tenantId, { includeDeleted: true }),
     listApprovedArtworkReadyForProduction(tenantId),
     listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
-    listCustomersForTenant(tenantId)
+    listCustomersForTenant(tenantId),
+    listEnquiriesForTenant(tenantId, { includeDeleted: true })
   ]);
   const deletedJobCount = allJobs.filter((job) => job.status === "deleted").length;
   const jobs = filter === "deleted" ? allJobs.filter((job) => job.status === "deleted") : allJobs.filter((job) => job.status !== "deleted");
@@ -625,9 +627,11 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   }
   const customerById = new Map(clients.map((client) => [client.id, client]));
   const quoteById = new Map(quoteDrafts.map((quote) => [quote.id, quote]));
+  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
   const logoForQuoteId = (quoteId: string | null | undefined) => {
     const quote = quoteId ? quoteById.get(quoteId) : null;
-    return customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+    const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
+    return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
   };
   const selectedJobLogoUrl = logoForQuoteId(selectedJob?.quoteId);
   const complete = pageCompletion(steps);

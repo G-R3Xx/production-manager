@@ -91,7 +91,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
           <div style={{ display: "grid", gap: 12 }}>
             {enquiries.map((enquiry) => {
               const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
-              const logoUrl = customerLogoUrl(linkedClient);
+              const logoUrl = enquiry.clientLogoUrl || customerLogoUrl(linkedClient);
               const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
               const contactLine = [enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ");
               const purchaseOrderLine = enquiry.clientPurchaseOrderNumber ? `PO: ${enquiry.clientPurchaseOrderNumber}` : "";

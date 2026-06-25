@@ -228,7 +228,7 @@ async function ensureArtworkApprovalTables(): Promise<void> {
   `);
 
   await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS artwork_approvals_quote_unique_idx
+    CREATE INDEX IF NOT EXISTS artwork_approvals_quote_idx
       ON sales.artwork_approvals (quote_id)
   `);
 
@@ -263,7 +263,7 @@ async function ensureArtworkApprovalTables(): Promise<void> {
   `);
 
   await pool.query(`
-    CREATE UNIQUE INDEX IF NOT EXISTS artwork_approval_pages_source_quote_line_unique_idx
+    CREATE INDEX IF NOT EXISTS artwork_approval_pages_source_quote_line_idx
       ON sales.artwork_approval_pages (approval_id, source_quote_line_id)
       WHERE source_quote_line_id IS NOT NULL
   `);

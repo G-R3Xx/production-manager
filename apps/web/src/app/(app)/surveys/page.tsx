@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getEnquiryById } from "@/server/enquiries";
+import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
 import { listSurveyRequestsForTenant } from "@/server/surveys";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
@@ -167,17 +167,19 @@ export default async function SurveysPage({ searchParams }: PageProps) {
   const fromEnquiry = readParam(params, "fromEnquiry");
   const selectedSurveyId = readParam(params, "selected");
   const filter = readParam(params, "filter");
-  const [allSurveyRequests, enquiry, clients] = await Promise.all([
+  const [allSurveyRequests, enquiry, clients, allEnquiries] = await Promise.all([
     listSurveyRequestsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
-    listCustomersForTenant(activeTenant.tenantId)
+    listCustomersForTenant(activeTenant.tenantId),
+    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
   ]);
   const deletedCount = allSurveyRequests.filter((survey) => survey.status === "deleted").length;
   const surveyRequests = filter === "deleted"
     ? allSurveyRequests.filter((survey) => survey.status === "deleted")
     : allSurveyRequests.filter((survey) => survey.status !== "deleted");
   const customerById = new Map(clients.map((client) => [client.id, client]));
-  const sourceClientLogoUrl = customerLogoUrl(enquiry?.linkedCustomerId ? customerById.get(enquiry.linkedCustomerId) : null);
+  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
+  const sourceClientLogoUrl = enquiry?.clientLogoUrl || customerLogoUrl(enquiry?.linkedCustomerId ? customerById.get(enquiry.linkedCustomerId) : null);
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -233,7 +235,8 @@ export default async function SurveysPage({ searchParams }: PageProps) {
               const workflowStatus = getSurveyWorkflowStatus(survey);
               const hasInstallJob = Boolean(survey.installSchedulerJobId || survey.installSchedulerJobUrl);
               const hasCompletedSurvey = survey.installSchedulerSyncStatus === "completed" || survey.status === "completed";
-              const surveyLogoUrl = customerLogoUrl(survey.linkedCustomerId ? customerById.get(survey.linkedCustomerId) : null);
+              const surveySourceEnquiry = survey.enquiryId ? enquiryById.get(survey.enquiryId) : null;
+              const surveyLogoUrl = surveySourceEnquiry?.clientLogoUrl || customerLogoUrl(survey.linkedCustomerId ? customerById.get(survey.linkedCustomerId) : null);
               return (
                 <article key={survey.id} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>

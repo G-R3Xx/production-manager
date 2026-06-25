@@ -5,6 +5,8 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
+import { getEnquiryById } from "@/server/enquiries";
+import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { createSurveyRequestForTenant, getSurveyRequestById, setSurveyRequestStatusForTenant, updateSurveyRequestForTenant } from "@/server/surveys";
 
 
@@ -31,9 +33,12 @@ export async function createSurveyRequestAction(formData: FormData): Promise<voi
     redirect("/surveys?error=Client%20name%20is%20required");
   }
 
+  const enquiryId = nullable(formData.get("enquiryId"));
+  const linkedCustomerId = nullable(formData.get("linkedCustomerId"));
+
   const created = await createSurveyRequestForTenant(activeTenant.tenantId, {
-    enquiryId: nullable(formData.get("enquiryId")),
-    linkedCustomerId: nullable(formData.get("linkedCustomerId")),
+    enquiryId,
+    linkedCustomerId,
     clientName,
     contactName: nullable(formData.get("contactName")),
     phone: nullable(formData.get("phone")),
@@ -44,8 +49,15 @@ export async function createSurveyRequestAction(formData: FormData): Promise<voi
   });
 
   const survey = await getSurveyRequestById(activeTenant.tenantId, created.id);
+  const sourceEnquiry = enquiryId ? await getEnquiryById(activeTenant.tenantId, enquiryId) : null;
+  const linkedCustomer = linkedCustomerId ? await getCustomerById(activeTenant.tenantId, linkedCustomerId) : null;
   const bridgeResult = survey
-    ? await createInstallSchedulerSurveyJob({ tenantId: activeTenant.tenantId, survey })
+    ? await createInstallSchedulerSurveyJob({
+        tenantId: activeTenant.tenantId,
+        survey,
+        clientLogoUrl: sourceEnquiry?.clientLogoUrl || customerLogoUrl(linkedCustomer),
+        clientLogoStoragePath: sourceEnquiry?.clientLogoStoragePath || (typeof linkedCustomer?.payloadJson.logoStoragePath === "string" ? linkedCustomer.payloadJson.logoStoragePath : null)
+      })
     : { ok: false, error: "Survey was created but could not be reloaded" };
 
   const message = bridgeResult.ok

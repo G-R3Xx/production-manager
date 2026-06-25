@@ -237,7 +237,12 @@ export default async function DashboardPage() {
   ]);
 
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
+  const enquiryById = new Map(enquiries.map((enquiry) => [enquiry.id, enquiry]));
   const logoForClientId = (clientId: string | null | undefined) => customerLogoUrl(clientId ? customerById.get(clientId) : null);
+  const logoForEnquiry = (enquiryId: string | null | undefined, linkedCustomerId: string | null | undefined) => {
+    const enquiry = enquiryId ? enquiryById.get(enquiryId) : null;
+    return enquiry?.clientLogoUrl || logoForClientId(linkedCustomerId);
+  };
 
   const recentQuotes = quotes.slice(0, 24);
   const quoteLinePairs = await Promise.all(recentQuotes.map(async (quote) => ({ quote, lines: await listQuoteLines(quote.id) })));
@@ -281,7 +286,7 @@ export default async function DashboardPage() {
       href: "/enquiries",
       date: enquiry.updatedAt ?? enquiry.createdAt,
       tone: "blue" as const,
-      logoUrl: logoForClientId(enquiry.linkedCustomerId),
+      logoUrl: enquiry.clientLogoUrl || logoForClientId(enquiry.linkedCustomerId),
       clientName: enquiry.clientName
     })),
     ...surveys.slice(0, 8).map((survey) => ({
@@ -291,7 +296,7 @@ export default async function DashboardPage() {
       href: "/surveys",
       date: survey.updatedAt ?? survey.createdAt,
       tone: isCompletedSurvey(survey) ? "green" as const : "purple" as const,
-      logoUrl: logoForClientId(survey.linkedCustomerId),
+      logoUrl: logoForEnquiry(survey.enquiryId, survey.linkedCustomerId),
       clientName: survey.clientName
     })),
     ...quotes.slice(0, 8).map((quote) => ({
@@ -301,7 +306,7 @@ export default async function DashboardPage() {
       href: "/quotes",
       date: quote.updatedAt ?? quote.createdAt,
       tone: "orange" as const,
-      logoUrl: logoForClientId(quote.linkedCustomerId),
+      logoUrl: logoForEnquiry(quote.enquiryId, quote.linkedCustomerId),
       clientName: quote.clientName
     }))
   ].sort((a, b) => new Date(b.date ?? 0).getTime() - new Date(a.date ?? 0).getTime()).slice(0, 10);
@@ -314,7 +319,7 @@ export default async function DashboardPage() {
       href: "/surveys",
       date: survey.dueDate ?? survey.createdAt,
       tone: "purple" as const,
-      logoUrl: logoForClientId(survey.linkedCustomerId),
+      logoUrl: logoForEnquiry(survey.enquiryId, survey.linkedCustomerId),
       clientName: survey.clientName
     })),
     ...completedSurveysNotQuoted.slice(0, 6).map((survey) => ({
@@ -324,7 +329,7 @@ export default async function DashboardPage() {
       href: "/surveys",
       date: survey.installSchedulerCompletedAt ?? survey.completedAt ?? survey.updatedAt,
       tone: "green" as const,
-      logoUrl: logoForClientId(survey.linkedCustomerId),
+      logoUrl: logoForEnquiry(survey.enquiryId, survey.linkedCustomerId),
       clientName: survey.clientName
     })),
     ...lowStock.map((material) => ({

@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getEnquiryById } from "@/server/enquiries";
+import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
@@ -181,14 +181,15 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const selected = readParam(params, "selected");
   const filter = readParam(params, "filter");
 
-  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients] = await Promise.all([
+  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listMaterialsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
     getCompanySettingsByTenantId(activeTenant.tenantId),
-    listCustomersForTenant(activeTenant.tenantId)
+    listCustomersForTenant(activeTenant.tenantId),
+    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
   ]);
 
   const deletedQuoteCount = allQuoteDrafts.filter((quote) => quote.status === "deleted").length;
@@ -196,13 +197,17 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     ? allQuoteDrafts.filter((quote) => quote.status === "deleted")
     : allQuoteDrafts.filter((quote) => quote.status !== "deleted");
 
-  const sourceClientName = survey?.clientName ?? enquiry?.clientName ?? "";
-  const sourceContactName = survey?.contactName ?? enquiry?.contactName ?? "";
-  const sourcePhone = survey?.phone ?? enquiry?.phone ?? "";
-  const sourceEmail = enquiry?.email ?? "";
   const activeMaterials = materials.filter((material) => material.active);
   const customerById = new Map(clients.map((client) => [client.id, client]));
-  const sourceLinkedCustomerId = survey?.linkedCustomerId ?? enquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
+  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
+  const surveySourceEnquiry = survey?.enquiryId ? enquiryById.get(survey.enquiryId) ?? null : null;
+  const selectedQuoteSourceEnquiry = selectedQuote?.enquiryId ? enquiryById.get(selectedQuote.enquiryId) ?? null : null;
+  const sourceEnquiry = enquiry ?? surveySourceEnquiry;
+  const sourceClientName = survey?.clientName ?? sourceEnquiry?.clientName ?? "";
+  const sourceContactName = survey?.contactName ?? sourceEnquiry?.contactName ?? "";
+  const sourcePhone = survey?.phone ?? sourceEnquiry?.phone ?? "";
+  const sourceEmail = sourceEnquiry?.email ?? "";
+  const sourceLinkedCustomerId = survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
 
   const [quoteLines, selectedArtworkApproval, linkedClient] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
@@ -214,11 +219,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
   const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
   const linkedClientLogoUrl = customerLogoUrl(linkedClient);
+  const sourceLogoUrl = sourceEnquiry?.clientLogoUrl || linkedClientLogoUrl;
+  const selectedQuoteLogoUrl = selectedQuoteSourceEnquiry?.clientLogoUrl || linkedClientLogoUrl;
   const linkedClientDefaultDiscount = customerDefaultDiscount(linkedClient);
   const linkedClientDiscountRules = customerDiscountRules(linkedClient);
   const surveyPhotos = extractSurveyPhotos(survey?.installSchedulerPayload);
   const defaultQuoteNotes = buildSurveyQuoteNotes({
-    enquirySummary: enquiry?.requestSummary ?? null,
+    enquirySummary: sourceEnquiry?.requestSummary ?? null,
     surveyNotes: survey?.notes ?? null,
     surveyDetails: survey?.surveyDetails ?? null,
     photos: surveyPhotos
@@ -254,7 +261,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <section style={{ border: `1px solid ${survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe"}`, borderRadius: 18, padding: 12, display: "grid", gap: 8, background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
                   <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-                    <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={survey.clientName} size={46} radius={12} padding={4} />
+                    <ClientLogoBadge logoUrl={sourceLogoUrl} name={survey.clientName} size={46} radius={12} padding={4} />
                     <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
                       <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
                       <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{survey.clientName}</strong>
@@ -263,7 +270,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
                 </div>
                 <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>{survey.siteAddress || "No site address recorded"}</p>
-                {enquiry?.clientPurchaseOrderNumber ? <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>PO: <strong>{enquiry.clientPurchaseOrderNumber}</strong></p> : null}
+                {sourceEnquiry?.clientPurchaseOrderNumber ? <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>PO: <strong>{sourceEnquiry.clientPurchaseOrderNumber}</strong></p> : null}
                 <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                   {surveyPhotos.length ? <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 9px", fontSize: 12, fontWeight: 850 }}>{surveyPhotos.length} photo{surveyPhotos.length === 1 ? "" : "s"} copied to notes</span> : null}
                   <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 10, border: "1px solid #cbd5e1", color: "#111827", fontSize: 13, fontWeight: 900, padding: "0 10px" }}>Open survey</Link>
@@ -285,7 +292,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         <details open={!selectedQuote || Boolean(enquiry || survey)} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
           <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef" }}>New draft quote</summary>
           <form action={createQuoteDraftAction} style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <input type="hidden" name="enquiryId" value={enquiry?.id ?? survey?.enquiryId ?? ""} />
+            <input type="hidden" name="enquiryId" value={sourceEnquiry?.id ?? survey?.enquiryId ?? ""} />
             <input type="hidden" name="surveyRequestId" value={survey?.id ?? ""} />
             <input type="hidden" name="linkedCustomerId" value={sourceLinkedCustomerId ?? ""} />
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
@@ -303,7 +310,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
           {quoteDrafts.map((quote) => {
             const active = selectedQuote?.id === quote.id;
-            const quoteLogoUrl = customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+            const quoteSourceEnquiry = quote.enquiryId ? enquiryById.get(quote.enquiryId) : null;
+            const quoteLogoUrl = quoteSourceEnquiry?.clientLogoUrl || customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
             return (
               <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ minWidth: 280, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 8, background: active ? "#eff6ff" : "#fbfdff" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
@@ -327,7 +335,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <div style={{ display: "grid", gap: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                   <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
-                    <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={selectedQuote.clientName} size={58} radius={16} padding={5} />
+                    <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={58} radius={16} padding={5} />
                     <div style={{ minWidth: 0 }}>
                       <h2 style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Selected quote: {selectedQuote.clientName}</h2>
                       <p style={{ margin: "6px 0 0", color: "#667085" }}>Add line items by building from your material library. Start with Acrylic, ACM, Corflute, PVC, Banner or another sheet material.</p>

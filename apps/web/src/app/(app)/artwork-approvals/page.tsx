@@ -14,6 +14,7 @@ import {
   type ArtworkApprovalPageRecord
 } from "@/server/quotes";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import {
@@ -230,10 +231,11 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const quoteParam = readParam(params, "quote");
   const filter = readParam(params, "filter");
 
-  const [quoteDrafts, allApprovals, clients] = await Promise.all([
+  const [quoteDrafts, allApprovals, clients, allEnquiries] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId),
     listArtworkApprovalsForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listCustomersForTenant(activeTenant.tenantId)
+    listCustomersForTenant(activeTenant.tenantId),
+    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
   ]);
   const deletedApprovalCount = allApprovals.filter((approval) => approval.status === "deleted").length;
   const approvals = filter === "deleted"
@@ -257,7 +259,11 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
 
   const quoteTotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const customerById = new Map(clients.map((client) => [client.id, client]));
-  const logoForQuote = (quote: typeof quoteDrafts[number] | null | undefined) => customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
+  const logoForQuote = (quote: typeof quoteDrafts[number] | null | undefined) => {
+    const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
+    return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+  };
   const selectedQuoteLogoUrl = logoForQuote(selectedQuote);
   const artworkEligibleQuoteLines = quoteLines.filter((line) => artworkQuoteLineKind(line));
   const quotedPagesAlreadyCreated = proofPages.filter((page) => page.sourceQuoteLineId).length;
