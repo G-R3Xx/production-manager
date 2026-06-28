@@ -3,6 +3,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, isDeletedCustomer, listCustomersForTenant, type CustomerRecord } from "@/server/customers";
 import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, updateClientAction } from "./actions";
+import { ClientDiscountRulesEditor } from "./ClientDiscountRulesEditor";
 
 type ClientsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -141,11 +142,7 @@ function ClientEditor({ client }: { client: CustomerRecord | null }) {
           <input name="logoUrl" defaultValue={logoUrl} placeholder="or paste logo URL" style={inputStyle} />
         </div>
 
-        <div style={{ border: "1px solid #fef0c7", borderRadius: 20, padding: 14, background: "#fffbeb", display: "grid", gap: 10 }}>
-          <strong>Quantity / product type discounts</strong>
-          <p style={{ margin: 0, color: "#92400e", fontSize: 13 }}>One rule per line: <b>Product type | minimum qty | discount % | optional maximum qty | note</b></p>
-          <textarea name="discountRulesText" defaultValue={client ? discountLines(client) : "Signage | 10 | 5\nSmall format | 250 | 7.5"} style={{ ...textareaStyle, minHeight: 120 }} />
-        </div>
+        <ClientDiscountRulesEditor initialRulesText={client ? discountLines(client) : "Signage | 10 | 5\nSmall format | 250 | 7.5"} />
 
         <label style={{ display: "grid", gap: 6 }}><b>Internal notes</b><textarea name="notes" defaultValue={String(payload.notes ?? "")} style={textareaStyle} /></label>
 
