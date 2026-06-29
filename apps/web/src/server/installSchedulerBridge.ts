@@ -107,3 +107,82 @@ export async function createInstallSchedulerSurveyJob(input: CreateSurveyJobInpu
     return { ok: false, error: message };
   }
 }
+
+type CreateInstallJobInput = {
+  tenantId: string;
+  productionManagerJobId: string;
+  productionManagerItemId: string | null;
+  productionManagerStepId: string;
+  quoteId: string | null;
+  quoteNumber: string | null;
+  clientName: string;
+  contactName: string | null;
+  phone: string | null;
+  email: string | null;
+  siteAddress: string | null;
+  dueDate: string | null;
+  assignedTo: string | null;
+  priority: string | null;
+  projectName: string | null;
+  jobName: string;
+  description: string;
+  itemSummary: string | null;
+  substrateSummary: string | null;
+  colourSummary: string | null;
+  finishingSummary: string | null;
+  quoteProductName: string | null;
+  quoteOptionSummary: string | null;
+  readyStepLabel: string;
+  destination: string;
+  productionManagerBaseUrl: string;
+  clientLogoUrl: string | null;
+  clientLogoStoragePath: string | null;
+};
+
+export function installSchedulerInstallBridgeConfigured(): boolean {
+  return Boolean(process.env.INSTALL_SCHEDULER_CREATE_INSTALL_JOB_URL && process.env.INSTALL_SCHEDULER_BRIDGE_KEY);
+}
+
+export async function createInstallSchedulerInstallJob(input: CreateInstallJobInput): Promise<{
+  ok: boolean;
+  jobId?: string;
+  jobUrl?: string;
+  skipped?: boolean;
+  error?: string;
+  responseBody?: unknown;
+}> {
+  const endpoint = process.env.INSTALL_SCHEDULER_CREATE_INSTALL_JOB_URL?.trim();
+  const bridgeKey = process.env.INSTALL_SCHEDULER_BRIDGE_KEY?.trim();
+
+  if (!endpoint || !bridgeKey) {
+    return {
+      ok: false,
+      skipped: true,
+      error: "Install Scheduler install bridge is not configured. Set INSTALL_SCHEDULER_CREATE_INSTALL_JOB_URL and INSTALL_SCHEDULER_BRIDGE_KEY."
+    };
+  }
+
+  try {
+    const response = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${bridgeKey}`,
+      },
+      body: JSON.stringify(input),
+    });
+
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || body?.ok === false) {
+      return { ok: false, error: body?.error || `Install Scheduler bridge returned ${response.status}`, responseBody: body };
+    }
+
+    const baseUrl = cleanBaseUrl(process.env.INSTALL_SCHEDULER_BASE_URL || "https://install-scheduler.web.app");
+    const jobId = body?.jobId ? String(body.jobId) : undefined;
+    const jobUrl = body?.jobUrl ? String(body.jobUrl) : jobId ? `${baseUrl}/jobs/${jobId}` : undefined;
+    return { ok: true, jobId, jobUrl, responseBody: body };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return { ok: false, error: message };
+  }
+}

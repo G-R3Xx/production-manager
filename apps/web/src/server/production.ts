@@ -80,6 +80,38 @@ export type ApprovedArtworkOptionRecord = {
 
 export type ProductionBoardColumnKey = "printing" | "finishing" | "install" | "deliver" | "pickup";
 
+
+export type ProductionInstallSchedulerPayload = {
+  tenantId: string;
+  productionManagerJobId: string;
+  productionManagerItemId: string | null;
+  productionManagerStepId: string;
+  quoteId: string | null;
+  quoteNumber: string | null;
+  clientName: string;
+  contactName: string | null;
+  phone: string | null;
+  email: string | null;
+  siteAddress: string | null;
+  dueDate: string | null;
+  assignedTo: string | null;
+  priority: string | null;
+  projectName: string | null;
+  jobName: string;
+  description: string;
+  itemSummary: string | null;
+  substrateSummary: string | null;
+  colourSummary: string | null;
+  finishingSummary: string | null;
+  quoteProductName: string | null;
+  quoteOptionSummary: string | null;
+  readyStepLabel: string;
+  destination: ProductionBoardColumnKey;
+  productionManagerBaseUrl: string;
+  clientLogoUrl: string | null;
+  clientLogoStoragePath: string | null;
+};
+
 export type ProductionBoardCardRecord = {
   id: string;
   column: ProductionBoardColumnKey;
@@ -107,6 +139,7 @@ export type ProductionBoardCardRecord = {
   nextStepId: string | null;
   nextStepLabel: string | null;
   nextStepType: string | null;
+  handoffColumn: ProductionBoardColumnKey | null;
   stepsDone: string;
   stepsTotal: string;
   updatedAt: string;
@@ -127,6 +160,23 @@ function normaliseMoney(value: string | null | undefined, fallback = "1"): strin
 
 function cleanSearchText(value: string | null | undefined): string {
   return String(value ?? "").toLowerCase().replace(/[_/\\-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function isReadyHandoffText(value: string | null | undefined): boolean {
+  const source = cleanSearchText(value);
+  return /\b(ready for install|ready for pickup|ready for delivery|ready for collect|ready for collection|ready to install|ready to deliver|ready to pickup|ready to collect|dispatch|packed)\b/.test(source);
+}
+
+function destinationColumnFromText(value: string | null | undefined, fallback: ProductionBoardColumnKey = "install"): ProductionBoardColumnKey {
+  const source = cleanSearchText(value);
+  if (/\b(pickup|pick up|collect|collection|counter)\b/.test(source)) return "pickup";
+  if (/\b(deliver|delivery|courier|freight|drop off|dispatch)\b/.test(source)) return "deliver";
+  if (/\b(install|installed|installer|site install|site)\b/.test(source)) return "install";
+  return fallback;
+}
+
+function cleanBaseUrl(value: string | undefined): string {
+  return (value || "").trim().replace(/\/$/, "");
 }
 
 function uniqueSteps(steps: string[]): string[] {
@@ -432,6 +482,8 @@ function productionBoardColumnForText(text: string): ProductionBoardColumnKey {
 }
 
 function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "id" | "column">): ProductionBoardColumnKey {
+  if (!row.nextStepId && row.handoffColumn) return row.handoffColumn;
+
   const nextStep = cleanSearchText([row.nextStepLabel, row.nextStepType].filter(Boolean).join(" · "));
 
   if (!nextStep) {
@@ -493,8 +545,9 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
       ql.product_name as "quoteProductName",
       ql.option_summary as "quoteOptionSummary",
       next_step.id as "nextStepId",
-      next_step.label as "nextStepLabel",
-      next_step.step_type as "nextStepType",
+      COALESCE(next_step.label, final_handoff.label) as "nextStepLabel",
+      COALESCE(next_step.step_type, final_handoff.step_type) as "nextStepType",
+      final_handoff.handoff_column as "handoffColumn",
       COALESCE(progress.steps_done, 0)::text as "stepsDone",
       COALESCE(progress.steps_total, 0)::text as "stepsTotal",
       GREATEST(
@@ -519,6 +572,48 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
     ) next_step ON true
     LEFT JOIN LATERAL (
       SELECT
+        ps.id,
+        ps.label,
+        ps.step_type,
+        CASE
+          WHEN concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%pickup%'
+            OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%pick up%'
+            OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%collect%'
+            OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%counter%'
+          THEN 'pickup'
+          WHEN concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%deliver%'
+            OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%courier%'
+            OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%freight%'
+            OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%drop off%'
+          THEN 'deliver'
+          ELSE 'install'
+        END as handoff_column
+      FROM production.production_steps ps
+      WHERE ps.item_id = pi.id
+        AND ps.status = 'done'
+        AND (
+          lower(ps.label) LIKE '%ready for install%'
+          OR lower(ps.label) LIKE '%ready for pickup%'
+          OR lower(ps.label) LIKE '%ready for delivery%'
+          OR lower(ps.label) LIKE '%ready%pickup%'
+          OR lower(ps.label) LIKE '%ready%delivery%'
+          OR lower(ps.label) LIKE '%ready%install%'
+        )
+        AND NOT EXISTS (
+          SELECT 1
+          FROM production.production_steps pending
+          WHERE pending.item_id = pi.id
+            AND pending.status <> 'done'
+            AND NOT (
+              lower(pending.label) LIKE '%apply%mount%substrate%'
+              AND concat_ws(' ', pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%direct print%'
+            )
+        )
+      ORDER BY ps.sort_order DESC, ps.updated_at DESC
+      LIMIT 1
+    ) final_handoff ON true
+    LEFT JOIN LATERAL (
+      SELECT
         count(*) FILTER (WHERE NOT (lower(ps.label) LIKE '%apply%mount%substrate%' AND concat_ws(' ', pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%direct print%')) as steps_total,
         count(*) FILTER (WHERE ps.status = 'done' AND NOT (lower(ps.label) LIKE '%apply%mount%substrate%' AND concat_ws(' ', pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%direct print%')) as steps_done
       FROM production.production_steps ps
@@ -531,7 +626,7 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
     ) step_activity ON true
     WHERE pj.tenant_id = $1::uuid
       AND pj.status NOT IN ('deleted', 'completed')
-      AND (pi.id IS NULL OR next_step.id IS NOT NULL)
+      AND (pi.id IS NULL OR next_step.id IS NOT NULL OR final_handoff.id IS NOT NULL)
     ORDER BY
       CASE WHEN pj.priority ILIKE 'urgent%' THEN 0 ELSE 1 END,
       pj.due_date ASC NULLS LAST,
@@ -863,6 +958,195 @@ export async function setProductionStepStatusForTenant(tenantId: string, stepId:
     SELECT job_id as "jobId" FROM updated_step
   `, [tenantId, stepId, status, checkedBy ?? null]);
   return { jobId: result.rows[0]?.jobId ?? null };
+}
+
+
+export async function getProductionInstallSchedulerPayloadForStep(tenantId: string, stepId: string): Promise<{
+  payload: ProductionInstallSchedulerPayload;
+  alreadyCreatedJobId: string | null;
+  alreadyCreatedJobUrl: string | null;
+} | null> {
+  await ensureProductionTables();
+  const result = await pool.query<{
+    stepId: string;
+    stepLabel: string;
+    stepType: string;
+    jobId: string;
+    itemId: string | null;
+    quoteId: string | null;
+    quoteNumber: string | null;
+    clientName: string;
+    contactName: string | null;
+    projectName: string | null;
+    priority: string | null;
+    dueDate: string | null;
+    assignedTo: string | null;
+    itemCode: string | null;
+    itemTitle: string | null;
+    productionType: string | null;
+    quantity: string | null;
+    sizeSummary: string | null;
+    substrateSummary: string | null;
+    colourSummary: string | null;
+    finishingSummary: string | null;
+    quoteProductName: string | null;
+    quoteOptionSummary: string | null;
+    quotePhone: string | null;
+    quoteEmail: string | null;
+    artworkSiteAddress: string | null;
+    enquirySiteAddress: string | null;
+    enquiryClientLogoUrl: string | null;
+    enquiryClientLogoStoragePath: string | null;
+    customerLogoUrl: string | null;
+    existingJobId: string | null;
+    existingJobUrl: string | null;
+  }>(`
+    SELECT
+      ps.id as "stepId",
+      ps.label as "stepLabel",
+      ps.step_type as "stepType",
+      pj.id as "jobId",
+      pi.id as "itemId",
+      pj.quote_id as "quoteId",
+      pj.quote_number as "quoteNumber",
+      pj.client_name as "clientName",
+      pj.contact_name as "contactName",
+      pj.project_name as "projectName",
+      pj.priority,
+      pj.due_date::text as "dueDate",
+      pj.assigned_to as "assignedTo",
+      pi.item_code as "itemCode",
+      pi.title as "itemTitle",
+      pi.production_type as "productionType",
+      pi.quantity::text as quantity,
+      pi.size_summary as "sizeSummary",
+      pi.substrate_summary as "substrateSummary",
+      pi.colour_summary as "colourSummary",
+      pi.finishing_summary as "finishingSummary",
+      ql.product_name as "quoteProductName",
+      ql.option_summary as "quoteOptionSummary",
+      qd.phone as "quotePhone",
+      qd.email as "quoteEmail",
+      aa.site_address as "artworkSiteAddress",
+      e.site_address as "enquirySiteAddress",
+      e.client_logo_url as "enquiryClientLogoUrl",
+      e.client_logo_storage_path as "enquiryClientLogoStoragePath",
+      c.payload_json->>'logoUrl' as "customerLogoUrl",
+      pj.payload_json->'installSchedulerInstall'->>'jobId' as "existingJobId",
+      pj.payload_json->'installSchedulerInstall'->>'jobUrl' as "existingJobUrl"
+    FROM production.production_steps ps
+    JOIN production.production_jobs pj ON pj.id = ps.job_id
+    LEFT JOIN production.production_items pi ON pi.id = ps.item_id
+    LEFT JOIN sales.quote_lines ql ON ql.id = pi.source_quote_line_id
+    LEFT JOIN sales.quote_drafts qd ON qd.id = pj.quote_id
+    LEFT JOIN sales.artwork_approvals aa ON aa.id = pj.artwork_approval_id
+    LEFT JOIN app.enquiries e ON e.id = qd.enquiry_id
+    LEFT JOIN app.customers c ON c.id = qd.linked_customer_id
+    WHERE pj.tenant_id = $1::uuid
+      AND ps.id = $2::uuid
+    LIMIT 1
+  `, [tenantId, stepId]);
+
+  const row = result.rows[0];
+  if (!row || !isReadyHandoffText([row.stepLabel, row.stepType].join(" "))) return null;
+
+  const destinationSource = [
+    row.projectName,
+    row.itemTitle,
+    row.productionType,
+    row.sizeSummary,
+    row.substrateSummary,
+    row.colourSummary,
+    row.finishingSummary,
+    row.quoteProductName,
+    row.quoteOptionSummary
+  ].filter(Boolean).join(" · ");
+  const destinationSourceClean = cleanSearchText(destinationSource);
+  const hasSpecificDestination = /\b(pickup|pick up|collect|collection|counter|deliver|delivery|courier|freight|drop off|dispatch|install|installed|installer|site install|site)\b/.test(destinationSourceClean);
+  const stepLabelClean = cleanSearchText(row.stepLabel);
+  const genericReadyLabel = /ready/.test(stepLabelClean) && /install/.test(stepLabelClean) && /pickup/.test(stepLabelClean) && /delivery/.test(stepLabelClean);
+  const destination = hasSpecificDestination
+    ? destinationColumnFromText(destinationSource, "install")
+    : genericReadyLabel ? "install" : destinationColumnFromText(row.stepLabel, "install");
+
+  if (destination !== "install") return null;
+
+  const itemSummary = [row.itemCode, row.itemTitle].filter(Boolean).join(" - ") || row.quoteProductName || row.projectName || row.clientName;
+  const detailLines = [
+    row.quoteNumber ? `Quote: ${row.quoteNumber}` : null,
+    row.projectName ? `Job: ${row.projectName}` : null,
+    itemSummary ? `Item: ${itemSummary}` : null,
+    row.quantity ? `Qty: ${row.quantity}` : null,
+    row.sizeSummary ? `Size: ${row.sizeSummary}` : null,
+    row.substrateSummary ? `Substrate: ${row.substrateSummary}` : null,
+    row.colourSummary ? `Colour/print: ${row.colourSummary}` : null,
+    row.finishingSummary ? `Finishing/install notes: ${row.finishingSummary}` : null,
+    row.quoteOptionSummary ? `Quote details: ${row.quoteOptionSummary}` : null,
+    `Ready step: ${row.stepLabel}`,
+  ].filter(Boolean).join("\n");
+
+  const payload: ProductionInstallSchedulerPayload = {
+    tenantId,
+    productionManagerJobId: row.jobId,
+    productionManagerItemId: row.itemId,
+    productionManagerStepId: row.stepId,
+    quoteId: row.quoteId,
+    quoteNumber: row.quoteNumber,
+    clientName: row.clientName,
+    contactName: row.contactName,
+    phone: row.quotePhone,
+    email: row.quoteEmail,
+    siteAddress: row.artworkSiteAddress || row.enquirySiteAddress,
+    dueDate: row.dueDate,
+    assignedTo: row.assignedTo,
+    priority: row.priority,
+    projectName: row.projectName,
+    jobName: [row.clientName, row.projectName || row.quoteNumber].filter(Boolean).join(" - "),
+    description: detailLines,
+    itemSummary,
+    substrateSummary: row.substrateSummary,
+    colourSummary: row.colourSummary,
+    finishingSummary: row.finishingSummary,
+    quoteProductName: row.quoteProductName,
+    quoteOptionSummary: row.quoteOptionSummary,
+    readyStepLabel: row.stepLabel,
+    destination,
+    productionManagerBaseUrl: cleanBaseUrl(process.env.NEXT_PUBLIC_APP_URL),
+    clientLogoUrl: row.enquiryClientLogoUrl || row.customerLogoUrl || null,
+    clientLogoStoragePath: row.enquiryClientLogoStoragePath,
+  };
+
+  return { payload, alreadyCreatedJobId: row.existingJobId, alreadyCreatedJobUrl: row.existingJobUrl };
+}
+
+export async function recordProductionInstallSchedulerBridgeResultForStep(tenantId: string, stepId: string, input: {
+  status: "created" | "error" | "not_configured" | "skipped";
+  jobId?: string | null;
+  jobUrl?: string | null;
+  error?: string | null;
+}): Promise<void> {
+  await ensureProductionTables();
+  await pool.query(`
+    UPDATE production.production_jobs pj
+    SET payload_json = jsonb_set(
+          COALESCE(pj.payload_json, '{}'::jsonb),
+          '{installSchedulerInstall}',
+          $3::jsonb,
+          true
+        ),
+        updated_at = now()
+    FROM production.production_steps ps
+    WHERE ps.job_id = pj.id
+      AND pj.tenant_id = $1::uuid
+      AND ps.id = $2::uuid
+  `, [tenantId, stepId, JSON.stringify({
+    status: input.status,
+    jobId: input.jobId ?? null,
+    jobUrl: input.jobUrl ?? null,
+    error: input.error ?? null,
+    stepId,
+    syncedAt: new Date().toISOString(),
+  })]);
 }
 
 export async function addProductionStepForTenant(tenantId: string, jobId: string, itemId: string | null, label: string): Promise<void> {

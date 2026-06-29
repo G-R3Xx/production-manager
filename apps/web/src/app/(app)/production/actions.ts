@@ -6,6 +6,8 @@ import { resolveActiveTenantForAuthUserId, type ActiveTenantContext } from "@/se
 import {
   addProductionStepForTenant,
   createProductionJobFromArtworkApprovalForTenant,
+  getProductionInstallSchedulerPayloadForStep,
+  recordProductionInstallSchedulerBridgeResultForStep,
   removeProductionJobForTenant,
   restoreProductionJobForTenant,
   setProductionJobStatusForTenant,
@@ -15,6 +17,7 @@ import {
   updateProductionJobDetailsForTenant
 } from "@/server/production";
 import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
+import { createInstallSchedulerInstallJob } from "@/server/installSchedulerBridge";
 
 type ActiveTenant = NonNullable<ActiveTenantContext>;
 type SessionUser = Awaited<ReturnType<typeof getRequiredSessionUser>>;
@@ -45,6 +48,32 @@ function productionRedirect(jobId: string | null | undefined, message: string): 
 
 function productionBoardRedirect(message: string): never {
   redirectToProduction(`/production/board?message=${encodeURIComponent(message)}`);
+}
+
+async function maybeCreateInstallSchedulerInstallJob(tenantId: string, stepId: string): Promise<string | null> {
+  const bridgePayload = await getProductionInstallSchedulerPayloadForStep(tenantId, stepId);
+  if (!bridgePayload) return null;
+
+  if (bridgePayload.alreadyCreatedJobId) {
+    return "Install Scheduler job already exists";
+  }
+
+  const response = await createInstallSchedulerInstallJob(bridgePayload.payload);
+  if (response.ok) {
+    await recordProductionInstallSchedulerBridgeResultForStep(tenantId, stepId, {
+      status: "created",
+      jobId: response.jobId ?? null,
+      jobUrl: response.jobUrl ?? null,
+      error: null,
+    });
+    return "Install Scheduler install job created";
+  }
+
+  await recordProductionInstallSchedulerBridgeResultForStep(tenantId, stepId, {
+    status: response.skipped ? "not_configured" : "error",
+    error: response.error ?? "Install Scheduler job could not be created",
+  });
+  return response.skipped ? "Install Scheduler bridge not configured" : "Install Scheduler job could not be created";
 }
 
 export async function createProductionJobFromArtworkAction(formData: FormData): Promise<void> {
@@ -108,7 +137,9 @@ export async function toggleProductionStepAction(formData: FormData): Promise<vo
   if (!stepId) redirectToProduction("/production?error=Missing%20procedure%20step");
   const nextStatus = currentStatus === "done" ? "pending" : "done";
   const result = await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
-  productionRedirect(result.jobId, nextStatus === "done" ? "Step checked off" : "Step reopened");
+  const bridgeMessage = nextStatus === "done" ? await maybeCreateInstallSchedulerInstallJob(activeTenant.tenantId, stepId) : null;
+  const message = [nextStatus === "done" ? "Step checked off" : "Step reopened", bridgeMessage].filter(Boolean).join("; ");
+  productionRedirect(result.jobId, message);
 }
 
 export async function toggleProductionBoardStepAction(formData: FormData): Promise<void> {
@@ -118,7 +149,9 @@ export async function toggleProductionBoardStepAction(formData: FormData): Promi
   if (!stepId) redirectToProduction("/production/board?error=Missing%20procedure%20step");
   const nextStatus = currentStatus === "done" ? "pending" : "done";
   await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
-  productionBoardRedirect(nextStatus === "done" ? "Board step checked off" : "Board step reopened");
+  const bridgeMessage = nextStatus === "done" ? await maybeCreateInstallSchedulerInstallJob(activeTenant.tenantId, stepId) : null;
+  const message = [nextStatus === "done" ? "Board step checked off" : "Board step reopened", bridgeMessage].filter(Boolean).join("; ");
+  productionBoardRedirect(message);
 }
 
 export async function addProductionStepAction(formData: FormData): Promise<void> {

@@ -177,6 +177,8 @@ function finishedSizeForCard(card: ProductionBoardCardRecord): string {
 }
 
 function boardColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey {
+  if (!card.nextStepId && card.handoffColumn) return card.handoffColumn;
+
   const nextStep = cleanBoardText([card.nextStepLabel, card.nextStepType].filter(Boolean).join(" · "));
 
   if (nextStep) {
@@ -271,6 +273,11 @@ function laminateName(card: ProductionBoardCardRecord): string | null {
 function nextStepSummary(card: ProductionBoardCardRecord, laminate: string | null): string {
   const step = compactText(card.nextStepLabel);
   if (!step) return "Needs steps synced";
+  if (!card.nextStepId && card.handoffColumn) {
+    if (card.handoffColumn === "install") return "Ready for install";
+    if (card.handoffColumn === "deliver") return "Ready for delivery";
+    if (card.handoffColumn === "pickup") return "Ready for pickup";
+  }
   if (laminate && /laminate|lamination|cello/i.test(step)) return `${step} (${laminate})`;
   return step;
 }
