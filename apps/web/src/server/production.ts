@@ -430,20 +430,34 @@ function productionBoardColumnForText(text: string): ProductionBoardColumnKey {
   return "printing";
 }
 
+function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "id" | "column">): ProductionBoardColumnKey {
+  const nextStep = cleanSearchText([row.nextStepLabel, row.nextStepType].filter(Boolean).join(" · "));
+
+  if (!nextStep) {
+    return productionBoardColumnForText([
+      row.jobStatus,
+      row.projectName,
+      row.itemTitle,
+      row.productionType,
+      row.substrateSummary,
+      row.colourSummary,
+      row.finishingSummary,
+      row.quoteProductName,
+      row.quoteOptionSummary
+    ].filter(Boolean).join(" · "));
+  }
+
+  if (/\b(ready for install|install|installed|installer|site install)\b/.test(nextStep)) return "install";
+  if (/\b(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
+  if (/\b(ready for pickup|pickup|pick up|collect|collection)\b/.test(nextStep)) return "pickup";
+
+  if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
+
+  return "printing";
+}
+
 function productionBoardCardFromRow(row: Omit<ProductionBoardCardRecord, "id" | "column">): ProductionBoardCardRecord {
-  const column = productionBoardColumnForText([
-    row.nextStepLabel,
-    row.nextStepType,
-    row.jobStatus,
-    row.projectName,
-    row.itemTitle,
-    row.productionType,
-    row.substrateSummary,
-    row.colourSummary,
-    row.finishingSummary,
-    row.quoteProductName,
-    row.quoteOptionSummary
-  ].filter(Boolean).join(" · "));
+  const column = productionBoardColumnForNextStep(row);
 
   return {
     ...row,

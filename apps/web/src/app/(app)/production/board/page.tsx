@@ -110,6 +110,84 @@ function quantitySuffix(value: string | null | undefined): string {
   return ` (${display} ${count === 1 ? "piece" : "pieces"})`;
 }
 
+function optionParts(card: ProductionBoardCardRecord): string[] {
+  return [
+    card.quoteProductName,
+    card.quoteOptionSummary,
+    card.substrateSummary,
+    card.colourSummary,
+    card.finishingSummary,
+    card.sizeSummary,
+    card.itemTitle
+  ]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(/\s*[·\n]\s*/g))
+    .map((part) => compactText(part))
+    .filter(Boolean);
+}
+
+function stripDetailLabel(value: string): string {
+  return compactText(value.replace(/^(?:material|substrate|stock|base|size|sizes|print|laminate|coating|finishing|finish|install|small format)\s*:\s*/i, ""));
+}
+
+function normaliseSizeText(value: string | null | undefined): string {
+  const source = compactText(value);
+  const normalised = source.replace(/[×*]/g, "x").replace(/\s+/g, " ");
+  const match = normalised.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|m)?/i);
+  if (!match) return "";
+  const unit = match[3] ? match[3].toLowerCase() : "mm";
+  return `${match[1]}x${match[2]}${unit}`;
+}
+
+function boardItemSummary(card: ProductionBoardCardRecord): string {
+  const code = compactText(card.itemCode) || "S1";
+  const material = materialName(card);
+  const size = normaliseSizeText(card.sizeSummary) || normaliseSizeText(boardSearchText(card));
+  return [code, material, size].filter(Boolean).join(" - ") + quantitySuffix(card.quantity);
+}
+
+function substrateDetail(card: ProductionBoardCardRecord): string | null {
+  const parts = optionParts(card);
+  const material = materialName(card);
+  const substratePart = parts.find((part) => /^(?:material|substrate|stock|base)\s*:/i.test(part))
+    || parts.find((part) => /\b(acm|acrylic|corflute|coreflute|pvc|foamboard|foamex|polycarbonate)\b/i.test(part) && /\b\d+(?:\.\d+)?\s*mm\b/i.test(part))
+    || compactText(card.substrateSummary)
+    || compactText(card.quoteProductName);
+
+  let cleaned = stripDetailLabel(substratePart || "")
+    .replace(/\b\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*(?:mm|m)?\b/gi, "")
+    .replace(/^\w+\s*-\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const thicknessThenMaterial = cleaned.match(/\b(\d+(?:\.\d+)?\s*mm\s*(?:ACM|Acrylic|Corflute|Coreflute|PVC|Foamboard|Foamex|Polycarbonate))\b/i)?.[1];
+  if (thicknessThenMaterial) return compactText(thicknessThenMaterial).replace(/\bCoreflute\b/i, "Corflute");
+
+  const materialThenThickness = cleaned.match(/\b(ACM|Acrylic|Corflute|Coreflute|PVC|Foamboard|Foamex|Polycarbonate)\s*(\d+(?:\.\d+)?\s*mm)\b/i);
+  if (materialThenThickness) return `${materialThenThickness[2]} ${materialThenThickness[1]}`.replace(/\bCoreflute\b/i, "Corflute");
+
+  if (!cleaned || cleaned.toLowerCase() === material.toLowerCase()) return null;
+  return cleaned;
+}
+
+function finishingDetails(card: ProductionBoardCardRecord, laminate: string | null): string[] {
+  const laminateKey = cleanBoardText(laminate ?? "");
+  const details = optionParts(card)
+    .filter((part) => /\b(finishing|finish|eyelet|eyelets|hole|holes|drill|jingwei|router|route|cnc|cut|cutting|fold|score|crease|bind|staple|numbering|pad|tape|trim|guillotine|mount|apply)\b/i.test(part))
+    .map(stripDetailLabel)
+    .flatMap((part) => part.split(/\s*,\s*/g))
+    .map((part) => compactText(part))
+    .filter((part) => {
+      const key = cleanBoardText(part);
+      if (!key) return false;
+      if (laminateKey && key === laminateKey) return false;
+      if (/^none$/i.test(part)) return false;
+      return !/\b(print setup|artwork|direct print|roll stock|cut vinyl|single sided|double sided|cmyk|white ink)\b/i.test(part);
+    });
+
+  return Array.from(new Set(details)).slice(0, 4);
+}
+
 function cleanBoardText(value: string): string {
   return value.toLowerCase().replace(/[–—_/\\]+/g, " ").replace(/\s+/g, " ").trim();
 }
@@ -137,13 +215,6 @@ function laminateName(card: ProductionBoardCardRecord): string | null {
   if (/anti\s*graffiti/i.test(raw)) return "Anti Graffiti Laminate";
   if (/whiteboard/i.test(raw)) return "Whiteboard Laminate";
   return null;
-}
-
-function boardItemSummary(card: ProductionBoardCardRecord): string {
-  const code = compactText(card.itemCode) || "Item";
-  const material = materialName(card);
-  const size = compactSize(card.sizeSummary, boardSearchText(card));
-  return [code, [material, size].filter(Boolean).join(" - ")].filter(Boolean).join(" · ") + quantitySuffix(card.quantity);
 }
 
 function nextStepSummary(card: ProductionBoardCardRecord, laminate: string | null): string {
@@ -275,6 +346,8 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                   const progress = Number(card.stepsTotal) > 0 ? `${card.stepsDone}/${card.stepsTotal}` : "No steps";
                   const print = printMethod(card);
                   const laminate = laminateName(card);
+                  const substrate = substrateDetail(card);
+                  const finishings = finishingDetails(card, laminate);
                   const nextStep = nextStepSummary(card, laminate);
                   return (
                     <article key={card.id} style={boardCardStyle}>
@@ -292,8 +365,10 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                       <div style={{ display: "grid", gap: 5, fontSize: 13, lineHeight: 1.45 }}>
                         <p style={{ margin: 0, color: "#e2e8f0", fontWeight: 950 }}>Signage details:</p>
                         <p style={{ margin: 0, color: "#f8fafc", fontWeight: 900 }}>{boardItemSummary(card)}</p>
+                        {substrate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Substrate:</strong> {substrate}</p> : null}
                         {print ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Print:</strong> {print}</p> : null}
                         {laminate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Laminate:</strong> {laminate}</p> : null}
+                        {finishings.map((detail) => <p key={detail} style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>{/eyelet/i.test(detail) ? "Eyelets:" : "Finishing:"}</strong> {detail.replace(/^Eyelets?:\s*/i, "")}</p>)}
                         <p style={{ margin: "5px 0 0", color: card.nextStepLabel ? "#f8fafc" : "#fbbf24", fontWeight: 950 }}>Next Step: {nextStep}</p>
                       </div>
 

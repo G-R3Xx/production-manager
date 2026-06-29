@@ -1166,7 +1166,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const selectedMediaName = selectedMedia?.name ?? "";
   const selectedLaminateName = laminateId === "none" ? "None" : selectedLaminate?.name ?? "";
   const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : selectedSmallCoating?.name ?? "";
-  const finishingSummary = selectedKeys(finishingOptions, finishings);
+  const finishingSummary = finishings.map((key) => {
+    if (key === "eyelets") {
+      const preset = eyeletPresets.find((option) => option.label === eyeletPresetLabel);
+      const qty = preset?.qty === 0 ? numberValue(customEyeletQty, 0) : preset?.qty ?? 0;
+      return `Eyelets: ${eyeletPresetLabel}${qty > 0 ? ` (${qty})` : ""}`;
+    }
+    return finishingOptions.find((item) => item.key === key)?.label ?? "";
+  }).filter(Boolean).join(", ");
   const smallFinishingSummary = selectedKeys(smallFinishingOptions, smallFinishings);
 
   const componentPartSummary = pricedComponentParts.map((part) => {
