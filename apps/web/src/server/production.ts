@@ -12,6 +12,7 @@ export type ProductionJobRecord = {
   contactName: string | null;
   projectName: string | null;
   status: string;
+  dispatchType: string | null;
   priority: string | null;
   dueDate: string | null;
   assignedTo: string | null;
@@ -123,6 +124,7 @@ export type ProductionBoardCardRecord = {
   contactName: string | null;
   projectName: string | null;
   jobStatus: string;
+  dispatchType: string | null;
   priority: string | null;
   dueDate: string | null;
   assignedTo: string | null;
@@ -148,6 +150,38 @@ export type ProductionBoardCardRecord = {
 function nullableText(value: string | null | undefined): string | null {
   const cleaned = String(value ?? "").trim();
   return cleaned.length ? cleaned : null;
+}
+
+function normaliseDispatchType(value: string | null | undefined): "pickup" | "delivery" | "install" | null {
+  const clean = String(value ?? "").trim().toLowerCase();
+  if (clean === "pickup" || clean === "pick up" || clean === "collection" || clean === "collect") return "pickup";
+  if (clean === "delivery" || clean === "deliver" || clean === "courier") return "delivery";
+  if (clean === "install" || clean === "installation" || clean === "site install") return "install";
+  return null;
+}
+
+function readyStepLabelForDispatch(value: string | null | undefined): string | null {
+  const dispatch = normaliseDispatchType(value);
+  if (dispatch === "install") return "Ready for install";
+  if (dispatch === "delivery") return "Ready for delivery";
+  if (dispatch === "pickup") return "Ready for pickup";
+  return null;
+}
+
+function dispatchStepTypeForDispatch(value: string | null | undefined): string {
+  const dispatch = normaliseDispatchType(value);
+  if (dispatch === "install") return "ready_for_install";
+  if (dispatch === "delivery") return "ready_for_delivery";
+  if (dispatch === "pickup") return "ready_for_pickup";
+  return "ready_for_dispatch";
+}
+
+function variationProductNameForDispatch(value: string | null | undefined): string {
+  const dispatch = normaliseDispatchType(value);
+  if (dispatch === "install") return "Sign Install";
+  if (dispatch === "delivery") return "Delivery";
+  if (dispatch === "pickup") return "Pickup / collection change";
+  return "Production variation";
 }
 
 
@@ -205,6 +239,7 @@ export async function ensureProductionTables(): Promise<void> {
       contact_name varchar(255),
       project_name varchar(255),
       status varchar(50) NOT NULL DEFAULT 'ready_to_start',
+      dispatch_type varchar(40),
       priority varchar(50),
       due_date date,
       assigned_to varchar(255),
@@ -220,6 +255,7 @@ export async function ensureProductionTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS quote_number varchar(50),
       ADD COLUMN IF NOT EXISTS contact_name varchar(255),
       ADD COLUMN IF NOT EXISTS project_name varchar(255),
+      ADD COLUMN IF NOT EXISTS dispatch_type varchar(40),
       ADD COLUMN IF NOT EXISTS priority varchar(50),
       ADD COLUMN IF NOT EXISTS due_date date,
       ADD COLUMN IF NOT EXISTS assigned_to varchar(255),
@@ -346,6 +382,7 @@ function productionJobSelectSql(): string {
       contact_name as "contactName",
       project_name as "projectName",
       status,
+      dispatch_type as "dispatchType",
       priority,
       due_date::text as "dueDate",
       assigned_to as "assignedTo",
@@ -485,6 +522,10 @@ function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "
   if (!row.nextStepId && row.handoffColumn) return row.handoffColumn;
 
   const nextStep = cleanSearchText([row.nextStepLabel, row.nextStepType].filter(Boolean).join(" · "));
+  const dispatch = cleanSearchText(row.dispatchType ?? "");
+  const dispatchColumn: ProductionBoardColumnKey | null = dispatch === "pickup" ? "pickup" : dispatch === "delivery" ? "deliver" : dispatch === "install" ? "install" : null;
+  const isGenericReadyStep = /ready/.test(nextStep) && /install/.test(nextStep) && /pickup/.test(nextStep) && /delivery/.test(nextStep);
+  if (isGenericReadyStep && dispatchColumn) return dispatchColumn;
 
   if (!nextStep) {
     return productionBoardColumnForText([
@@ -531,6 +572,7 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
       pj.contact_name as "contactName",
       pj.project_name as "projectName",
       pj.status as "jobStatus",
+      pj.dispatch_type as "dispatchType",
       pj.priority,
       pj.due_date::text as "dueDate",
       pj.assigned_to as "assignedTo",
@@ -576,6 +618,9 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
         ps.label,
         ps.step_type,
         CASE
+          WHEN pj.dispatch_type = 'pickup' THEN 'pickup'
+          WHEN pj.dispatch_type = 'delivery' THEN 'deliver'
+          WHEN pj.dispatch_type = 'install' THEN 'install'
           WHEN concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%pickup%'
             OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%pick up%'
             OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%collect%'
@@ -901,6 +946,8 @@ export async function syncProductionJobForTenant(tenantId: string, jobId: string
 }
 
 export async function updateProductionJobDetailsForTenant(tenantId: string, jobId: string, input: {
+  dispatchType?: string | null;
+  dispatchNotes?: string | null;
   priority?: string | null;
   dueDate?: string | null;
   assignedTo?: string | null;
@@ -909,13 +956,190 @@ export async function updateProductionJobDetailsForTenant(tenantId: string, jobI
   await ensureProductionTables();
   await pool.query(`
     UPDATE production.production_jobs
-    SET priority = $3::varchar,
-        due_date = NULLIF($4::text, '')::date,
-        assigned_to = $5::varchar,
-        internal_notes = $6::text,
+    SET dispatch_type = NULLIF($3::text, '')::varchar,
+        priority = $4::varchar,
+        due_date = NULLIF($5::text, '')::date,
+        assigned_to = $6::varchar,
+        internal_notes = $7::text,
+        payload_json = jsonb_set(
+          jsonb_set(COALESCE(payload_json, '{}'::jsonb), '{dispatchType}', to_jsonb(COALESCE(NULLIF($3::text, ''), '')::text), true),
+          '{dispatchNotes}', to_jsonb(COALESCE(NULLIF($8::text, ''), '')::text), true
+        ),
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
-  `, [tenantId, jobId, nullableText(input.priority) ?? "normal", nullableText(input.dueDate), nullableText(input.assignedTo), nullableText(input.internalNotes)]);
+  `, [tenantId, jobId, nullableText(input.dispatchType), nullableText(input.priority) ?? "normal", nullableText(input.dueDate), nullableText(input.assignedTo), nullableText(input.internalNotes), nullableText(input.dispatchNotes)]);
+
+  if (input.dispatchType) {
+    await setProductionJobDispatchTypeForTenant(tenantId, jobId, input.dispatchType);
+  }
+}
+
+
+export async function setProductionJobDispatchTypeForTenant(tenantId: string, jobId: string, dispatchType: string | null): Promise<void> {
+  await ensureProductionTables();
+  const normalised = normaliseDispatchType(dispatchType);
+  const readyLabel = readyStepLabelForDispatch(normalised);
+  const stepType = dispatchStepTypeForDispatch(normalised);
+
+  await pool.query(`
+    UPDATE production.production_jobs
+    SET dispatch_type = $3::varchar,
+        payload_json = jsonb_set(COALESCE(payload_json, '{}'::jsonb), '{dispatchType}', to_jsonb($3::text), true),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, jobId, normalised]);
+
+  if (!readyLabel) return;
+
+  await pool.query(`
+    WITH ready_steps AS (
+      SELECT ps.id,
+             row_number() OVER (PARTITION BY ps.item_id ORDER BY ps.sort_order DESC, ps.updated_at DESC, ps.created_at DESC) as keep_rank
+      FROM production.production_steps ps
+      JOIN production.production_jobs pj ON pj.id = ps.job_id
+      WHERE pj.tenant_id = $1::uuid
+        AND ps.job_id = $2::uuid
+        AND ps.item_id IS NOT NULL
+        AND (
+          lower(ps.label) LIKE 'ready for%'
+          OR lower(ps.label) LIKE 'ready%install%'
+          OR lower(ps.label) LIKE 'ready%pickup%'
+          OR lower(ps.label) LIKE 'ready%delivery%'
+          OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+        )
+    )
+    DELETE FROM production.production_steps ps
+    USING ready_steps rs
+    WHERE ps.id = rs.id
+      AND rs.keep_rank > 1
+      AND ps.status <> 'done'
+  `, [tenantId, jobId]);
+
+  await pool.query(`
+    UPDATE production.production_steps ps
+    SET label = $3::varchar,
+        step_type = $4::varchar,
+        updated_at = now()
+    FROM production.production_jobs pj
+    WHERE pj.id = ps.job_id
+      AND pj.tenant_id = $1::uuid
+      AND ps.job_id = $2::uuid
+      AND (
+        lower(ps.label) LIKE 'ready for%'
+        OR lower(ps.label) LIKE 'ready%install%'
+        OR lower(ps.label) LIKE 'ready%pickup%'
+        OR lower(ps.label) LIKE 'ready%delivery%'
+        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+      )
+  `, [tenantId, jobId, readyLabel, stepType]);
+
+  await pool.query(`
+    INSERT INTO production.production_steps (job_id, item_id, label, step_type, status, sort_order, created_at, updated_at)
+    SELECT pi.job_id,
+           pi.id,
+           $3::varchar,
+           $4::varchar,
+           'pending',
+           COALESCE((SELECT max(ps.sort_order) + 1 FROM production.production_steps ps WHERE ps.item_id = pi.id), 999),
+           now(),
+           now()
+    FROM production.production_items pi
+    JOIN production.production_jobs pj ON pj.id = pi.job_id
+    WHERE pj.tenant_id = $1::uuid
+      AND pi.job_id = $2::uuid
+      AND NOT EXISTS (
+        SELECT 1
+        FROM production.production_steps existing
+        WHERE existing.item_id = pi.id
+          AND (
+            lower(existing.label) LIKE 'ready for%'
+            OR existing.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+          )
+      )
+  `, [tenantId, jobId, readyLabel, stepType]);
+}
+
+export async function addProductionJobVariationLineForTenant(tenantId: string, jobId: string, input: {
+  dispatchType?: string | null;
+  productName?: string | null;
+  optionSummary?: string | null;
+  quantity?: string | null;
+  unitPrice?: string | null;
+  notes?: string | null;
+  createdBy?: string | null;
+}): Promise<void> {
+  await ensureProductionTables();
+  const normalisedDispatch = normaliseDispatchType(input.dispatchType);
+  const productName = nullableText(input.productName) ?? variationProductNameForDispatch(normalisedDispatch);
+  const quantity = normaliseMoney(input.quantity, "1");
+  const unitPrice = normaliseMoney(input.unitPrice, "0");
+  const notes = [
+    "Variation added from production job.",
+    normalisedDispatch ? `Dispatch type: ${normalisedDispatch}` : null,
+    nullableText(input.notes),
+    input.createdBy ? `Added by: ${input.createdBy}` : null
+  ].filter(Boolean).join("\n");
+
+  await pool.query(`
+    WITH target_job AS (
+      SELECT id, quote_id
+      FROM production.production_jobs
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+      LIMIT 1
+    ), inserted_line AS (
+      INSERT INTO sales.quote_lines (
+        quote_id,
+        product_id,
+        product_name,
+        option_summary,
+        quantity,
+        unit_price,
+        line_total,
+        notes,
+        created_at,
+        updated_at
+      )
+      SELECT
+        target_job.quote_id,
+        NULL::uuid,
+        $3::varchar,
+        $4::text,
+        $5::numeric,
+        $6::numeric,
+        ($5::numeric * $6::numeric),
+        $7::text,
+        now(),
+        now()
+      FROM target_job
+      RETURNING quote_id
+    )
+    UPDATE sales.quote_drafts qd
+    SET updated_at = now(),
+        myob_order_status = CASE WHEN qd.myob_order_status = 'synced' THEN 'ready_to_sync' ELSE qd.myob_order_status END,
+        myob_order_sync_error = NULL
+    WHERE qd.tenant_id = $1::uuid
+      AND qd.id IN (SELECT quote_id FROM inserted_line)
+  `, [
+    tenantId,
+    jobId,
+    productName,
+    nullableText(input.optionSummary),
+    quantity,
+    unitPrice,
+    notes
+  ]);
+
+  await pool.query(`
+    UPDATE production.production_jobs
+    SET payload_json = jsonb_set(
+          COALESCE(payload_json, '{}'::jsonb),
+          '{lastVariation}',
+          $3::jsonb,
+          true
+        ),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, jobId, JSON.stringify({ productName, quantity, unitPrice, optionSummary: nullableText(input.optionSummary), notes, addedAt: new Date().toISOString() })]);
 }
 
 export async function setProductionJobStatusForTenant(tenantId: string, jobId: string, status: string): Promise<void> {
@@ -979,6 +1203,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
     contactName: string | null;
     projectName: string | null;
     priority: string | null;
+    dispatchType: string | null;
     dueDate: string | null;
     assignedTo: string | null;
     itemCode: string | null;
@@ -1013,6 +1238,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
       pj.contact_name as "contactName",
       pj.project_name as "projectName",
       pj.priority,
+      pj.dispatch_type as "dispatchType",
       pj.due_date::text as "dueDate",
       pj.assigned_to as "assignedTo",
       pi.item_code as "itemCode",
@@ -1051,6 +1277,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
   if (!row || !isReadyHandoffText([row.stepLabel, row.stepType].join(" "))) return null;
 
   const destinationSource = [
+    row.dispatchType,
     row.projectName,
     row.itemTitle,
     row.productionType,
@@ -1062,12 +1289,13 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
     row.quoteOptionSummary
   ].filter(Boolean).join(" · ");
   const destinationSourceClean = cleanSearchText(destinationSource);
-  const hasSpecificDestination = /\b(pickup|pick up|collect|collection|counter|deliver|delivery|courier|freight|drop off|dispatch|install|installed|installer|site install|site)\b/.test(destinationSourceClean);
+  const dispatchColumn = normaliseDispatchType(row.dispatchType);
+  const hasSpecificDestination = /(pickup|pick up|collect|collection|counter|deliver|delivery|courier|freight|drop off|dispatch|install|installed|installer|site install|site)/.test(destinationSourceClean);
   const stepLabelClean = cleanSearchText(row.stepLabel);
   const genericReadyLabel = /ready/.test(stepLabelClean) && /install/.test(stepLabelClean) && /pickup/.test(stepLabelClean) && /delivery/.test(stepLabelClean);
-  const destination = hasSpecificDestination
+  const destination = dispatchColumn === "delivery" ? "deliver" : dispatchColumn ?? (hasSpecificDestination
     ? destinationColumnFromText(destinationSource, "install")
-    : genericReadyLabel ? "install" : destinationColumnFromText(row.stepLabel, "install");
+    : genericReadyLabel ? "install" : destinationColumnFromText(row.stepLabel, "install"));
 
   if (destination !== "install") return null;
 

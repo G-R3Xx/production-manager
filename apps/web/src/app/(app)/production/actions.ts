@@ -4,6 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId, type ActiveTenantContext } from "@/server/bootstrap/activeTenant";
 import {
+  addProductionJobVariationLineForTenant,
   addProductionStepForTenant,
   createProductionJobFromArtworkApprovalForTenant,
   getProductionInstallSchedulerPayloadForStep,
@@ -93,15 +94,34 @@ export async function syncProductionJobAction(formData: FormData): Promise<void>
 }
 
 export async function updateProductionJobDetailsAction(formData: FormData): Promise<void> {
-  const { activeTenant } = await requireTenant();
+  const { user, activeTenant } = await requireTenant();
   const jobId = String(formData.get("jobId") ?? "").trim();
   if (!jobId) redirectToProduction("/production?error=Missing%20production%20job");
+  const dispatchType = text(formData.get("dispatchType"));
   await updateProductionJobDetailsForTenant(activeTenant.tenantId, jobId, {
+    dispatchType,
+    dispatchNotes: text(formData.get("dispatchNotes")),
     priority: text(formData.get("priority")),
     dueDate: text(formData.get("dueDate")),
     assignedTo: text(formData.get("assignedTo")),
     internalNotes: text(formData.get("internalNotes"))
   });
+
+  const addVariation = String(formData.get("addVariation") ?? "").trim() === "yes";
+  const variationUnitPrice = text(formData.get("variationUnitPrice"));
+  if (addVariation && variationUnitPrice) {
+    await addProductionJobVariationLineForTenant(activeTenant.tenantId, jobId, {
+      dispatchType,
+      productName: text(formData.get("variationProductName")),
+      optionSummary: text(formData.get("variationOptionSummary")),
+      quantity: text(formData.get("variationQuantity")) ?? "1",
+      unitPrice: variationUnitPrice,
+      notes: text(formData.get("variationNotes")),
+      createdBy: user.email ?? null
+    });
+    productionRedirect(jobId, "Production details saved and variation line added");
+  }
+
   productionRedirect(jobId, "Production details saved");
 }
 

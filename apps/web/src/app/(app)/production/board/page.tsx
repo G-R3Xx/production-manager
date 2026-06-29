@@ -176,20 +176,31 @@ function finishedSizeForCard(card: ProductionBoardCardRecord): string {
     || normaliseSizeText(card.itemTitle);
 }
 
+function dispatchColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey | null {
+  const dispatch = cleanBoardText(card.dispatchType ?? "");
+  if (dispatch === "pickup") return "pickup";
+  if (dispatch === "delivery") return "deliver";
+  if (dispatch === "install") return "install";
+  return null;
+}
+
 function boardColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey {
   if (!card.nextStepId && card.handoffColumn) return card.handoffColumn;
 
   const nextStep = cleanBoardText([card.nextStepLabel, card.nextStepType].filter(Boolean).join(" · "));
+  const dispatchColumn = dispatchColumnForCard(card);
+  const isGenericReadyStep = /ready/.test(nextStep) && /install/.test(nextStep) && /pickup/.test(nextStep) && /delivery/.test(nextStep);
 
   if (nextStep) {
-    if (/\b(ready for install|install|installed|installer|site install)\b/.test(nextStep)) return "install";
-    if (/\b(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
-    if (/\b(ready for pickup|pickup|pick up|collect|collection)\b/.test(nextStep)) return "pickup";
-    if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
+    if (isGenericReadyStep && dispatchColumn) return dispatchColumn;
+    if (/(ready for install|install|installed|installer|site install)/.test(nextStep)) return "install";
+    if (/(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)/.test(nextStep)) return "deliver";
+    if (/(ready for pickup|pickup|pick up|collect|collection)/.test(nextStep)) return "pickup";
+    if (/(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)/.test(nextStep)) return "finishing";
     return "printing";
   }
 
-  return card.column;
+  return dispatchColumn ?? card.column;
 }
 
 function boardItemSummary(card: ProductionBoardCardRecord): string {

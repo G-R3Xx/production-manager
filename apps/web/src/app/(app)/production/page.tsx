@@ -819,6 +819,65 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             </div>
           </section>
 
+          <section style={{ ...cardStyle, display: "grid", gap: 14, borderColor: "#bfdbfe", background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "start" }}>
+              <div>
+                <h2 style={{ margin: 0 }}>Edit workflow / variation</h2>
+                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Use this when a client changes pickup to install/delivery, or when production needs a quick admin update.</p>
+              </div>
+              <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", border: "1px solid #c7d7fe", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>Original accepted quote stays preserved</span>
+            </div>
+            <form action={updateProductionJobDetailsAction} style={{ display: "grid", gap: 14 }}>
+              <input type="hidden" name="jobId" value={selectedJob.id} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+                <label style={labelStyle}>Dispatch type
+                  <select name="dispatchType" defaultValue={selectedJob.dispatchType ?? ""} style={inputStyle}>
+                    <option value="">Not set / keep from quote</option>
+                    <option value="pickup">Pickup</option>
+                    <option value="delivery">Delivery</option>
+                    <option value="install">Install</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>Priority
+                  <select name="priority" defaultValue={selectedJob.priority ?? "normal"} style={inputStyle}>
+                    <option value="normal">Normal</option>
+                    <option value="urgent">Urgent</option>
+                    <option value="hold">On hold</option>
+                  </select>
+                </label>
+                <label style={labelStyle}>Due date<input name="dueDate" type="date" defaultValue={selectedJob.dueDate ?? ""} style={inputStyle} /></label>
+                <label style={labelStyle}>Assigned to<input name="assignedTo" defaultValue={selectedJob.assignedTo ?? ""} placeholder="Staff member" style={inputStyle} /></label>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 12 }}>
+                <label style={labelStyle}>Dispatch / fixing notes<textarea name="dispatchNotes" placeholder="Example: install on-site, silicone + screws, front entry, client requested change from pickup" style={{ ...textareaStyle, minHeight: 84 }} /></label>
+                <label style={labelStyle}>Internal production notes<textarea name="internalNotes" defaultValue={selectedJob.internalNotes ?? ""} placeholder="Notes for production staff" style={{ ...textareaStyle, minHeight: 84 }} /></label>
+              </div>
+
+              <section style={{ border: "1px solid #fed7aa", borderRadius: 18, padding: 14, background: "#fff7ed", display: "grid", gap: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                  <div style={{ display: "grid", gap: 3 }}>
+                    <strong>Optional billable variation</strong>
+                    <span style={{ color: "#9a3412", fontSize: 13 }}>Tick this only if the client change needs an extra charge added to the quote/order.</span>
+                  </div>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, fontWeight: 950, color: "#9a3412" }}>
+                    <input type="checkbox" name="addVariation" value="yes" /> Add variation line
+                  </label>
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 0.7fr 0.9fr", gap: 10 }}>
+                  <label style={labelStyle}>Line name<input name="variationProductName" placeholder="Sign Install" style={inputStyle} /></label>
+                  <label style={labelStyle}>Summary<input name="variationOptionSummary" placeholder="Fixings, access, delivery/install notes" style={inputStyle} /></label>
+                  <label style={labelStyle}>Qty<input name="variationQuantity" type="number" step="0.01" min="0" defaultValue="1" style={inputStyle} /></label>
+                  <label style={labelStyle}>Sell price<input name="variationUnitPrice" type="number" step="0.01" min="0" placeholder="0.00" style={inputStyle} /></label>
+                </div>
+                <label style={labelStyle}>Variation notes<textarea name="variationNotes" placeholder="Example: Client changed pickup to install after quote acceptance. Add install charge and schedule installer." style={{ ...textareaStyle, minHeight: 74 }} /></label>
+              </section>
+
+              <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                <button type="submit" style={buttonStyle}>Save workflow changes</button>
+              </div>
+            </form>
+          </section>
+
           <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
             <div>
               <h2 style={{ margin: 0 }}>Production items</h2>
@@ -919,20 +978,6 @@ export default async function ProductionPage({ searchParams }: PageProps) {
               </section>
             );
           })() : null}
-
-          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-            <h2 style={{ margin: 0 }}>Job details</h2>
-            <form action={updateProductionJobDetailsAction} style={{ display: "grid", gap: 12 }}>
-              <input type="hidden" name="jobId" value={selectedJob.id} />
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
-                <label style={labelStyle}>Priority<input name="priority" defaultValue={selectedJob.priority ?? "normal"} placeholder="normal / urgent" style={inputStyle} /></label>
-                <label style={labelStyle}>Due date<input name="dueDate" type="date" defaultValue={selectedJob.dueDate ?? ""} style={inputStyle} /></label>
-                <label style={labelStyle}>Assigned to<input name="assignedTo" defaultValue={selectedJob.assignedTo ?? ""} placeholder="Staff member" style={inputStyle} /></label>
-                <div style={{ display: "grid", alignItems: "end" }}><button type="submit" style={buttonStyle}>Save job details</button></div>
-              </div>
-              <label style={labelStyle}>Internal production notes<textarea name="internalNotes" defaultValue={selectedJob.internalNotes ?? ""} placeholder="Notes for production staff" style={textareaStyle} /></label>
-            </form>
-          </section>
 
 
         </section>
