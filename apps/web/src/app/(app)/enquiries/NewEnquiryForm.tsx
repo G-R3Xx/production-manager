@@ -38,6 +38,7 @@ type SignedIntakeUpload = {
 };
 
 const urgencyOptions = ["Low", "Normal", "High", "Urgent", "Critical"];
+const sourceOptions = ["Email", "Phone call", "Walk-in", "Website", "Referral", "Repeat client", "Tender", "Social media", "Other"];
 const MAX_CORRESPONDENCE_FILE_SIZE_BYTES = 50 * 1024 * 1024;
 
 const inputStyle = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 14px", width: "100%", boxSizing: "border-box" } as const;
@@ -208,7 +209,12 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
         <input name="email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="Email" style={inputStyle} />
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <input name="source" placeholder="Source (call / email / walk-in)" style={inputStyle} />
+        <select name="source" defaultValue="" style={inputStyle}>
+          <option value="">Source</option>
+          {sourceOptions.map((option) => (
+            <option key={option} value={option}>{option}</option>
+          ))}
+        </select>
         <select name="urgency" defaultValue="Normal" style={inputStyle}>
           {urgencyOptions.map((option) => (
             <option key={option} value={option}>{option}</option>

@@ -9,6 +9,8 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
+const APP_VERSION = "Project Manager V26.06.29.01";
+
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
   { href: "/enquiries", label: "Enquiries", emoji: "?" },
@@ -64,6 +66,9 @@ export default async function AppLayout({ children }: AppLayoutProps) {
             padding: "8px 8px 4px"
           }}
         >
+          <div style={{ fontSize: 11, fontWeight: 900, color: "#64748b", letterSpacing: "0.05em", textTransform: "uppercase", textAlign: "center" }}>
+            {APP_VERSION}
+          </div>
           <a href="/enquiries" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
             <img
               src="/brand/production-manager-logo.svg"
