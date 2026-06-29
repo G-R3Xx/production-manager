@@ -666,7 +666,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                 </div>
               ))}
             </div>
-            <a href="/production/board" style={{ justifySelf: "end", borderRadius: 999, background: "#0f172a", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 950, textDecoration: "none", boxShadow: "0 12px 24px rgba(15,23,42,0.16)" }}>Open large-screen board</a>
+            <a href="/production/board" style={{ justifySelf: "end", borderRadius: 999, background: "#0f172a", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 950, textDecoration: "none", boxShadow: "0 12px 24px rgba(15,23,42,0.16)" }}>Open fullscreen board</a>
           </div>
         </div>
       </section>

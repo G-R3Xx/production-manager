@@ -128,26 +128,50 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
   cards.forEach((card) => grouped.get(card.column)?.push(card));
 
   return (
-    <div style={{ display: "grid", gap: 18, minHeight: "calc(100vh - 72px)", color: "#f8fafc" }}>
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 2147483647,
+        background: "#020617",
+        color: "#f8fafc",
+        overflow: "auto",
+        padding: 18,
+        boxSizing: "border-box",
+        display: "grid",
+        gap: 14,
+        alignContent: "start"
+      }}
+    >
       <AutoRefreshBoard seconds={45} />
-      <section style={{ border: "1px solid rgba(148,163,184,0.26)", borderRadius: 28, padding: 22, background: "linear-gradient(135deg, #0f172a 0%, #111827 48%, #1e293b 100%)", boxShadow: "0 24px 70px rgba(15,23,42,0.22)", display: "grid", gap: 16 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
-          <div style={{ display: "grid", gap: 8 }}>
-            <p style={{ margin: 0, color: "#93c5fd", fontSize: 12, fontWeight: 950, letterSpacing: "0.12em", textTransform: "uppercase" }}>Production display board</p>
-            <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Live production board</h1>
-            <p style={{ margin: 0, color: "#cbd5e1", maxWidth: 900, lineHeight: 1.55 }}>Large-screen view for active work. Cards move to the next department from the first unfinished production step. The board auto-refreshes every 45 seconds.</p>
-          </div>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-            <span style={{ borderRadius: 999, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(147,197,253,0.35)", color: "#dbeafe", padding: "9px 13px", fontSize: 12, fontWeight: 950 }}>{cards.length} active card{cards.length === 1 ? "" : "s"}</span>
-            <span style={{ borderRadius: 999, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)", color: "#e2e8f0", padding: "9px 13px", fontSize: 12, fontWeight: 900 }}>Updated {new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", hour: "numeric", minute: "2-digit" }).format(new Date())}</span>
-            <a href="/production" style={{ borderRadius: 999, background: "#ffffff", color: "#0f172a", padding: "10px 14px", fontSize: 13, fontWeight: 950, textDecoration: "none" }}>Production details</a>
-          </div>
+      <section
+        style={{
+          border: "1px solid rgba(148,163,184,0.22)",
+          borderRadius: 20,
+          padding: "14px 16px",
+          background: "linear-gradient(135deg, rgba(15,23,42,0.98) 0%, rgba(17,24,39,0.98) 55%, rgba(30,41,59,0.96) 100%)",
+          boxShadow: "0 18px 44px rgba(0,0,0,0.26)",
+          display: "flex",
+          justifyContent: "space-between",
+          gap: 16,
+          alignItems: "center",
+          flexWrap: "wrap"
+        }}
+      >
+        <div style={{ display: "grid", gap: 3 }}>
+          <h1 style={{ margin: 0, fontSize: 32, letterSpacing: "-0.04em" }}>Production board</h1>
+          <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.45 }}>Live large-screen view · auto-refreshes every 45 seconds</p>
         </div>
-        {message ? <div style={{ border: "1px solid rgba(171,239,198,0.45)", background: "rgba(6,118,71,0.24)", color: "#dcfae6", borderRadius: 16, padding: 12 }}>{message}</div> : null}
-        {error ? <div style={{ border: "1px solid rgba(253,162,155,0.45)", background: "rgba(192,16,72,0.22)", color: "#ffe4e8", borderRadius: 16, padding: 12 }}>{error}</div> : null}
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <span style={{ borderRadius: 999, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(147,197,253,0.35)", color: "#dbeafe", padding: "9px 13px", fontSize: 12, fontWeight: 950 }}>{cards.length} active card{cards.length === 1 ? "" : "s"}</span>
+          <span style={{ borderRadius: 999, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)", color: "#e2e8f0", padding: "9px 13px", fontSize: 12, fontWeight: 900 }}>Updated {new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", hour: "numeric", minute: "2-digit" }).format(new Date())}</span>
+          <a href="/production" style={{ borderRadius: 999, background: "#ffffff", color: "#0f172a", padding: "10px 14px", fontSize: 13, fontWeight: 950, textDecoration: "none" }}>Exit board</a>
+        </div>
       </section>
+      {message ? <div style={{ border: "1px solid rgba(171,239,198,0.45)", background: "rgba(6,118,71,0.24)", color: "#dcfae6", borderRadius: 16, padding: 12 }}>{message}</div> : null}
+      {error ? <div style={{ border: "1px solid rgba(253,162,155,0.45)", background: "rgba(192,16,72,0.22)", color: "#ffe4e8", borderRadius: 16, padding: 12 }}>{error}</div> : null}
 
-      <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(230px, 1fr))", gap: 14, alignItems: "start", overflowX: "auto", paddingBottom: 8 }}>
+      <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(250px, 1fr))", gap: 14, alignItems: "start", overflowX: "auto", paddingBottom: 8, minHeight: "calc(100vh - 118px)" }}>
         {columns.map((column) => {
           const columnCards = grouped.get(column.key) ?? [];
           return (
