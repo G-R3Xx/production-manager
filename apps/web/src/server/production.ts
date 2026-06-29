@@ -992,9 +992,74 @@ export async function setProductionJobDispatchTypeForTenant(tenantId: string, jo
   if (!readyLabel) return;
 
   await pool.query(`
+    UPDATE production.production_steps ps
+    SET label = $3::varchar,
+        step_type = $4::varchar,
+        updated_at = now()
+    FROM production.production_jobs pj
+    WHERE pj.id = ps.job_id
+      AND pj.tenant_id = $1::uuid
+      AND ps.job_id = $2::uuid
+      AND (
+        lower(ps.label) LIKE 'ready for%'
+        OR lower(ps.label) LIKE 'ready%install%'
+        OR lower(ps.label) LIKE 'ready%pickup%'
+        OR lower(ps.label) LIKE 'ready%delivery%'
+        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+      )
+  `, [tenantId, jobId, readyLabel, stepType]);
+
+  await pool.query(`
+    WITH ready_state AS (
+      SELECT ps.item_id,
+             bool_or(ps.status = 'done' OR pj.status IN ('ready_for_dispatch', 'ready_for_install', 'ready_for_delivery', 'ready_for_pickup')) as should_be_done,
+             max(ps.checked_at) FILTER (WHERE ps.checked_at IS NOT NULL) as last_checked_at,
+             max(ps.checked_by) FILTER (WHERE ps.checked_by IS NOT NULL) as last_checked_by
+      FROM production.production_steps ps
+      JOIN production.production_jobs pj ON pj.id = ps.job_id
+      WHERE pj.tenant_id = $1::uuid
+        AND ps.job_id = $2::uuid
+        AND ps.item_id IS NOT NULL
+        AND (
+          lower(ps.label) LIKE 'ready for%'
+          OR lower(ps.label) LIKE 'ready%install%'
+          OR lower(ps.label) LIKE 'ready%pickup%'
+          OR lower(ps.label) LIKE 'ready%delivery%'
+          OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+        )
+      GROUP BY ps.item_id
+    )
+    UPDATE production.production_steps ps
+    SET status = 'done',
+        checked_at = COALESCE(ps.checked_at, ready_state.last_checked_at, now()),
+        checked_by = COALESCE(ps.checked_by, ready_state.last_checked_by, 'Production Manager'),
+        updated_at = now()
+    FROM ready_state
+    WHERE ps.item_id = ready_state.item_id
+      AND ready_state.should_be_done = true
+      AND ps.job_id = $2::uuid
+      AND (
+        lower(ps.label) LIKE 'ready for%'
+        OR lower(ps.label) LIKE 'ready%install%'
+        OR lower(ps.label) LIKE 'ready%pickup%'
+        OR lower(ps.label) LIKE 'ready%delivery%'
+        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+      )
+  `, [tenantId, jobId]);
+
+  await pool.query(`
     WITH ready_steps AS (
       SELECT ps.id,
-             row_number() OVER (PARTITION BY ps.item_id ORDER BY ps.sort_order DESC, ps.updated_at DESC, ps.created_at DESC) as keep_rank
+             ps.item_id,
+             ps.status,
+             row_number() OVER (
+               PARTITION BY ps.item_id
+               ORDER BY
+                 CASE WHEN ps.status = 'done' THEN 0 ELSE 1 END,
+                 ps.sort_order DESC,
+                 ps.updated_at DESC,
+                 ps.created_at DESC
+             ) as keep_rank
       FROM production.production_steps ps
       JOIN production.production_jobs pj ON pj.id = ps.job_id
       WHERE pj.tenant_id = $1::uuid
@@ -1012,26 +1077,7 @@ export async function setProductionJobDispatchTypeForTenant(tenantId: string, jo
     USING ready_steps rs
     WHERE ps.id = rs.id
       AND rs.keep_rank > 1
-      AND ps.status <> 'done'
   `, [tenantId, jobId]);
-
-  await pool.query(`
-    UPDATE production.production_steps ps
-    SET label = $3::varchar,
-        step_type = $4::varchar,
-        updated_at = now()
-    FROM production.production_jobs pj
-    WHERE pj.id = ps.job_id
-      AND pj.tenant_id = $1::uuid
-      AND ps.job_id = $2::uuid
-      AND (
-        lower(ps.label) LIKE 'ready for%'
-        OR lower(ps.label) LIKE 'ready%install%'
-        OR lower(ps.label) LIKE 'ready%pickup%'
-        OR lower(ps.label) LIKE 'ready%delivery%'
-        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
-      )
-  `, [tenantId, jobId, readyLabel, stepType]);
 
   await pool.query(`
     INSERT INTO production.production_steps (job_id, item_id, label, step_type, status, sort_order, created_at, updated_at)
