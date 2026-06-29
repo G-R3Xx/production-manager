@@ -43,6 +43,10 @@ function productionRedirect(jobId: string | null | undefined, message: string): 
   redirectToProduction(`/production${suffix}`);
 }
 
+function productionBoardRedirect(message: string): never {
+  redirectToProduction(`/production/board?message=${encodeURIComponent(message)}`);
+}
+
 export async function createProductionJobFromArtworkAction(formData: FormData): Promise<void> {
   const { user, activeTenant } = await requireTenant();
   const approvalId = String(formData.get("approvalId") ?? "").trim();
@@ -105,6 +109,16 @@ export async function toggleProductionStepAction(formData: FormData): Promise<vo
   const nextStatus = currentStatus === "done" ? "pending" : "done";
   const result = await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
   productionRedirect(result.jobId, nextStatus === "done" ? "Step checked off" : "Step reopened");
+}
+
+export async function toggleProductionBoardStepAction(formData: FormData): Promise<void> {
+  const { user, activeTenant } = await requireTenant();
+  const stepId = String(formData.get("stepId") ?? "").trim();
+  const currentStatus = String(formData.get("currentStatus") ?? "pending").trim();
+  if (!stepId) redirectToProduction("/production/board?error=Missing%20procedure%20step");
+  const nextStatus = currentStatus === "done" ? "pending" : "done";
+  await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
+  productionBoardRedirect(nextStatus === "done" ? "Board step checked off" : "Board step reopened");
 }
 
 export async function addProductionStepAction(formData: FormData): Promise<void> {

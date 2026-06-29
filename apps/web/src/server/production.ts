@@ -78,6 +78,40 @@ export type ApprovedArtworkOptionRecord = {
   pageCount: string;
 };
 
+export type ProductionBoardColumnKey = "printing" | "finishing" | "install" | "deliver" | "pickup";
+
+export type ProductionBoardCardRecord = {
+  id: string;
+  column: ProductionBoardColumnKey;
+  jobId: string;
+  itemId: string | null;
+  quoteId: string | null;
+  quoteNumber: string | null;
+  clientName: string;
+  contactName: string | null;
+  projectName: string | null;
+  jobStatus: string;
+  priority: string | null;
+  dueDate: string | null;
+  assignedTo: string | null;
+  itemCode: string | null;
+  itemTitle: string | null;
+  productionType: string | null;
+  quantity: string | null;
+  sizeSummary: string | null;
+  substrateSummary: string | null;
+  colourSummary: string | null;
+  finishingSummary: string | null;
+  quoteProductName: string | null;
+  quoteOptionSummary: string | null;
+  nextStepId: string | null;
+  nextStepLabel: string | null;
+  nextStepType: string | null;
+  stepsDone: string;
+  stepsTotal: string;
+  updatedAt: string;
+};
+
 function nullableText(value: string | null | undefined): string | null {
   const cleaned = String(value ?? "").trim();
   return cleaned.length ? cleaned : null;
@@ -376,6 +410,109 @@ export async function listProductionStepsForJob(jobId: string): Promise<Producti
     ORDER BY item_id NULLS FIRST, sort_order ASC, created_at ASC
   `, [jobId]);
   return result.rows;
+}
+
+
+function productionBoardColumnForText(text: string): ProductionBoardColumnKey {
+  const source = cleanSearchText(text);
+  const finalStep = /\b(ready for install|ready for pickup|ready for delivery|dispatch|packed)\b/.test(source);
+
+  if (finalStep) {
+    if (/\binstall|installed|installer|site\b/.test(source)) return "install";
+    if (/\bdeliver|delivery|courier|freight|drop off\b/.test(source)) return "deliver";
+    return "pickup";
+  }
+
+  if (/\binstall|installed|installer|site\b/.test(source)) return "install";
+  if (/\bdeliver|delivery|courier|freight|drop off\b/.test(source)) return "deliver";
+  if (/\bpickup|pick up|collect|collection\b/.test(source)) return "pickup";
+  if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet)\b/.test(source)) return "finishing";
+  return "printing";
+}
+
+function productionBoardCardFromRow(row: Omit<ProductionBoardCardRecord, "id" | "column">): ProductionBoardCardRecord {
+  const column = productionBoardColumnForText([
+    row.nextStepLabel,
+    row.nextStepType,
+    row.jobStatus,
+    row.projectName,
+    row.itemTitle,
+    row.productionType,
+    row.substrateSummary,
+    row.colourSummary,
+    row.finishingSummary,
+    row.quoteProductName,
+    row.quoteOptionSummary
+  ].filter(Boolean).join(" · "));
+
+  return {
+    ...row,
+    id: row.itemId ? `${row.jobId}:${row.itemId}` : row.jobId,
+    column
+  };
+}
+
+export async function listProductionBoardCardsForTenant(tenantId: string): Promise<ProductionBoardCardRecord[]> {
+  await ensureProductionTables();
+  const result = await pool.query<Omit<ProductionBoardCardRecord, "id" | "column">>(`
+    SELECT
+      pj.id as "jobId",
+      pi.id as "itemId",
+      pj.quote_id as "quoteId",
+      pj.quote_number as "quoteNumber",
+      pj.client_name as "clientName",
+      pj.contact_name as "contactName",
+      pj.project_name as "projectName",
+      pj.status as "jobStatus",
+      pj.priority,
+      pj.due_date::text as "dueDate",
+      pj.assigned_to as "assignedTo",
+      pi.item_code as "itemCode",
+      pi.title as "itemTitle",
+      pi.production_type as "productionType",
+      pi.quantity::text as quantity,
+      pi.size_summary as "sizeSummary",
+      pi.substrate_summary as "substrateSummary",
+      pi.colour_summary as "colourSummary",
+      pi.finishing_summary as "finishingSummary",
+      ql.product_name as "quoteProductName",
+      ql.option_summary as "quoteOptionSummary",
+      next_step.id as "nextStepId",
+      next_step.label as "nextStepLabel",
+      next_step.step_type as "nextStepType",
+      COALESCE(progress.steps_done, 0)::text as "stepsDone",
+      COALESCE(progress.steps_total, 0)::text as "stepsTotal",
+      GREATEST(pj.updated_at, COALESCE(pi.updated_at, pj.updated_at)) as "updatedAt"
+    FROM production.production_jobs pj
+    LEFT JOIN production.production_items pi ON pi.job_id = pj.id
+    LEFT JOIN sales.quote_lines ql ON ql.id = pi.source_quote_line_id
+    LEFT JOIN LATERAL (
+      SELECT ps.id, ps.label, ps.step_type, ps.sort_order
+      FROM production.production_steps ps
+      WHERE ps.item_id = pi.id
+        AND ps.status <> 'done'
+      ORDER BY ps.sort_order ASC, ps.created_at ASC
+      LIMIT 1
+    ) next_step ON true
+    LEFT JOIN LATERAL (
+      SELECT
+        count(*) as steps_total,
+        count(*) FILTER (WHERE ps.status = 'done') as steps_done
+      FROM production.production_steps ps
+      WHERE ps.item_id = pi.id
+    ) progress ON true
+    WHERE pj.tenant_id = $1::uuid
+      AND pj.status NOT IN ('deleted', 'completed')
+      AND (pi.id IS NULL OR next_step.id IS NOT NULL)
+    ORDER BY
+      CASE WHEN pj.priority ILIKE 'urgent%' THEN 0 ELSE 1 END,
+      pj.due_date ASC NULLS LAST,
+      pj.updated_at DESC,
+      pi.sort_order ASC NULLS LAST,
+      pi.created_at ASC NULLS LAST
+  `, [tenantId]);
+
+  return result.rows.map(productionBoardCardFromRow);
 }
 
 export async function listApprovedArtworkReadyForProduction(tenantId: string): Promise<ApprovedArtworkOptionRecord[]> {

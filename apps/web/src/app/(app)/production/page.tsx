@@ -652,18 +652,21 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Production chain</h1>
             <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Approved artwork turns into a production job with print-ready files, item-level procedures and staff checkoff. Client proof stays separate from the actual file used to print, cut, route or finish.</p>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(110px, 1fr))", gap: 10, minWidth: 460 }}>
-            {[
-              ["Ready", readyCount],
-              ["Waiting", waitingCount],
-              ["In production", inProductionCount],
-              ["Ready out", readyDispatchCount]
-            ].map(([label, count]) => (
-              <div key={String(label)} style={{ border: "1px solid #dbe4f0", borderRadius: 18, padding: 12, background: "rgba(255,255,255,0.78)" }}>
-                <strong style={{ fontSize: 24 }}>{count}</strong>
-                <div style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>{label}</div>
-              </div>
-            ))}
+          <div style={{ display: "grid", gap: 10, minWidth: 460 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(110px, 1fr))", gap: 10 }}>
+              {[
+                ["Ready", readyCount],
+                ["Waiting", waitingCount],
+                ["In production", inProductionCount],
+                ["Ready out", readyDispatchCount]
+              ].map(([label, count]) => (
+                <div key={String(label)} style={{ border: "1px solid #dbe4f0", borderRadius: 18, padding: 12, background: "rgba(255,255,255,0.78)" }}>
+                  <strong style={{ fontSize: 24 }}>{count}</strong>
+                  <div style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>{label}</div>
+                </div>
+              ))}
+            </div>
+            <a href="/production/board" style={{ justifySelf: "end", borderRadius: 999, background: "#0f172a", color: "#fff", padding: "10px 14px", fontSize: 13, fontWeight: 950, textDecoration: "none", boxShadow: "0 12px 24px rgba(15,23,42,0.16)" }}>Open large-screen board</a>
           </div>
         </div>
       </section>
