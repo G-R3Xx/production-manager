@@ -591,6 +591,35 @@ function optionParts(line: Pick<QuoteLineRecord, "optionSummary">): string[] {
     .filter(Boolean);
 }
 
+function normaliseArtworkSize(value: string | null | undefined): string | null {
+  const source = String(value ?? "").replace(/[×*]/g, "x").replace(/\s+/g, " ").trim();
+  const match = source.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|m)?/i);
+  if (!match) return null;
+  const unit = match[3] ? match[3].toLowerCase() : "mm";
+  return `${match[1]} × ${match[2]}${unit}`;
+}
+
+function isLikelyStockOrMaterialSize(value: string): boolean {
+  const source = value.toLowerCase();
+  const hasMaterialWord = /\b(material|substrate|stock|sheet|roll|media|acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|foamex|polycarbonate|vinyl|banner)\b/.test(source);
+  const hasThickness = /\b\d+(?:\.\d+)?\s*mm\b/.test(source);
+  return hasMaterialWord && hasThickness;
+}
+
+function extractFinishedSizeFromQuoteLine(line: QuoteLineRecord): string | null {
+  const parts = optionParts(line);
+  const labelled = parts.find((part) => /^(?:finished\s*)?size\s*:/i.test(part));
+  const labelledSize = normaliseArtworkSize(labelled);
+  if (labelledSize) return labelledSize;
+
+  const standalone = parts.find((part) => /^\d+(?:\.\d+)?\s*[×x*]\s*\d+(?:\.\d+)?\s*(?:mm|m)?$/i.test(part));
+  const standaloneSize = normaliseArtworkSize(standalone);
+  if (standaloneSize) return standaloneSize;
+
+  const nonStockPart = parts.find((part) => normaliseArtworkSize(part) && !isLikelyStockOrMaterialSize(part));
+  return normaliseArtworkSize(nonStockPart);
+}
+
 function summaryKey(value: string): string {
   return value
     .toLowerCase()
@@ -651,7 +680,7 @@ function placeholderArtworkImage(line: QuoteLineRecord, code: string): string {
 function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kind: "signage" | "small_format"): ArtworkApprovalPageInput {
   const parts = optionParts(line);
   const combined = [line.productName, line.optionSummary, line.notes].filter(Boolean).join(" · ");
-  const size = extractFirstMatch(combined, [/(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm)/i, /(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?)/i]);
+  const size = extractFinishedSizeFromQuoteLine(line) ?? extractFirstMatch(combined, [/(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm)/i, /(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?)/i]);
   const code = titleCaseSignCode(index, kind);
   const qty = normaliseMoney(line.quantity, "1");
 

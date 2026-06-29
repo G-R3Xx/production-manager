@@ -10,6 +10,7 @@ import { listProductionBoardCardsForTenant, type ProductionBoardCardRecord, type
 import { listQuoteDraftsForTenant } from "@/server/quotes";
 import { toggleProductionBoardStepAction } from "../actions";
 import { AutoRefreshBoard } from "./AutoRefreshBoard";
+import { FullscreenBoardMode } from "./FullscreenBoardMode";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -139,10 +140,60 @@ function normaliseSizeText(value: string | null | undefined): string {
   return `${match[1]}x${match[2]}${unit}`;
 }
 
+function splitSummaryParts(value: string | null | undefined): string[] {
+  return String(value ?? "")
+    .split(/\s*[·\n]\s*/g)
+    .map((part) => compactText(part))
+    .filter(Boolean);
+}
+
+function isLikelyStockOrMaterialSize(part: string): boolean {
+  const source = part.toLowerCase();
+  const hasMaterialWord = /\b(material|substrate|stock|sheet|roll|media|acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|foamex|polycarbonate|vinyl|banner)\b/.test(source);
+  const hasThickness = /\b\d+(?:\.\d+)?\s*mm\b/.test(source);
+  return hasMaterialWord && hasThickness;
+}
+
+function finishedSizeFromOptionSummary(value: string | null | undefined): string {
+  const parts = splitSummaryParts(value);
+  const labelled = parts.find((part) => /^(?:finished\s*)?size\s*:/i.test(part));
+  const labelledSize = normaliseSizeText(labelled);
+  if (labelledSize) return labelledSize;
+
+  const standalone = parts.find((part) => /^\d+(?:\.\d+)?\s*[×x*]\s*\d+(?:\.\d+)?\s*(?:mm|m)?$/i.test(part));
+  const standaloneSize = normaliseSizeText(standalone);
+  if (standaloneSize) return standaloneSize;
+
+  const nonStockPart = parts.find((part) => normaliseSizeText(part) && !isLikelyStockOrMaterialSize(part));
+  return normaliseSizeText(nonStockPart);
+}
+
+function finishedSizeForCard(card: ProductionBoardCardRecord): string {
+  return finishedSizeFromOptionSummary(card.quoteOptionSummary)
+    || finishedSizeFromOptionSummary(card.sizeSummary)
+    || normaliseSizeText(card.sizeSummary)
+    || normaliseSizeText(card.quoteOptionSummary)
+    || normaliseSizeText(card.itemTitle);
+}
+
+function boardColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey {
+  const nextStep = cleanBoardText([card.nextStepLabel, card.nextStepType].filter(Boolean).join(" · "));
+
+  if (nextStep) {
+    if (/\b(ready for install|install|installed|installer|site install)\b/.test(nextStep)) return "install";
+    if (/\b(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
+    if (/\b(ready for pickup|pickup|pick up|collect|collection)\b/.test(nextStep)) return "pickup";
+    if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
+    return "printing";
+  }
+
+  return card.column;
+}
+
 function boardItemSummary(card: ProductionBoardCardRecord): string {
   const code = compactText(card.itemCode) || "S1";
   const material = materialName(card);
-  const size = normaliseSizeText(card.sizeSummary) || normaliseSizeText(boardSearchText(card));
+  const size = finishedSizeForCard(card) || normaliseSizeText(boardSearchText(card));
   return [code, material, size].filter(Boolean).join(" - ") + quantitySuffix(card.quantity);
 }
 
@@ -279,8 +330,9 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
     return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
   };
 
+  const fullscreenRequested = readParam(params, "display") === "fullscreen";
   const grouped = new Map<ProductionBoardColumnKey, ProductionBoardCardRecord[]>(columns.map((column) => [column.key, []]));
-  cards.forEach((card) => grouped.get(card.column)?.push(card));
+  cards.forEach((card) => grouped.get(boardColumnForCard(card))?.push(card));
 
   return (
     <div
@@ -299,6 +351,7 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
       }}
     >
       <AutoRefreshBoard seconds={45} />
+      <FullscreenBoardMode requested={fullscreenRequested} />
       <section
         style={{
           border: "1px solid rgba(148,163,184,0.22)",
