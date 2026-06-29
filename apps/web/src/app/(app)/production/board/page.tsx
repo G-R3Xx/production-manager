@@ -54,19 +54,103 @@ function compactText(value: string | null | undefined, fallback = ""): string {
   return String(value ?? fallback).replace(/\s+/g, " ").trim();
 }
 
-function cardTitle(card: ProductionBoardCardRecord): string {
-  return compactText(card.projectName) || compactText(card.quoteProductName) || compactText(card.itemTitle) || compactText(card.quoteNumber, "Production job");
+function boardSearchText(card: ProductionBoardCardRecord): string {
+  return [
+    card.itemTitle,
+    card.quoteProductName,
+    card.quoteOptionSummary,
+    card.sizeSummary,
+    card.substrateSummary,
+    card.colourSummary,
+    card.finishingSummary
+  ].map((value) => compactText(value)).filter(Boolean).join(" · ");
 }
 
-function cardDetail(card: ProductionBoardCardRecord): string {
-  return [
-    compactText(card.itemCode),
-    compactText(card.quoteProductName),
-    compactText(card.sizeSummary),
-    compactText(card.substrateSummary),
-    compactText(card.colourSummary),
-    compactText(card.finishingSummary)
-  ].filter(Boolean).slice(0, 4).join(" · ");
+function compactSize(value: string | null | undefined, fallbackText = ""): string {
+  const source = compactText(value) || fallbackText;
+  const normalised = source.replace(/[×*]/g, "x").replace(/\s+/g, " ");
+  const match = normalised.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|m)?/i);
+  if (!match) return compactText(value);
+  const unit = match[3] ? match[3].toLowerCase() : "mm";
+  return `${match[1]}x${match[2]}${unit}`;
+}
+
+function materialName(card: ProductionBoardCardRecord): string {
+  const source = boardSearchText(card);
+  const knownMaterials = [
+    "ACM",
+    "Acrylic",
+    "Corflute",
+    "PVC",
+    "Foamboard",
+    "Foamex",
+    "Banner",
+    "SAV",
+    "Vinyl",
+    "Poster",
+    "Paper",
+    "Card"
+  ];
+  const lower = source.toLowerCase();
+  const found = knownMaterials.find((material) => lower.includes(material.toLowerCase()));
+  if (found) return found;
+
+  const cleaned = compactText(card.quoteProductName) || compactText(card.substrateSummary) || compactText(card.itemTitle) || "Signage";
+  return cleaned
+    .replace(/\b\d+(?:\.\d+)?\s*mm\b/gi, "")
+    .replace(/\b\d+(?:\.\d+)?\s*x\s*\d+(?:\.\d+)?\s*(?:mm|m)?\b/gi, "")
+    .split(/[-·,]/)[0]
+    .trim() || "Signage";
+}
+
+function quantitySuffix(value: string | null | undefined): string {
+  const count = Number(String(value ?? "").replace(/,/g, ""));
+  if (!Number.isFinite(count) || count <= 1) return "";
+  const display = Number.isInteger(count) ? String(count) : count.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+  return ` (${display} ${count === 1 ? "piece" : "pieces"})`;
+}
+
+function cleanBoardText(value: string): string {
+  return value.toLowerCase().replace(/[–—_/\\]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function printMethod(card: ProductionBoardCardRecord): string | null {
+  const source = cleanBoardText(boardSearchText(card));
+  if (/\bno print\b|\bmaterial only\b/.test(source)) return "No print";
+  if (/\bcut vinyl\b/.test(source)) return "Cut vinyl";
+  if (/\broll stock\b|\bprint vinyl\b|\bbanner media\b/.test(source)) return "Roll stock";
+  if (/\bdirect print\b/.test(source)) return "Direct";
+  if (/\bcmyk\b|\bwhite ink\b|\bprinted\b/.test(source)) return "Print";
+  return null;
+}
+
+function laminateName(card: ProductionBoardCardRecord): string | null {
+  const raw = boardSearchText(card);
+  const explicit = raw.match(/Laminate:\s*([^·,\n]+)/i)?.[1];
+  if (explicit) return compactText(explicit);
+
+  const lamCode = raw.match(/\b(LAM-[A-Za-z0-9 +\-]*?(?:Gloss|Matt|Matte|Anti Graffiti|Whiteboard)[A-Za-z0-9 +\-]*)\b/i)?.[1];
+  if (lamCode) return compactText(lamCode);
+
+  if (/gloss\s+lam/i.test(raw) || /laminate[^·,\n]*gloss/i.test(raw)) return "Gloss Laminate";
+  if (/(matt|matte)\s+lam/i.test(raw) || /laminate[^·,\n]*(matt|matte)/i.test(raw)) return "Matt Laminate";
+  if (/anti\s*graffiti/i.test(raw)) return "Anti Graffiti Laminate";
+  if (/whiteboard/i.test(raw)) return "Whiteboard Laminate";
+  return null;
+}
+
+function boardItemSummary(card: ProductionBoardCardRecord): string {
+  const code = compactText(card.itemCode) || "Item";
+  const material = materialName(card);
+  const size = compactSize(card.sizeSummary, boardSearchText(card));
+  return [code, [material, size].filter(Boolean).join(" - ")].filter(Boolean).join(" · ") + quantitySuffix(card.quantity);
+}
+
+function nextStepSummary(card: ProductionBoardCardRecord, laminate: string | null): string {
+  const step = compactText(card.nextStepLabel);
+  if (!step) return "Needs steps synced";
+  if (laminate && /laminate|lamination|cello/i.test(step)) return `${step} (${laminate})`;
+  return step;
 }
 
 function priorityTone(priority: string | null | undefined): { label: string; bg: string; fg: string; border: string } | null {
@@ -188,8 +272,10 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                 {columnCards.map((card) => {
                   const tone = priorityTone(card.priority);
                   const logoUrl = logoForQuoteId(card.quoteId);
-                  const detail = cardDetail(card);
                   const progress = Number(card.stepsTotal) > 0 ? `${card.stepsDone}/${card.stepsTotal}` : "No steps";
+                  const print = printMethod(card);
+                  const laminate = laminateName(card);
+                  const nextStep = nextStepSummary(card, laminate);
                   return (
                     <article key={card.id} style={boardCardStyle}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
@@ -203,10 +289,12 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                         {tone ? <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950 }}>{tone.label}</span> : null}
                       </div>
 
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <h3 style={{ margin: 0, fontSize: 15, lineHeight: 1.35 }}>{cardTitle(card)}</h3>
-                        {detail ? <p style={{ margin: 0, color: "#cbd5e1", fontSize: 12, lineHeight: 1.45 }}>{detail}</p> : null}
-                        {card.nextStepLabel ? <p style={{ margin: "4px 0 0", color: "#f8fafc", fontSize: 13, fontWeight: 900 }}>Next: {card.nextStepLabel}</p> : <p style={{ margin: "4px 0 0", color: "#fbbf24", fontSize: 13, fontWeight: 900 }}>Needs steps synced</p>}
+                      <div style={{ display: "grid", gap: 5, fontSize: 13, lineHeight: 1.45 }}>
+                        <p style={{ margin: 0, color: "#e2e8f0", fontWeight: 950 }}>Signage details:</p>
+                        <p style={{ margin: 0, color: "#f8fafc", fontWeight: 900 }}>{boardItemSummary(card)}</p>
+                        {print ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Print:</strong> {print}</p> : null}
+                        {laminate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Laminate:</strong> {laminate}</p> : null}
+                        <p style={{ margin: "5px 0 0", color: card.nextStepLabel ? "#f8fafc" : "#fbbf24", fontWeight: 950 }}>Next Step: {nextStep}</p>
                       </div>
 
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#94a3b8", fontSize: 12 }}>

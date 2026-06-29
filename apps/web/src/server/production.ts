@@ -482,7 +482,11 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
       next_step.step_type as "nextStepType",
       COALESCE(progress.steps_done, 0)::text as "stepsDone",
       COALESCE(progress.steps_total, 0)::text as "stepsTotal",
-      GREATEST(pj.updated_at, COALESCE(pi.updated_at, pj.updated_at)) as "updatedAt"
+      GREATEST(
+        pj.updated_at,
+        COALESCE(pi.updated_at, pj.updated_at),
+        COALESCE(step_activity.steps_updated_at, pj.updated_at)
+      ) as "updatedAt"
     FROM production.production_jobs pj
     LEFT JOIN production.production_items pi ON pi.job_id = pj.id
     LEFT JOIN sales.quote_lines ql ON ql.id = pi.source_quote_line_id
@@ -501,6 +505,11 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
       FROM production.production_steps ps
       WHERE ps.item_id = pi.id
     ) progress ON true
+    LEFT JOIN LATERAL (
+      SELECT max(ps.updated_at) as steps_updated_at
+      FROM production.production_steps ps
+      WHERE ps.item_id = pi.id
+    ) step_activity ON true
     WHERE pj.tenant_id = $1::uuid
       AND pj.status NOT IN ('deleted', 'completed')
       AND (pi.id IS NULL OR next_step.id IS NOT NULL)
@@ -781,16 +790,31 @@ export async function setProductionJobStatusForTenant(tenantId: string, jobId: s
 export async function setProductionStepStatusForTenant(tenantId: string, stepId: string, status: "pending" | "done", checkedBy?: string | null): Promise<{ jobId: string | null }> {
   await ensureProductionTables();
   const result = await pool.query<{ jobId: string }>(`
-    UPDATE production.production_steps ps
-    SET status = $3::varchar,
-        checked_at = CASE WHEN $3 = 'done' THEN now() ELSE NULL END,
-        checked_by = CASE WHEN $3 = 'done' THEN $4::varchar ELSE NULL END,
-        updated_at = now()
-    FROM production.production_jobs pj
-    WHERE ps.job_id = pj.id
-      AND pj.tenant_id = $1::uuid
-      AND ps.id = $2::uuid
-    RETURNING ps.job_id as "jobId"
+    WITH updated_step AS (
+      UPDATE production.production_steps ps
+      SET status = $3::varchar,
+          checked_at = CASE WHEN $3 = 'done' THEN now() ELSE NULL END,
+          checked_by = CASE WHEN $3 = 'done' THEN $4::varchar ELSE NULL END,
+          updated_at = now()
+      FROM production.production_jobs pj
+      WHERE ps.job_id = pj.id
+        AND pj.tenant_id = $1::uuid
+        AND ps.id = $2::uuid
+      RETURNING ps.job_id, ps.item_id
+    ), updated_item AS (
+      UPDATE production.production_items pi
+      SET updated_at = now()
+      FROM updated_step us
+      WHERE pi.id = us.item_id
+      RETURNING pi.id
+    ), updated_job AS (
+      UPDATE production.production_jobs pj
+      SET updated_at = now()
+      FROM updated_step us
+      WHERE pj.id = us.job_id
+      RETURNING pj.id
+    )
+    SELECT job_id as "jobId" FROM updated_step
   `, [tenantId, stepId, status, checkedBy ?? null]);
   return { jobId: result.rows[0]?.jobId ?? null };
 }
