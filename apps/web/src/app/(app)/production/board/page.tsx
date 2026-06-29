@@ -422,7 +422,22 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                         {print ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Print:</strong> {print}</p> : null}
                         {laminate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Laminate:</strong> {laminate}</p> : null}
                         {finishings.map((detail) => <p key={detail} style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>{/eyelet/i.test(detail) ? "Eyelets:" : "Finishing:"}</strong> {detail.replace(/^Eyelets?:\s*/i, "")}</p>)}
-                        <p style={{ margin: "5px 0 0", color: card.nextStepLabel ? "#f8fafc" : "#fbbf24", fontWeight: 950 }}>Next Step: {nextStep}</p>
+                        <div
+                          style={{
+                            marginTop: 8,
+                            borderRadius: 14,
+                            padding: "10px 12px",
+                            background: "linear-gradient(135deg, rgba(250,204,21,0.98) 0%, rgba(245,158,11,0.95) 100%)",
+                            color: "#111827",
+                            border: "1px solid rgba(254,240,138,0.85)",
+                            boxShadow: "0 12px 24px rgba(245,158,11,0.22)",
+                            display: "grid",
+                            gap: 2
+                          }}
+                        >
+                          <span style={{ fontSize: 10, fontWeight: 1000, letterSpacing: "0.12em", textTransform: "uppercase", opacity: 0.78 }}>Next step</span>
+                          <strong style={{ fontSize: 15, lineHeight: 1.2 }}>{nextStep}</strong>
+                        </div>
                       </div>
 
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#94a3b8", fontSize: 12 }}>

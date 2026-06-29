@@ -117,6 +117,7 @@ function nullableText(value: string | null | undefined): string | null {
   return cleaned.length ? cleaned : null;
 }
 
+
 function normaliseMoney(value: string | null | undefined, fallback = "1"): string {
   const cleaned = String(value ?? "").replace(/[$,]/g, "").trim();
   if (!cleaned) return fallback;
@@ -509,13 +510,17 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
       FROM production.production_steps ps
       WHERE ps.item_id = pi.id
         AND ps.status <> 'done'
+        AND NOT (
+          lower(ps.label) LIKE '%apply%mount%substrate%'
+          AND concat_ws(' ', pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%direct print%'
+        )
       ORDER BY ps.sort_order ASC, ps.created_at ASC
       LIMIT 1
     ) next_step ON true
     LEFT JOIN LATERAL (
       SELECT
-        count(*) as steps_total,
-        count(*) FILTER (WHERE ps.status = 'done') as steps_done
+        count(*) FILTER (WHERE NOT (lower(ps.label) LIKE '%apply%mount%substrate%' AND concat_ws(' ', pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%direct print%')) as steps_total,
+        count(*) FILTER (WHERE ps.status = 'done' AND NOT (lower(ps.label) LIKE '%apply%mount%substrate%' AND concat_ws(' ', pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%direct print%')) as steps_done
       FROM production.production_steps ps
       WHERE ps.item_id = pi.id
     ) progress ON true
@@ -570,10 +575,14 @@ function stepPlanForItem(input: {
   colourSummary: string | null;
   finishingSummary: string | null;
   sizeSummary: string | null;
+  quoteProductName?: string | null;
+  quoteOptionSummary?: string | null;
 }): string[] {
   const combined = cleanSearchText([
     input.productionType,
     input.title,
+    input.quoteProductName,
+    input.quoteOptionSummary,
     input.substrateSummary,
     input.colourSummary,
     input.finishingSummary,
@@ -593,9 +602,13 @@ function stepPlanForItem(input: {
     return uniqueSteps(steps);
   }
 
+  const isDirectPrint = /\bdirect print\b/.test(combined);
+  const hasPrintedOrCutMedia = /\b(roll stock|print vinyl|printed vinyl|vinyl|sav|cut vinyl|banner media|banner|self adhesive|apply|applied|mount|mounted)\b/.test(combined);
+  const hasSeparateSubstrate = /\b(acm|aluminium composite|acrylic|pvc|foamboard|substrate|panel)\b/.test(combined);
+
   if (/\b(roll|vinyl|banner|cmyk|mono|direct print|white ink|print)\b/.test(combined)) steps.push("Print");
   if (/\b(laminate|lamination|gloss|matt|matte|anti graffiti|whiteboard)\b/.test(combined)) steps.push("Laminate");
-  if (/\b(apply|applied|mount|mounted|acm|aluminium composite|acrylic|pvc|foamboard|substrate|panel)\b/.test(combined)) steps.push("Apply / mount to substrate");
+  if (!isDirectPrint && hasPrintedOrCutMedia && hasSeparateSubstrate) steps.push("Apply / mount to substrate");
   if (/\b(jingwei|router|cnc|cut|cutting|drill|holes|eyelet|eyelets)\b/.test(combined)) steps.push("Cut / route / finish");
   steps.push("Quality checked", "Packed", "Ready for install / pickup / delivery");
   return uniqueSteps(steps);
@@ -616,6 +629,8 @@ async function syncProductionItemsAndSteps(jobId: string): Promise<void> {
     proofImageUrl: string | null;
     proofFileName: string | null;
     sortOrder: number;
+    quoteProductName: string | null;
+    quoteOptionSummary: string | null;
   }>(`
     SELECT
       aap.id,
@@ -630,9 +645,12 @@ async function syncProductionItemsAndSteps(jobId: string): Promise<void> {
       CASE WHEN aap.production_type = 'small_format' THEN aap.small_format_summary ELSE aap.install_summary END as "finishingSummary",
       aap.image_url as "proofImageUrl",
       aap.file_name as "proofFileName",
-      aap.sort_order as "sortOrder"
+      aap.sort_order as "sortOrder",
+      ql.product_name as "quoteProductName",
+      ql.option_summary as "quoteOptionSummary"
     FROM production.production_jobs pj
     JOIN sales.artwork_approval_pages aap ON aap.approval_id = pj.artwork_approval_id
+    LEFT JOIN sales.quote_lines ql ON ql.id = aap.source_quote_line_id
     WHERE pj.id = $1::uuid
     ORDER BY aap.sort_order ASC, aap.created_at ASC
   `, [jobId]);
@@ -707,6 +725,20 @@ async function syncProductionItemsAndSteps(jobId: string): Promise<void> {
         DO UPDATE SET sort_order = EXCLUDED.sort_order, updated_at = production.production_steps.updated_at
       `, [jobId, itemId, label, cleanSearchText(label).replace(/\s+/g, "_"), (page.sortOrder || 0) * 100 + index + 1]);
     }
+
+    await pool.query(`
+      DELETE FROM production.production_steps ps
+      WHERE ps.job_id = $1::uuid
+        AND ps.item_id = $2::uuid
+        AND ps.status <> 'done'
+        AND lower(ps.label) = ANY($3::text[])
+        AND NOT (lower(ps.label) = ANY($4::text[]))
+    `, [
+      jobId,
+      itemId,
+      ["apply / mount to substrate"],
+      steps.map((step) => cleanSearchText(step))
+    ]);
   }
 }
 

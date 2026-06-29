@@ -516,6 +516,28 @@ function pageCompletion(steps: ProductionStepRecord[]): { done: number; total: n
   return { done: steps.filter((step) => step.status === "done").length, total: steps.length };
 }
 
+function isDirectPrintItem(item: ProductionItemRecord): boolean {
+  const source = summaryKey([
+    item.title,
+    item.quoteProductName,
+    item.quoteOptionSummary,
+    item.sizeSummary,
+    item.substrateSummary,
+    item.colourSummary,
+    item.finishingSummary
+  ].filter(Boolean).join(" "));
+  return /\bdirect print\b/.test(source);
+}
+
+function isObsoleteStepForItem(item: ProductionItemRecord, step: ProductionStepRecord): boolean {
+  const stepText = summaryKey(`${step.label} ${step.stepType}`);
+  return isDirectPrintItem(item) && /\bapply\b/.test(stepText) && /\bmount\b/.test(stepText) && /\bsubstrate\b/.test(stepText);
+}
+
+function visibleStepsForItem(item: ProductionItemRecord, allSteps: ProductionStepRecord[]): ProductionStepRecord[] {
+  return allSteps.filter((step) => step.itemId === item.id && !isObsoleteStepForItem(item, step));
+}
+
 const cardStyle = {
   border: "1px solid #dbe4f0",
   borderRadius: 24,
@@ -635,7 +657,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
   };
   const selectedJobLogoUrl = logoForQuoteId(selectedJob?.quoteId);
-  const complete = pageCompletion(steps);
+  const complete = pageCompletion(selectedJob ? items.flatMap((item) => visibleStepsForItem(item, steps)) : steps);
   const readyCount = allJobs.filter((job) => job.status === "ready_to_start").length;
   const inProductionCount = allJobs.filter((job) => job.status === "in_production").length;
   const waitingCount = allJobs.filter((job) => job.status === "waiting_on_files" || job.status === "waiting_on_material").length;
@@ -797,60 +819,17 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             </div>
           </section>
 
-          {selectedQuote ? (() => {
-            const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
-            const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
-            return (
-              <section style={{ ...cardStyle, borderColor: myobTone.border, background: myobTone.bg, color: myobTone.fg, display: "grid", gap: 10 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                  <div style={{ display: "grid", gap: 5 }}>
-                    <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>MYOB open job / order</p>
-                    <h3 style={{ margin: 0 }}>{myobTone.label}</h3>
-                    <p style={{ margin: 0, fontSize: 13 }}>Production Manager runs the workflow. Accepted quotes are sent to MYOB as open Orders when you choose to sync.</p>
-                    {selectedQuote.myobOrderNumber ? <p style={{ margin: 0, fontSize: 13 }}>MYOB Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</p> : null}
-                    {selectedQuote.myobOrderSyncError ? <p style={{ margin: 0, fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</p> : null}
-                  </div>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <span style={{ borderRadius: 999, border: `1px solid ${myobTone.border}`, background: "rgba(255,255,255,0.75)", color: myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{myobTone.label}</span>
-                    {canPush ? (
-                      <form action={pushProductionQuoteToMyobOrderAction}>
-                        <input type="hidden" name="jobId" value={selectedJob.id} />
-                        <input type="hidden" name="quoteId" value={selectedJob.quoteId} />
-                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
-                      </form>
-                    ) : null}
-                  </div>
-                </div>
-              </section>
-            );
-          })() : null}
-
-          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-            <h2 style={{ margin: 0 }}>Job details</h2>
-            <form action={updateProductionJobDetailsAction} style={{ display: "grid", gap: 12 }}>
-              <input type="hidden" name="jobId" value={selectedJob.id} />
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
-                <label style={labelStyle}>Priority<input name="priority" defaultValue={selectedJob.priority ?? "normal"} placeholder="normal / urgent" style={inputStyle} /></label>
-                <label style={labelStyle}>Due date<input name="dueDate" type="date" defaultValue={selectedJob.dueDate ?? ""} style={inputStyle} /></label>
-                <label style={labelStyle}>Assigned to<input name="assignedTo" defaultValue={selectedJob.assignedTo ?? ""} placeholder="Staff member" style={inputStyle} /></label>
-                <div style={{ display: "grid", alignItems: "end" }}><button type="submit" style={buttonStyle}>Save job details</button></div>
-              </div>
-              <label style={labelStyle}>Internal production notes<textarea name="internalNotes" defaultValue={selectedJob.internalNotes ?? ""} placeholder="Notes for production staff" style={textareaStyle} /></label>
-            </form>
-          </section>
-
           <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
             <div>
               <h2 style={{ margin: 0 }}>Production items</h2>
               <p style={{ margin: "4px 0 0", color: "#667085" }}>Each approved artwork page becomes one production item. Attach the print-ready file used for print/cut/router/RIP, then check off the procedure.</p>
             </div>
             {items.map((item) => {
-              const itemSteps = steps.filter((step) => step.itemId === item.id);
-              const itemComplete = completionForItem(item, steps);
+              const itemSteps = visibleStepsForItem(item, steps);
+              const itemComplete = { done: itemSteps.filter((step) => step.status === "done").length, total: itemSteps.length };
               const productionDetails = quotedDetailsForItem(item);
               return (
                 <article key={item.id} style={{ border: "1px solid #dbe4f0", borderRadius: 22, padding: 16, background: "#fbfdff", display: "grid", gap: 14 }}>
-                  <QuotedDetailsCard item={item} />
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.8fr) minmax(0, 1.2fr)", gap: 16, alignItems: "start" }}>
                     <div style={{ display: "grid", gap: 10 }}>
                       {proofPreview(item)}
@@ -906,11 +885,56 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                       </section>
                     </div>
                   </div>
+                  <QuotedDetailsCard item={item} />
                 </article>
               );
             })}
             {items.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No production items yet. Sync from artwork pages or create production from an approved artwork approval.</p> : null}
           </section>
+
+          {selectedQuote ? (() => {
+            const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
+            const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
+            return (
+              <section style={{ ...cardStyle, borderColor: myobTone.border, background: myobTone.bg, color: myobTone.fg, display: "grid", gap: 10 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                  <div style={{ display: "grid", gap: 5 }}>
+                    <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>MYOB open job / order</p>
+                    <h3 style={{ margin: 0 }}>{myobTone.label}</h3>
+                    <p style={{ margin: 0, fontSize: 13 }}>Production Manager runs the workflow. Accepted quotes are sent to MYOB as open Orders when you choose to sync.</p>
+                    {selectedQuote.myobOrderNumber ? <p style={{ margin: 0, fontSize: 13 }}>MYOB Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</p> : null}
+                    {selectedQuote.myobOrderSyncError ? <p style={{ margin: 0, fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</p> : null}
+                  </div>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <span style={{ borderRadius: 999, border: `1px solid ${myobTone.border}`, background: "rgba(255,255,255,0.75)", color: myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{myobTone.label}</span>
+                    {canPush ? (
+                      <form action={pushProductionQuoteToMyobOrderAction}>
+                        <input type="hidden" name="jobId" value={selectedJob.id} />
+                        <input type="hidden" name="quoteId" value={selectedJob.quoteId} />
+                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
+                      </form>
+                    ) : null}
+                  </div>
+                </div>
+              </section>
+            );
+          })() : null}
+
+          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+            <h2 style={{ margin: 0 }}>Job details</h2>
+            <form action={updateProductionJobDetailsAction} style={{ display: "grid", gap: 12 }}>
+              <input type="hidden" name="jobId" value={selectedJob.id} />
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
+                <label style={labelStyle}>Priority<input name="priority" defaultValue={selectedJob.priority ?? "normal"} placeholder="normal / urgent" style={inputStyle} /></label>
+                <label style={labelStyle}>Due date<input name="dueDate" type="date" defaultValue={selectedJob.dueDate ?? ""} style={inputStyle} /></label>
+                <label style={labelStyle}>Assigned to<input name="assignedTo" defaultValue={selectedJob.assignedTo ?? ""} placeholder="Staff member" style={inputStyle} /></label>
+                <div style={{ display: "grid", alignItems: "end" }}><button type="submit" style={buttonStyle}>Save job details</button></div>
+              </div>
+              <label style={labelStyle}>Internal production notes<textarea name="internalNotes" defaultValue={selectedJob.internalNotes ?? ""} placeholder="Notes for production staff" style={textareaStyle} /></label>
+            </form>
+          </section>
+
+
         </section>
       ) : null}
     </div>
