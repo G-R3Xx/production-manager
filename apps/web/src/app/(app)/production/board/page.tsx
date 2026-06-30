@@ -184,23 +184,19 @@ function dispatchColumnForCard(card: ProductionBoardCardRecord): ProductionBoard
   return null;
 }
 
-function textHasAnyWord(source: string, terms: string[]): boolean {
-  return terms.some((term) => new RegExp(`(^|\\s)${term.replace(/\\s+/g, "\\\\s+")}(?=\\s|$)`, "i").test(source));
-}
-
 function boardColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey {
   if (!card.nextStepId && card.handoffColumn) return card.handoffColumn;
 
   const nextStep = cleanBoardText([card.nextStepLabel, card.nextStepType].filter(Boolean).join(" · "));
   const dispatchColumn = dispatchColumnForCard(card);
-  const isGenericReadyStep = nextStep.includes("ready") && nextStep.includes("install") && nextStep.includes("pickup") && nextStep.includes("delivery");
+  const isGenericReadyStep = /ready/.test(nextStep) && /install/.test(nextStep) && /pickup/.test(nextStep) && /delivery/.test(nextStep);
 
   if (nextStep) {
     if (isGenericReadyStep && dispatchColumn) return dispatchColumn;
-    if (nextStep.includes("ready for install") || textHasAnyWord(nextStep, ["install", "installed", "installer", "site install"])) return "install";
-    if (nextStep.includes("ready for delivery") || textHasAnyWord(nextStep, ["deliver", "delivery", "courier", "freight", "drop off", "dispatch"])) return "deliver";
-    if (nextStep.includes("ready for pickup") || textHasAnyWord(nextStep, ["pickup", "pick up", "collect", "collection"])) return "pickup";
-    if (textHasAnyWord(nextStep, ["laminate", "lamination", "cello", "fold", "score", "crease", "bind", "staple", "number", "numbering", "pad", "tape", "trim", "guillotine", "cut", "route", "router", "cnc", "jingwei", "finish", "finishing", "quality", "pack", "packed", "apply", "mount", "mounted", "eyelet", "drill", "hole", "holes"])) return "finishing";
+    if (/\b(ready for install|install|installed|installer|site install)\b/.test(nextStep)) return "install";
+    if (/\b(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
+    if (/\b(ready for pickup|pickup|pick up|collect|collection)\b/.test(nextStep)) return "pickup";
+    if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
     return "printing";
   }
 

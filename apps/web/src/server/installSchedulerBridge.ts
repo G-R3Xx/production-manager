@@ -137,6 +137,17 @@ type CreateInstallJobInput = {
   productionManagerBaseUrl: string;
   clientLogoUrl: string | null;
   clientLogoStoragePath: string | null;
+  referencePhotos?: Array<{
+    url: string;
+    storagePath?: string | null;
+    fileName?: string | null;
+    originalFileName?: string | null;
+    mime?: string | null;
+    caption?: string | null;
+    source?: string | null;
+    signTitle?: string | null;
+    location?: string | null;
+  }>;
 };
 
 export function installSchedulerInstallBridgeConfigured(): boolean {

@@ -82,6 +82,18 @@ export type ApprovedArtworkOptionRecord = {
 export type ProductionBoardColumnKey = "printing" | "finishing" | "install" | "deliver" | "pickup";
 
 
+export type ProductionReferencePhotoPayload = {
+  url: string;
+  storagePath?: string | null;
+  fileName?: string | null;
+  originalFileName?: string | null;
+  mime?: string | null;
+  caption?: string | null;
+  source?: string | null;
+  signTitle?: string | null;
+  location?: string | null;
+};
+
 export type ProductionInstallSchedulerPayload = {
   tenantId: string;
   productionManagerJobId: string;
@@ -111,6 +123,7 @@ export type ProductionInstallSchedulerPayload = {
   productionManagerBaseUrl: string;
   clientLogoUrl: string | null;
   clientLogoStoragePath: string | null;
+  referencePhotos: ProductionReferencePhotoPayload[];
 };
 
 export type ProductionBoardCardRecord = {
@@ -221,6 +234,249 @@ function uniqueSteps(steps: string[]): string[] {
     seen.add(key);
     return true;
   });
+}
+
+
+type JsonRecord = Record<string, unknown>;
+
+function asJsonRecord(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+}
+
+function asJsonArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function jsonText(value: unknown): string | null {
+  const cleaned = String(value ?? "").trim();
+  return cleaned.length ? cleaned : null;
+}
+
+function photoUrlFromJson(value: unknown): string | null {
+  const photo = asJsonRecord(value);
+  return jsonText(photo.url) || jsonText(photo.downloadUrl) || jsonText(photo.photoUrl) || jsonText(photo.photoURL);
+}
+
+function normaliseReferencePhoto(value: unknown, index: number, defaults?: { signTitle?: string | null; location?: string | null }): ProductionReferencePhotoPayload | null {
+  const photo = asJsonRecord(value);
+  const url = photoUrlFromJson(photo);
+  if (!url) return null;
+  const fileName = jsonText(photo.fileName) || jsonText(photo.originalFileName) || jsonText(photo.name) || `Survey photo ${index + 1}`;
+  const signTitle = jsonText(photo.signTitle) || defaults?.signTitle || null;
+  const location = jsonText(photo.location) || defaults?.location || null;
+  return {
+    url,
+    storagePath: jsonText(photo.storagePath),
+    fileName,
+    originalFileName: jsonText(photo.originalFileName),
+    mime: jsonText(photo.mime) || jsonText(photo.contentType),
+    caption: [signTitle, location].filter(Boolean).join(" · ") || null,
+    source: "Install Scheduler survey",
+    signTitle,
+    location,
+  };
+}
+
+function surveyReferencePhotosFromPayload(payload: unknown): ProductionReferencePhotoPayload[] {
+  const root = asJsonRecord(payload);
+  const photos: ProductionReferencePhotoPayload[] = [];
+  const pushPhoto = (photo: unknown, defaults?: { signTitle?: string | null; location?: string | null }) => {
+    const normalised = normaliseReferencePhoto(photo, photos.length, defaults);
+    if (normalised) photos.push(normalised);
+  };
+
+  asJsonArray(root.surveyPhotos).forEach((photo) => pushPhoto(photo));
+  asJsonArray(root.referencePhotos).forEach((photo) => pushPhoto(photo));
+
+  const scanSigns = (signs: unknown) => {
+    asJsonArray(signs).forEach((sign) => {
+      const record = asJsonRecord(sign);
+      const signTitle = jsonText(record.title) || jsonText(record.signTitle) || jsonText(record.location);
+      const location = jsonText(record.location);
+      asJsonArray(record.photos).forEach((photo) => pushPhoto(photo, { signTitle, location }));
+      asJsonArray(record.referencePhotos).forEach((photo) => pushPhoto(photo, { signTitle, location }));
+    });
+  };
+
+  scanSigns(root.signs);
+  scanSigns(asJsonRecord(root.rawSurvey).signs);
+
+  const seen = new Set<string>();
+  return photos.filter((photo) => {
+    const key = photo.url.trim();
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function compactProductionText(value: string | null | undefined): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function productionPartsForSummary(row: {
+  itemTitle?: string | null;
+  quoteProductName?: string | null;
+  quoteOptionSummary?: string | null;
+  sizeSummary?: string | null;
+  substrateSummary?: string | null;
+  colourSummary?: string | null;
+  finishingSummary?: string | null;
+}): string[] {
+  return [row.quoteProductName, row.quoteOptionSummary, row.substrateSummary, row.colourSummary, row.finishingSummary, row.sizeSummary, row.itemTitle]
+    .filter(Boolean)
+    .flatMap((value) => String(value).split(/\s*[·\n]\s*/g))
+    .map(compactProductionText)
+    .filter(Boolean);
+}
+
+function normaliseProductionSize(value: string | null | undefined): string | null {
+  const source = compactProductionText(value).replace(/[×*]/g, "x");
+  const match = source.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|m)?/i);
+  if (!match) return null;
+  return `${match[1]}x${match[2]}${(match[3] || "mm").toLowerCase()}`;
+}
+
+function isStockSizeSummaryPart(value: string): boolean {
+  const source = value.toLowerCase();
+  return /\b(material|substrate|stock|sheet|roll|media|acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|vinyl|banner)\b/.test(source)
+    && /\b\d+(?:\.\d+)?\s*mm\b/.test(source);
+}
+
+function finishedSizeForInstallSummary(row: {
+  itemTitle?: string | null;
+  quoteOptionSummary?: string | null;
+  sizeSummary?: string | null;
+}): string | null {
+  const parts = String(row.quoteOptionSummary ?? "")
+    .split(/\s*[·\n]\s*/g)
+    .map(compactProductionText)
+    .filter(Boolean);
+  const labelled = parts.find((part) => /^(?:finished\s*)?size\s*:/i.test(part));
+  const labelledSize = normaliseProductionSize(labelled);
+  if (labelledSize) return labelledSize;
+  const standalone = parts.find((part) => /^\d+(?:\.\d+)?\s*[×x*]\s*\d+(?:\.\d+)?\s*(?:mm|m)?$/i.test(part));
+  const standaloneSize = normaliseProductionSize(standalone);
+  if (standaloneSize) return standaloneSize;
+  const nonStock = parts.find((part) => normaliseProductionSize(part) && !isStockSizeSummaryPart(part));
+  return normaliseProductionSize(nonStock) || normaliseProductionSize(row.sizeSummary) || normaliseProductionSize(row.itemTitle);
+}
+
+function materialNameForInstallSummary(row: {
+  itemTitle?: string | null;
+  quoteProductName?: string | null;
+  quoteOptionSummary?: string | null;
+  substrateSummary?: string | null;
+}): string {
+  const source = productionPartsForSummary(row).join(" · ").toLowerCase();
+  const materials = ["ACM", "Acrylic", "Corflute", "Coreflute", "PVC", "Foamboard", "Foamex", "Banner", "SAV", "Vinyl", "Poster", "Paper", "Card"];
+  const found = materials.find((material) => source.includes(material.toLowerCase()));
+  if (found) return found === "Coreflute" ? "Corflute" : found;
+  return compactProductionText(row.quoteProductName) || compactProductionText(row.substrateSummary) || "Signage";
+}
+
+function stripProductionLabel(value: string): string {
+  return compactProductionText(value.replace(/^(?:material|substrate|stock|base|size|sizes|print|laminate|coating|finishing|finish|install|small format)\s*:\s*/i, ""));
+}
+
+function substrateForInstallSummary(row: {
+  itemTitle?: string | null;
+  quoteProductName?: string | null;
+  quoteOptionSummary?: string | null;
+  substrateSummary?: string | null;
+}): string | null {
+  const parts = productionPartsForSummary(row);
+  const substrate = parts.find((part) => /^(?:material|substrate|stock|base)\s*:/i.test(part))
+    || parts.find((part) => /\b(acm|acrylic|corflute|coreflute|pvc|foamboard|foamex|polycarbonate)\b/i.test(part) && /\b\d+(?:\.\d+)?\s*mm\b/i.test(part))
+    || compactProductionText(row.substrateSummary)
+    || compactProductionText(row.quoteProductName);
+  const cleaned = stripProductionLabel(substrate || "")
+    .replace(/\b\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*(?:mm|m)?\b/gi, "")
+    .replace(/^\w+\s*-\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const thicknessThenMaterial = cleaned.match(/\b(\d+(?:\.\d+)?\s*mm\s*(?:ACM|Acrylic|Corflute|Coreflute|PVC|Foamboard|Foamex|Polycarbonate))\b/i)?.[1];
+  if (thicknessThenMaterial) return compactProductionText(thicknessThenMaterial).replace(/\bCoreflute\b/i, "Corflute");
+  const materialThenThickness = cleaned.match(/\b(ACM|Acrylic|Corflute|Coreflute|PVC|Foamboard|Foamex|Polycarbonate)\s*(\d+(?:\.\d+)?\s*mm)\b/i);
+  if (materialThenThickness) return `${materialThenThickness[2]} ${materialThenThickness[1]}`.replace(/\bCoreflute\b/i, "Corflute");
+  return cleaned || null;
+}
+
+function printForInstallSummary(row: { quoteOptionSummary?: string | null; colourSummary?: string | null; itemTitle?: string | null }): string | null {
+  const source = cleanSearchText([row.quoteOptionSummary, row.colourSummary, row.itemTitle].filter(Boolean).join(" · "));
+  if (/\bno print\b|\bmaterial only\b/.test(source)) return "No print";
+  if (/\bcut vinyl\b/.test(source)) return "Cut vinyl";
+  if (/\broll stock\b|\bprint vinyl\b|\bbanner media\b/.test(source)) return "Roll stock";
+  if (/\bdirect print\b/.test(source)) return "Direct";
+  if (/\bcmyk\b|\bwhite ink\b|\bprinted\b|\bprint\b/.test(source)) return "Print";
+  return null;
+}
+
+function laminateForInstallSummary(row: { quoteOptionSummary?: string | null; finishingSummary?: string | null; itemTitle?: string | null }): string | null {
+  const raw = [row.quoteOptionSummary, row.finishingSummary, row.itemTitle].filter(Boolean).join(" · ");
+  const explicit = raw.match(/Laminate:\s*([^·,\n]+)/i)?.[1];
+  if (explicit) return compactProductionText(explicit);
+  const lamCode = raw.match(/\b(LAM-[A-Za-z0-9 +\-]*?(?:Gloss|Matt|Matte|Anti Graffiti|Whiteboard)[A-Za-z0-9 +\-]*)\b/i)?.[1];
+  if (lamCode) return compactProductionText(lamCode);
+  if (/gloss\s+lam/i.test(raw) || /laminate[^·,\n]*gloss/i.test(raw)) return "Gloss Laminate";
+  if (/(matt|matte)\s+lam/i.test(raw) || /laminate[^·,\n]*(matt|matte)/i.test(raw)) return "Matt Laminate";
+  return null;
+}
+
+function finishingForInstallSummary(row: { quoteOptionSummary?: string | null; finishingSummary?: string | null; itemTitle?: string | null }, laminate: string | null): string[] {
+  const laminateKey = cleanSearchText(laminate ?? "");
+  return Array.from(new Set(productionPartsForSummary(row)
+    .filter((part) => /\b(finishing|finish|eyelet|eyelets|hole|holes|drill|jingwei|router|route|cnc|cut|cutting|fold|score|crease|bind|staple|numbering|pad|tape|trim|guillotine|mount|apply)\b/i.test(part))
+    .map(stripProductionLabel)
+    .flatMap((part) => part.split(/\s*,\s*/g))
+    .map(compactProductionText)
+    .filter((part) => {
+      const key = cleanSearchText(part);
+      if (!key || /^none$/i.test(part)) return false;
+      if (laminateKey && key === laminateKey) return false;
+      return !/\b(print setup|artwork|direct print|roll stock|cut vinyl|single sided|double sided|cmyk|white ink)\b/i.test(part);
+    }))).slice(0, 6);
+}
+
+function quantityForInstallSummary(value: string | null | undefined): string {
+  const count = Number(String(value ?? "1").replace(/,/g, ""));
+  if (!Number.isFinite(count) || count <= 0) return "1";
+  return Number.isInteger(count) ? String(count) : count.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function buildInstallSchedulerProductionDetails(row: {
+  itemCode?: string | null;
+  itemTitle?: string | null;
+  quantity?: string | null;
+  sizeSummary?: string | null;
+  substrateSummary?: string | null;
+  colourSummary?: string | null;
+  finishingSummary?: string | null;
+  quoteProductName?: string | null;
+  quoteOptionSummary?: string | null;
+  quoteNumber?: string | null;
+  stepLabel?: string | null;
+}): { itemSummary: string; description: string; substrateSummary: string | null; printSummary: string | null; laminateSummary: string | null; finishingDetails: string[] } {
+  const code = compactProductionText(row.itemCode) || "S1";
+  const material = materialNameForInstallSummary(row);
+  const size = finishedSizeForInstallSummary(row);
+  const qty = quantityForInstallSummary(row.quantity);
+  const itemSummary = [code, material, size].filter(Boolean).join(" - ") + ` (Qty ${qty})`;
+  const substrate = substrateForInstallSummary(row);
+  const print = printForInstallSummary(row);
+  const laminate = laminateForInstallSummary(row);
+  const finishings = finishingForInstallSummary(row, laminate);
+  const lines = [
+    "Signage details:",
+    itemSummary,
+    substrate ? `Substrate: ${substrate}` : null,
+    print ? `Print: ${print}` : null,
+    laminate ? `Laminate: ${laminate}` : null,
+    ...finishings.map((detail) => (/eyelet/i.test(detail) ? `Eyelets: ${detail.replace(/^Eyelets?:\s*/i, "")}` : `Finishing: ${detail}`)),
+    row.stepLabel ? `Next step: ${row.stepLabel}` : null,
+    row.quoteNumber ? `Quote: ${row.quoteNumber}` : null,
+  ].filter(Boolean);
+  return { itemSummary, description: lines.join("\n"), substrateSummary: substrate, printSummary: print, laminateSummary: laminate, finishingDetails: finishings };
 }
 
 export async function ensureProductionTables(): Promise<void> {
@@ -992,74 +1248,9 @@ export async function setProductionJobDispatchTypeForTenant(tenantId: string, jo
   if (!readyLabel) return;
 
   await pool.query(`
-    UPDATE production.production_steps ps
-    SET label = $3::varchar,
-        step_type = $4::varchar,
-        updated_at = now()
-    FROM production.production_jobs pj
-    WHERE pj.id = ps.job_id
-      AND pj.tenant_id = $1::uuid
-      AND ps.job_id = $2::uuid
-      AND (
-        lower(ps.label) LIKE 'ready for%'
-        OR lower(ps.label) LIKE 'ready%install%'
-        OR lower(ps.label) LIKE 'ready%pickup%'
-        OR lower(ps.label) LIKE 'ready%delivery%'
-        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
-      )
-  `, [tenantId, jobId, readyLabel, stepType]);
-
-  await pool.query(`
-    WITH ready_state AS (
-      SELECT ps.item_id,
-             bool_or(ps.status = 'done' OR pj.status IN ('ready_for_dispatch', 'ready_for_install', 'ready_for_delivery', 'ready_for_pickup')) as should_be_done,
-             max(ps.checked_at) FILTER (WHERE ps.checked_at IS NOT NULL) as last_checked_at,
-             max(ps.checked_by) FILTER (WHERE ps.checked_by IS NOT NULL) as last_checked_by
-      FROM production.production_steps ps
-      JOIN production.production_jobs pj ON pj.id = ps.job_id
-      WHERE pj.tenant_id = $1::uuid
-        AND ps.job_id = $2::uuid
-        AND ps.item_id IS NOT NULL
-        AND (
-          lower(ps.label) LIKE 'ready for%'
-          OR lower(ps.label) LIKE 'ready%install%'
-          OR lower(ps.label) LIKE 'ready%pickup%'
-          OR lower(ps.label) LIKE 'ready%delivery%'
-          OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
-        )
-      GROUP BY ps.item_id
-    )
-    UPDATE production.production_steps ps
-    SET status = 'done',
-        checked_at = COALESCE(ps.checked_at, ready_state.last_checked_at, now()),
-        checked_by = COALESCE(ps.checked_by, ready_state.last_checked_by, 'Production Manager'),
-        updated_at = now()
-    FROM ready_state
-    WHERE ps.item_id = ready_state.item_id
-      AND ready_state.should_be_done = true
-      AND ps.job_id = $2::uuid
-      AND (
-        lower(ps.label) LIKE 'ready for%'
-        OR lower(ps.label) LIKE 'ready%install%'
-        OR lower(ps.label) LIKE 'ready%pickup%'
-        OR lower(ps.label) LIKE 'ready%delivery%'
-        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
-      )
-  `, [tenantId, jobId]);
-
-  await pool.query(`
     WITH ready_steps AS (
       SELECT ps.id,
-             ps.item_id,
-             ps.status,
-             row_number() OVER (
-               PARTITION BY ps.item_id
-               ORDER BY
-                 CASE WHEN ps.status = 'done' THEN 0 ELSE 1 END,
-                 ps.sort_order DESC,
-                 ps.updated_at DESC,
-                 ps.created_at DESC
-             ) as keep_rank
+             row_number() OVER (PARTITION BY ps.item_id ORDER BY ps.sort_order DESC, ps.updated_at DESC, ps.created_at DESC) as keep_rank
       FROM production.production_steps ps
       JOIN production.production_jobs pj ON pj.id = ps.job_id
       WHERE pj.tenant_id = $1::uuid
@@ -1077,7 +1268,26 @@ export async function setProductionJobDispatchTypeForTenant(tenantId: string, jo
     USING ready_steps rs
     WHERE ps.id = rs.id
       AND rs.keep_rank > 1
+      AND ps.status <> 'done'
   `, [tenantId, jobId]);
+
+  await pool.query(`
+    UPDATE production.production_steps ps
+    SET label = $3::varchar,
+        step_type = $4::varchar,
+        updated_at = now()
+    FROM production.production_jobs pj
+    WHERE pj.id = ps.job_id
+      AND pj.tenant_id = $1::uuid
+      AND ps.job_id = $2::uuid
+      AND (
+        lower(ps.label) LIKE 'ready for%'
+        OR lower(ps.label) LIKE 'ready%install%'
+        OR lower(ps.label) LIKE 'ready%pickup%'
+        OR lower(ps.label) LIKE 'ready%delivery%'
+        OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
+      )
+  `, [tenantId, jobId, readyLabel, stepType]);
 
   await pool.query(`
     INSERT INTO production.production_steps (job_id, item_id, label, step_type, status, sort_order, created_at, updated_at)
@@ -1269,6 +1479,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
     enquiryClientLogoUrl: string | null;
     enquiryClientLogoStoragePath: string | null;
     customerLogoUrl: string | null;
+    latestSurveyPayload: unknown | null;
     existingJobId: string | null;
     existingJobUrl: string | null;
   }>(`
@@ -1304,6 +1515,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
       e.client_logo_url as "enquiryClientLogoUrl",
       e.client_logo_storage_path as "enquiryClientLogoStoragePath",
       c.payload_json->>'logoUrl' as "customerLogoUrl",
+      latest_survey.install_scheduler_payload as "latestSurveyPayload",
       pj.payload_json->'installSchedulerInstall'->>'jobId' as "existingJobId",
       pj.payload_json->'installSchedulerInstall'->>'jobUrl' as "existingJobUrl"
     FROM production.production_steps ps
@@ -1314,6 +1526,19 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
     LEFT JOIN sales.artwork_approvals aa ON aa.id = pj.artwork_approval_id
     LEFT JOIN app.enquiries e ON e.id = qd.enquiry_id
     LEFT JOIN app.customers c ON c.id = qd.linked_customer_id
+    LEFT JOIN LATERAL (
+      SELECT sr.install_scheduler_payload
+      FROM app.survey_requests sr
+      WHERE sr.tenant_id = pj.tenant_id
+        AND sr.install_scheduler_payload IS NOT NULL
+        AND (
+          (qd.survey_request_id IS NOT NULL AND sr.id = qd.survey_request_id)
+          OR (qd.enquiry_id IS NOT NULL AND sr.enquiry_id = qd.enquiry_id)
+          OR (qd.linked_customer_id IS NOT NULL AND sr.linked_customer_id = qd.linked_customer_id)
+        )
+      ORDER BY sr.completed_at DESC NULLS LAST, sr.updated_at DESC
+      LIMIT 1
+    ) latest_survey ON true
     WHERE pj.tenant_id = $1::uuid
       AND ps.id = $2::uuid
     LIMIT 1
@@ -1336,7 +1561,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
   ].filter(Boolean).join(" · ");
   const destinationSourceClean = cleanSearchText(destinationSource);
   const dispatchColumn = normaliseDispatchType(row.dispatchType);
-  const hasSpecificDestination = /(pickup|pick up|collect|collection|counter|deliver|delivery|courier|freight|drop off|dispatch|install|installed|installer|site install|site)/.test(destinationSourceClean);
+  const hasSpecificDestination = /\b(pickup|pick up|collect|collection|counter|deliver|delivery|courier|freight|drop off|dispatch|install|installed|installer|site install|site)\b/.test(destinationSourceClean);
   const stepLabelClean = cleanSearchText(row.stepLabel);
   const genericReadyLabel = /ready/.test(stepLabelClean) && /install/.test(stepLabelClean) && /pickup/.test(stepLabelClean) && /delivery/.test(stepLabelClean);
   const destination = dispatchColumn === "delivery" ? "deliver" : dispatchColumn ?? (hasSpecificDestination
@@ -1345,19 +1570,9 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
 
   if (destination !== "install") return null;
 
-  const itemSummary = [row.itemCode, row.itemTitle].filter(Boolean).join(" - ") || row.quoteProductName || row.projectName || row.clientName;
-  const detailLines = [
-    row.quoteNumber ? `Quote: ${row.quoteNumber}` : null,
-    row.projectName ? `Job: ${row.projectName}` : null,
-    itemSummary ? `Item: ${itemSummary}` : null,
-    row.quantity ? `Qty: ${row.quantity}` : null,
-    row.sizeSummary ? `Size: ${row.sizeSummary}` : null,
-    row.substrateSummary ? `Substrate: ${row.substrateSummary}` : null,
-    row.colourSummary ? `Colour/print: ${row.colourSummary}` : null,
-    row.finishingSummary ? `Finishing/install notes: ${row.finishingSummary}` : null,
-    row.quoteOptionSummary ? `Quote details: ${row.quoteOptionSummary}` : null,
-    `Ready step: ${row.stepLabel}`,
-  ].filter(Boolean).join("\n");
+  const installSummary = buildInstallSchedulerProductionDetails(row);
+  const referencePhotos = surveyReferencePhotosFromPayload(row.latestSurveyPayload);
+  const jobName = [row.clientName, row.quoteNumber].filter(Boolean).join(" - ") || row.clientName;
 
   const payload: ProductionInstallSchedulerPayload = {
     tenantId,
@@ -1375,12 +1590,12 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
     assignedTo: row.assignedTo,
     priority: row.priority,
     projectName: row.projectName,
-    jobName: [row.clientName, row.projectName || row.quoteNumber].filter(Boolean).join(" - "),
-    description: detailLines,
-    itemSummary,
-    substrateSummary: row.substrateSummary,
-    colourSummary: row.colourSummary,
-    finishingSummary: row.finishingSummary,
+    jobName,
+    description: installSummary.description,
+    itemSummary: installSummary.itemSummary,
+    substrateSummary: installSummary.substrateSummary ?? row.substrateSummary,
+    colourSummary: installSummary.printSummary ?? row.colourSummary,
+    finishingSummary: [installSummary.laminateSummary ? `Laminate: ${installSummary.laminateSummary}` : null, ...installSummary.finishingDetails].filter(Boolean).join(" · ") || row.finishingSummary,
     quoteProductName: row.quoteProductName,
     quoteOptionSummary: row.quoteOptionSummary,
     readyStepLabel: row.stepLabel,
@@ -1388,6 +1603,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
     productionManagerBaseUrl: cleanBaseUrl(process.env.NEXT_PUBLIC_APP_URL),
     clientLogoUrl: row.enquiryClientLogoUrl || row.customerLogoUrl || null,
     clientLogoStoragePath: row.enquiryClientLogoStoragePath,
+    referencePhotos,
   };
 
   return { payload, alreadyCreatedJobId: row.existingJobId, alreadyCreatedJobUrl: row.existingJobUrl };
