@@ -5,7 +5,7 @@ CREATE TABLE IF NOT EXISTS app.tenant_domain_access (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
   email_domain varchar(255) NOT NULL,
-  default_role app.tenant_role NOT NULL DEFAULT 'staff',
+  default_role varchar(30) NOT NULL DEFAULT 'staff' CHECK (default_role IN ('owner', 'manager', 'staff', 'sales', 'installer', 'accounts')),
   status varchar(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
   auto_join boolean NOT NULL DEFAULT true,
   created_at timestamp with time zone NOT NULL DEFAULT NOW(),
@@ -22,7 +22,7 @@ CREATE INDEX IF NOT EXISTS tenant_domain_access_tenant_idx
 -- Best-effort seed for the Tender Edge workspace. If your tenant slug/name is different,
 -- use Settings → Staff Google access and save tenderedge.com.au after deploying.
 INSERT INTO app.tenant_domain_access (tenant_id, email_domain, default_role, status, auto_join)
-SELECT matched.id, 'tenderedge.com.au', 'staff'::app.tenant_role, 'active', true
+SELECT matched.id, 'tenderedge.com.au', 'staff', 'active', true
 FROM (
   SELECT t.id
   FROM app.tenants t

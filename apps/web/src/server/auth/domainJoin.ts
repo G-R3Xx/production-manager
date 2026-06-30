@@ -84,7 +84,7 @@ export async function ensureTenantDomainAccessTable(): Promise<void> {
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
       email_domain varchar(255) NOT NULL,
-      default_role app.tenant_role NOT NULL DEFAULT 'staff',
+      default_role varchar(30) NOT NULL DEFAULT 'staff' CHECK (default_role IN ('owner', 'manager', 'staff', 'sales', 'installer', 'accounts')),
       status varchar(20) NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
       auto_join boolean NOT NULL DEFAULT true,
       created_at timestamp with time zone NOT NULL DEFAULT NOW(),
@@ -105,7 +105,7 @@ export async function ensureTenantDomainAccessTable(): Promise<void> {
 async function seedTenderEdgeDomainAccessIfPossible(): Promise<void> {
   await pool.query(`
     INSERT INTO app.tenant_domain_access (tenant_id, email_domain, default_role, status, auto_join)
-    SELECT matched.id, 'tenderedge.com.au', 'staff'::app.tenant_role, 'active', true
+    SELECT matched.id, 'tenderedge.com.au', 'staff', 'active', true
     FROM (
       SELECT t.id
       FROM app.tenants t
@@ -258,7 +258,7 @@ export async function saveTenantDomainAccessSettingsByTenantId(
         `
           UPDATE app.tenant_domain_access
           SET email_domain = $2,
-              default_role = $3::app.tenant_role,
+              default_role = $3,
               status = 'active',
               auto_join = $4,
               updated_at = NOW()
@@ -270,7 +270,7 @@ export async function saveTenantDomainAccessSettingsByTenantId(
       await client.query(
         `
           INSERT INTO app.tenant_domain_access (tenant_id, email_domain, default_role, status, auto_join)
-          VALUES ($1, $2, $3::app.tenant_role, 'active', $4)
+          VALUES ($1, $2, $3, 'active', $4)
         `,
         [tenantId, emailDomain, defaultRole, input.autoJoin]
       );
@@ -391,7 +391,7 @@ export async function ensureDomainAutoJoinForAuthUser(input: {
       await client.query(
         `
           INSERT INTO app.memberships (tenant_id, user_profile_id, tenant_role, status)
-          VALUES ($1, $2, $3::app.tenant_role, 'active')
+          VALUES ($1, $2, $3, 'active')
         `,
         [domainAccess.tenantId, userProfileId, normaliseRole(domainAccess.defaultRole)]
       );
