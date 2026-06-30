@@ -5,6 +5,7 @@ import { z } from "zod";
 import { requireAuthenticatedUser } from "@/lib/supabase/server";
 import { createInitialTenantBootstrap } from "@/server/bootstrap/bootstrap";
 import { setStoredActiveTenantId } from "@/server/bootstrap/activeTenant";
+import { ensureDomainAutoJoinForAuthUser } from "@/server/auth/domainJoin";
 
 const bootstrapSchema = z.object({
   fullName: z.string().min(2, "Full name is required."),
@@ -15,6 +16,24 @@ const bootstrapSchema = z.object({
 
 export async function bootstrapTenantAction(formData: FormData): Promise<void> {
   const user = await requireAuthenticatedUser("/bootstrap");
+
+  const fullNameFromAuth =
+    typeof user.user_metadata?.full_name === "string"
+      ? user.user_metadata.full_name
+      : typeof user.user_metadata?.name === "string"
+        ? user.user_metadata.name
+        : null;
+
+  const autoJoinResult = await ensureDomainAutoJoinForAuthUser({
+    authUserId: user.id,
+    email: user.email,
+    fullName: fullNameFromAuth
+  });
+
+  if (autoJoinResult.status === "joined" || autoJoinResult.status === "already_member") {
+    await setStoredActiveTenantId(autoJoinResult.tenantId);
+    redirect(`/dashboard?message=${encodeURIComponent(`Joined ${autoJoinResult.tenantName}.`)}`);
+  }
 
   const parsed = bootstrapSchema.safeParse({
     fullName: String(formData.get("fullName") || "").trim(),

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { defaultSignageSizePresets, defaultSmallSizePresets, getCompanySettingsByTenantId, type QuoteSizePreset } from "@/server/company";
+import { getEmailDomain, getTenantDomainAccessSettingsByTenantId } from "@/server/auth/domainJoin";
 import { saveCompanySettingsAction } from "./actions";
 
 type CompanyPageProps = {
@@ -30,7 +31,15 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
     redirect("/bootstrap");
   }
 
-  const settings = await getCompanySettingsByTenantId(activeTenant.tenantId);
+  const [settings, teamDomainAccess] = await Promise.all([
+    getCompanySettingsByTenantId(activeTenant.tenantId),
+    getTenantDomainAccessSettingsByTenantId(activeTenant.tenantId)
+  ]);
+  const defaultTeamDomain =
+    teamDomainAccess?.emailDomain ||
+    getEmailDomain(settings?.email) ||
+    getEmailDomain(user.email) ||
+    "tenderedge.com.au";
   const params = (await searchParams) ?? {};
   const message = readParam(params, "message");
   const error = readParam(params, "error");
@@ -119,6 +128,51 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
               <input name="companyLogoUrl" defaultValue={settings?.companyLogoUrl ?? ""} placeholder="or paste logo URL" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #bfdbfe", padding: "0 14px", fontSize: 16, background: "#fff" }} />
               <small style={{ color: "#475467" }}>Clear this field and save to remove the workspace logo.</small>
             </label>
+          </div>
+        </section>
+
+
+        <section style={{ border: "1px solid #bbf7d0", background: "#f0fdf4", borderRadius: 18, padding: 18, display: "grid", gap: 14 }}>
+          <div>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#15803d" }}>Staff Google access</p>
+            <h2 style={{ margin: "6px 0 6px", fontSize: 20 }}>Auto-join team by email domain</h2>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>
+              Staff who sign in with this Google email domain will be added to this workspace automatically, instead of creating a new blank workspace.
+            </p>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 0.8fr 0.8fr", gap: 16, alignItems: "end" }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Allowed Google email domain</span>
+              <input name="teamGoogleDomain" defaultValue={defaultTeamDomain} placeholder="tenderedge.com.au" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #86efac", padding: "0 14px", fontSize: 16, background: "#fff" }} />
+              <small style={{ color: "#475467" }}>Use the domain only, eg tenderedge.com.au. Leave blank and save to turn this off.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Default role</span>
+              <select name="teamGoogleDefaultRole" defaultValue={teamDomainAccess?.defaultRole ?? "staff"} style={{ minHeight: 46, borderRadius: 12, border: "1px solid #86efac", padding: "0 14px", fontSize: 16, background: "#fff" }}>
+                <option value="staff">Staff</option>
+                <option value="sales">Sales</option>
+                <option value="installer">Installer</option>
+                <option value="accounts">Accounts</option>
+                <option value="manager">Manager</option>
+              </select>
+              <small style={{ color: "#475467" }}>New domain users are created with this workspace role.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Auto join</span>
+              <span style={{ minHeight: 46, borderRadius: 12, border: "1px solid #86efac", background: "#fff", padding: "0 14px", display: "flex", alignItems: "center", gap: 10 }}>
+                <input type="checkbox" name="teamGoogleAutoJoin" defaultChecked={teamDomainAccess?.autoJoin ?? true} />
+                Enabled
+              </span>
+              <small style={{ color: "#475467" }}>Turn off to stop automatic staff access.</small>
+            </label>
+          </div>
+
+          <div style={{ border: "1px solid #bbf7d0", background: "#ffffff", borderRadius: 14, padding: 12, color: "#166534", lineHeight: 1.55 }}>
+            Current setup: <strong>{teamDomainAccess?.emailDomain || defaultTeamDomain}</strong> → this workspace as <strong>{teamDomainAccess?.defaultRole ?? "staff"}</strong>.
+            Staff should sign out and back in with their Google account after this is saved.
           </div>
         </section>
 

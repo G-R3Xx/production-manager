@@ -7,6 +7,7 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { defaultSignageSizePresets, defaultSmallSizePresets, updateCompanySettingsByTenantId } from "@/server/company";
+import { saveTenantDomainAccessSettingsByTenantId } from "@/server/auth/domainJoin";
 
 const companySchema = z.object({
   companyLegalName: z.string().max(200).optional().or(z.literal("")),
@@ -27,7 +28,10 @@ const companySchema = z.object({
   quoteSmallSizePresetsText: z.string().optional().or(z.literal("")),
   quoteTerms: z.string().optional().or(z.literal("")),
   proofTerms: z.string().optional().or(z.literal("")),
-  jobTerms: z.string().optional().or(z.literal(""))
+  jobTerms: z.string().optional().or(z.literal("")),
+  teamGoogleDomain: z.string().max(255).optional().or(z.literal("")),
+  teamGoogleDefaultRole: z.enum(["staff", "sales", "installer", "accounts", "manager"]).default("staff"),
+  teamGoogleAutoJoin: z.boolean().default(true)
 });
 
 function nullable(value: string | undefined): string | null {
@@ -134,7 +138,10 @@ export async function saveCompanySettingsAction(formData: FormData): Promise<voi
     quoteSmallSizePresetsText: String(formData.get("quoteSmallSizePresetsText") || ""),
     quoteTerms: String(formData.get("quoteTerms") || ""),
     proofTerms: String(formData.get("proofTerms") || ""),
-    jobTerms: String(formData.get("jobTerms") || "")
+    jobTerms: String(formData.get("jobTerms") || ""),
+    teamGoogleDomain: String(formData.get("teamGoogleDomain") || ""),
+    teamGoogleDefaultRole: String(formData.get("teamGoogleDefaultRole") || "staff"),
+    teamGoogleAutoJoin: formData.get("teamGoogleAutoJoin") === "on"
   });
 
   if (!parsed.success) {
@@ -174,6 +181,17 @@ export async function saveCompanySettingsAction(formData: FormData): Promise<voi
     proofTerms: nullable(parsed.data.proofTerms),
     jobTerms: nullable(parsed.data.jobTerms)
   });
+
+  try {
+    await saveTenantDomainAccessSettingsByTenantId(activeTenant.tenantId, {
+      emailDomain: parsed.data.teamGoogleDomain,
+      defaultRole: parsed.data.teamGoogleDefaultRole,
+      autoJoin: parsed.data.teamGoogleAutoJoin
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(`/company?error=${encodeURIComponent(message)}`);
+  }
 
   redirect("/company?message=Company%20settings%20saved");
 }
