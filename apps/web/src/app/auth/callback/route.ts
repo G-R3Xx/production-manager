@@ -76,6 +76,12 @@ export async function GET(request: Request) {
         path: "/",
         maxAge: 60 * 60 * 24 * 30
       });
+    } else if (autoJoinResult.status === "inactive_member") {
+      const label = autoJoinResult.membershipStatus === "disabled" ? "disabled" : "pending approval";
+      response.headers.set(
+        "Location",
+        new URL(`/bootstrap?error=${encodeURIComponent(`Your ${autoJoinResult.tenantName} access is ${label}. Ask a manager to update Staff & roles.`)}`, url.origin).toString()
+      );
     }
   }
 

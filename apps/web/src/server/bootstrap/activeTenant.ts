@@ -55,5 +55,5 @@ export async function resolveActiveTenantForAuthUserId(
     }
   }
 
-  return activeStatuses[0] ?? memberships[0] ?? null;
+  return activeStatuses[0] ?? null;
 }

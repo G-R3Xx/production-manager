@@ -35,6 +35,11 @@ export async function bootstrapTenantAction(formData: FormData): Promise<void> {
     redirect(`/dashboard?message=${encodeURIComponent(`Joined ${autoJoinResult.tenantName}.`)}`);
   }
 
+  if (autoJoinResult.status === "inactive_member") {
+    const label = autoJoinResult.membershipStatus === "disabled" ? "disabled" : "pending approval";
+    redirect(`/bootstrap?error=${encodeURIComponent(`Your ${autoJoinResult.tenantName} access is ${label}. Ask a manager to update Staff & roles.`)}`);
+  }
+
   const parsed = bootstrapSchema.safeParse({
     fullName: String(formData.get("fullName") || "").trim(),
     shortName: String(formData.get("shortName") || "").trim(),

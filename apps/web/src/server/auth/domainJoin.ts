@@ -17,6 +17,7 @@ export type DomainAutoJoinResult =
   | { status: "invalid_email" }
   | { status: "joined"; tenantId: string; tenantName: string; tenantSlug: string }
   | { status: "already_member"; tenantId: string; tenantName: string; tenantSlug: string }
+  | { status: "inactive_member"; tenantId: string; tenantName: string; tenantSlug: string; membershipStatus: "invited" | "disabled" }
   | { status: "error"; message: string };
 
 const VALID_TENANT_ROLES: TenantRoleValue[] = [
@@ -373,13 +374,25 @@ export async function ensureDomainAutoJoinForAuthUser(input: {
         await client.query(
           `
             UPDATE app.memberships
-            SET status = 'active', updated_at = NOW()
+            SET updated_at = NOW()
             WHERE id = $1
           `,
           [existingMembership.rows[0].id]
         );
 
         await client.query("COMMIT");
+
+        const existingStatus = existingMembership.rows[0].status === "disabled" ? "disabled" : existingMembership.rows[0].status === "invited" ? "invited" : "active";
+        if (existingStatus !== "active") {
+          return {
+            status: "inactive_member",
+            tenantId: domainAccess.tenantId,
+            tenantName: domainAccess.tenantName,
+            tenantSlug: domainAccess.tenantSlug,
+            membershipStatus: existingStatus
+          };
+        }
+
         return {
           status: "already_member",
           tenantId: domainAccess.tenantId,
