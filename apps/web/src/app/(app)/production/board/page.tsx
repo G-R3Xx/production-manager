@@ -128,13 +128,19 @@ function stripDetailLabel(value: string): string {
   return compactText(value.replace(/^(?:material|substrate|stock|base|size|sizes|print|laminate|coating|finishing|finish|install|small format)\s*:\s*/i, ""));
 }
 
+function cleanSizeNumber(value: string): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return numeric.toFixed(2).replace(/\.00$/g, "").replace(/(\.\d)0$/g, "$1");
+}
+
 function normaliseSizeText(value: string | null | undefined): string {
   const source = compactText(value);
   const normalised = source.replace(/[×*]/g, "x").replace(/\s+/g, " ");
   const match = normalised.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|m)?/i);
   if (!match) return "";
   const unit = match[3] ? match[3].toLowerCase() : "mm";
-  return `${match[1]}x${match[2]}${unit}`;
+  return `${cleanSizeNumber(match[1])}x${cleanSizeNumber(match[2])}${unit}`;
 }
 
 function splitSummaryParts(value: string | null | undefined): string[] {

@@ -1319,7 +1319,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     const material = materials.find((item) => item.id === part.materialId);
     return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || material?.name || "part"}`;
   }).join(", ");
-  const finishedSizeLabel = width > 0 && height > 0 ? `${usage(width)} × ${usage(height)}mm` : "";
+  const finishedSizeLabel = width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : "";
   const lineName = flowType === "component"
     ? componentName.trim() || "Custom component"
     : flowType === "service"
@@ -1610,7 +1610,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
               {flowType === "signage" ? <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} /> : null}
               {flowType === "small_format" ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
-              <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
+              <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
               <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
               <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
             </div>
@@ -2478,7 +2478,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 {isDuplicateBook ? <SummaryRow label="Book" value={ncrCopies ? `${ncrCopiesCount} part · ${ncrSetsPerBook || "?"} sets/book` : undefined} /> : null}
                 {isDuplicateBook ? <SummaryRow label="Page colours" value={ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : undefined} /> : null}
                 {isDuplicateBook ? <SummaryRow label="Cover / tape" value={ncrCoverColour && ncrTapeColour ? `${ncrCoverColour} cover · ${ncrTapeColour} tape` : undefined} /> : null}
-                <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
+                <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 {!isDuplicateBook ? <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} /> : null}
                 {!isDuplicateBook ? <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} /> : null}
@@ -2490,7 +2490,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Base" value={selectedBase?.label} />
                 <SummaryRow label="Material" value={selectedMainMaterial?.name} />
                 <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
-                <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
+                <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 <SummaryRow label="Print" value={printMethods.find((item) => item.key === printMethod)?.label} />
                 <SummaryRow label="Print setup" value={printed && printSetupHours ? `${usage(numberValue(printSetupHours, 0))}hr` : undefined} />

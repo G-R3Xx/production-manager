@@ -63,9 +63,18 @@ function summaryParts(line: Pick<QuoteLineRecord, "optionSummary">): string[] {
     .filter(Boolean);
 }
 
+function cleanDimensionNumber(value: string): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return numeric.toFixed(2).replace(/\.00$/g, "").replace(/(\.\d)0$/g, "$1");
+}
+
 function normaliseDimension(value: string | null | undefined): string {
-  const trimmed = compactText(value).replace(/\s*[×x]\s*/i, "x").replace(/\s+mm$/i, "mm");
-  return trimmed.replace(/x/i, "x");
+  const source = compactText(value);
+  const match = source.match(/(\d+(?:\.\d+)?)\s*[×x]\s*(\d+(?:\.\d+)?)(?:\s*(mm|m))?/i);
+  if (!match) return source.replace(/\s*[×x]\s*/i, "x").replace(/\s+mm$/i, "mm").replace(/x/i, "x");
+  const unit = match[3] ? match[3].toLowerCase() : "mm";
+  return `${cleanDimensionNumber(match[1])}x${cleanDimensionNumber(match[2])}${unit}`;
 }
 
 function dimensionFromText(value: string | null | undefined): string | null {
@@ -79,8 +88,8 @@ function isStandaloneDimensionPart(value: string | null | undefined): boolean {
 
 function isLikelyStockOrMaterialDimension(value: string | null | undefined): boolean {
   const source = compactText(value).toLowerCase();
-  return /(material|substrate|stock|sheet|parent sheet|roll|media|acm|aluminium|composite|acrylic|corflute|coreflute|pvc|foamboard|foam board|vinyl|banner|paper|card|gsm)/.test(source)
-    && /\d+(?:\.\d+)?\s*mm/.test(source);
+  return /\b(material|substrate|stock|sheet|parent sheet|roll|media|acm|aluminium|composite|acrylic|corflute|coreflute|pvc|foamboard|foam board|vinyl|banner|paper|card|gsm)\b/.test(source)
+    && /\b\d+(?:\.\d+)?\s*mm\b/.test(source);
 }
 
 function findDimension(parts: string[], fallbackSource: string): string | null {

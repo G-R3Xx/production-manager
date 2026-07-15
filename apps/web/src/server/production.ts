@@ -331,11 +331,17 @@ function productionPartsForSummary(row: {
     .filter(Boolean);
 }
 
+function cleanProductionSizeNumber(value: string): string {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return value;
+  return numeric.toFixed(2).replace(/\.00$/g, "").replace(/(\.\d)0$/g, "$1");
+}
+
 function normaliseProductionSize(value: string | null | undefined): string | null {
   const source = compactProductionText(value).replace(/[×*]/g, "x");
   const match = source.match(/(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)\s*(mm|m)?/i);
   if (!match) return null;
-  return `${match[1]}x${match[2]}${(match[3] || "mm").toLowerCase()}`;
+  return `${cleanProductionSizeNumber(match[1])}x${cleanProductionSizeNumber(match[2])}${(match[3] || "mm").toLowerCase()}`;
 }
 
 function isStockSizeSummaryPart(value: string): boolean {
