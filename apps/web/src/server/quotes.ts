@@ -497,18 +497,57 @@ export async function markQuoteViewedByToken(token: string): Promise<void> {
   `, [token]);
 }
 
+async function quoteDraftColumnExists(columnName: string): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return false;
+  const result = await pool.query<{ exists: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'sales'
+        AND table_name = 'quote_drafts'
+        AND column_name = $1
+    ) as exists
+  `, [columnName]);
+  return Boolean(result.rows[0]?.exists);
+}
+
+async function updateQuoteReadyForMyobByToken(token: string): Promise<void> {
+  try {
+    const hasMyobOrderStatus = await quoteDraftColumnExists("myob_order_status");
+    if (!hasMyobOrderStatus) return;
+    await pool.query(`
+      UPDATE sales.quote_drafts
+      SET myob_order_status = 'ready_to_sync',
+          updated_at = now()
+      WHERE public_token = $1
+    `, [token]);
+  } catch (error) {
+    console.error("Quote acceptance saved, but MYOB ready status could not be updated", error);
+  }
+}
+
 export async function respondToQuoteByToken(token: string, response: "accepted" | "changes_requested" | "declined", notes: string | null): Promise<void> {
   await ensureQuoteLifecycleColumns();
+
   const timestampColumn = response === "accepted" ? "accepted_at" : response === "declined" ? "declined_at" : "changes_requested_at";
-  await pool.query(`
+
+  const result = await pool.query<{ id: string }>(`
     UPDATE sales.quote_drafts
-    SET status = $2,
-        myob_order_status = CASE WHEN $2 = 'accepted' THEN 'ready_to_sync' ELSE myob_order_status END,
+    SET status = $2::varchar,
         ${timestampColumn} = now(),
-        client_response_notes = $3,
+        client_response_notes = $3::text,
         updated_at = now()
     WHERE public_token = $1
+    RETURNING id
   `, [token, response, notes]);
+
+  if (!result.rowCount) {
+    throw new Error("Quote response could not be saved because the public quote token was not found.");
+  }
+
+  if (response === "accepted") {
+    await updateQuoteReadyForMyobByToken(token);
+  }
 }
 
 export async function createArtworkApprovalForAcceptedQuoteToken(token: string): Promise<{ id: string } | null> {

@@ -277,11 +277,11 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   const sourceSiteAddress = sourceSurvey?.siteAddress || sourceEnquiry?.siteAddress || linkedClient?.payloadJson.defaultSiteAddress || null;
   const siteAddress = sourceSiteAddress && sourceSiteAddress !== clientAddress ? sourceSiteAddress : null;
   const jobName = deriveJobName(quote, lines, sourceEnquiry?.requestSummary || sourceSurvey?.notes || sourceSurvey?.surveyDetails);
-  const responseStatus = quote.status === "accepted"
+  const responseStatus = quote.acceptedAt || quote.status === "accepted" || quote.status === "approved"
     ? "accepted"
-    : quote.status === "declined"
+    : quote.declinedAt || quote.status === "declined"
       ? "declined"
-      : quote.status === "changes_requested"
+      : quote.changesRequestedAt || quote.status === "changes_requested"
         ? "changes requested"
         : null;
 
