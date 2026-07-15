@@ -130,8 +130,10 @@ function friendlySide(value: string | null | undefined): string | null {
 }
 
 function isInstallLine(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): boolean {
-  const combined = `${line.productName} · ${line.optionSummary ?? ""}`.toLowerCase();
-  return /\b(sign install|install|installation)\b/.test(combined) && !/\bprint install\b/.test(combined);
+  const productName = compactText(line.productName).toLowerCase();
+  // Dispatch notes on signage lines can legitimately contain "Install". Only treat a
+  // quote line as an install line when the line title itself is the install/service item.
+  return /^(sign install|installation|install)$/i.test(productName) || /\b(sign install|installation service)\b/i.test(productName);
 }
 
 function installLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {

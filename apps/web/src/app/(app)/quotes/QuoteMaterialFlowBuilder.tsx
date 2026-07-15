@@ -468,12 +468,30 @@ function sheetAreaSqm(material: QuoteMaterial): number {
   return (dimensions.width / 1000) * (dimensions.length / 1000);
 }
 
+function panelizedSheets(parentWidth: number, parentHeight: number, pieceWidth: number, pieceHeight: number): { sheets: number; across: number; rows: number; rotated: boolean } | null {
+  if (parentWidth <= 0 || parentHeight <= 0 || pieceWidth <= 0 || pieceHeight <= 0) return null;
+
+  const normal = {
+    sheets: Math.ceil(pieceWidth / parentWidth) * Math.ceil(pieceHeight / parentHeight),
+    across: Math.ceil(pieceWidth / parentWidth),
+    rows: Math.ceil(pieceHeight / parentHeight),
+    rotated: false
+  };
+  const rotated = {
+    sheets: Math.ceil(pieceWidth / parentHeight) * Math.ceil(pieceHeight / parentWidth),
+    across: Math.ceil(pieceWidth / parentHeight),
+    rows: Math.ceil(pieceHeight / parentWidth),
+    rotated: true
+  };
+
+  return [normal, rotated].sort((a, b) => a.sheets - b.sheets)[0] ?? null;
+}
+
 function sheetUsageForItem(material: QuoteMaterial, pieceWidthMm: number, pieceHeightMm: number): { amount: number; note?: string } {
   const dimensions = bestSheetDimensions(material);
   if (!dimensions || pieceWidthMm <= 0 || pieceHeightMm <= 0) return { amount: 0, note: "sheet size missing" };
 
   const parentArea = (dimensions.width / 1000) * (dimensions.length / 1000);
-  const itemArea = (pieceWidthMm / 1000) * (pieceHeightMm / 1000);
   const perSheet = piecesPerSheet(dimensions.width, dimensions.length, pieceWidthMm, pieceHeightMm);
 
   if (perSheet > 0) {
@@ -483,9 +501,17 @@ function sheetUsageForItem(material: QuoteMaterial, pieceWidthMm: number, pieceH
     };
   }
 
-  if (parentArea > 0 && itemArea > 0) {
-    const fullSheets = Math.max(1, Math.ceil(itemArea / parentArea));
-    return { amount: fullSheets, note: `does not fit one parent sheet; ${usage(parentArea)}sqm parent sheet` };
+  const panelized = panelizedSheets(dimensions.width, dimensions.length, pieceWidthMm, pieceHeightMm);
+  if (panelized && panelized.sheets > 0) {
+    return {
+      amount: panelized.sheets,
+      note: [
+        `${panelized.sheets} parent sheet${panelized.sheets === 1 ? "" : "s"} required`,
+        `panelled ${panelized.across} across × ${panelized.rows} high`,
+        panelized.rotated ? "rotated sheet orientation" : null,
+        `${usage(parentArea)}sqm parent sheet`
+      ].filter(Boolean).join(" · ")
+    };
   }
 
   return { amount: 0, note: "sheet size missing" };
