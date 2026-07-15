@@ -135,6 +135,7 @@ export type ProductionBoardCardRecord = {
   quoteNumber: string | null;
   clientName: string;
   contactName: string | null;
+  clientLogoUrl: string | null;
   projectName: string | null;
   jobStatus: string;
   dispatchType: string | null;
@@ -826,6 +827,7 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
       pj.quote_number as "quoteNumber",
       pj.client_name as "clientName",
       pj.contact_name as "contactName",
+      COALESCE(enq.client_logo_url, NULLIF(c.payload_json->>'logoUrl', '')) as "clientLogoUrl",
       pj.project_name as "projectName",
       pj.status as "jobStatus",
       pj.dispatch_type as "dispatchType",
@@ -856,6 +858,9 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
     FROM production.production_jobs pj
     LEFT JOIN production.production_items pi ON pi.job_id = pj.id
     LEFT JOIN sales.quote_lines ql ON ql.id = pi.source_quote_line_id
+    LEFT JOIN sales.quote_drafts qd ON qd.id = pj.quote_id
+    LEFT JOIN app.enquiries enq ON enq.id = qd.enquiry_id
+    LEFT JOIN app.customers c ON c.id = qd.linked_customer_id
     LEFT JOIN LATERAL (
       SELECT ps.id, ps.label, ps.step_type, ps.sort_order
       FROM production.production_steps ps

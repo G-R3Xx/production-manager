@@ -2,12 +2,9 @@ export const dynamic = "force-dynamic";
 
 import { redirect } from "next/navigation";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
-import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
-import { listEnquiriesForTenant } from "@/server/enquiries";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listProductionBoardCardsForTenant, type ProductionBoardCardRecord, type ProductionBoardColumnKey } from "@/server/production";
-import { listQuoteDraftsForTenant } from "@/server/quotes";
 import { toggleProductionBoardStepAction } from "../actions";
 import { AutoRefreshBoard } from "./AutoRefreshBoard";
 import { FullscreenBoardMode } from "./FullscreenBoardMode";
@@ -332,21 +329,7 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
   const error = readParam(params, "error");
   const tenantId = activeTenant.tenantId;
 
-  const [cards, quoteDrafts, clients, enquiries] = await Promise.all([
-    listProductionBoardCardsForTenant(tenantId),
-    listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
-    listCustomersForTenant(tenantId),
-    listEnquiriesForTenant(tenantId, { includeDeleted: true })
-  ]);
-
-  const customerById = new Map(clients.map((client) => [client.id, client]));
-  const quoteById = new Map(quoteDrafts.map((quote) => [quote.id, quote]));
-  const enquiryById = new Map(enquiries.map((item) => [item.id, item]));
-  const logoForQuoteId = (quoteId: string | null | undefined) => {
-    const quote = quoteId ? quoteById.get(quoteId) : null;
-    const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
-    return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
-  };
+  const cards = await listProductionBoardCardsForTenant(tenantId);
 
   const fullscreenRequested = readParam(params, "display") === "fullscreen";
   const grouped = new Map<ProductionBoardColumnKey, ProductionBoardCardRecord[]>(columns.map((column) => [column.key, []]));
@@ -413,7 +396,7 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
               <div style={{ display: "grid", gap: 10 }}>
                 {columnCards.map((card) => {
                   const tone = priorityTone(card.priority);
-                  const logoUrl = logoForQuoteId(card.quoteId);
+                  const logoUrl = card.clientLogoUrl ?? "";
                   const progress = Number(card.stepsTotal) > 0 ? `${card.stepsDone}/${card.stepsTotal}` : "No steps";
                   const print = printMethod(card);
                   const laminate = laminateName(card);

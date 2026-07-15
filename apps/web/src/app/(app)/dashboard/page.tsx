@@ -3,7 +3,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
 import { listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
-import { listQuoteDraftsForTenant, listQuoteLines, type QuoteDraftRecord } from "@/server/quotes";
+import { listQuoteDraftsForTenant, listQuoteLineTotals, type QuoteDraftRecord } from "@/server/quotes";
 import { listMaterialsForTenant, type MaterialRecord } from "@/server/materials";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
@@ -245,8 +245,7 @@ export default async function DashboardPage() {
   };
 
   const recentQuotes = quotes.slice(0, 24);
-  const quoteLinePairs = await Promise.all(recentQuotes.map(async (quote) => ({ quote, lines: await listQuoteLines(quote.id) })));
-  const quoteTotals = new Map<string, number>(quoteLinePairs.map(({ quote, lines }) => [quote.id, lines.reduce((sum, line) => sum + asMoney(line.lineTotal), 0)]));
+  const quoteTotals = await listQuoteLineTotals(recentQuotes.map((quote) => quote.id));
   const totalOpenQuoteValue = recentQuotes.reduce((sum, quote) => {
     const label = quoteStatusLabel(quote.status);
     return label === "Accepted" || label === "Declined" ? sum : sum + (quoteTotals.get(quote.id) ?? 0);

@@ -342,6 +342,23 @@ export async function getQuoteDraftByPublicToken(token: string): Promise<QuoteDr
   return result.rows[0] ?? null;
 }
 
+
+export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<string, number>> {
+  const uniqueIds = Array.from(new Set(quoteIds.filter(Boolean)));
+  if (!uniqueIds.length) return new Map();
+
+  const result = await pool.query<{ quoteId: string; total: string }>(`
+    SELECT
+      quote_id as "quoteId",
+      COALESCE(SUM(line_total), 0)::text as total
+    FROM sales.quote_lines
+    WHERE quote_id = ANY($1::uuid[])
+    GROUP BY quote_id
+  `, [uniqueIds]);
+
+  return new Map(result.rows.map((row) => [row.quoteId, Number(row.total) || 0]));
+}
+
 export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]> {
   const result = await pool.query<QuoteLineRecord>(`
     SELECT

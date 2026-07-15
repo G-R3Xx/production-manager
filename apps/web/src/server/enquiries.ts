@@ -20,6 +20,7 @@ export type EnquiryCorrespondenceRecord = {
   emailTo: string | null;
   emailDate: string | null;
   bodyPreview: string | null;
+  totalCount?: number;
   createdAt: string;
 };
 
@@ -252,6 +253,44 @@ export async function listEnquiryCorrespondenceForTenant(tenantId: string): Prom
   return result.rows.map((row) => ({
     ...row,
     sizeBytes: row.sizeBytes == null ? null : Number(row.sizeBytes)
+  }));
+}
+
+export async function listRecentEnquiryCorrespondenceForTenant(tenantId: string, limitPerEnquiry = 5): Promise<EnquiryCorrespondenceRecord[]> {
+  await ensureEnquiryCorrespondenceTable();
+  const result = await pool.query<EnquiryCorrespondenceRecord & { sizeBytes: string | number | null; totalCount: string | number }>(`
+    SELECT *
+    FROM (
+      SELECT
+        id,
+        tenant_id as "tenantId",
+        enquiry_id as "enquiryId",
+        file_name as "fileName",
+        file_url as "fileUrl",
+        storage_path as "storagePath",
+        mime_type as "mimeType",
+        CASE WHEN size_bytes IS NULL THEN NULL ELSE size_bytes::bigint END as "sizeBytes",
+        uploaded_by as "uploadedBy",
+        preview_kind as "previewKind",
+        email_subject as "emailSubject",
+        email_from as "emailFrom",
+        email_to as "emailTo",
+        email_date as "emailDate",
+        body_preview as "bodyPreview",
+        count(*) OVER (PARTITION BY enquiry_id) as "totalCount",
+        row_number() OVER (PARTITION BY enquiry_id ORDER BY created_at DESC) as rn,
+        created_at as "createdAt"
+      FROM app.enquiry_correspondence
+      WHERE tenant_id = $1::uuid
+    ) ranked
+    WHERE rn <= $2::integer
+    ORDER BY "createdAt" DESC
+  `, [tenantId, Math.max(1, limitPerEnquiry)]);
+
+  return result.rows.map((row) => ({
+    ...row,
+    sizeBytes: row.sizeBytes == null ? null : Number(row.sizeBytes),
+    totalCount: Number(row.totalCount) || 0
   }));
 }
 

@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listEnquiriesForTenant, listEnquiryCorrespondenceForTenant } from "@/server/enquiries";
+import { listEnquiriesForTenant, listRecentEnquiryCorrespondenceForTenant } from "@/server/enquiries";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { attachEnquiryCorrespondenceAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
 import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
@@ -46,7 +46,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const [allEnquiries, clients, correspondence] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listCustomersForTenant(activeTenant.tenantId),
-    listEnquiryCorrespondenceForTenant(activeTenant.tenantId)
+    listRecentEnquiryCorrespondenceForTenant(activeTenant.tenantId, 5)
   ]);
   const deletedCount = allEnquiries.filter((enquiry) => enquiry.status === "deleted").length;
   const enquiries = filter === "deleted"
@@ -93,6 +93,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
               const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
               const logoUrl = enquiry.clientLogoUrl || customerLogoUrl(linkedClient);
               const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
+              const correspondenceCount = enquiryCorrespondence[0]?.totalCount ?? enquiryCorrespondence.length;
               const contactLine = [enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ");
               const purchaseOrderLine = enquiry.clientPurchaseOrderNumber ? `PO: ${enquiry.clientPurchaseOrderNumber}` : "";
 
@@ -120,7 +121,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                     <section style={{ display: "grid", gap: 8 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                         <strong style={{ fontSize: 13 }}>Correspondence</strong>
-                        <span style={{ fontSize: 12, color: "#667085" }}>{enquiryCorrespondence.length} attached</span>
+                        <span style={{ fontSize: 12, color: "#667085" }}>{correspondenceCount} attached</span>
                       </div>
                       {enquiryCorrespondence.length > 0 ? (
                         <div style={{ display: "grid", gap: 8 }}>
