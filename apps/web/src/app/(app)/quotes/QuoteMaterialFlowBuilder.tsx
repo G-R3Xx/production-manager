@@ -1319,13 +1319,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     const material = materials.find((item) => item.id === part.materialId);
     return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || material?.name || "part"}`;
   }).join(", ");
+  const finishedSizeLabel = width > 0 && height > 0 ? `${usage(width)} × ${usage(height)}mm` : "";
   const lineName = flowType === "component"
     ? componentName.trim() || "Custom component"
     : flowType === "service"
     ? serviceLabel ?? "Service item"
     : flowType === "small_format"
-      ? [selectedSmallType?.label ?? "Small format item", selectedSmallStock?.name].filter(Boolean).join(" - ")
-      : [selectedBase?.label ?? "Material quote line", selectedMainMaterial?.name].filter(Boolean).join(" - ");
+      ? selectedSmallType?.label ?? "Small format item"
+      : selectedBase?.label ?? "Signage item";
 
   const optionSummary = flowType === "component"
     ? [
@@ -1347,13 +1348,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : flowType === "small_format"
       ? [
       selectedSmallType?.label,
-      selectedSmallStock?.name,
+      selectedSmallStock?.name ? `Stock: ${selectedSmallStock.name}` : null,
       isDuplicateBook && ncrCopies ? `${ncrCopiesCount} part book` : null,
       isDuplicateBook && ncrSetsPerBook ? `${ncrSetsPerBook} sets/book` : null,
       isDuplicateBook && ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : null,
       isDuplicateBook && ncrCoverColour ? `Cover: ${ncrCoverColour}` : null,
       isDuplicateBook && ncrTapeColour ? `Tape: ${ncrTapeColour}` : null,
-      width > 0 && height > 0 ? `${width} × ${height}mm` : null,
+      finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
@@ -1364,8 +1365,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ].filter(Boolean).join(" · ")
     : [
       selectedBase?.label,
-      selectedMainMaterial?.name,
-      width > 0 && height > 0 ? `${width} × ${height}mm` : null,
+      selectedMainMaterial?.name ? `Substrate: ${selectedMainMaterial.name}` : null,
+      finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       printMethods.find((item) => item.key === printMethod)?.label,
       printed && numberValue(printSetupHours, 0) > 0 ? `Print setup ${usage(numberValue(printSetupHours, 0))}hr` : null,

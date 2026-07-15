@@ -68,11 +68,38 @@ function normaliseDimension(value: string | null | undefined): string {
   return trimmed.replace(/x/i, "x");
 }
 
-function findDimension(parts: string[], fallbackSource: string): string | null {
-  const fromParts = parts.find((part) => /\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm/i.test(part));
-  const source = fromParts || fallbackSource;
-  const match = source.match(/\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm/i);
+function dimensionFromText(value: string | null | undefined): string | null {
+  const match = compactText(value).match(/\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*(?:mm|m)?/i);
   return match ? normaliseDimension(match[0]) : null;
+}
+
+function isStandaloneDimensionPart(value: string | null | undefined): boolean {
+  return /^\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*(?:mm|m)?$/i.test(compactText(value));
+}
+
+function isLikelyStockOrMaterialDimension(value: string | null | undefined): boolean {
+  const source = compactText(value).toLowerCase();
+  return /(material|substrate|stock|sheet|parent sheet|roll|media|acm|aluminium|composite|acrylic|corflute|coreflute|pvc|foamboard|foam board|vinyl|banner|paper|card|gsm)/.test(source)
+    && /\d+(?:\.\d+)?\s*mm/.test(source);
+}
+
+function findDimension(parts: string[], fallbackSource: string): string | null {
+  const labelled = parts.find((part) => /^(?:finished\s*)?size\s*:/i.test(part));
+  const labelledDimension = dimensionFromText(labelled);
+  if (labelledDimension) return labelledDimension;
+
+  // In quick quote summaries the parent sheet/substrate is listed before the finished
+  // sign size. Prefer a standalone size entry so client quotes show the actual sign,
+  // not the purchased stock sheet size.
+  const standalone = parts.find(isStandaloneDimensionPart);
+  const standaloneDimension = dimensionFromText(standalone);
+  if (standaloneDimension) return standaloneDimension;
+
+  const nonStock = parts.find((part) => dimensionFromText(part) && !isLikelyStockOrMaterialDimension(part));
+  const nonStockDimension = dimensionFromText(nonStock);
+  if (nonStockDimension) return nonStockDimension;
+
+  return dimensionFromText(fallbackSource);
 }
 
 function findThickness(source: string): string | null {
