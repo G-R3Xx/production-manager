@@ -911,7 +911,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
 
       <label style={labelStyle}>
-        <span style={labelTextStyle}>1. Select product</span>
+        <span style={labelTextStyle}>1. Pick saved product</span>
         <select value={selectedProductId} onChange={(event) => handleProductChange(event.target.value)} style={inputStyle}>
           {products.map((product) => (
             <option key={product.id} value={product.id}>{product.name}</option>
@@ -922,8 +922,8 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
       <div style={quotePanelStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div>
-            <strong>2. Answer quote cards</strong>
-            <p style={{ ...mutedStyle, marginTop: 4 }}>These are the quote cards created on the Products page. The price below starts from cost, then applies the global markup and profit set in Company settings.</p>
+            <strong>2. Choose product options</strong>
+            <p style={{ ...mutedStyle, marginTop: 4 }}>These options come from the product setup page. Pick the saved product, add quantity/options, then add it to the quote.</p>
           </div>
           <span style={chipStyle}>{visibleFields.length} option{visibleFields.length === 1 ? "" : "s"}</span>
         </div>
@@ -1045,7 +1045,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
       </div>
 
       <div style={{ ...quotePanelStyle, background: "#ffffff" }}>
-        <strong>3. Calculated price</strong>
+        <strong>3. Price and quantity</strong>
         <div style={{ display: "grid", gridTemplateColumns: quantityField ? "1fr" : "1fr 1fr", gap: 10 }}>
           {!quantityField ? (
             <label style={labelStyle}>
@@ -1108,7 +1108,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         </div>
       </div>
 
-      <button type="submit" style={buttonStyle}>Save current line to quote</button>
+      <button type="submit" style={buttonStyle}>Add saved product to quote</button>
     </form>
   );
 }

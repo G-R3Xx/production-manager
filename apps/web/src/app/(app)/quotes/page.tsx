@@ -5,6 +5,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
+import { listProductsForTenant } from "@/server/products";
+import { listConfiguratorTemplatesForTenant } from "@/server/configurators";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
@@ -181,7 +183,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const selected = readParam(params, "selected");
   const filter = readParam(params, "filter");
 
-  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries] = await Promise.all([
+  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, products, configuratorTemplates] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listMaterialsForTenant(activeTenant.tenantId),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
@@ -189,7 +191,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
     getCompanySettingsByTenantId(activeTenant.tenantId),
     listCustomersForTenant(activeTenant.tenantId),
-    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
+    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
+    listProductsForTenant(activeTenant.tenantId),
+    listConfiguratorTemplatesForTenant(activeTenant.tenantId)
   ]);
 
   const deletedQuoteCount = allQuoteDrafts.filter((quote) => quote.status === "deleted").length;
@@ -198,6 +202,23 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     : allQuoteDrafts.filter((quote) => quote.status !== "deleted");
 
   const activeMaterials = materials.filter((material) => material.active);
+  const templateById = new Map(configuratorTemplates.map((template) => [template.id, template]));
+  const savedQuoteProducts = products
+    .filter((product) => product.status !== "deleted")
+    .map((product) => {
+      const template = product.defaultTemplateId ? templateById.get(product.defaultTemplateId) : null;
+      const definition = template?.definitionJson ?? {};
+      const fields = Array.isArray(definition.fields) ? definition.fields : [];
+      const components = Array.isArray(definition.components) ? definition.components : [];
+      return {
+        id: product.id,
+        name: product.name,
+        sku: product.sku,
+        fields,
+        components
+      };
+    })
+    .filter((product) => product.fields.length > 0 || product.components.length > 0);
   const customerById = new Map(clients.map((client) => [client.id, client]));
   const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
   const surveySourceEnquiry = survey?.enquiryId ? enquiryById.get(survey.enquiryId) ?? null : null;
@@ -419,6 +440,7 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                 <QuoteMaterialFlowBuilder
                   quoteId={selectedQuote.id}
                   materials={activeMaterials}
+                  savedProducts={savedQuoteProducts}
                   pricingSettings={{
                     markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                     profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
+import { QuoteLineBuilder } from "./QuoteLineBuilder";
 
 type QuoteMaterial = {
   id: string;
@@ -46,17 +47,84 @@ type PricingSettings = {
   clientDiscountRules?: ClientDiscountRule[] | null;
 };
 
+type SavedQuoteChoice = {
+  id?: string | null;
+  label?: string | null;
+  value?: string | null;
+  widthMm?: string | null;
+  heightMm?: string | null;
+};
+
+type SavedQuoteQuestion = {
+  id?: string | null;
+  key: string;
+  label: string;
+  type: string;
+  required?: boolean;
+  defaultValue?: string | null;
+  helpText?: string | null;
+  options?: SavedQuoteChoice[];
+  showWhen?: {
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+  } | null;
+};
+
+type SavedQuoteComponent = {
+  id?: string | null;
+  label?: string | null;
+  kind?: string | null;
+  materialId?: string | null;
+  quantity?: string | null;
+  unit?: string | null;
+  ruleType?: string | null;
+  wastePercent?: string | null;
+  notes?: string | null;
+  stockUsage?: {
+    usageBasis?: string | null;
+    dimensionSource?: string | null;
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+    widthMm?: string | null;
+    heightMm?: string | null;
+    rollWidthMm?: string | null;
+    partsPerSheet?: string | null;
+    metresPerUnit?: string | null;
+    sheetsPerUnit?: string | null;
+    sellRate?: string | null;
+    chargeName?: string | null;
+    quantitySource?: string | null;
+    quantityPrompt?: string | null;
+    quantityPresets?: Array<{ id?: string | null; label?: string | null; value?: string | null; qty?: string | number | null }> | null;
+    allowCustomQuantity?: boolean | null;
+    customQuantityLabel?: string | null;
+  } | null;
+  trigger?: {
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+  } | null;
+};
+
+type SavedQuoteProduct = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  fields: SavedQuoteQuestion[];
+  components: SavedQuoteComponent[];
+};
+
 type QuoteMaterialFlowBuilderProps = {
   quoteId: string;
   materials: QuoteMaterial[];
   pricingSettings?: PricingSettings;
+  savedProducts?: SavedQuoteProduct[];
 };
 
 type FlowType = "" | "signage" | "small_format" | "service" | "component";
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
 type ServiceType = "" | "pickup" | "delivery" | "install";
-type BuilderMode = "quick" | "advanced";
+type BuilderMode = "quick" | "saved" | "advanced";
 type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl";
 type InkChoice = "" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
@@ -621,7 +689,7 @@ function normaliseSizePresets(presets: QuoteSizePreset[] | null | undefined, fal
   return cleaned.length > 0 ? cleaned : fallback;
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [] }: QuoteMaterialFlowBuilderProps) {
   const [builderMode, setBuilderMode] = useState<BuilderMode>("quick");
   const [activeStep, setActiveStep] = useState<StepKey>("base");
   const [flowType, setFlowType] = useState<FlowType>("signage");
@@ -1205,6 +1273,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
         ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installHours ? `${installHours}hr` : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
         : "";
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
+  const baseSheetUse = flowType === "signage" ? costs.find((row) => row.label === "Base material" && row.unit === "sheet") : undefined;
+  const totalSheetUse = baseSheetUse ? baseSheetUse.amount * quantityNumber : 0;
+  const sheetUseLabel = baseSheetUse && totalSheetUse > 0
+    ? `${usage(totalSheetUse)} sheet${Math.abs(totalSheetUse - 1) < 0.0001 ? "" : "s"}${baseSheetUse.note ? ` · ${baseSheetUse.note}` : ""}`
+    : "";
 
   const finishingSummary = finishings.map((key) => {
     if (key === "eyelets") {
@@ -1401,7 +1474,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       <div style={{ display: "grid", gap: 0 }}>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #dfe7f2" }}>
           <button type="button" onClick={() => setBuilderMode("quick")} style={{ border: "none", borderTop: "4px solid #65a30d", background: "#ffffff", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#65a30d", cursor: "pointer" }}>Build a quick quote item</button>
-          <button type="button" onClick={() => setBuilderMode("advanced")} style={{ border: "none", borderLeft: "1px solid #dfe7f2", background: "#f3f4f6", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#1f2937", cursor: "pointer" }}>Advanced / saved product setup</button>
+          <button type="button" onClick={() => setBuilderMode("saved")} style={{ border: "none", borderLeft: "1px solid #dfe7f2", background: "#f3f4f6", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#1f2937", cursor: "pointer" }}>Use saved product</button>
         </div>
 
         <div style={{ padding: 22, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 20, alignItems: "start" }}>
@@ -1508,6 +1581,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               <strong>Current item</strong>
               <SummaryRow label="Type" value={flowType === "small_format" ? "Small format / print" : flowType === "component" ? "Custom component" : "Large format / signage"} />
               {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
+              {flowType === "signage" ? <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} /> : null}
               {flowType === "small_format" ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
               <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
@@ -1531,6 +1605,38 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               <span style={{ color: optionSummary ? "#111827" : "#667085", lineHeight: 1.5 }}>{optionSummary || "Complete the fields to build this quote line."}</span>
             </div>
           </aside>
+        </div>
+      </div>
+    );
+  }
+
+  function renderSavedProductLayout() {
+    return (
+      <div style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #dfe7f2" }}>
+          <button type="button" onClick={() => setBuilderMode("quick")} style={{ border: "none", background: "#f3f4f6", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#1f2937", cursor: "pointer" }}>Build a quick quote item</button>
+          <button type="button" onClick={() => setBuilderMode("saved")} style={{ border: "none", borderTop: "4px solid #65a30d", borderLeft: "1px solid #dfe7f2", background: "#ffffff", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#65a30d", cursor: "pointer" }}>Use saved product</button>
+        </div>
+
+        <div style={{ padding: 22, display: "grid", gap: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+            <div>
+              <p style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 12, fontWeight: 950, color: "#65a30d" }}>Saved product picker</p>
+              <h3 style={{ margin: "4px 0 0", fontSize: 28, letterSpacing: "-0.04em" }}>Pick a pre-built product, set the options, then add it to the quote.</h3>
+              <p style={{ margin: "6px 0 0", color: "#667085", lineHeight: 1.55 }}>Use this for standard products that have already been configured on the Products page. It keeps quoting fast without opening the old step-by-step builder.</p>
+            </div>
+            <span style={{ borderRadius: 999, background: "#ecfccb", color: "#3f6212", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{savedProducts.length} saved product{savedProducts.length === 1 ? "" : "s"}</span>
+          </div>
+
+          <QuoteLineBuilder
+            quoteId={quoteId}
+            products={savedProducts}
+            materials={materials}
+            pricingSettings={{
+              markupMultiplier: pricingSettings?.markupMultiplier,
+              profitMultiplier: pricingSettings?.profitMultiplier
+            }}
+          />
         </div>
       </div>
     );
@@ -2268,6 +2374,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     }
   };
 
+  if (builderMode === "saved") {
+    return renderSavedProductLayout();
+  }
+
   const headerGradient = flowType === "component"
     ? "linear-gradient(135deg, #7c2d12 0%, #f97316 58%, #fdba74 100%)"
     : flowType === "service"
@@ -2352,6 +2462,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
               <>
                 <SummaryRow label="Base" value={selectedBase?.label} />
                 <SummaryRow label="Material" value={selectedMainMaterial?.name} />
+                <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 <SummaryRow label="Print" value={printMethods.find((item) => item.key === printMethod)?.label} />
