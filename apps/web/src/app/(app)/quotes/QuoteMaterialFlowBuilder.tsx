@@ -56,6 +56,7 @@ type FlowType = "" | "signage" | "small_format" | "service" | "component";
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
 type ServiceType = "" | "pickup" | "delivery" | "install";
+type BuilderMode = "quick" | "advanced";
 type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl";
 type InkChoice = "" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
@@ -90,6 +91,7 @@ type StepKey =
   | "component_details"
   | "component_parts"
   | "component_labour"
+  | "dispatch"
   | "review";
 
 type CostRow = {
@@ -620,8 +622,9 @@ function normaliseSizePresets(presets: QuoteSizePreset[] | null | undefined, fal
 }
 
 export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }: QuoteMaterialFlowBuilderProps) {
-  const [activeStep, setActiveStep] = useState<StepKey>("flow");
-  const [flowType, setFlowType] = useState<FlowType>("");
+  const [builderMode, setBuilderMode] = useState<BuilderMode>("quick");
+  const [activeStep, setActiveStep] = useState<StepKey>("base");
+  const [flowType, setFlowType] = useState<FlowType>("signage");
 
   const [baseType, setBaseType] = useState<BaseType | "">("");
   const [thickness, setThickness] = useState("");
@@ -798,7 +801,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       }
       next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: isDuplicateBook ? "7" : "9" });
       next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: isDuplicateBook ? "8" : "10" });
-      next.push({ key: "review", label: "Review", complete: Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId))), icon: "✓" });
+      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0))), icon: "→" });
+      next.push({ key: "review", label: "Review", complete: Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && serviceType), icon: "✓" });
       return next;
     }
 
@@ -814,7 +818,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       if (printed) next.push({ key: "sides", label: isClearAcrylic ? "Sides / direction" : "Sides", complete: Boolean(sides && (!isClearAcrylic || printDirection)), icon: "•" });
       if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId && (laminateId === "none" || laminateHours.trim().length > 0)), icon: "•" });
       next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
-      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && printMethod && printSetupComplete), icon: "✓" });
+      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0))), icon: "→" });
+      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && printMethod && printSetupComplete && serviceType), icon: "✓" });
     }
 
     return next;
@@ -1166,6 +1171,41 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   const selectedMediaName = selectedMedia?.name ?? "";
   const selectedLaminateName = laminateId === "none" ? "None" : selectedLaminate?.name ?? "";
   const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : selectedSmallCoating?.name ?? "";
+  const dispatchCosts = useMemo<CostRow[]>(() => {
+    const rows: CostRow[] = [];
+
+    if (serviceType === "delivery") {
+      const charge = numberValue(deliveryCharge, 0);
+      if (charge > 0) rows.push({ label: "Delivery", detail: "Delivery charge", amount: 1, unit: "each", rate: charge, cost: charge });
+    }
+
+    if (serviceType === "install") {
+      const people = Math.max(1, numberValue(installCrewSize, 1));
+      const hours = numberValue(installHours, 0);
+      if (hours > 0) rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount: people * hours, unit: "hr", rate: labourRate, cost: people * hours * labourRate, note: `${usage(hours)}hr on site` });
+      const travel = numberValue(travelCharge, 0);
+      if (travel > 0) rows.push({ label: "Travel / delivery", detail: "Travel or call-out allowance", amount: 1, unit: "each", rate: travel, cost: travel });
+      for (const item of fixingOptions) {
+        if (!serviceFixings.includes(item.key)) continue;
+        const qty = numberValue(serviceFixingQty[item.key], 0);
+        const rate = numberValue(serviceFixingRate[item.key], 0);
+        if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable", amount: qty, unit: item.unit, rate, cost: qty * rate });
+      }
+    }
+
+    return rows;
+  }, [serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate]);
+  const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
+  const dispatchUnitPrice = dispatchRawCost * sellMultiplier;
+  const dispatchSummary = serviceType === "pickup"
+    ? "Pickup"
+    : serviceType === "delivery"
+      ? `Delivery${deliveryCharge ? ` · allowance ${money(numberValue(deliveryCharge, 0))}` : ""}`
+      : serviceType === "install"
+        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installHours ? `${installHours}hr` : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
+        : "";
+  const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
+
   const finishingSummary = finishings.map((key) => {
     if (key === "eyelets") {
       const preset = eyeletPresets.find((option) => option.label === eyeletPresetLabel);
@@ -1220,6 +1260,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
       smallFinishingSummary ? `Finishing: ${smallFinishingSummary}` : null,
+      dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
     : [
@@ -1234,16 +1275,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       printDirection ? `${printDirection === "reverse" ? "Reverse" : "Positive"} print` : null,
       selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null,
-      finishingSummary ? `Finishing: ${finishingSummary}` : null
+      finishingSummary ? `Finishing: ${finishingSummary}` : null,
+      dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
     ].filter(Boolean).join(" · ");
+
+  const dispatchComplete = serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0);
 
   const canSave = flowType === "component"
     ? Boolean(componentName.trim() && componentHasCost)
     : flowType === "service"
-    ? Boolean(serviceType && (serviceType === "pickup" || serviceType === "delivery" || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
+    ? Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
     : flowType === "small_format"
-      ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0)
-      : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0));
+      ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
+      : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0) && dispatchComplete);
 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
@@ -1276,7 +1320,233 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
     );
   }
 
+  function chooseQuickFlow(nextFlow: FlowType) {
+    if (nextFlow === flowType) return;
+    chooseFlow(nextFlow);
+  }
+
+  function renderDispatchSection() {
+    return (
+      <div style={{ display: "grid", gap: 14 }}>
+        <div style={{ display: "grid", gap: 4 }}>
+          <strong style={{ fontSize: 18 }}>How can we get your order to you?</strong>
+          <span style={{ color: "#64748b", fontSize: 13 }}>Pickup is no charge. Delivery and install add their own clear line to the quote.</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+          {serviceTypes.map((choice) => (
+            <button
+              key={choice.key}
+              type="button"
+              onClick={() => { setServiceType(choice.key); setUnitPriceOverridden(false); }}
+              style={{
+                ...cardButtonStyle(serviceType === choice.key, choice.key === "install" ? "#ea580c" : choice.key === "delivery" ? "#0891b2" : "#16a34a"),
+                minHeight: 96,
+                padding: 14
+              }}
+            >
+              <span style={{ fontSize: 28 }}>{choice.icon}</span>
+              <strong>{choice.label}</strong>
+              <span style={{ color: "#64748b", fontSize: 13 }}>{choice.description}</span>
+            </button>
+          ))}
+        </div>
+        {serviceType === "delivery" ? (
+          <div style={{ border: "1px solid #bae6fd", borderRadius: 18, padding: 14, background: "#f0f9ff", display: "grid", gap: 10 }}>
+            <label style={{ display: "grid", gap: 6 }}><b>Delivery / courier cost</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="0.01" style={inputStyle} /></label>
+            <span style={{ color: "#475467", fontSize: 13 }}>This becomes a separate Delivery line on the quote.</span>
+          </div>
+        ) : null}
+        {serviceType === "install" ? (
+          <div style={{ border: "1px solid #fed7aa", borderRadius: 18, padding: 14, background: "#fff7ed", display: "grid", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
+              <label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="1" step="1" style={inputStyle} /></label>
+              <label style={{ display: "grid", gap: 6 }}><b>Install hours</b><input value={installHours} onChange={(event) => { setInstallHours(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="0" step="0.25" style={inputStyle} /></label>
+              <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out cost</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="optional" type="number" min="0" step="0.01" style={inputStyle} /></label>
+            </div>
+            <div style={{ display: "grid", gap: 10 }}>
+              <strong>Fixings / install consumables</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
+                {fixingOptions.map((item) => {
+                  const selected = serviceFixings.includes(item.key);
+                  return (
+                    <div key={item.key} style={{ border: selected ? "2px solid #ea580c" : "1px solid #fed7aa", borderRadius: 16, padding: 12, background: selected ? "#ffedd5" : "#fff", display: "grid", gap: 8 }}>
+                      <button type="button" onClick={() => toggleServiceFixing(item.key)} style={{ border: "none", background: "transparent", color: "#0f172a", display: "flex", gap: 8, alignItems: "center", padding: 0, fontWeight: 950, cursor: "pointer", textAlign: "left" }}>
+                        <span>{selected ? "✓" : "+"}</span><span>{item.label}</span>
+                      </button>
+                      {selected ? (
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                          <input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={`Qty ${item.placeholderQty}`} type="number" min="0" step="0.01" style={inputStyle} />
+                          <input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={`Cost ${item.placeholderRate}`} type="number" min="0" step="0.01" style={inputStyle} />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+            <span style={{ color: "#475467", fontSize: 13 }}>Install becomes a separate Sign Install line on the quote and can later hand off to Install Scheduler.</span>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+
+  function renderQuickQuoteLayout() {
+    const sizePresetValue = widthMm && heightMm ? `${widthMm}x${heightMm}` : "";
+    const signagePresets = signageSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
+    const smallPresets = smallSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
+    const currentPresets = flowType === "small_format" ? smallPresets : signagePresets;
+
+    return (
+      <div style={{ display: "grid", gap: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #dfe7f2" }}>
+          <button type="button" onClick={() => setBuilderMode("quick")} style={{ border: "none", borderTop: "4px solid #65a30d", background: "#ffffff", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#65a30d", cursor: "pointer" }}>Build a quick quote item</button>
+          <button type="button" onClick={() => setBuilderMode("advanced")} style={{ border: "none", borderLeft: "1px solid #dfe7f2", background: "#f3f4f6", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#1f2937", cursor: "pointer" }}>Advanced / saved product setup</button>
+        </div>
+
+        <div style={{ padding: 22, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 20, alignItems: "start" }}>
+          <section style={{ display: "grid", gap: 18 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+              <div>
+                <p style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 12, fontWeight: 950, color: "#65a30d" }}>Fast quote builder</p>
+                <h3 style={{ margin: "4px 0 0", fontSize: 28, letterSpacing: "-0.04em" }}>Build the item, choose artwork, then choose pickup / delivery / install.</h3>
+              </div>
+              <span style={{ borderRadius: 999, background: "#ecfccb", color: "#3f6212", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>Quick layout</span>
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Quote type</b>
+                <select value={flowType} onChange={(event) => chooseQuickFlow(event.target.value as FlowType)} style={inputStyle}>
+                  <option value="signage">Large format / signage</option>
+                  <option value="small_format">Small format / print</option>
+                  <option value="component">Custom component / assembly</option>
+                </select>
+              </label>
+              <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="1" style={inputStyle} /></label>
+            </div>
+
+            {flowType === "component" ? (
+              <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
+                <strong>Custom component / assembly</strong>
+                <p style={{ margin: 0, color: "#9a3412" }}>Components can be more detailed, so use the advanced flow for parts, labour and assembly breakdowns.</p>
+                <button type="button" onClick={() => { setBuilderMode("advanced"); setActiveStep("component_details"); }} style={{ ...primaryButton, justifySelf: "start" }}>Open component builder</button>
+              </div>
+            ) : null}
+
+            {flowType === "signage" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
+                <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Thickness / stock</b><select value={thickness} onChange={(event) => { setThickness(event.target.value); setColour(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose thickness</option>{thicknessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Colour</b><select value={colour} onChange={(event) => { setColour(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose colour</option>{colourOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 6000" type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour hours</b><input value={printSetupHours} onChange={(event) => setPrintSetupHours(event.target.value)} placeholder="eg 0.25" type="number" min="0" step="0.05" style={inputStyle} /></label> : null}
+                {needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => setMediaId(event.target.value)} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
+                {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => setInk(event.target.value as InkChoice)} style={inputStyle}><option value="">Choose ink</option>{inkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
+                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
+                {isClearAcrylic && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
+                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
+                {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour hours</b><input value={laminateHours} onChange={(event) => setLaminateHours(event.target.value)} placeholder="eg 0.25" type="number" min="0" step="0.05" style={inputStyle} /></label> : null}
+              </div>
+            ) : null}
+
+            {flowType === "small_format" ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
+                <label style={{ display: "grid", gap: 6 }}><b>Product type</b><select value={smallType} onChange={(event) => setSmallType(event.target.value as SmallFormatType)} style={inputStyle}><option value="">Choose product type</option>{smallFormatTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); }} style={inputStyle}><option value="">Choose stock</option>{smallStocks.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 90" type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 55" type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => setSmallPrintColour(event.target.value as SmallPrintColour)} style={inputStyle}><option value="">Choose print colour</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Coating / laminate</b><select value={smallCoatingId} onChange={(event) => setSmallCoatingId(event.target.value)} style={inputStyle}><option value="">Choose coating</option><option value="none">No coating</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+              </div>
+            ) : null}
+
+            {flowType === "signage" ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <strong>Finishing</strong>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+                  {finishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleFinishing(item.key)} style={cardButtonStyle(finishings.includes(item.key), "#0f766e")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
+                </div>
+                <SelectedLabourHours options={finishingOptions.filter((item) => item.key !== "eyelets")} selected={finishings} values={finishingHours} onChange={setFinishingHours} labourRate={labourRate} />
+                {finishings.includes("eyelets") ? <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><label style={{ display: "grid", gap: 6 }}><b>Eyelet placement</b><select value={eyeletPresetLabel} onChange={(event) => setEyeletPresetLabel(event.target.value)} style={inputStyle}>{eyeletPresets.map((preset) => <option key={preset.label} value={preset.label}>{preset.label}</option>)}</select></label>{eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} type="number" min="0" step="1" style={inputStyle} /></label> : null}</div> : null}
+              </div>
+            ) : null}
+
+            {flowType === "small_format" && !isDuplicateBook ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <strong>Finishing</strong>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+                  {smallFinishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleSmallFinishing(item.key)} style={cardButtonStyle(smallFinishings.includes(item.key), "#7c3aed")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
+                </div>
+                <SelectedLabourHours options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingHours} onChange={setSmallFinishingHours} labourRate={labourRate} />
+              </div>
+            ) : null}
+
+            <div style={{ display: "grid", gap: 10 }}>
+              <strong>How will print-ready artwork be supplied?</strong>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkHours(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
+                <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}><span style={{ fontSize: 30 }}>✎</span><strong>Artwork required</strong><span style={{ color: "#64748b" }}>Add artwork/design labour.</span></button>
+              </div>
+              {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork hours</b><input value={artworkHours} onChange={(event) => setArtworkHours(event.target.value)} placeholder="eg 0.5" type="number" min="0" step="0.05" style={inputStyle} /></label> : null}
+            </div>
+
+            {flowType !== "component" ? renderDispatchSection() : null}
+
+            <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" placeholder="Optional notes for this line" style={textareaStyle} /></label>
+
+            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 58, justifySelf: "center", minWidth: 240, fontSize: 18, background: "#65a30d", opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Add item to quote" : "Complete required fields"}</button>
+          </section>
+
+          <aside style={{ position: "sticky", top: 18, display: "grid", gap: 14 }}>
+            <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
+              <strong>Current item</strong>
+              <SummaryRow label="Type" value={flowType === "small_format" ? "Small format / print" : flowType === "component" ? "Custom component" : "Large format / signage"} />
+              {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
+              {flowType === "small_format" ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
+              <SummaryRow label="Size" value={width > 0 && height > 0 ? `${width} × ${height}mm` : undefined} />
+              <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
+              <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
+            </div>
+            <div style={{ border: "1px solid #bbf7d0", borderRadius: 22, padding: 16, background: "#f0fdf4", display: "grid", gap: 8 }}>
+              <span style={{ fontSize: 12, fontWeight: 950, color: "#067647", textTransform: "uppercase" }}>Item price</span>
+              <strong style={{ fontSize: 28 }}>{money(unitPrice)}</strong>
+              <span style={{ color: "#475467", fontSize: 13 }}>Qty {usage(quantityNumber)} · line total {money(lineTotal)}</span>
+            </div>
+            {shouldCreateDispatchLine ? (
+              <div style={{ border: "1px solid #fed7aa", borderRadius: 22, padding: 16, background: "#fff7ed", display: "grid", gap: 8 }}>
+                <span style={{ fontSize: 12, fontWeight: 950, color: "#c2410c", textTransform: "uppercase" }}>Extra service line</span>
+                <strong style={{ fontSize: 22 }}>{serviceType === "install" ? "Sign Install" : "Delivery"}</strong>
+                <span style={{ color: "#475467", fontSize: 13 }}>{dispatchSummary}</span>
+                <strong>{money(dispatchUnitPrice)}</strong>
+              </div>
+            ) : null}
+            <div style={{ border: "1px solid #e5e7eb", borderRadius: 18, padding: 14, background: "#f8fafc", display: "grid", gap: 5 }}>
+              <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Summary</span>
+              <span style={{ color: optionSummary ? "#111827" : "#667085", lineHeight: 1.5 }}>{optionSummary || "Complete the fields to build this quote line."}</span>
+            </div>
+          </aside>
+        </div>
+      </div>
+    );
+  }
+
   function renderStep() {
+    if (activeStep === "dispatch") {
+      return (
+        <div style={{ display: "grid", gap: 16 }}>
+          <StepIntro icon="→" title="How can we get this order to the client?" text="Choose pickup, delivery or install. Install asks for crew, hours and fixings so it can become a separate install quote line." />
+          {renderDispatchSection()}
+          <button type="button" onClick={() => setActiveStep("review")} disabled={!dispatchComplete} style={{ ...primaryButton, opacity: dispatchComplete ? 1 : 0.45, justifySelf: "start" }}>Continue to review</button>
+        </div>
+      );
+    }
+
     if (activeStep === "flow") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
@@ -1993,7 +2263,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
   };
 
   const handleBuilderSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (activeStep !== "review" || !canSave) {
+    if (!canSave || (builderMode !== "quick" && activeStep !== "review")) {
       event.preventDefault();
     }
   };
@@ -2013,6 +2283,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
       <input type="hidden" name="optionSummary" value={optionSummary} />
       <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
       <input type="hidden" name="quantity" value={quantity} />
+      {shouldCreateDispatchLine ? (
+        <>
+          <input type="hidden" name="serviceLineProductName" value={serviceType === "install" ? "Sign Install" : "Delivery"} />
+          <input type="hidden" name="serviceLineOptionSummary" value={dispatchSummary} />
+          <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
+          <input type="hidden" name="serviceLineQuantity" value="1" />
+        </>
+      ) : null}
+      {builderMode === "quick" ? renderQuickQuoteLayout() : (
+        <>
       <div style={{ background: headerGradient, color: "#fff", padding: 22, display: "grid", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
           <div>
@@ -2112,6 +2392,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings }
         </div>
         <button type="submit" disabled={!canSave || activeStep !== "review"} style={{ ...darkButton, opacity: canSave && activeStep === "review" ? 1 : 0.45, cursor: canSave && activeStep === "review" ? "pointer" : "not-allowed" }}>{activeStep === "review" ? canSave ? "Save quote line" : "Complete required cards before saving" : "Review before saving"}</button>
       </div>
+        </>
+      )}
     </form>
   );
 }

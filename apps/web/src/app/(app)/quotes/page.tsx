@@ -238,15 +238,15 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
       <section style={{ ...cardStyle(), display: "grid", gap: 8, background: "linear-gradient(135deg, #ffffff 0%, #f7fbff 54%, #eef6ff 100%)" }}>
         <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote entry</p>
-        <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Build quote lines from materials</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Start with a base material, then move through the card flow: thickness, colour, size, print, ink, laminate and finishing. Products/templates stay in the background as optional shortcuts.</p>
+        <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Quick, clear quote entry</h1>
+        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Build quote items in one clean layout: choose the product, material, size, artwork, finishing and pickup / delivery / install without stepping through a manual.</p>
       </section>
 
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
             <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted quotes" : "Quote workflow"}</h2>
-            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create or switch quotes here; the selected quote builder below now gets the full page width.</p>
+            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create or switch quotes here; use the quick builder below to add lines fast.</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <a href="/quotes" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</a>

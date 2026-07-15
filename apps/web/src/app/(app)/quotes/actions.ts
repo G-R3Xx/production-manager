@@ -87,6 +87,21 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
     notes: nullable(formData.get("notes"))
   });
 
+  const serviceLineProductName = String(formData.get("serviceLineProductName") ?? "").trim();
+  const serviceLineUnitPrice = String(formData.get("serviceLineUnitPrice") ?? "").trim();
+  const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
+
+  if (serviceLineProductName && serviceLineUnitPrice) {
+    await addQuoteLine(quoteId, {
+      productId: null,
+      productName: serviceLineProductName,
+      optionSummary: nullable(formData.get("serviceLineOptionSummary")),
+      quantity: serviceLineQuantity,
+      unitPrice: serviceLineUnitPrice,
+      notes: nullable(formData.get("serviceLineNotes"))
+    });
+  }
+
   redirect(`/quotes?selected=${quoteId}&message=Quote%20line%20added`);
 }
 
