@@ -1066,9 +1066,22 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (flowType === "signage") {
       if (selectedMainMaterial && areaSqm > 0) {
         if (isRollMaterial(selectedMainMaterial) && !isSheetMaterial(selectedMainMaterial)) {
-          const lm = linearMetres(width, height, selectedMainMaterial);
+          const lm = roundedRollMetresForQuantity(width, height, selectedMainMaterial, quantityNumber);
           const rate = rollRate(selectedMainMaterial);
-          rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: lm.amount, unit: "lm", rate: rate.rate, cost: lm.amount * rate.rate, note: [lm.note, rate.note].filter(Boolean).join(" · ") || undefined });
+          const amount = lm.amount / quantityNumber;
+          rows.push({
+            label: "Base material",
+            detail: selectedMainMaterial.name,
+            amount,
+            unit: "lm",
+            rate: rate.rate,
+            cost: amount * rate.rate,
+            note: [
+              lm.note,
+              quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null,
+              rate.note
+            ].filter(Boolean).join(" · ") || undefined
+          });
         } else {
           const sheetUse = sheetUsageForItem(selectedMainMaterial, width, height);
           const rate = sheetUnitRate(selectedMainMaterial);
@@ -1078,20 +1091,40 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (artworkChoice === "required") {
         const hours = numberValue(artworkHours, 0);
-        if (hours > 0) rows.push({ label: "Artwork", detail: "Artwork/design time", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+        if (hours > 0) {
+          const amount = hours / quantityNumber;
+          rows.push({ label: "Artwork", detail: "Artwork/design time", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        }
       }
 
       if (printed) {
         const hours = numberValue(printSetupHours, 0);
         const methodLabel = printMethods.find((item) => item.key === printMethod)?.label ?? "Print";
-        if (hours > 0) rows.push({ label: "Print setup labour", detail: methodLabel, amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+        if (hours > 0) {
+          const amount = hours / quantityNumber;
+          rows.push({ label: "Print setup labour", detail: methodLabel, amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        }
       }
 
       if (selectedMedia && needsMediaStep && areaSqm > 0) {
-        const lm = linearMetres(width, height, selectedMedia);
+        const mediaFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
+        const lm = roundedRollMetresForQuantity(width, height, selectedMedia, mediaFaces);
         const rate = rollRate(selectedMedia);
-        const amount = lm.amount * sideMultiplier;
-        rows.push({ label: printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll print media", detail: selectedMedia.name, amount, unit: "lm", rate: rate.rate, cost: amount * rate.rate, note: [lm.note, sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
+        const amount = lm.amount / quantityNumber;
+        rows.push({
+          label: printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll print media",
+          detail: selectedMedia.name,
+          amount,
+          unit: "lm",
+          rate: rate.rate,
+          cost: amount * rate.rate,
+          note: [
+            lm.note,
+            sides === "double" ? "double sided" : null,
+            quantityNumber > 1 || sideMultiplier > 1 ? `${usage(lm.amount)}lm total for ${usage(mediaFaces)} face${mediaFaces === 1 ? "" : "s"}` : null,
+            rate.note
+          ].filter(Boolean).join(" · ") || undefined
+        });
       }
 
       if (needsInkStep && ink && areaSqm > 0) {
@@ -1120,7 +1153,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           note: [lm.note, sides === "double" ? "double sided" : null, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
         });
         const hours = numberValue(laminateHours, 0);
-        if (hours > 0) rows.push({ label: "Laminate labour", detail: "Apply laminate", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+        if (hours > 0) {
+          const amount = hours / quantityNumber;
+          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        }
       }
 
       for (const item of finishingOptions) {
@@ -1137,7 +1173,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           continue;
         }
         const hours = numberValue(finishingHours[item.key], 0);
-        if (hours > 0) rows.push({ label: item.label, detail: "Factory labour", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+        if (hours > 0) {
+          const amount = hours / quantityNumber;
+          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        }
       }
     }
 
@@ -1303,6 +1342,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const totalSheetUse = baseSheetUse ? baseSheetUse.amount * quantityNumber : 0;
   const sheetUseLabel = baseSheetUse && totalSheetUse > 0
     ? `${usage(totalSheetUse)} sheet${Math.abs(totalSheetUse - 1) < 0.0001 ? "" : "s"}${baseSheetUse.note ? ` · ${baseSheetUse.note}` : ""}`
+    : "";
+  const rollUseRow = flowType === "signage"
+    ? costs.find((row) => row.unit === "lm" && ["Roll print media", "Cut vinyl", "Base material"].includes(row.label))
+    : undefined;
+  const totalRollUse = rollUseRow ? rollUseRow.amount * quantityNumber : 0;
+  const rollUseLabel = rollUseRow && totalRollUse > 0
+    ? `${usage(totalRollUse)}lm total${rollUseRow.note ? ` · ${rollUseRow.note}` : ""}`
     : "";
 
   const finishingSummary = finishings.map((key) => {
@@ -1608,7 +1654,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <strong>Current item</strong>
               <SummaryRow label="Type" value={flowType === "small_format" ? "Small format / print" : flowType === "component" ? "Custom component" : "Large format / signage"} />
               {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
-              {flowType === "signage" ? <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} /> : null}
+              {flowType === "signage" && sheetUseLabel ? <SummaryRow label="Sheet use" value={sheetUseLabel} /> : null}
+              {flowType === "signage" && rollUseLabel ? <SummaryRow label="Roll use" value={rollUseLabel} /> : null}
               {flowType === "small_format" ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
               <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
