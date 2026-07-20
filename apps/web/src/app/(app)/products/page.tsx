@@ -607,6 +607,8 @@ function ProductBasicsPanel({ selectedProduct }: { selectedProduct: any }) {
             <span style={labelTextStyle}>Department</span>
             <select name="department" defaultValue={selectedProduct.department ?? "signage"} style={inputStyle}>
               <option value="signage">Signage</option>
+              <option value="plan_printing">Plan printing</option>
+              <option value="poster_printing">Poster printing</option>
               <option value="small_format">Small format</option>
               <option value="install">Install</option>
               <option value="outsourced">Outsourced</option>
@@ -1636,7 +1638,7 @@ function isSmallFormatProduct(selectedProduct: any, setupPreset: string): boolea
   const preset = lowerText(setupPreset);
   const department = lowerText(selectedProduct?.department);
   const family = lowerText(selectedProduct?.productFamily);
-  return department === "small_format" || preset.includes("business") || preset.includes("flyer") || preset.includes("book") || preset.includes("carbon") || family.includes("small_format") || family.includes("book");
+  return department === "small_format" || department === "plan_printing" || department === "poster_printing" || preset.includes("business") || preset.includes("flyer") || preset.includes("book") || preset.includes("carbon") || family.includes("small_format") || family.includes("book");
 }
 
 function productBuildSlotsFor(selectedProduct: any, setupPreset: string): ProductBuildSlot[] {

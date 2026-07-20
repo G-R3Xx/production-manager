@@ -307,7 +307,7 @@ function baseProductName(item: ProductionItemRecord, parts: string[]): string {
   const first = parts.find((part) => part && !/^Artwork\b/i.test(part) && !parseDimensionText(part));
   const fromProduct = String(item.quoteProductName || item.title || "Production item").split(" - ")[0]?.trim();
   const base = first || fromProduct || "Production item";
-  if (item.productionType === "small_format") return base;
+  if (item.productionType === "small_format" || item.productionType === "plan_printing" || item.productionType === "poster_printing") return base;
   if (/\bsign\b/i.test(base)) return base;
   if (/\b(service|delivery|install|pickup)\b/i.test(base)) return base;
   return `${base} sign`;

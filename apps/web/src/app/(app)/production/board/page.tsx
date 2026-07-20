@@ -22,6 +22,8 @@ type BoardColumn = {
 
 const columns: BoardColumn[] = [
   { key: "printing", title: "Printing", hint: "Artwork, stock, print and RIP tasks", accent: "#2563eb" },
+  { key: "plan_printing", title: "Plan Printing", hint: "Plans, drawings and document sets", accent: "#0f766e" },
+  { key: "poster_printing", title: "Poster Printing", hint: "Posters and display prints", accent: "#dc2626" },
   { key: "finishing", title: "Finishing", hint: "Laminate, cut, route, trim, pack", accent: "#7c3aed" },
   { key: "install", title: "Install", hint: "Ready for site install", accent: "#f59e0b" },
   { key: "deliver", title: "Deliver", hint: "Courier / delivery jobs", accent: "#0891b2" },
@@ -179,6 +181,13 @@ function finishedSizeForCard(card: ProductionBoardCardRecord): string {
     || normaliseSizeText(card.itemTitle);
 }
 
+function departmentColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey | null {
+  const source = cleanBoardText(boardSearchText(card));
+  if (/\b(plan printing|plans?|drawing|drawings|cad|architectural|engineering|blueprint|a0|a1|a2)\b/.test(source)) return "plan_printing";
+  if (/\b(poster printing|poster|posters|photo print|photo prints|presentation print|display print|display prints)\b/.test(source)) return "poster_printing";
+  return null;
+}
+
 function dispatchColumnForCard(card: ProductionBoardCardRecord): ProductionBoardColumnKey | null {
   const dispatch = cleanBoardText(card.dispatchType ?? "");
   if (dispatch === "pickup") return "pickup";
@@ -200,10 +209,10 @@ function boardColumnForCard(card: ProductionBoardCardRecord): ProductionBoardCol
     if (/\b(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
     if (/\b(ready for pickup|pickup|pick up|collect|collection)\b/.test(nextStep)) return "pickup";
     if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
-    return "printing";
+    return departmentColumnForCard(card) ?? "printing";
   }
 
-  return dispatchColumn ?? card.column;
+  return dispatchColumn ?? departmentColumnForCard(card) ?? card.column;
 }
 
 function boardItemSummary(card: ProductionBoardCardRecord): string {
@@ -305,6 +314,8 @@ function priorityTone(priority: string | null | undefined): { label: string; bg:
 
 function emptyColumnMessage(key: ProductionBoardColumnKey): string {
   if (key === "printing") return "No active print tasks.";
+  if (key === "plan_printing") return "No plan printing queued.";
+  if (key === "poster_printing") return "No poster printing queued.";
   if (key === "finishing") return "No finishing tasks.";
   if (key === "install") return "No installs ready.";
   if (key === "deliver") return "No deliveries queued.";

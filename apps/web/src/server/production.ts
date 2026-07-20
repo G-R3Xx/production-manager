@@ -79,7 +79,7 @@ export type ApprovedArtworkOptionRecord = {
   pageCount: string;
 };
 
-export type ProductionBoardColumnKey = "printing" | "finishing" | "install" | "deliver" | "pickup";
+export type ProductionBoardColumnKey = "printing" | "plan_printing" | "poster_printing" | "finishing" | "install" | "deliver" | "pickup";
 
 
 export type ProductionReferencePhotoPayload = {
@@ -208,6 +208,13 @@ function normaliseMoney(value: string | null | undefined, fallback = "1"): strin
 
 function cleanSearchText(value: string | null | undefined): string {
   return String(value ?? "").toLowerCase().replace(/[_/\\-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function departmentColumnFromText(value: string | null | undefined): ProductionBoardColumnKey | null {
+  const source = cleanSearchText(value);
+  if (/\b(plan printing|plans?|drawing|drawings|cad|architectural|engineering|blueprint|a0|a1|a2)\b/.test(source)) return "plan_printing";
+  if (/\b(poster printing|poster|posters|photo print|photo prints|presentation print|display print|display prints)\b/.test(source)) return "poster_printing";
+  return null;
 }
 
 function isReadyHandoffText(value: string | null | undefined): boolean {
@@ -778,7 +785,7 @@ function productionBoardColumnForText(text: string): ProductionBoardColumnKey {
   if (/\bdeliver|delivery|courier|freight|drop off\b/.test(source)) return "deliver";
   if (/\bpickup|pick up|collect|collection\b/.test(source)) return "pickup";
   if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet)\b/.test(source)) return "finishing";
-  return "printing";
+  return departmentColumnFromText(source) ?? "printing";
 }
 
 function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "id" | "column">): ProductionBoardColumnKey {
@@ -790,18 +797,20 @@ function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "
   const isGenericReadyStep = /ready/.test(nextStep) && /install/.test(nextStep) && /pickup/.test(nextStep) && /delivery/.test(nextStep);
   if (isGenericReadyStep && dispatchColumn) return dispatchColumn;
 
+  const departmentSearchText = [
+    row.jobStatus,
+    row.projectName,
+    row.itemTitle,
+    row.productionType,
+    row.substrateSummary,
+    row.colourSummary,
+    row.finishingSummary,
+    row.quoteProductName,
+    row.quoteOptionSummary
+  ].filter(Boolean).join(" · ");
+
   if (!nextStep) {
-    return productionBoardColumnForText([
-      row.jobStatus,
-      row.projectName,
-      row.itemTitle,
-      row.productionType,
-      row.substrateSummary,
-      row.colourSummary,
-      row.finishingSummary,
-      row.quoteProductName,
-      row.quoteOptionSummary
-    ].filter(Boolean).join(" · "));
+    return productionBoardColumnForText(departmentSearchText);
   }
 
   if (/\b(ready for install|install|installed|installer|site install)\b/.test(nextStep)) return "install";
@@ -810,7 +819,7 @@ function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "
 
   if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
 
-  return "printing";
+  return departmentColumnFromText(departmentSearchText) ?? "printing";
 }
 
 function productionBoardCardFromRow(row: Omit<ProductionBoardCardRecord, "id" | "column">): ProductionBoardCardRecord {
@@ -998,7 +1007,7 @@ function stepPlanForItem(input: {
 
   const steps: string[] = ["Artwork checked", "Print-ready file attached", "Material / stock allocated"];
 
-  if (input.productionType === "small_format") {
+  if (input.productionType === "small_format" || input.productionType === "plan_printing" || input.productionType === "poster_printing") {
     steps.push("Print");
     if (/\b(cello|laminate|lamination|coating|gloss|matt|matte)\b/.test(combined)) steps.push("Cello / laminate");
     if (/\b(fold|folding|score|scoring|crease|creasing)\b/.test(combined)) steps.push("Fold / score");
@@ -1049,7 +1058,7 @@ async function syncProductionItemsAndSteps(jobId: string): Promise<void> {
       aap.size_summary as "sizeSummary",
       aap.substrate_summary as "substrateSummary",
       aap.colour_summary as "colourSummary",
-      CASE WHEN aap.production_type = 'small_format' THEN aap.small_format_summary ELSE aap.install_summary END as "finishingSummary",
+      CASE WHEN aap.production_type IN ('small_format','plan_printing','poster_printing') THEN aap.small_format_summary ELSE aap.install_summary END as "finishingSummary",
       aap.image_url as "proofImageUrl",
       aap.file_name as "proofFileName",
       aap.sort_order as "sortOrder",

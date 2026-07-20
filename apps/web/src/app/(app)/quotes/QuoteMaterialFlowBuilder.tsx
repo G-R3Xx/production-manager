@@ -120,7 +120,7 @@ type QuoteMaterialFlowBuilderProps = {
   savedProducts?: SavedQuoteProduct[];
 };
 
-type FlowType = "" | "signage" | "small_format" | "service" | "component";
+type FlowType = "" | "signage" | "plan_printing" | "poster_printing" | "small_format" | "service" | "component";
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
 type ServiceType = "" | "pickup" | "delivery" | "install";
@@ -204,6 +204,13 @@ const smallFormatTypes: Array<{ key: SmallFormatType; label: string; icon: strin
   { key: "stickers", label: "Stickers", icon: "◉", description: "Small-format sticker stock, laminate and cutting." }
 ];
 
+const printDepartments: Array<{ key: Exclude<FlowType, "" | "service" | "component">; label: string; description: string }> = [
+  { key: "signage", label: "Large format / signage", description: "ACM, acrylic, corflute, banners, SAV, vinyl and signs." },
+  { key: "plan_printing", label: "Plan printing", description: "Architectural plans, drawings, CAD sheets and document sets." },
+  { key: "poster_printing", label: "Poster printing", description: "Posters, presentation prints, photo prints and display prints." },
+  { key: "small_format", label: "Small format / print", description: "Cards, flyers, brochures, booklets, NCR and stickers." }
+];
+
 const defaultSignageSizePresets: QuoteSizePreset[] = [
   { label: "450 × 600 mm", width: "450", height: "600" },
   { label: "600 × 900 mm", width: "600", height: "900" },
@@ -218,6 +225,23 @@ const defaultSmallSizePresets: QuoteSizePreset[] = [
   { label: "A5 148 × 210", width: "148", height: "210" },
   { label: "A4 210 × 297", width: "210", height: "297" },
   { label: "A3 297 × 420", width: "297", height: "420" }
+];
+
+const defaultPlanSizePresets: QuoteSizePreset[] = [
+  { label: "A4 210 × 297", width: "210", height: "297" },
+  { label: "A3 297 × 420", width: "297", height: "420" },
+  { label: "A2 420 × 594", width: "420", height: "594" },
+  { label: "A1 594 × 841", width: "594", height: "841" },
+  { label: "A0 841 × 1189", width: "841", height: "1189" }
+];
+
+const defaultPosterSizePresets: QuoteSizePreset[] = [
+  { label: "A3 297 × 420", width: "297", height: "420" },
+  { label: "A2 420 × 594", width: "420", height: "594" },
+  { label: "A1 594 × 841", width: "594", height: "841" },
+  { label: "A0 841 × 1189", width: "841", height: "1189" },
+  { label: "600 × 900 mm", width: "600", height: "900" },
+  { label: "900 × 1200 mm", width: "900", height: "1200" }
 ];
 
 const printMethods: Array<{ key: Exclude<PrintMethod, "">; label: string; icon: string; description: string }> = [
@@ -370,6 +394,23 @@ function isSmallFormatStock(material: QuoteMaterial): boolean {
   const signageWords = ["acm", "aluminium composite", "aluminum composite", "acrylic", "perspex", "pmma", "corflute", "correx", "pvc", "foamboard", "foam board", "banner", "sav", "vinyl", "laminate"];
   if (signageWords.some((word) => text.includes(word))) return false;
   return type.includes("paper") || type.includes("card") || type.includes("small") || text.includes("paper") || text.includes("card") || text.includes("gsm") || text.includes("ncr") || text.includes("carbon") || text.includes("bond") || purchaseUom.includes("ream");
+}
+
+function isPlanPrintingStock(material: QuoteMaterial): boolean {
+  const type = String(material.materialType ?? "").toLowerCase();
+  const text = materialText(material);
+  const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
+  const planWords = ["plan", "plans", "drawing", "drawings", "cad", "bond", "plain paper", "copy paper", "engineering", "architectural"];
+  if (planWords.some((word) => text.includes(word) || type.includes(word))) return true;
+  return isSmallFormatStock(material) && (purchaseUom.includes("sheet") || purchaseUom.includes("ream") || text.includes("paper") || text.includes("gsm"));
+}
+
+function isPosterPrintingStock(material: QuoteMaterial): boolean {
+  const type = String(material.materialType ?? "").toLowerCase();
+  const text = materialText(material);
+  const posterWords = ["poster", "photo", "satin", "gloss", "matte", "matt", "presentation", "display", "synthetic paper", "polypropylene", "pp paper"];
+  if (posterWords.some((word) => text.includes(word) || type.includes(word))) return true;
+  return isPrintRollMaterial(material) || isSmallFormatStock(material);
 }
 
 function isRollMaterial(material: QuoteMaterial): boolean {
@@ -715,10 +756,31 @@ function normaliseSizePresets(presets: QuoteSizePreset[] | null | undefined, fal
   return cleaned.length > 0 ? cleaned : fallback;
 }
 
+function isPrintDepartmentFlow(value: FlowType): boolean {
+  return value === "plan_printing" || value === "poster_printing";
+}
+
+function flowTypeLabel(value: FlowType): string {
+  if (value === "signage") return "Large format / signage";
+  if (value === "plan_printing") return "Plan printing";
+  if (value === "poster_printing") return "Poster printing";
+  if (value === "small_format") return "Small format / print";
+  if (value === "component") return "Custom component";
+  if (value === "service") return "Pickup / delivery / install";
+  return "Choose later";
+}
+
+function flowDepartmentProductName(value: FlowType): string {
+  if (value === "plan_printing") return "Plan Printing";
+  if (value === "poster_printing") return "Poster Printing";
+  return flowTypeLabel(value);
+}
+
 export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [] }: QuoteMaterialFlowBuilderProps) {
   const [builderMode, setBuilderMode] = useState<BuilderMode>("quick");
   const [activeStep, setActiveStep] = useState<StepKey>("base");
   const [flowType, setFlowType] = useState<FlowType>("signage");
+  const isPrintDepartment = isPrintDepartmentFlow(flowType);
 
   const [baseType, setBaseType] = useState<BaseType | "">("");
   const [thickness, setThickness] = useState("");
@@ -786,6 +848,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const monoRatePerSqm = numberValue(pricingSettings?.monoRatePerSqm, defaultMonoRatePerSqm);
   const signageSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.signageSizePresets, defaultSignageSizePresets), [pricingSettings?.signageSizePresets]);
   const smallSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.smallSizePresets, defaultSmallSizePresets), [pricingSettings?.smallSizePresets]);
+  const planSizePresets = useMemo(() => defaultPlanSizePresets, []);
+  const posterSizePresets = useMemo(() => defaultPosterSizePresets, []);
   const inkChoices = useMemo<Array<{ key: Exclude<InkChoice, "">; label: string; icon: string; description: string }>>(() => [
     { key: "cmyk", label: "CMYK", icon: "●", description: `${money(inkRatePerSqm)}/m² colour ink charge.` },
     { key: "white", label: "White", icon: "○", description: `${money(inkRatePerSqm)}/m² white ink charge.` },
@@ -815,6 +879,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const rollMedia = useMemo(() => materials.filter(isPrintRollMaterial), [materials]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
   const smallStocks = useMemo(() => materials.filter(isSmallFormatStock), [materials]);
+  const planPrintingStocks = useMemo(() => {
+    const matched = materials.filter(isPlanPrintingStock);
+    return matched.length > 0 ? matched : smallStocks;
+  }, [materials, smallStocks]);
+  const posterPrintingStocks = useMemo(() => {
+    const matched = materials.filter(isPosterPrintingStock);
+    return matched.length > 0 ? matched : [...rollMedia, ...smallStocks];
+  }, [materials, rollMedia, smallStocks]);
+  const departmentStocks = flowType === "plan_printing" ? planPrintingStocks : flowType === "poster_printing" ? posterPrintingStocks : smallStocks;
   const customSmallStock = useMemo<QuoteMaterial | undefined>(() => {
     if (!customSmallStockEnabled || !customSmallStockName.trim()) return undefined;
     return {
@@ -834,7 +907,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   }, [customSmallStockEnabled, customSmallStockName, customSmallStockSupplier, customSmallStockCost, customSmallStockWidthMm, customSmallStockLengthMm, customSmallStockGsm]);
   const selectedMedia = rollMedia.find((material) => material.id === mediaId);
   const selectedLaminate = laminateMaterials.find((material) => material.id === laminateId);
-  const selectedSmallStock = customSmallStockEnabled ? customSmallStock : smallStocks.find((material) => material.id === smallStockId);
+  const selectedSmallStock = customSmallStockEnabled ? customSmallStock : departmentStocks.find((material) => material.id === smallStockId);
   const selectedSmallCoating = laminateMaterials.find((material) => material.id === smallCoatingId);
   const eyeletMaterial = materials.find((material) => materialText(material).includes("eyelet")) ?? materials.find((material) => String(material.materialType ?? "").toLowerCase().includes("fix"));
 
@@ -882,6 +955,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       return next;
     }
 
+
+    if (isPrintDepartment) {
+      next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: "2" });
+      next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: "3" });
+      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: "4" });
+      next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "5" });
+      next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "6" });
+      next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "7" });
+      next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: "8" });
+      next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: "9" });
+      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0))), icon: "→" });
+      next.push({ key: "review", label: "Review", complete: Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && serviceType), icon: "✓" });
+      return next;
+    }
+
     if (flowType === "small_format") {
       next.push({ key: "small_type", label: "Print item", complete: Boolean(smallType), icon: "2" });
       if (isDuplicateBook) next.push({ key: "ncr_details", label: "Book details", complete: ncrDetailsComplete, icon: "3" });
@@ -917,7 +1005,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return next;
-  }, [flowType, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
+  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -979,7 +1067,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setComponentLabourLabel("Build / assembly labour");
     setComponentLabourHours("");
     setUnitPriceOverridden(false);
-    setActiveStep(nextFlow === "small_format" ? "small_type" : nextFlow === "service" ? "service_type" : nextFlow === "component" ? "component_details" : "base");
+    setActiveStep(nextFlow === "small_format" ? "small_type" : isPrintDepartmentFlow(nextFlow) ? "small_stock" : nextFlow === "service" ? "service_type" : nextFlow === "component" ? "component_details" : "base");
   }
 
   function resetAfterBase(nextBase: BaseType) {
@@ -1180,6 +1268,68 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
     }
 
+    if (isPrintDepartment) {
+      const itemArea = areaSqm;
+      if (selectedSmallStock && itemArea > 0 && quantityNumber > 0) {
+        if (isRollMaterial(selectedSmallStock)) {
+          const lm = roundedRollMetresForQuantity(width, height, selectedSmallStock, quantityNumber);
+          const rate = rollRate(selectedSmallStock);
+          const amount = lm.amount / quantityNumber;
+          rows.push({
+            label: flowType === "plan_printing" ? "Plan media" : "Poster media",
+            detail: selectedSmallStock.name,
+            amount,
+            unit: "lm",
+            rate: rate.rate,
+            cost: amount * rate.rate,
+            note: [lm.note, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
+          });
+        } else {
+          const stockDimensions = bestSheetDimensions(selectedSmallStock);
+          const parentWidth = stockDimensions?.width ?? 0;
+          const parentHeight = stockDimensions?.length ?? 0;
+          const perSheet = piecesPerSheet(parentWidth, parentHeight, width, height);
+          const requiredPieces = quantityNumber;
+          const sheets = perSheet > 0 ? Math.ceil(requiredPieces / perSheet) : requiredPieces;
+          const rate = sheetUnitRate(selectedSmallStock);
+          const amount = sheets / quantityNumber;
+          rows.push({
+            label: flowType === "plan_printing" ? "Plan stock" : "Poster stock",
+            detail: selectedSmallStock.name,
+            amount,
+            unit: "sheet",
+            rate: rate.rate,
+            cost: amount * rate.rate,
+            note: perSheet > 0 ? `${perSheet} up per parent sheet · ${sheets} sheet${sheets === 1 ? "" : "s"} total for qty ${usage(quantityNumber)}` : rate.note ?? "parent sheet size missing"
+          });
+        }
+      }
+
+      if (artworkChoice === "required") {
+        const hours = numberValue(artworkHours, 0);
+        if (hours > 0) rows.push({ label: "Artwork", detail: "Artwork/design time", amount: hours / quantityNumber, unit: "hr", rate: labourRate, cost: (hours / quantityNumber) * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+      }
+
+      if (smallPrintColour && itemArea > 0) {
+        const printedArea = itemArea * sideMultiplier;
+        if (smallPrintColour === "mono") rows.push({ label: "Mono print", detail: flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: monoRatePerSqm, cost: printedArea * monoRatePerSqm, note: sides === "double" ? "double sided" : undefined });
+        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: inkRatePerSqm, cost: printedArea * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
+        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: inkRatePerSqm * 2, cost: printedArea * inkRatePerSqm * 2, note: sides === "double" ? "double sided" : undefined });
+      }
+
+      if (selectedSmallCoating && smallCoatingId !== "none" && itemArea > 0) {
+        const rate = isRollMaterial(selectedSmallCoating) ? rollRate(selectedSmallCoating) : sheetUnitRate(selectedSmallCoating);
+        const amount = itemArea * sideMultiplier;
+        rows.push({ label: "Coating / laminate", detail: selectedSmallCoating.name, amount, unit: "sqm", rate: rate.rate, cost: amount * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
+      }
+
+      for (const item of smallFinishingOptions) {
+        if (!smallFinishings.includes(item.key)) continue;
+        const hours = numberValue(smallFinishingHours[item.key], 0);
+        if (hours > 0) rows.push({ label: item.label, detail: "Finishing labour", amount: hours / quantityNumber, unit: "hr", rate: labourRate, cost: (hours / quantityNumber) * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+      }
+    }
+
     if (flowType === "small_format") {
       const itemArea = areaSqm;
       if (selectedSmallStock && itemArea > 0 && quantityNumber > 0) {
@@ -1280,17 +1430,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, printed, printSetupHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, printed, printSetupHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
   const lineProductTypes = flowType === "small_format"
     ? ["small_format", selectedSmallType?.label ?? ""]
-    : flowType === "service"
-      ? ["service", serviceLabel ?? ""]
-      : flowType === "component"
-        ? ["component", componentName.trim()]
-        : ["signage", selectedBase?.label ?? "", baseType];
+    : flowType === "plan_printing"
+      ? ["plan_printing", "Plan printing"]
+      : flowType === "poster_printing"
+        ? ["poster_printing", "Poster printing"]
+        : flowType === "service"
+          ? ["service", serviceLabel ?? ""]
+          : flowType === "component"
+            ? ["component", componentName.trim()]
+            : ["signage", selectedBase?.label ?? "", baseType];
   const clientDiscount = resolveClientDiscountPercent({
     rules: pricingSettings?.clientDiscountRules,
     defaultDiscount: pricingSettings?.clientDefaultDiscountPercent,
@@ -1372,7 +1526,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ? serviceLabel ?? "Service item"
     : flowType === "small_format"
       ? selectedSmallType?.label ?? "Small format item"
-      : selectedBase?.label ?? "Signage item";
+      : flowType === "plan_printing"
+        ? "Plan Printing"
+        : flowType === "poster_printing"
+          ? "Poster Printing"
+          : selectedBase?.label ?? "Signage item";
 
   const optionSummary = flowType === "component"
     ? [
@@ -1390,6 +1548,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       serviceType === "install" && installHours ? `${installHours}hr install` : null,
       serviceType === "install" && travelCharge ? `Travel ${money(numberValue(travelCharge, 0))}` : null,
       serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
+    ].filter(Boolean).join(" · ")
+    : isPrintDepartment
+      ? [
+      flowDepartmentProductName(flowType),
+      selectedSmallStock?.name ? `Stock: ${selectedSmallStock.name}` : null,
+      finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
+      artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
+      smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
+      selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
+      smallFinishingSummary ? `Finishing: ${smallFinishingSummary}` : null,
+      dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
+      `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
     : flowType === "small_format"
       ? [
@@ -1431,9 +1602,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ? Boolean(componentName.trim() && componentHasCost)
     : flowType === "service"
     ? Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
-    : flowType === "small_format"
-      ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
-      : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0) && dispatchComplete);
+    : isPrintDepartment
+      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
+      : flowType === "small_format"
+        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
+        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0) && dispatchComplete);
 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
@@ -1541,7 +1714,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     const sizePresetValue = widthMm && heightMm ? `${widthMm}x${heightMm}` : "";
     const signagePresets = signageSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
     const smallPresets = smallSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
-    const currentPresets = flowType === "small_format" ? smallPresets : signagePresets;
+    const planPresets = planSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
+    const posterPresets = posterSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
+    const currentPresets = flowType === "small_format" ? smallPresets : flowType === "plan_printing" ? planPresets : flowType === "poster_printing" ? posterPresets : signagePresets;
 
     return (
       <div style={{ display: "grid", gap: 0 }}>
@@ -1564,8 +1739,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <label style={{ display: "grid", gap: 6 }}>
                 <b>Quote type</b>
                 <select value={flowType} onChange={(event) => chooseQuickFlow(event.target.value as FlowType)} style={inputStyle}>
-                  <option value="signage">Large format / signage</option>
-                  <option value="small_format">Small format / print</option>
+                  {printDepartments.map((department) => <option key={department.key} value={department.key}>{department.label}</option>)}
                   <option value="component">Custom component / assembly</option>
                 </select>
               </label>
@@ -1599,6 +1773,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               </div>
             ) : null}
 
+            {isPrintDepartment ? (
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
+                <label style={{ display: "grid", gap: 6 }}><b>Department</b><input value={flowDepartmentProductName(flowType)} readOnly style={{ ...inputStyle, background: "#f8fafc" }} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => { setSides(event.target.value as SidesChoice); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder={flowType === "plan_printing" ? "eg 841" : "eg 600"} type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder={flowType === "plan_printing" ? "eg 1189" : "eg 900"} type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => { setSmallPrintColour(event.target.value as SmallPrintColour); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose print colour</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Coating / laminate</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose coating</option><option value="none">No coating</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+              </div>
+            ) : null}
+
+
             {flowType === "small_format" ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
                 <label style={{ display: "grid", gap: 6 }}><b>Product type</b><select value={smallType} onChange={(event) => setSmallType(event.target.value as SmallFormatType)} style={inputStyle}><option value="">Choose product type</option>{smallFormatTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
@@ -1623,7 +1811,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               </div>
             ) : null}
 
-            {flowType === "small_format" && !isDuplicateBook ? (
+            {(flowType === "small_format" || isPrintDepartment) && !isDuplicateBook ? (
               <div style={{ display: "grid", gap: 10 }}>
                 <strong>Finishing</strong>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
@@ -1652,11 +1840,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <aside style={{ position: "sticky", top: 18, display: "grid", gap: 14 }}>
             <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
               <strong>Current item</strong>
-              <SummaryRow label="Type" value={flowType === "small_format" ? "Small format / print" : flowType === "component" ? "Custom component" : "Large format / signage"} />
+              <SummaryRow label="Type" value={flowTypeLabel(flowType)} />
               {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
               {flowType === "signage" && sheetUseLabel ? <SummaryRow label="Sheet use" value={sheetUseLabel} /> : null}
               {flowType === "signage" && rollUseLabel ? <SummaryRow label="Roll use" value={rollUseLabel} /> : null}
-              {flowType === "small_format" ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
+              {flowType === "small_format" || isPrintDepartment ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
               <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
               <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
@@ -2458,7 +2646,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ? "linear-gradient(135deg, #064e3b 0%, #059669 58%, #34d399 100%)"
     : flowType === "small_format"
       ? "linear-gradient(135deg, #581c87 0%, #7c3aed 58%, #c084fc 100%)"
-      : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
+      : flowType === "plan_printing"
+        ? "linear-gradient(135deg, #064e3b 0%, #0f766e 58%, #5eead4 100%)"
+        : flowType === "poster_printing"
+          ? "linear-gradient(135deg, #7f1d1d 0%, #dc2626 58%, #fca5a5 100%)"
+          : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
 
   return (
     <form action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
@@ -2502,7 +2694,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         <aside style={{ display: "grid", gap: 14, alignSelf: "start" }}>
           <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
             <strong>Current build</strong>
-            <SummaryRow label="Flow" value={flowType === "component" ? "Custom component / assembly" : flowType === "service" ? "Pickup / delivery / install" : flowType === "small_format" ? "Small format" : flowType === "signage" ? "Signage" : undefined} />
+            <SummaryRow label="Flow" value={flowType ? flowTypeLabel(flowType) : undefined} />
             {flowType === "component" ? (
               <>
                 <SummaryRow label="Component" value={componentName || undefined} />

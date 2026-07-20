@@ -94,13 +94,24 @@ function cleanFinishingSummary(value: string | null | undefined): string | null 
   return cleanSummaryLines(value);
 }
 
+function productionTypeLabel(value: string | null | undefined): string {
+  if (value === "small_format") return "Small format";
+  if (value === "plan_printing") return "Plan printing";
+  if (value === "poster_printing") return "Poster printing";
+  return "Install / finishing";
+}
+
+function isPrintOnlyProductionType(value: string | null | undefined): boolean {
+  return value === "small_format" || value === "plan_printing" || value === "poster_printing";
+}
+
 function detailsList(page: ArtworkApprovalPageRecord): Array<{ label: string; value: string | null }> {
   const rows = [
     { label: "Qty", value: page.quantity },
     { label: "Size", value: page.sizeSummary },
     { label: "Colours", value: cleanSummaryLines(page.colourSummary) },
     { label: "Substrate / stock", value: cleanSubstrateSummary(page.substrateSummary) },
-    { label: page.productionType === "small_format" ? "Small format" : "Install / finishing", value: page.productionType === "small_format" ? cleanSummaryLines(page.smallFormatSummary) : cleanFinishingSummary(page.installSummary) }
+    { label: productionTypeLabel(page.productionType), value: isPrintOnlyProductionType(page.productionType) ? cleanSummaryLines(page.smallFormatSummary) : cleanFinishingSummary(page.installSummary) }
   ];
   return rows.filter((row) => String(row.value ?? "").trim().length > 0);
 }

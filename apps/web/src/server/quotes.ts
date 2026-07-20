@@ -612,13 +612,23 @@ function normaliseForSearch(value: string | null | undefined): string {
   return String(value ?? "").toLowerCase().replace(/[_/\\-]+/g, " ").replace(/\s+/g, " ").trim();
 }
 
-export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes">): "signage" | "small_format" | null {
+type ArtworkQuoteLineKind = "signage" | "plan_printing" | "poster_printing" | "small_format";
+
+export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes">): ArtworkQuoteLineKind | null {
   const product = normaliseForSearch(line.productName);
   const combined = normaliseForSearch([line.productName, line.optionSummary, line.notes].filter(Boolean).join(" · "));
 
   if (/\b(pickup|delivery|install|installation|freight|courier)\b/.test(product)) return null;
   if (/\b(pickup|delivery charge|client collects|installer|install hr|install\b|travel)\b/.test(combined)) return null;
   if (/\b(custom component|assembly|parts:)\b/.test(combined)) return null;
+
+  if (/\b(plan printing|plans?|drawing|drawings|cad|architectural|engineering|blueprint|a0|a1|a2|a3|a4)\b/.test(combined)) {
+    return "plan_printing";
+  }
+
+  if (/\b(poster printing|poster|posters|photo print|photo prints|presentation print|display print|display prints)\b/.test(combined)) {
+    return "poster_printing";
+  }
 
   if (/\b(card|cards|business card|flyer|flyers|brochure|brochures|booklet|booklets|book\b|books\b|ncr|duplicate|triplicate|quadruplicate|carbon|gsm|cello|fold|folding|score|creasing|staple|saddle stitch|sequential numbering|padding|tape colour|cover:)\b/.test(combined)) {
     return "small_format";
@@ -718,8 +728,11 @@ function uniqueSpecificSummaryLines(lines: Array<string | null | undefined>): st
   });
 }
 
-function titleCaseSignCode(index: number, kind: "signage" | "small_format"): string {
-  return kind === "small_format" ? `P${index}` : `S${index}`;
+function titleCaseSignCode(index: number, kind: ArtworkQuoteLineKind): string {
+  if (kind === "small_format") return `P${index}`;
+  if (kind === "plan_printing") return `PL${index}`;
+  if (kind === "poster_printing") return `PO${index}`;
+  return `S${index}`;
 }
 
 function escapeSvg(value: string): string {
@@ -733,7 +746,7 @@ function placeholderArtworkImage(line: QuoteLineRecord, code: string): string {
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
 
-function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kind: "signage" | "small_format"): ArtworkApprovalPageInput {
+function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kind: ArtworkQuoteLineKind): ArtworkApprovalPageInput {
   const parts = optionParts(line);
   const combined = [line.productName, line.optionSummary, line.notes].filter(Boolean).join(" · ");
   const size = extractFinishedSizeFromQuoteLine(line) ?? extractFirstMatch(combined, [/(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?\s*mm)/i, /(\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?)/i]);
@@ -749,7 +762,7 @@ function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kin
   const fallbackSubstrate = uniqueSpecificSummaryLines([line.productName, ...materialParts]).join("\n") || line.productName;
 
   return {
-    title: line.productName || `${kind === "small_format" ? "Small format" : "Sign"} proof`,
+    title: line.productName || `${kind === "small_format" ? "Small format" : kind === "plan_printing" ? "Plan printing" : kind === "poster_printing" ? "Poster printing" : "Sign"} proof`,
     signCode: code,
     description: line.optionSummary || line.notes || null,
     imageUrl: placeholderArtworkImage(line, code),
@@ -762,7 +775,7 @@ function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kin
     sizeSummary: size,
     substrateSummary: fallbackSubstrate || null,
     installSummary: kind === "signage" && finishingParts.length ? finishingParts.join("\n") : null,
-    smallFormatSummary: kind === "small_format" ? parts.join("\n") : null,
+    smallFormatSummary: kind !== "signage" ? parts.join("\n") : null,
     sourceQuoteLineId: line.id
   };
 }
