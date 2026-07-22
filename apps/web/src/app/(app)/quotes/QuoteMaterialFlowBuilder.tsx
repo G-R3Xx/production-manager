@@ -253,10 +253,11 @@ const printMethods: Array<{ key: Exclude<PrintMethod, "">; label: string; icon: 
 
 
 const finishingOptions = [
-  { key: "jingwei", label: "Jingwei cutting", icon: "✦", description: "Add cutting/plotting labour." },
-  { key: "router", label: "Router / CNC cut", icon: "⚙", description: "Add router or CNC cutting labour." },
-  { key: "drill_holes", label: "Drill holes", icon: "●", description: "Add drilling labour." },
-  { key: "eyelets", label: "Eyelets", icon: "◎", description: "Ask placement/quantity and charge per eyelet." }
+  { key: "jingwei", label: "Jingwei cutting", icon: "✦", description: "Cutting/plotting on the Jingwei table." },
+  { key: "eyelets", label: "Eyelets", icon: "◎", description: "Ask placement/quantity and charge per eyelet." },
+  { key: "vinyl_cutting", label: "Vinyl cutting", icon: "✂", description: "Cut vinyl / lettering / decals." },
+  { key: "print_vinyl_application", label: "Print/vinyl application", icon: "▰", description: "Apply printed vinyl, cut vinyl or transfer to substrate." },
+  { key: "tape_hem_banner", label: "Tape/Hem Banner", icon: "═", description: "Banner hem tape, hemming and edge finishing." }
 ];
 
 const smallFinishingOptions = [
@@ -340,6 +341,17 @@ function usage(value: number): string {
   if (value < 0.01) return value.toFixed(4);
   if (value < 1) return value.toFixed(3);
   return value.toFixed(2);
+}
+
+function minutesToHours(value: string | number | null | undefined): number {
+  const minutes = numberValue(value, 0);
+  return minutes > 0 ? minutes / 60 : 0;
+}
+
+function minutesLabel(value: string | number | null | undefined): string {
+  const minutes = numberValue(value, 0);
+  if (minutes <= 0) return "";
+  return `${usage(minutes)}min`;
 }
 
 function multiplierValue(value: string | number | null | undefined, fallback: number): number {
@@ -1256,14 +1268,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             const rate = eachRate(eyeletMaterial);
             rows.push({ label: "Eyelets", detail: eyeletMaterial.name, amount: qty, unit: "each", rate: rate.rate, cost: qty * rate.rate, note: [eyeletPresetLabel, rate.note].filter(Boolean).join(" · ") || undefined });
           }
-          const eyeletHours = numberValue(finishingHours[item.key], 0);
-          if (qty > 0 && eyeletHours > 0) rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount: qty * eyeletHours, unit: "hr", rate: labourRate, cost: qty * eyeletHours * labourRate, note: `${usage(eyeletHours)}hr each` });
+          const eyeletMinutes = numberValue(finishingHours[item.key], 0);
+          const eyeletHours = eyeletMinutes > 0 ? eyeletMinutes / 60 : 0;
+          if (qty > 0 && eyeletHours > 0) rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount: qty * eyeletHours, unit: "hr", rate: labourRate, cost: qty * eyeletHours * labourRate, note: `${minutesLabel(eyeletMinutes)} each` });
           continue;
         }
-        const hours = numberValue(finishingHours[item.key], 0);
+        const minutes = numberValue(finishingHours[item.key], 0);
+        const hours = minutesToHours(minutes);
         if (hours > 0) {
           const amount = hours / quantityNumber;
-          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line` : minutesLabel(minutes) });
         }
       }
     }
@@ -1372,8 +1386,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
-        const hours = numberValue(smallFinishingHours[item.key], 0);
-        if (hours > 0) rows.push({ label: item.label, detail: "Bindery / finishing labour", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+        const minutes = numberValue(smallFinishingHours[item.key], 0);
+        const hours = minutesToHours(minutes);
+        if (hours > 0) rows.push({ label: item.label, detail: "Bindery / finishing labour", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate, note: minutesLabel(minutes) });
       }
     }
 
@@ -2354,14 +2369,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       const eyeletsSelected = finishings.includes("eyelets");
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title="Choose finishing" text="Tick all finishing processes required, then enter the labour time for anything selected." />
+          <StepIntro icon="•" title="Choose finishing" text="Tick all finishing processes required, then enter the labour time in minutes." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
             {finishingOptions.map((item) => (
               <button key={item.key} type="button" onClick={() => toggleFinishing(item.key)} style={cardButtonStyle(finishings.includes(item.key), "#f59e0b")}>
                 <span style={{ fontSize: 30 }}>{item.icon}</span>
                 <strong>{item.label}</strong>
                 <span style={{ color: "#64748b" }}>{item.description}</span>
-                <span style={{ fontWeight: 900 }}>Enter hours when selected</span>
+                <span style={{ fontWeight: 900 }}>Enter minutes when selected</span>
               </button>
             ))}
           </div>
@@ -2576,7 +2591,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <span style={{ fontSize: 30 }}>{item.icon}</span>
                 <strong>{item.label}</strong>
                 <span style={{ color: "#64748b" }}>{item.description}</span>
-                <span style={{ fontWeight: 900 }}>Enter hours when selected</span>
+                <span style={{ fontWeight: 900 }}>Enter minutes when selected</span>
               </button>
             ))}
           </div>
@@ -2829,16 +2844,16 @@ function SelectedLabourHours<T extends { key: string; label: string }>({ options
   if (chosen.length === 0) return null;
   return (
     <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 14, background: "#f8fbff", display: "grid", gap: 10 }}>
-      <strong>Labour time for selected finishing</strong>
+      <strong>Labour minutes for selected finishing</strong>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
         {chosen.map((item) => (
           <label key={item.key} style={{ display: "grid", gap: 6 }}>
-            <b>{item.label} {item.key === eachLabelFor ? "hours each" : "hours"}</b>
-            <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder={item.key === eachLabelFor ? "eg 0.03" : "eg 0.25"} type="number" min="0" step="0.01" style={inputStyle} />
+            <b>{item.label} {item.key === eachLabelFor ? "minutes each" : "minutes"}</b>
+            <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder={item.key === eachLabelFor ? "eg 2" : "eg 15"} type="number" min="0" step="1" style={inputStyle} />
           </label>
         ))}
       </div>
-      <span style={{ color: "#475467", fontSize: 13 }}>All labour is charged at {money(labourRate)}/hr before global markup and profit.</span>
+      <span style={{ color: "#475467", fontSize: 13 }}>Enter normal minutes. The system converts them to labour at {money(labourRate)}/hr before global markup and profit.</span>
     </div>
   );
 }
