@@ -442,6 +442,40 @@ export async function deleteQuoteLineForTenant(tenantId: string, quoteId: string
   `, [tenantId, quoteId, lineId]);
 }
 
+export async function updateQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string, input: {
+  productName: string;
+  optionSummary?: string | null;
+  quantity: string;
+  unitPrice: string;
+  notes?: string | null;
+}): Promise<void> {
+  await pool.query(`
+    UPDATE sales.quote_lines ql
+    SET product_name = $4::varchar,
+        option_summary = $5::text,
+        quantity = $6::numeric,
+        unit_price = $7::numeric,
+        line_total = ($6::numeric * $7::numeric),
+        notes = $8::text,
+        updated_at = now()
+    FROM sales.quote_drafts qd
+    WHERE ql.quote_id = qd.id
+      AND qd.tenant_id = $1::uuid
+      AND ql.quote_id = $2::uuid
+      AND ql.id = $3::uuid
+  `, [
+    tenantId,
+    quoteId,
+    lineId,
+    input.productName,
+    input.optionSummary ?? null,
+    normaliseMoney(input.quantity, "1"),
+    normaliseMoney(input.unitPrice, "0"),
+    input.notes ?? null
+  ]);
+}
+
+
 export async function markQuoteSentForTenant(tenantId: string, quoteId: string): Promise<void> {
   await ensureQuoteLifecycleColumns();
   await pool.query(`

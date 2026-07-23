@@ -9,7 +9,7 @@ import { listProductsForTenant } from "@/server/products";
 import { listConfiguratorTemplatesForTenant } from "@/server/configurators";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, updateQuoteLineAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
@@ -122,6 +122,8 @@ function cardStyle() {
 const inputStyle = { minHeight: 44, borderRadius: 14, border: "1px solid #cfd9e8", padding: "0 14px", width: "100%", boxSizing: "border-box", background: "#fff" } as const;
 const textareaStyle = { minHeight: 110, borderRadius: 14, border: "1px solid #cfd9e8", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit", background: "#fff" } as const;
 const buttonStyle = { minHeight: 44, borderRadius: 14, border: "none", background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 16px" } as const;
+const labelStyle = { display: "grid", gap: 6 } as const;
+const labelTextStyle = { fontSize: 12, textTransform: "uppercase", letterSpacing: "0.06em", color: "#475467", fontWeight: 950 } as const;
 
 function parseMoney(value: string | null | undefined): number {
   const parsed = Number(String(value ?? "0").replace(/[$,]/g, ""));
@@ -152,6 +154,34 @@ function publicQuoteUrl(token: string | null | undefined): string {
   return `${base}/public/quotes/${token}`;
 }
 
+function splitQuoteLineSummary(summary: string | null | undefined): string[] {
+  return String(summary ?? "")
+    .split(/\s+[·•]\s+/g)
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function cleanQuoteLineAmount(value: string | number | null | undefined): string {
+  const parsed = parseMoney(String(value ?? "0"));
+  if (!Number.isFinite(parsed)) return String(value ?? "");
+  return parsed.toFixed(2);
+}
+
+function quoteLineBreakdownRows(line: { optionSummary: string | null; quantity: string; unitPrice: string; lineTotal: string; notes: string | null }): { label: string; value: string }[] {
+  const rows = splitQuoteLineSummary(line.optionSummary).map((part) => {
+    const colonIndex = part.indexOf(":");
+    if (colonIndex > 0 && colonIndex < 36) {
+      return { label: part.slice(0, colonIndex).trim(), value: part.slice(colonIndex + 1).trim() };
+    }
+    return { label: "Detail", value: part };
+  });
+
+  rows.push({ label: "Quantity", value: line.quantity });
+  rows.push({ label: "Unit price", value: formatMoney(parseMoney(line.unitPrice)) });
+  rows.push({ label: "Line total", value: formatMoney(parseMoney(line.lineTotal)) });
+  if (line.notes) rows.push({ label: "Notes", value: line.notes });
+  return rows;
+}
 
 function myobOrderTone(status: string | null | undefined): { bg: string; fg: string; border: string; label: string } {
   if (status === "synced") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6", label: "MYOB order synced" };
@@ -460,23 +490,78 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
               <div style={{ display: "grid", gap: 10 }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <h4 style={{ margin: 0 }}>Saved quote lines</h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Saved lines are snapshots. Change the card flow above, then save a new line or remove an old one.</p>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Click a saved line to see the breakdown, edit wording/pricing, or remove it.</p>
                 </div>
-                {quoteLines.map((line) => (
-                  <div key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 14, display: "grid", gap: 10, background: "#fbfdff" }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                      <div style={{ display: "grid", gap: 4 }}>
-                        <strong>{line.productName}</strong>
-                        <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${line.unitPrice}`, `Total $${line.lineTotal}`].filter(Boolean).join(" · ")}</div>
+                {quoteLines.map((line) => {
+                  const breakdownRows = quoteLineBreakdownRows(line);
+                  return (
+                    <details key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 0, background: "#fbfdff", overflow: "hidden" }}>
+                      <summary style={{ listStyle: "none", cursor: "pointer", padding: 14 }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                          <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
+                            <strong>{line.productName}</strong>
+                            <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
+                          </div>
+                          <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
+                        </div>
+                      </summary>
+
+                      <div style={{ borderTop: "1px solid #e5edf7", padding: 14, display: "grid", gap: 14, background: "#ffffff" }}>
+                        <section style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 12, background: "#f8fafc", display: "grid", gap: 10 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                            <strong>Line breakdown</strong>
+                            <span style={{ color: "#475467", fontSize: 13 }}>Created {formatDateTime(line.createdAt)}</span>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                            {breakdownRows.map((row, index) => (
+                              <div key={`${row.label}-${index}`} style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 10, display: "grid", gap: 3 }}>
+                                <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b", fontWeight: 950 }}>{row.label}</span>
+                                <strong style={{ lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{row.value}</strong>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+
+                        <form action={updateQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 16, padding: 12, background: "#f8fbff", display: "grid", gap: 10 }}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <input type="hidden" name="lineId" value={line.id} />
+                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Line title</span>
+                              <input name="productName" defaultValue={line.productName} style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Quantity</span>
+                              <input name="quantity" defaultValue={line.quantity} inputMode="decimal" style={inputStyle} />
+                            </label>
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Unit price</span>
+                              <input name="unitPrice" defaultValue={cleanQuoteLineAmount(line.unitPrice)} inputMode="decimal" style={inputStyle} />
+                            </label>
+                          </div>
+                          <label style={labelStyle}>
+                            <span style={labelTextStyle}>Client-facing / production summary</span>
+                            <textarea name="optionSummary" defaultValue={line.optionSummary ?? ""} style={{ ...textareaStyle, minHeight: 74 }} />
+                          </label>
+                          <label style={labelStyle}>
+                            <span style={labelTextStyle}>Internal notes</span>
+                            <textarea name="notes" defaultValue={line.notes ?? ""} style={{ ...textareaStyle, minHeight: 66 }} />
+                          </label>
+                          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                            <button type="submit" style={{ ...buttonStyle, background: "#155eef" }}>Save line changes</button>
+                            <span style={{ color: "#64748b", fontSize: 13 }}>Line total recalculates from quantity × unit price.</span>
+                          </div>
+                        </form>
+
+                        <form action={deleteQuoteLineAction} style={{ display: "flex", justifyContent: "flex-end" }}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <input type="hidden" name="lineId" value={line.id} />
+                          <button type="submit" style={{ border: "1px solid #fecaca", background: "#fff", color: "#b42318", borderRadius: 12, padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Remove line</button>
+                        </form>
                       </div>
-                      <form action={deleteQuoteLineAction}>
-                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                        <input type="hidden" name="lineId" value={line.id} />
-                        <button type="submit" style={{ border: "1px solid #fecaca", background: "#fff", color: "#b42318", borderRadius: 12, padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Remove</button>
-                      </form>
-                    </div>
-                  </div>
-                ))}
+                    </details>
+                  );
+                })}
                 {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No saved quote lines yet. Build a line above, then save it to the quote.</p> : null}
               </div>
 

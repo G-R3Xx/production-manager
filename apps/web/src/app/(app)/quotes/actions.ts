@@ -10,6 +10,7 @@ import {
   createQuoteDraftForTenant,
   deleteQuoteLineForTenant,
   markArtworkApprovalSentForTenant,
+  updateQuoteLineForTenant,
   markQuoteSentForTenant,
   removeArtworkApprovalPageForTenant,
   setQuoteDraftStatusForTenant
@@ -118,6 +119,34 @@ export async function deleteQuoteLineAction(formData: FormData): Promise<void> {
 
   redirect(`/quotes?selected=${quoteId}&message=Saved%20quote%20line%20removed`);
 }
+
+export async function updateQuoteLineAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const lineId = String(formData.get("lineId") ?? "").trim();
+  const productName = String(formData.get("productName") ?? "").trim();
+  const quantity = String(formData.get("quantity") ?? "1").trim();
+  const unitPrice = String(formData.get("unitPrice") ?? "0").trim();
+
+  if (!quoteId || !lineId) {
+    redirect("/quotes?error=Select%20a%20saved%20quote%20line%20to%20edit");
+  }
+
+  if (!productName) {
+    redirect(`/quotes?selected=${quoteId}&error=Quote%20line%20title%20is%20required`);
+  }
+
+  await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId, {
+    productName,
+    optionSummary: nullable(formData.get("optionSummary")),
+    quantity: quantity || "1",
+    unitPrice: unitPrice || "0",
+    notes: nullable(formData.get("notes"))
+  });
+
+  redirect(`/quotes?selected=${quoteId}&message=Saved%20quote%20line%20updated`);
+}
+
 
 export async function markQuoteSentAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
