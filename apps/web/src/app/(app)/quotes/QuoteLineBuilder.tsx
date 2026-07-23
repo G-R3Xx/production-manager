@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addQuoteLineAction } from "./actions";
+import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
 
 type QuoteChoice = {
   id?: string | null;
@@ -9,6 +10,10 @@ type QuoteChoice = {
   value?: string | null;
   widthMm?: string | null;
   heightMm?: string | null;
+  showWhen?: {
+    optionKey?: string | null;
+    optionValues?: string[] | null;
+  } | null;
 };
 
 type QuoteQuestion = {
@@ -373,7 +378,7 @@ function isVisible(field: QuoteQuestion, answers: Record<string, string>): boole
 function summaryFor(product: QuoteProduct | undefined, fields: QuoteQuestion[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): string {
   return fields
     .filter((field) => isVisible(field, answers))
-    .filter((field) => field.type !== "quantity" && field.key !== "quantity")
+    .filter((field) => field.key !== "quantity")
     .map((field) => {
       const value = answers[field.key] ?? "";
       if (!value) return "";
@@ -771,6 +776,28 @@ function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: R
     .filter((component) => !component.materialId);
 }
 
+function sanitiseAnswersForAvailableChoices(product: QuoteProduct | undefined, answers: Record<string, string>): Record<string, string> {
+  if (!product) return answers;
+
+  let next = answers;
+  for (const field of product.fields) {
+    const currentValue = String(next[field.key] ?? "");
+    if (!currentValue || !Array.isArray(field.options) || field.options.length === 0) continue;
+
+    const allowedValues = new Set(availableQuoteChoices(field, next).map(quoteChoiceValue));
+    if (isMultiSelectField(field)) {
+      const filtered = selectedValues(currentValue).filter((value) => allowedValues.has(value));
+      const joined = filtered.join(",");
+      if (joined !== currentValue) next = { ...next, [field.key]: joined };
+      continue;
+    }
+
+    if (!allowedValues.has(currentValue)) next = { ...next, [field.key]: "" };
+  }
+
+  return next;
+}
+
 export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings }: QuoteLineBuilderProps) {
   const [selectedProductId, setSelectedProductId] = useState(products[0]?.id ?? "");
   const selectedProduct = useMemo(
@@ -792,7 +819,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     [selectedProduct, answers]
   );
 
-  const quantityField = visibleFields.find((field) => field.type === "quantity" || field.key === "quantity");
+  const quantityField = visibleFields.find((field) => field.key === "quantity");
   const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : "1";
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
   const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct, selectedProduct.fields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
@@ -821,7 +848,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   }
 
   function updateAnswer(key: string, value: string) {
-    setAnswers((current) => ({ ...current, [key]: value }));
+    setAnswers((current) => sanitiseAnswersForAvailableChoices(selectedProduct, { ...current, [key]: value }));
   }
 
   function toggleMultiAnswer(key: string, value: string, checked: boolean) {
@@ -837,7 +864,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         nextValues = nextValues.filter((item) => !isNoneChoice(item));
       }
 
-      return { ...current, [key]: nextValues.join(",") };
+      return sanitiseAnswersForAvailableChoices(selectedProduct, { ...current, [key]: nextValues.join(",") });
     });
   }
 
@@ -935,7 +962,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
               const value = answers[field.key] ?? String(field.defaultValue ?? "");
 
               if (fieldType === "multi_select") {
-                const choices = field.options ?? [];
+                const choices = availableQuoteChoices(field, answers);
                 const checkedValues = selectedValues(value);
 
                 return (
@@ -945,7 +972,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                     {choices.length === 0 ? <small style={{ color: "#667085" }}>No choices set up</small> : null}
                     <div style={{ display: "grid", gap: 8 }}>
                       {choices.map((choice) => {
-                        const choiceValue = String(choice.value ?? choice.label ?? "");
+                        const choiceValue = quoteChoiceValue(choice);
                         const label = choice.label ?? humanize(choiceValue);
                         const checked = checkedValues.includes(choiceValue);
                         return (
@@ -972,7 +999,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                       { label: "Yes", value: "yes" },
                       { label: "No", value: "no" }
                     ]
-                  : field.options ?? [];
+                  : availableQuoteChoices(field, answers);
 
                 return (
                   <label key={field.id ?? field.key} style={labelStyle}>
@@ -987,7 +1014,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                       <option value="">Choose {String(field.label ?? "option").toLowerCase()}</option>
                       {choices.length === 0 ? <option value="">No choices set up</option> : null}
                       {choices.map((choice) => {
-                        const choiceValue = String(choice.value ?? choice.label ?? "");
+                        const choiceValue = quoteChoiceValue(choice);
                         const label = choice.label ?? humanize(choiceValue);
                         return <option key={choice.id ?? choiceValue} value={choiceValue}>{label}</option>;
                       })}
