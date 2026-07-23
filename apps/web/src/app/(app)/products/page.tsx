@@ -1761,7 +1761,54 @@ function isSheetMaterial(material: any): boolean {
   return text.includes("sheet") || text.includes("card") || text.includes("paper") || text.includes("acm") || text.includes("corflute") || text.includes("acrylic") || text.includes("foam") || text.includes("pvc");
 }
 
-function materialMatchesPart(material: any, part: string): boolean {
+type MaterialDepartmentGroup = "signage" | "plan-printing" | "poster-printing" | "small-format" | "shared";
+
+function explicitMaterialGroup(material: any): MaterialDepartmentGroup | null {
+  switch (lowerText(material?.materialGroup).trim().replace(/_/g, "-")) {
+    case "signage":
+      return "signage";
+    case "plan-printing":
+      return "plan-printing";
+    case "poster-printing":
+      return "poster-printing";
+    case "small-format":
+      return "small-format";
+    case "shared":
+    case "general":
+    case "installation":
+      return "shared";
+    default:
+      return null;
+  }
+}
+
+function productMaterialGroup(selectedProduct: any): Exclude<MaterialDepartmentGroup, "shared"> | null {
+  switch (lowerText(selectedProduct?.department).trim().replace(/_/g, "-")) {
+    case "signage":
+      return "signage";
+    case "plan-printing":
+      return "plan-printing";
+    case "poster-printing":
+      return "poster-printing";
+    case "small-format":
+      return "small-format";
+    default:
+      return null;
+  }
+}
+
+function materialMatchesProductDepartment(material: any, selectedProduct: any, part: string): boolean {
+  const group = explicitMaterialGroup(material);
+  if (!group) return true;
+  if (group === "shared") return part === "finishing";
+
+  const productGroup = productMaterialGroup(selectedProduct);
+  return !productGroup || group === productGroup;
+}
+
+function materialMatchesPart(material: any, part: string, selectedProduct?: any): boolean {
+  if (selectedProduct && !materialMatchesProductDepartment(material, selectedProduct, part)) return false;
+
   const text = `${materialTypeText(material)} ${lowerText(material?.name)} ${lowerText(material?.sku)} ${lowerText(material?.notes)}`;
   if (part === "substrate") return isSheetMaterial(material) && !text.includes("laminate") && !text.includes("cello") && !text.includes("ncr") && !text.includes("carbonless");
   if (part === "print_media") return isRollMaterial(material) && (text.includes("print") || text.includes("sav") || text.includes("vinyl") || text.includes("banner") || text.includes("media") || text.includes("clear") || text.includes("white"));
@@ -1982,7 +2029,7 @@ function SelectDirectPrintForSlotForm({ selectedProduct, existing }: { selectedP
 }
 
 function MaterialPickerForSlot({ selectedProduct, slot, materials, existing, query }: { selectedProduct: any; slot: ProductBuildSlot; materials: any[]; existing: any | null; query: string }) {
-  const rows = materials.filter((material) => materialMatchesPart(material, slot.key));
+  const rows = materials.filter((material) => materialMatchesPart(material, slot.key, selectedProduct));
   const closeHref = productBuilderUrl(selectedProduct.id, query);
   const isPrintMethodPicker = slot.key === "print_media";
   const existingIsDirectPrint = lowerText(existing?.label).includes("direct print") && !existing?.materialId;
@@ -2578,7 +2625,7 @@ function EmptyWorkflowPanel({ title, body }: { title: string; body: string }) {
 
 function MainMaterialStep({ selectedProduct, query, materials, components }: { selectedProduct: any; query: string; materials: any[]; components: any[] }) {
   const selected = workflowMainMaterial(components);
-  const substrateMaterials = materials.filter((material) => materialMatchesPart(material, "substrate")).slice(0, 18);
+  const substrateMaterials = materials.filter((material) => materialMatchesPart(material, "substrate", selectedProduct)).slice(0, 18);
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <VisualStepIntro stepKey="main_material" kicker="Step 1" />
@@ -2627,7 +2674,7 @@ function RollMediaStep({ selectedProduct, query, fields, components, materials }
   const printField = workflowFieldByKey(fields, "print_method") ?? workflowFieldByKey(fields, "print_type");
   const rollAvailable = hasWorkflowOption(printField, "roll_stock") || hasWorkflowOption(printField, "roll_stock_applied");
   const selected = workflowRollMedia(components);
-  const rollMaterials = materials.filter((material) => materialMatchesPart(material, "print_media")).slice(0, 18);
+  const rollMaterials = materials.filter((material) => materialMatchesPart(material, "print_media", selectedProduct)).slice(0, 18);
   if (!rollAvailable) {
     return <section style={{ display: "grid", gap: 16 }}><h3 style={sectionHeadingStyle}>Step 3 — roll media skipped</h3><p style={mutedStyle}>Roll stock is not enabled in Step 2, so there is no media to choose.</p><WorkflowNavigation selectedProduct={selectedProduct} query={query} currentStep="roll_media" /></section>;
   }
@@ -2673,7 +2720,7 @@ function InkStep({ selectedProduct, query, fields }: { selectedProduct: any; que
 
 function LaminateStep({ selectedProduct, query, fields, components, materials }: { selectedProduct: any; query: string; fields: any[]; components: any[]; materials: any[] }) {
   const selectedIds = new Set(workflowLaminateComponents(components).map((component) => String(component.materialId ?? "")).filter(Boolean));
-  const laminateMaterials = materials.filter((material) => materialMatchesPart(material, "laminate")).slice(0, 24);
+  const laminateMaterials = materials.filter((material) => materialMatchesPart(material, "laminate", selectedProduct)).slice(0, 24);
   return (
     <section style={{ display: "grid", gap: 16 }}>
       <VisualStepIntro stepKey="laminate" kicker="Step 5" />
@@ -2700,7 +2747,7 @@ function LaminateStep({ selectedProduct, query, fields, components, materials }:
 function FinishingStep({ selectedProduct, query, fields, components, materials }: { selectedProduct: any; query: string; fields: any[]; components: any[]; materials: any[] }) {
   const field = workflowFieldByKey(fields, "finishing");
   const optionSet = new Set(workflowOptions(field).map((option: any) => String(option.value ?? option.label ?? "")));
-  const eyeletMaterials = materials.filter((material) => materialMatchesPart(material, "finishing") && lowerText(`${material.name} ${material.sku} ${material.notes}`).includes("eyelet"));
+  const eyeletMaterials = materials.filter((material) => materialMatchesPart(material, "finishing", selectedProduct) && lowerText(`${material.name} ${material.sku} ${material.notes}`).includes("eyelet"));
   const selectedEyelet = workflowFinishingComponents(components).find((component) => lowerText(component.label).includes("eyelet") && component.materialId);
   const finishChoices = [
     { value: "jingwei_cutting", label: "Jingwei cutting", help: "Adds cutting labour." },

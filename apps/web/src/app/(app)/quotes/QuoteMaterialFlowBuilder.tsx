@@ -8,6 +8,7 @@ type QuoteMaterial = {
   id: string;
   name: string;
   materialType?: string | null;
+  materialGroup?: string | null;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -389,8 +390,34 @@ function resolveClientDiscountPercent(input: {
   return Number.isFinite(fallback) && fallback > 0 ? { percent: fallback, reason: "client default discount" } : { percent: 0, reason: "" };
 }
 
+type MaterialDepartmentGroup = "signage" | "plan-printing" | "poster-printing" | "small-format" | "shared";
+
+function explicitMaterialGroup(material: QuoteMaterial): MaterialDepartmentGroup | null {
+  switch (String(material.materialGroup ?? "").trim().toLowerCase().replace(/_/g, "-")) {
+    case "signage":
+      return "signage";
+    case "plan-printing":
+      return "plan-printing";
+    case "poster-printing":
+      return "poster-printing";
+    case "small-format":
+      return "small-format";
+    case "shared":
+    case "general":
+    case "installation":
+      return "shared";
+    default:
+      return null;
+  }
+}
+
 function materialText(material: QuoteMaterial): string {
-  return `${material.name} ${material.materialType ?? ""} ${material.gsm ?? ""} ${material.notes ?? ""}`.toLowerCase();
+  return `${material.name} ${material.materialType ?? ""} ${material.materialGroup ?? ""} ${material.gsm ?? ""} ${material.notes ?? ""}`.toLowerCase();
+}
+
+function isSignageStock(material: QuoteMaterial): boolean {
+  const group = explicitMaterialGroup(material);
+  return group === null || group === "signage";
 }
 
 function isSheetMaterial(material: QuoteMaterial): boolean {
@@ -400,6 +427,9 @@ function isSheetMaterial(material: QuoteMaterial): boolean {
 }
 
 function isSmallFormatStock(material: QuoteMaterial): boolean {
+  const group = explicitMaterialGroup(material);
+  if (group) return group === "small-format";
+
   const type = String(material.materialType ?? "").toLowerCase();
   const text = materialText(material);
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
@@ -409,6 +439,9 @@ function isSmallFormatStock(material: QuoteMaterial): boolean {
 }
 
 function isPlanPrintingStock(material: QuoteMaterial): boolean {
+  const group = explicitMaterialGroup(material);
+  if (group) return group === "plan-printing";
+
   const type = String(material.materialType ?? "").toLowerCase();
   const text = materialText(material);
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
@@ -418,6 +451,9 @@ function isPlanPrintingStock(material: QuoteMaterial): boolean {
 }
 
 function isPosterPrintingStock(material: QuoteMaterial): boolean {
+  const group = explicitMaterialGroup(material);
+  if (group) return group === "poster-printing";
+
   const type = String(material.materialType ?? "").toLowerCase();
   const text = materialText(material);
   const posterWords = ["poster", "photo", "satin", "gloss", "matte", "matt", "presentation", "display", "synthetic paper", "polypropylene", "pp paper"];
@@ -870,7 +906,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
   const baseMaterials = useMemo(() => {
     if (!baseType) return [];
-    return materials.filter((material) => materialMatchesBase(material, baseType));
+    return materials.filter((material) => isSignageStock(material) && materialMatchesBase(material, baseType));
   }, [materials, baseType]);
 
   const thicknessOptions = useMemo(() => uniq(baseMaterials.map(thicknessFor)), [baseMaterials]);
@@ -888,8 +924,22 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     return materialPool[0];
   }, [baseMaterials, thickness, colour]);
 
-  const rollMedia = useMemo(() => materials.filter(isPrintRollMaterial), [materials]);
-  const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
+  const rollMedia = useMemo(() => materials.filter((material) => isSignageStock(material) && isPrintRollMaterial(material)), [materials]);
+  const laminateMaterials = useMemo(() => {
+    const departmentGroup: MaterialDepartmentGroup = flowType === "plan_printing"
+      ? "plan-printing"
+      : flowType === "poster_printing"
+        ? "poster-printing"
+        : flowType === "small_format"
+          ? "small-format"
+          : "signage";
+
+    return materials.filter((material) => {
+      if (!isLaminateMaterial(material)) return false;
+      const group = explicitMaterialGroup(material);
+      return group === null || group === departmentGroup;
+    });
+  }, [materials, flowType]);
   const smallStocks = useMemo(() => materials.filter(isSmallFormatStock), [materials]);
   const planPrintingStocks = useMemo(() => {
     const matched = materials.filter(isPlanPrintingStock);

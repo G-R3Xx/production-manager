@@ -15,6 +15,7 @@ type MaterialFormRecord = {
   name: string;
   sku: string | null;
   materialType: string;
+  materialGroup: string | null;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -25,6 +26,8 @@ type MaterialFormRecord = {
   gsm: string | null;
   notes: string | null;
 };
+
+type MaterialGroupValue = "signage" | "plan-printing" | "poster-printing" | "small-format" | "shared";
 
 type MaterialKind =
   | "sheet_media"
@@ -39,11 +42,19 @@ type MaterialKind =
   | "item"
   | "other";
 
+const materialGroupOptions: Array<{ value: MaterialGroupValue; label: string; hint: string }> = [
+  { value: "signage", label: "Signage", hint: "ACM, corflute, acrylic, PVC, banner, vinyl and signage laminate." },
+  { value: "plan-printing", label: "Plan printing", hint: "Plan paper, bond paper, CAD paper and plan film rolls or sheets." },
+  { value: "poster-printing", label: "Poster printing", hint: "Poster paper, photo paper, presentation stock and synthetic poster media." },
+  { value: "small-format", label: "Small format", hint: "Paper, card, cello, binding, tape and bookmaking stock." },
+  { value: "shared", label: "Shared / consumables", hint: "Eyelets, fixings, hardware, blades, app tape and general consumables." }
+];
+
 const materialTypeOptions: Array<{ value: MaterialKind; label: string; hint: string }> = [
   { value: "sheet_media", label: "Sheet material", hint: "ACM, corflute, acrylic, PVC, foamboard." },
   { value: "roll_media", label: "Roll media", hint: "SAV, banner, printable vinyl, print film." },
   { value: "roll_laminate", label: "Roll laminate", hint: "Gloss, matte, anti-graffiti, whiteboard laminate." },
-  { value: "paper_stock", label: "Paper stock", hint: "Small format paper, reams, packs or sheets." },
+  { value: "paper_stock", label: "Paper stock", hint: "Plan, poster or small-format paper supplied as reams, packs or sheets." },
   { value: "card_stock", label: "Card stock", hint: "Business card stock, cover stock, heavier sheet stock." },
   { value: "cello_stock", label: "Cello / coating roll", hint: "Celloglaze, coating film, small format laminate rolls." },
   { value: "binding", label: "Binding / tape", hint: "Book tape, binding strips, wire, comb, padding glue." },
@@ -111,6 +122,27 @@ function normaliseMaterialKind(value: string | null | undefined): MaterialKind {
   }
 }
 
+function normaliseMaterialGroup(value: string | null | undefined, kind: MaterialKind): MaterialGroupValue {
+  switch (String(value ?? "").trim().toLowerCase().replace(/_/g, "-")) {
+    case "signage":
+      return "signage";
+    case "plan-printing":
+      return "plan-printing";
+    case "poster-printing":
+      return "poster-printing";
+    case "small-format":
+      return "small-format";
+    case "shared":
+    case "general":
+    case "installation":
+      return "shared";
+    default:
+      if (kind === "paper_stock" || kind === "card_stock" || kind === "cello_stock" || kind === "binding") return "small-format";
+      if (kind === "sheet_media" || kind === "roll_media" || kind === "roll_laminate") return "signage";
+      return "shared";
+  }
+}
+
 function defaultStockUomFor(kind: MaterialKind): string {
   switch (kind) {
     case "roll_media":
@@ -173,6 +205,16 @@ function SupplierSelect({ suppliers, defaultValue = "" }: { suppliers: SupplierO
   );
 }
 
+function GroupSelect({ value, onChange }: { value: MaterialGroupValue; onChange: (value: MaterialGroupValue) => void }) {
+  return (
+    <Field label="Material category" helper="This decides which department card and quote material list this stock appears under.">
+      <select name="materialGroup" value={value} onChange={(event) => onChange(event.target.value as MaterialGroupValue)} style={inputStyle}>
+        {materialGroupOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+      </select>
+    </Field>
+  );
+}
+
 function TypeSelect({ value, onChange }: { value: MaterialKind; onChange: (value: MaterialKind) => void }) {
   return (
     <Field label="Material type" helper="This changes the fields below so you only see what matters for this material.">
@@ -180,6 +222,15 @@ function TypeSelect({ value, onChange }: { value: MaterialKind; onChange: (value
         {materialTypeOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
       </select>
     </Field>
+  );
+}
+
+function GroupHint({ group }: { group: MaterialGroupValue }) {
+  const option = materialGroupOptions.find((item) => item.value === group);
+  return (
+    <div style={{ border: "1px solid #c7d7fe", background: "#f5f7ff", color: "#3730a3", borderRadius: 14, padding: 12, fontSize: 13, lineHeight: 1.45 }}>
+      <strong>{option?.label ?? "Material category"}</strong>: {option?.hint ?? "Choose the department that owns this stock."}
+    </div>
   );
 }
 
@@ -221,32 +272,32 @@ function CommonTopFields({ suppliers, material }: { suppliers: SupplierOption[];
 }
 
 function SheetFields({ material, kind }: { material?: MaterialFormRecord; kind: MaterialKind }) {
-  const isSmallFormat = kind === "paper_stock" || kind === "card_stock";
+  const isPaperOrCard = kind === "paper_stock" || kind === "card_stock";
   return (
     <>
       <div style={gridStyle}>
-        <Field label={isSmallFormat ? "Sheet width mm" : "Sheet width mm"} helper="The short side or sheet width used for nesting and area cost.">
-          <input name="widthMm" defaultValue={material?.widthMm ?? ""} placeholder={isSmallFormat ? "eg 210, 320 or 450" : "eg 1220"} style={inputStyle} />
+        <Field label={isPaperOrCard ? "Sheet width mm" : "Sheet width mm"} helper="The short side or sheet width used for nesting and area cost.">
+          <input name="widthMm" defaultValue={material?.widthMm ?? ""} placeholder={isPaperOrCard ? "eg 210, 320 or 450" : "eg 1220"} style={inputStyle} />
         </Field>
-        <Field label={isSmallFormat ? "Sheet length mm" : "Sheet length mm"} helper="The long side or sheet length used for nesting and area cost.">
-          <input name="lengthMm" defaultValue={material?.lengthMm ?? ""} placeholder={isSmallFormat ? "eg 297, 450 or 640" : "eg 2440"} style={inputStyle} />
+        <Field label={isPaperOrCard ? "Sheet length mm" : "Sheet length mm"} helper="The long side or sheet length used for nesting and area cost.">
+          <input name="lengthMm" defaultValue={material?.lengthMm ?? ""} placeholder={isPaperOrCard ? "eg 297, 450 or 640" : "eg 2440"} style={inputStyle} />
         </Field>
-        <Field label="GSM / Thickness" helper={isSmallFormat ? "Small format stock usually uses GSM. Rigid sheets usually use thickness." : "Use thickness for rigid sheets, eg 3mm, 5mm, 10mm."}>
-          <input name="gsm" defaultValue={material?.gsm ?? ""} placeholder={isSmallFormat ? "eg 150gsm, 250gsm, 350gsm" : "eg 3mm"} style={inputStyle} />
+        <Field label="GSM / Thickness" helper={isPaperOrCard ? "Paper and card stock usually use GSM. Rigid sheets usually use thickness." : "Use thickness for rigid sheets, eg 3mm, 5mm, 10mm."}>
+          <input name="gsm" defaultValue={material?.gsm ?? ""} placeholder={isPaperOrCard ? "eg 150gsm, 250gsm, 350gsm" : "eg 3mm"} style={inputStyle} />
         </Field>
       </div>
       <div style={gridStyle}>
-        <Field label={isSmallFormat ? "Bought as" : "Bought as"} helper={isSmallFormat ? "How the supplier sells it: ream, pack, sheet or box." : "How the supplier sells it: sheet, pack or pallet."}>
-          <UnitSelect name="purchaseUom" defaultValue={material?.purchaseUom ?? defaultPurchaseUomFor(kind)} options={isSmallFormat ? ["ream", "pack", "box", "sheet"] : ["sheet", "pack", "pallet"]} />
+        <Field label={isPaperOrCard ? "Bought as" : "Bought as"} helper={isPaperOrCard ? "How the supplier sells it: ream, pack, sheet or box." : "How the supplier sells it: sheet, pack or pallet."}>
+          <UnitSelect name="purchaseUom" defaultValue={material?.purchaseUom ?? defaultPurchaseUomFor(kind)} options={isPaperOrCard ? ["ream", "pack", "box", "sheet"] : ["sheet", "pack", "pallet"]} />
         </Field>
-        <Field label={isSmallFormat ? "Used / sold as" : "Used as"} helper="How product recipes consume this material.">
+        <Field label={isPaperOrCard ? "Used / sold as" : "Used as"} helper="How product recipes consume this material.">
           <UnitSelect name="stockUom" defaultValue={material?.stockUom ?? defaultStockUomFor(kind)} options={["sheet", "sqm", "each"]} />
         </Field>
-        <Field label={isSmallFormat ? "Stock qty / sheets per ream" : "Sheets in stock"} helper={isSmallFormat ? "Use stock count or sheets per ream/pack if you cost by ream." : "Current sheet count. Use 0 if you do not track stock yet."}>
-          <input name="stockQuantity" defaultValue={material?.stockQuantity ?? "0"} placeholder={isSmallFormat ? "eg 500" : "eg 12"} style={inputStyle} />
+        <Field label={isPaperOrCard ? "Stock qty / sheets per ream" : "Sheets in stock"} helper={isPaperOrCard ? "Use stock count or sheets per ream/pack if you cost by ream." : "Current sheet count. Use 0 if you do not track stock yet."}>
+          <input name="stockQuantity" defaultValue={material?.stockQuantity ?? "0"} placeholder={isPaperOrCard ? "eg 500" : "eg 12"} style={inputStyle} />
         </Field>
-        <Field label={isSmallFormat ? "Purchase cost" : "Cost per sheet"} helper={isSmallFormat ? "Cost for the selected Bought as unit, eg cost per ream/pack/sheet." : "Supplier cost for one sheet."}>
-          <input name="purchaseCost" defaultValue={material?.purchaseCost ?? "0"} placeholder={isSmallFormat ? "eg 38.50" : "eg 80"} style={inputStyle} />
+        <Field label={isPaperOrCard ? "Purchase cost" : "Cost per sheet"} helper={isPaperOrCard ? "Cost for the selected Bought as unit, eg cost per ream/pack/sheet." : "Supplier cost for one sheet."}>
+          <input name="purchaseCost" defaultValue={material?.purchaseCost ?? "0"} placeholder={isPaperOrCard ? "eg 38.50" : "eg 80"} style={inputStyle} />
         </Field>
       </div>
     </>
@@ -322,15 +373,19 @@ function ParameterFields({ kind, material }: { kind: MaterialKind; material?: Ma
 
 function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: SupplierOption[]; material?: MaterialFormRecord; submitLabel: string }) {
   const initialKind = useMemo(() => normaliseMaterialKind(material?.materialType), [material?.materialType]);
+  const initialGroup = useMemo(() => normaliseMaterialGroup(material?.materialGroup, initialKind), [material?.materialGroup, initialKind]);
   const [kind, setKind] = useState<MaterialKind>(initialKind);
+  const [group, setGroup] = useState<MaterialGroupValue>(initialGroup);
 
   return (
     <>
       {material ? <input type="hidden" name="materialId" value={material.id} /> : null}
       <CommonTopFields suppliers={suppliers} material={material} />
       <div style={gridStyle}>
+        <GroupSelect value={group} onChange={setGroup} />
         <TypeSelect value={kind} onChange={setKind} />
       </div>
+      <GroupHint group={group} />
       <TypeHint kind={kind} />
       <ParameterFields kind={kind} material={material} />
       <Field label="Notes">

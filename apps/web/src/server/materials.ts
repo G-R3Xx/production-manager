@@ -12,6 +12,7 @@ export type MaterialRecord = {
   name: string;
   sku: string | null;
   materialType: string;
+  materialGroup: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -33,6 +34,7 @@ export type CreateMaterialInput = {
   name: string;
   sku: string | null;
   materialType: string;
+  materialGroup: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -48,6 +50,14 @@ export type UpdateMaterialInput = CreateMaterialInput & {
   id: string;
 };
 
+async function ensureMaterialGroupColumn(): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+
+  await pool.query(`
+    ALTER TABLE catalog.materials
+      ADD COLUMN IF NOT EXISTS material_group varchar(50)
+  `);
+}
 
 function normalizeMaterialType(value: string): string {
   switch (value) {
@@ -107,6 +117,8 @@ function presentMaterialType(value: string): string {
 }
 
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
+  await ensureMaterialGroupColumn();
+
   const result = await pool.query<MaterialRecord>(`
     SELECT
       m.id,
@@ -121,6 +133,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
         WHEN m.material_type IS NOT NULL THEN m.material_type::text
         ELSE m.type::text
       END AS "materialType",
+      m.material_group AS "materialGroup",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
       m.stock_quantity::text AS "stockQuantity",
@@ -144,6 +157,8 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
 }
 
 export async function createMaterial(input: CreateMaterialInput): Promise<void> {
+  await ensureMaterialGroupColumn();
+
   await pool.query(`
     INSERT INTO catalog.materials (
       tenant_id,
@@ -153,6 +168,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       sku,
       type,
       material_type,
+      material_group,
       stock_uom,
       purchase_uom,
       stock_quantity,
@@ -175,13 +191,14 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $7::varchar,
       $8::varchar,
       $9::varchar,
-      $10::numeric,
+      $10::varchar,
       $11::numeric,
       $12::numeric,
       $13::numeric,
       $14::numeric,
       $15::numeric,
-      $16::varchar,
+      $16::numeric,
+      $17::varchar,
       true,
       now(),
       now()
@@ -194,6 +211,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.sku,
     toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),
+    input.materialGroup,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,
@@ -207,6 +225,8 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
 }
 
 export async function updateMaterial(input: UpdateMaterialInput): Promise<void> {
+  await ensureMaterialGroupColumn();
+
   await pool.query(`
     UPDATE catalog.materials
     SET
@@ -216,15 +236,16 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       sku = $6::varchar,
       type = $7::material_type,
       material_type = $8::varchar,
-      stock_uom = $9::varchar,
-      purchase_uom = $10::varchar,
-      stock_quantity = $11::numeric,
-      purchase_cost = $12::numeric,
-      width_mm = $13::numeric,
-      length_mm = $14::numeric,
-      roll_width_mm = $15::numeric,
-      gsm = $16::numeric,
-      notes = $17::varchar,
+      material_group = $9::varchar,
+      stock_uom = $10::varchar,
+      purchase_uom = $11::varchar,
+      stock_quantity = $12::numeric,
+      purchase_cost = $13::numeric,
+      width_mm = $14::numeric,
+      length_mm = $15::numeric,
+      roll_width_mm = $16::numeric,
+      gsm = $17::numeric,
+      notes = $18::varchar,
       updated_at = now()
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
@@ -237,6 +258,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     input.sku,
     toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),
+    input.materialGroup,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,

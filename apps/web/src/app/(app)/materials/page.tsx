@@ -11,7 +11,7 @@ type MaterialsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
-type MaterialGroup = "signage" | "small-format" | "shared" | "all";
+type MaterialGroup = "signage" | "plan-printing" | "poster-printing" | "small-format" | "shared" | "all";
 
 type MaterialSummary = Awaited<ReturnType<typeof listMaterialsForTenant>>[number];
 
@@ -54,7 +54,29 @@ function isSheetType(type: string): boolean {
   return type.includes("sheet") || type.includes("card") || type.includes("paper");
 }
 
-function materialGroupFor(material: MaterialSummary): MaterialGroup {
+function normaliseMaterialGroup(value: string | null | undefined): Exclude<MaterialGroup, "all"> | null {
+  switch (String(value ?? "").trim().toLowerCase().replace(/_/g, "-")) {
+    case "signage":
+      return "signage";
+    case "plan-printing":
+      return "plan-printing";
+    case "poster-printing":
+      return "poster-printing";
+    case "small-format":
+      return "small-format";
+    case "shared":
+    case "general":
+    case "installation":
+      return "shared";
+    default:
+      return null;
+  }
+}
+
+function materialGroupFor(material: MaterialSummary): Exclude<MaterialGroup, "all"> {
+  const explicitGroup = normaliseMaterialGroup(material.materialGroup);
+  if (explicitGroup) return explicitGroup;
+
   const type = normaliseMaterialType(material.materialType);
 
   if (type === "paper_stock" || type === "card_stock" || type === "cello_stock" || type === "binding") {
@@ -69,7 +91,7 @@ function materialGroupFor(material: MaterialSummary): MaterialGroup {
 }
 
 function isValidGroup(value: string): value is MaterialGroup {
-  return value === "signage" || value === "small-format" || value === "shared" || value === "all";
+  return value === "signage" || value === "plan-printing" || value === "poster-printing" || value === "small-format" || value === "shared" || value === "all";
 }
 
 function searchTextFor(material: MaterialSummary): string {
@@ -78,6 +100,8 @@ function searchTextFor(material: MaterialSummary): string {
     material.sku,
     material.supplierName,
     material.materialType,
+    material.materialGroup,
+    groupLabel(materialGroupFor(material)),
     formatMaterialType(material.materialType),
     material.stockUom,
     material.purchaseUom,
@@ -100,6 +124,10 @@ function groupLabel(group: MaterialGroup): string {
   switch (group) {
     case "signage":
       return "Signage";
+    case "plan-printing":
+      return "Plan printing";
+    case "poster-printing":
+      return "Poster printing";
     case "small-format":
       return "Small format";
     case "shared":
@@ -113,6 +141,10 @@ function groupDescription(group: MaterialGroup): string {
   switch (group) {
     case "signage":
       return "ACM, corflute, acrylic, PVC, roll media and roll laminate.";
+    case "plan-printing":
+      return "Plan paper, bond rolls, CAD paper and architectural drawing stock.";
+    case "poster-printing":
+      return "Poster paper, photo paper, presentation stock and synthetic print media.";
     case "small-format":
       return "Paper, card, cello, binding, tape and bookmaking stock.";
     case "shared":
@@ -203,6 +235,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
   const sheetMaterials = materials.filter((material) => isSheetType(material.materialType));
   const groupCounts: Record<MaterialGroup, number> = {
     signage: materials.filter((material) => material.active && materialGroupFor(material) === "signage").length,
+    "plan-printing": materials.filter((material) => material.active && materialGroupFor(material) === "plan-printing").length,
+    "poster-printing": materials.filter((material) => material.active && materialGroupFor(material) === "poster-printing").length,
     "small-format": materials.filter((material) => material.active && materialGroupFor(material) === "small-format").length,
     shared: materials.filter((material) => material.active && materialGroupFor(material) === "shared").length,
     all: materials.length
@@ -264,6 +298,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
               <select name="group" defaultValue={selectedGroup} style={inputStyle}>
                 <option value="">All groups</option>
                 <option value="signage">Signage</option>
+                <option value="plan-printing">Plan printing</option>
+                <option value="poster-printing">Poster printing</option>
                 <option value="small-format">Small format</option>
                 <option value="shared">Shared / consumables</option>
                 <option value="all">Everything</option>
@@ -273,7 +309,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
           </form>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
-            {(["signage", "small-format", "shared"] as const).map((group) => (
+            {(["signage", "plan-printing", "poster-printing", "small-format", "shared"] as const).map((group) => (
               <a key={group} href={groupHref(group)} style={{ ...groupCardStyle, borderColor: selectedGroup === group ? "#2563eb" : "#dbeafe", background: selectedGroup === group ? "#eff6ff" : "#f8fbff" }}>
                 <span style={{ fontWeight: 900 }}>{groupLabel(group)}</span>
                 <span style={mutedTextStyle}>{groupDescription(group)}</span>
@@ -284,7 +320,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
           {!hasBrowseFilter ? (
             <div style={{ borderRadius: 16, border: "1px dashed #d0d5dd", padding: 24, color: "#475467", background: "#fcfcfd" }}>
-              Nothing is listed yet. Search for a material, or open a group like <strong>Signage</strong> or <strong>Small format</strong> to browse that section.
+              Nothing is listed yet. Search for a material, or open a department such as <strong>Signage</strong>, <strong>Plan printing</strong>, <strong>Poster printing</strong> or <strong>Small format</strong>.
             </div>
           ) : filteredMaterials.length === 0 ? (
             <div style={{ borderRadius: 16, border: "1px dashed #d0d5dd", padding: 24, color: "#475467", background: "#fcfcfd" }}>

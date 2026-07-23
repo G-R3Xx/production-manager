@@ -104,6 +104,7 @@ export const materials = catalogSchema.table("materials", {
     .notNull()
     .references(() => tenants.id, { onDelete: "cascade" }),
   type: materialTypeEnum("type").notNull(),
+  materialGroup: varchar("material_group", { length: 50 }),
   name: varchar("name", { length: 200 }).notNull(),
   supplierId: uuid("supplier_id"),
   stockUom: varchar("stock_uom", { length: 20 }).notNull(),
