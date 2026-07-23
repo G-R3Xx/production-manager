@@ -45,6 +45,7 @@ export type QuoteLineRecord = {
   unitPrice: string;
   lineTotal: string;
   notes: string | null;
+  configurationSnapshot: Record<string, unknown>;
   createdAt: string;
 };
 
@@ -176,6 +177,14 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS quote_drafts_public_token_unique_idx
       ON sales.quote_drafts (public_token)
       WHERE public_token IS NOT NULL
+  `);
+}
+
+async function ensureQuoteLineConfigurationColumn(): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  await pool.query(`
+    ALTER TABLE sales.quote_lines
+      ADD COLUMN IF NOT EXISTS configuration_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
 }
 
@@ -360,6 +369,7 @@ export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<strin
 }
 
 export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]> {
+  await ensureQuoteLineConfigurationColumn();
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       id,
@@ -371,6 +381,7 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]
       unit_price::text as "unitPrice",
       line_total::text as "lineTotal",
       notes,
+      configuration_snapshot as "configurationSnapshot",
       created_at as "createdAt"
     FROM sales.quote_lines
     WHERE quote_id = $1::uuid
@@ -421,17 +432,31 @@ export async function addQuoteLine(quoteId: string, input: {
   quantity: string;
   unitPrice: string;
   notes?: string | null;
-}): Promise<void> {
-  await pool.query(`
+  configurationSnapshot?: Record<string, unknown> | null;
+}): Promise<{ id: string }> {
+  await ensureQuoteLineConfigurationColumn();
+  const result = await pool.query<{ id: string }>(`
     INSERT INTO sales.quote_lines (
-      quote_id, product_id, product_name, option_summary, quantity, unit_price, line_total, notes, created_at, updated_at
+      quote_id, product_id, product_name, option_summary, quantity, unit_price, line_total, notes, configuration_snapshot, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::uuid,$3::varchar,$4::text,$5::numeric,$6::numeric,($5::numeric * $6::numeric),$7::text,now(),now()
+      $1::uuid,$2::uuid,$3::varchar,$4::text,$5::numeric,$6::numeric,($5::numeric * $6::numeric),$7::text,$8::jsonb,now(),now()
     )
-  `, [quoteId, input.productId ?? null, input.productName, input.optionSummary ?? null, normaliseMoney(input.quantity, "1"), normaliseMoney(input.unitPrice, "0"), input.notes ?? null]);
+    RETURNING id
+  `, [
+    quoteId,
+    input.productId ?? null,
+    input.productName,
+    input.optionSummary ?? null,
+    normaliseMoney(input.quantity, "1"),
+    normaliseMoney(input.unitPrice, "0"),
+    input.notes ?? null,
+    JSON.stringify(input.configurationSnapshot ?? {})
+  ]);
+  return result.rows[0];
 }
 
 export async function deleteQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<void> {
+  await ensureQuoteLineConfigurationColumn();
   await pool.query(`
     DELETE FROM sales.quote_lines ql
     USING sales.quote_drafts qd
@@ -448,7 +473,9 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
   quantity: string;
   unitPrice: string;
   notes?: string | null;
+  configurationSnapshot?: Record<string, unknown> | null;
 }): Promise<void> {
+  await ensureQuoteLineConfigurationColumn();
   await pool.query(`
     UPDATE sales.quote_lines ql
     SET product_name = $4::varchar,
@@ -457,6 +484,7 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
         unit_price = $7::numeric,
         line_total = ($6::numeric * $7::numeric),
         notes = $8::text,
+        configuration_snapshot = COALESCE($9::jsonb, ql.configuration_snapshot),
         updated_at = now()
     FROM sales.quote_drafts qd
     WHERE ql.quote_id = qd.id
@@ -471,8 +499,34 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
     input.optionSummary ?? null,
     normaliseMoney(input.quantity, "1"),
     normaliseMoney(input.unitPrice, "0"),
-    input.notes ?? null
+    input.notes ?? null,
+    input.configurationSnapshot === undefined ? null : JSON.stringify(input.configurationSnapshot ?? {})
   ]);
+}
+
+export async function getQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<QuoteLineRecord | null> {
+  await ensureQuoteLineConfigurationColumn();
+  const result = await pool.query<QuoteLineRecord>(`
+    SELECT
+      ql.id,
+      ql.quote_id as "quoteId",
+      ql.product_id as "productId",
+      ql.product_name as "productName",
+      ql.option_summary as "optionSummary",
+      ql.quantity::text as quantity,
+      ql.unit_price::text as "unitPrice",
+      ql.line_total::text as "lineTotal",
+      ql.notes,
+      ql.configuration_snapshot as "configurationSnapshot",
+      ql.created_at as "createdAt"
+    FROM sales.quote_lines ql
+    JOIN sales.quote_drafts qd ON qd.id = ql.quote_id
+    WHERE qd.tenant_id = $1::uuid
+      AND ql.quote_id = $2::uuid
+      AND ql.id = $3::uuid
+    LIMIT 1
+  `, [tenantId, quoteId, lineId]);
+  return result.rows[0] ?? null;
 }
 
 
@@ -483,6 +537,7 @@ export async function linkQuoteLineToProductForTenant(
   productId: string,
   productName: string
 ): Promise<void> {
+  await ensureQuoteLineConfigurationColumn();
   await pool.query(`
     UPDATE sales.quote_lines ql
     SET

@@ -9,11 +9,13 @@ import { listProductsForTenant } from "@/server/products";
 import { listConfiguratorTemplatesForTenant } from "@/server/configurators";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteDraftAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
+import { createArtworkApprovalAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
+import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
+import { inferLegacyQuickQuoteSnapshot, readQuickQuoteSnapshot, type QuickQuoteStep } from "./quoteLineSnapshot";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -188,6 +190,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const fromSurvey = readParam(params, "fromSurvey");
   const selected = readParam(params, "selected");
   const filter = readParam(params, "filter");
+  const editLineId = readParam(params, "editLine");
+  const editStepParam = readParam(params, "editStep");
 
   const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, products, configuratorTemplates] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
@@ -244,6 +248,31 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     sourceLinkedCustomerId ? getCustomerById(activeTenant.tenantId, sourceLinkedCustomerId) : Promise.resolve(null)
   ]);
 
+  const editingQuoteLineRecord = editLineId ? quoteLines.find((line) => line.id === editLineId) ?? null : null;
+  const editingSnapshot = editingQuoteLineRecord
+    ? readQuickQuoteSnapshot(editingQuoteLineRecord.configurationSnapshot) ?? inferLegacyQuickQuoteSnapshot({
+        productName: editingQuoteLineRecord.productName,
+        optionSummary: editingQuoteLineRecord.optionSummary,
+        quantity: editingQuoteLineRecord.quantity,
+        unitPrice: editingQuoteLineRecord.unitPrice,
+        notes: editingQuoteLineRecord.notes,
+        materials
+      })
+    : null;
+  const editingQuoteLine = editingQuoteLineRecord && editingSnapshot
+    ? {
+        id: editingQuoteLineRecord.id,
+        productName: editingQuoteLineRecord.productName,
+        optionSummary: editingQuoteLineRecord.optionSummary,
+        quantity: editingQuoteLineRecord.quantity,
+        unitPrice: editingQuoteLineRecord.unitPrice,
+        notes: editingQuoteLineRecord.notes,
+        configurationSnapshot: editingSnapshot,
+        reconstructed: Boolean(editingSnapshot.reconstructed)
+      }
+    : null;
+  const editingStep = editStepParam ? editStepParam as QuickQuoteStep : null;
+
   const quoteSubtotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
   const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
@@ -259,6 +288,23 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     surveyDetails: survey?.surveyDetails ?? null,
     photos: surveyPhotos
   });
+  const draftClientOptions = clients
+    .filter((client) => client.isActive || client.id === sourceLinkedCustomerId)
+    .map((client) => ({
+      id: client.id,
+      displayName: client.displayName,
+      companyName: client.companyName,
+      firstName: client.firstName,
+      lastName: client.lastName,
+      email: client.email,
+      phone: client.phone,
+      logoUrl: customerLogoUrl(client),
+      defaultDiscountPercent: customerDefaultDiscount(client),
+      isActive: client.isActive
+    }));
+  const linkedClientContactName = linkedClient ? [linkedClient.firstName, linkedClient.lastName].filter(Boolean).join(" ").trim() : "";
+  const initialDraftClientName = sourceClientName || linkedClient?.companyName || linkedClient?.displayName || "";
+  const initialDraftContactName = sourceContactName || linkedClientContactName || (!linkedClient?.companyName ? linkedClient?.displayName ?? "" : "");
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 18 }}>
@@ -320,20 +366,20 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
         <details open={!selectedQuote || Boolean(enquiry || survey)} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
           <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef" }}>New draft quote</summary>
-          <form action={createQuoteDraftAction} style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <input type="hidden" name="enquiryId" value={sourceEnquiry?.id ?? survey?.enquiryId ?? ""} />
-            <input type="hidden" name="surveyRequestId" value={survey?.id ?? ""} />
-            <input type="hidden" name="linkedCustomerId" value={sourceLinkedCustomerId ?? ""} />
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-              <input name="clientName" defaultValue={sourceClientName} placeholder="Client / business name" style={inputStyle} />
-              <input name="contactName" defaultValue={sourceContactName} placeholder="Contact name" style={inputStyle} />
-              <input name="phone" defaultValue={sourcePhone} placeholder="Phone" style={inputStyle} />
-              <input name="email" defaultValue={sourceEmail} placeholder="Email" style={inputStyle} />
-              <input name="discountPercent" defaultValue={String(linkedClientDefaultDiscount || 0)} placeholder="Client discount %" style={inputStyle} />
-            </div>
-            <textarea name="notes" defaultValue={defaultQuoteNotes} placeholder="Quote notes" style={{ ...textareaStyle, minHeight: 80 }} />
-            <button type="submit" style={{ ...buttonStyle, width: "fit-content" }}>Create draft quote</button>
-          </form>
+          <NewQuoteDraftForm
+            clients={draftClientOptions}
+            enquiryId={sourceEnquiry?.id ?? survey?.enquiryId ?? ""}
+            surveyRequestId={survey?.id ?? ""}
+            initialValues={{
+              linkedCustomerId: sourceLinkedCustomerId ?? "",
+              clientName: initialDraftClientName,
+              contactName: initialDraftContactName,
+              phone: sourcePhone || linkedClient?.phone || "",
+              email: sourceEmail || linkedClient?.email || "",
+              discountPercent: String(linkedClientDefaultDiscount || 0),
+              notes: defaultQuoteNotes
+            }}
+          />
         </details>
 
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
@@ -446,9 +492,12 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
 
               {selectedQuote.status !== "deleted" ? (
                 <QuoteMaterialFlowBuilder
+                  key={editingQuoteLine?.id ?? "new-quote-line"}
                   quoteId={selectedQuote.id}
                   materials={activeMaterials}
                   savedProducts={savedQuoteProducts}
+                  editingLine={editingQuoteLine}
+                  editingStep={editingStep}
                   pricingSettings={{
                     markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                     profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
@@ -465,10 +514,10 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                 <section style={{ border: "1px solid #fecaca", borderRadius: 18, padding: 16, background: "#fff5f4", color: "#b42318", fontWeight: 800 }}>This quote is deleted. Restore it before editing or sending.</section>
               )}
 
-              <div style={{ display: "grid", gap: 10 }}>
+              <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18 }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <h4 style={{ margin: 0 }}>Saved quote lines</h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Click a saved line, then click any editable breakdown card to change its value or available option.</p>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Saved-product options edit in the breakdown. Quick-builder lines reopen their original controls; older lines can be rebuilt once.</p>
                 </div>
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
@@ -494,6 +543,7 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                             quantity: line.quantity,
                             unitPrice: line.unitPrice,
                             notes: line.notes,
+                            configurationSnapshot: line.configurationSnapshot,
                             createdAt: line.createdAt
                           }}
                           product={editableProduct}

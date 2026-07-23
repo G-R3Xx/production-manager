@@ -3,6 +3,7 @@
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
 import { QuoteLineBuilder } from "./QuoteLineBuilder";
+import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
 
 type QuoteMaterial = {
   id: string;
@@ -115,14 +116,27 @@ type SavedQuoteProduct = {
   components: SavedQuoteComponent[];
 };
 
+type EditableQuoteLine = {
+  id: string;
+  productName: string;
+  optionSummary: string | null;
+  quantity: string;
+  unitPrice: string;
+  notes: string | null;
+  configurationSnapshot: unknown;
+  reconstructed?: boolean;
+};
+
 type QuoteMaterialFlowBuilderProps = {
   quoteId: string;
   materials: QuoteMaterial[];
   pricingSettings?: PricingSettings;
   savedProducts?: SavedQuoteProduct[];
+  editingLine?: EditableQuoteLine | null;
+  editingStep?: QuickQuoteStep | null;
 };
 
-type FlowType = "" | "signage" | "plan_printing" | "poster_printing" | "small_format" | "service" | "component";
+type FlowType = QuickQuoteFlowType;
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
 type ServiceType = "" | "pickup" | "delivery" | "install";
@@ -133,36 +147,7 @@ type SidesChoice = "" | "single" | "double";
 type PrintDirection = "" | "positive" | "reverse";
 type ArtworkChoice = "" | "required" | "client_supplied";
 type SmallPrintColour = "" | "mono" | "cmyk" | "special";
-type StepKey =
-  | "flow"
-  | "base"
-  | "thickness"
-  | "colour"
-  | "size"
-  | "artwork"
-  | "print"
-  | "media"
-  | "ink"
-  | "sides"
-  | "laminate"
-  | "finishing"
-  | "small_type"
-  | "ncr_details"
-  | "small_stock"
-  | "small_size"
-  | "small_sides"
-  | "small_print"
-  | "small_coating"
-  | "small_finishing"
-  | "small_quantity"
-  | "service_type"
-  | "service_details"
-  | "service_fixings"
-  | "component_details"
-  | "component_parts"
-  | "component_labour"
-  | "dispatch"
-  | "review";
+type StepKey = QuickQuoteStep;
 
 type CostRow = {
   label: string;
@@ -818,6 +803,44 @@ function materialCardMeta(material: QuoteMaterial): string {
   ].filter(Boolean).join(" · ");
 }
 
+function snapshotString(snapshot: QuickQuoteSnapshot | null, key: keyof QuickQuoteSnapshot, fallback = ""): string {
+  const value = snapshot?.[key];
+  return typeof value === "string" ? value : fallback;
+}
+
+function snapshotStringArray(snapshot: QuickQuoteSnapshot | null, key: keyof QuickQuoteSnapshot): string[] {
+  const value = snapshot?.[key];
+  return Array.isArray(value) ? value.map((item) => String(item)).filter(Boolean) : [];
+}
+
+function snapshotStringRecord(snapshot: QuickQuoteSnapshot | null, key: keyof QuickQuoteSnapshot): Record<string, string> {
+  const value = snapshot?.[key];
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  return Object.fromEntries(Object.entries(value).map(([entryKey, entryValue]) => [entryKey, String(entryValue ?? "")]));
+}
+
+function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotMaterial | null {
+  if (!material) return null;
+  return {
+    id: material.id,
+    name: material.name,
+    materialType: material.materialType ?? null,
+    materialGroup: material.materialGroup ?? null,
+    minimumBillableSheetFraction: material.minimumBillableSheetFraction ?? null,
+    supplierName: material.supplierName ?? null,
+    sku: material.sku ?? null,
+    stockUom: material.stockUom ?? null,
+    purchaseUom: material.purchaseUom ?? null,
+    stockQuantity: material.stockQuantity ?? null,
+    purchaseCost: material.purchaseCost ?? null,
+    widthMm: material.widthMm ?? null,
+    lengthMm: material.lengthMm ?? null,
+    rollWidthMm: material.rollWidthMm ?? null,
+    gsm: material.gsm ?? null,
+    notes: material.notes ?? null
+  };
+}
+
 function cardButtonStyle(selected: boolean, accent = "#2563eb") {
   return {
     border: selected ? `2px solid ${accent}` : "1px solid #dbe5f3",
@@ -881,69 +904,94 @@ function flowDepartmentProductName(value: FlowType): string {
   return flowTypeLabel(value);
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [] }: QuoteMaterialFlowBuilderProps) {
-  const [builderMode, setBuilderMode] = useState<BuilderMode>("quick");
-  const [activeStep, setActiveStep] = useState<StepKey>("base");
-  const [flowType, setFlowType] = useState<FlowType>("signage");
+export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [], editingLine = null, editingStep = null }: QuoteMaterialFlowBuilderProps) {
+  const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
+  const materialPool = useMemo(() => {
+    const restoredMaterials = materialsFromSnapshot(initialSnapshot);
+    const combined = [...materials, ...restoredMaterials];
+    const seen = new Set<string>();
+    return combined.filter((material) => {
+      if (!material.id || seen.has(material.id)) return false;
+      seen.add(material.id);
+      return true;
+    });
+  }, [materials, initialSnapshot]);
+
+  const initialComponentParts = Array.isArray(initialSnapshot?.componentParts) && initialSnapshot.componentParts.length
+    ? initialSnapshot.componentParts.map((part, index) => ({
+        id: String(part.id ?? `part-restored-${index}`),
+        materialId: String(part.materialId ?? ""),
+        name: String(part.name ?? ""),
+        qty: String(part.qty ?? ""),
+        unit: String(part.unit ?? "each"),
+        unitCost: String(part.unitCost ?? ""),
+        note: String(part.note ?? "")
+      }))
+    : [createBlankComponentPart()];
+
+  const [builderMode, setBuilderMode] = useState<BuilderMode>(editingLine ? "advanced" : initialSnapshot?.builderMode ?? "quick");
+  const [activeStep, setActiveStep] = useState<StepKey>(editingStep ?? initialSnapshot?.activeStep ?? (initialSnapshot?.flowType === "service" ? "service_type" : initialSnapshot?.flowType === "small_format" ? "small_type" : initialSnapshot?.flowType === "plan_printing" || initialSnapshot?.flowType === "poster_printing" ? "small_stock" : "base"));
+  const [flowType, setFlowType] = useState<FlowType>(initialSnapshot?.flowType || "signage");
   const isPrintDepartment = isPrintDepartmentFlow(flowType);
 
-  const [baseType, setBaseType] = useState<BaseType | "">("");
-  const [thickness, setThickness] = useState("");
-  const [colour, setColour] = useState("");
-  const [widthMm, setWidthMm] = useState("");
-  const [heightMm, setHeightMm] = useState("");
-  const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>("");
-  const [artworkMinutes, setArtworkMinutes] = useState("");
-  const [printMethod, setPrintMethod] = useState<PrintMethod>("");
-  const [printSetupMinutes, setPrintSetupMinutes] = useState("");
-  const [mediaId, setMediaId] = useState("");
-  const [ink, setInk] = useState<InkChoice>("");
-  const [sides, setSides] = useState<SidesChoice>("");
-  const [printDirection, setPrintDirection] = useState<PrintDirection>("");
-  const [laminateId, setLaminateId] = useState("");
-  const [laminateMinutes, setLaminateMinutes] = useState("");
-  const [finishings, setFinishings] = useState<string[]>([]);
-  const [finishingMinutes, setFinishingMinutes] = useState<Record<string, string>>({});
-  const [eyeletPresetLabel, setEyeletPresetLabel] = useState(eyeletPresets[0]?.label ?? "");
-  const [customEyeletQty, setCustomEyeletQty] = useState("");
+  const [baseType, setBaseType] = useState<BaseType | "">(snapshotString(initialSnapshot, "baseType") as BaseType | "");
+  const [thickness, setThickness] = useState(snapshotString(initialSnapshot, "thickness"));
+  const [colour, setColour] = useState(snapshotString(initialSnapshot, "colour"));
+  const [widthMm, setWidthMm] = useState(snapshotString(initialSnapshot, "widthMm"));
+  const [heightMm, setHeightMm] = useState(snapshotString(initialSnapshot, "heightMm"));
+  const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>(snapshotString(initialSnapshot, "artworkChoice") as ArtworkChoice);
+  const [artworkMinutes, setArtworkMinutes] = useState(snapshotString(initialSnapshot, "artworkMinutes"));
+  const [printMethod, setPrintMethod] = useState<PrintMethod>(snapshotString(initialSnapshot, "printMethod") as PrintMethod);
+  const [printSetupMinutes, setPrintSetupMinutes] = useState(snapshotString(initialSnapshot, "printSetupMinutes"));
+  const [mediaId, setMediaId] = useState(snapshotString(initialSnapshot, "mediaId"));
+  const [ink, setInk] = useState<InkChoice>(snapshotString(initialSnapshot, "ink") as InkChoice);
+  const [sides, setSides] = useState<SidesChoice>(snapshotString(initialSnapshot, "sides") as SidesChoice);
+  const [printDirection, setPrintDirection] = useState<PrintDirection>(snapshotString(initialSnapshot, "printDirection") as PrintDirection);
+  const [laminateId, setLaminateId] = useState(snapshotString(initialSnapshot, "laminateId"));
+  const [laminateMinutes, setLaminateMinutes] = useState(snapshotString(initialSnapshot, "laminateMinutes"));
+  const [finishings, setFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "finishings"));
+  const [finishingMinutes, setFinishingMinutes] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "finishingMinutes"));
+  const [eyeletPresetLabel, setEyeletPresetLabel] = useState(snapshotString(initialSnapshot, "eyeletPresetLabel", eyeletPresets[0]?.label ?? ""));
+  const [customEyeletQty, setCustomEyeletQty] = useState(snapshotString(initialSnapshot, "customEyeletQty"));
 
-  const [smallType, setSmallType] = useState<SmallFormatType | "">("");
-  const [smallStockId, setSmallStockId] = useState("");
-  const [customSmallStockEnabled, setCustomSmallStockEnabled] = useState(false);
-  const [customSmallStockName, setCustomSmallStockName] = useState("");
-  const [customSmallStockSupplier, setCustomSmallStockSupplier] = useState("");
-  const [customSmallStockCost, setCustomSmallStockCost] = useState("");
-  const [customSmallStockWidthMm, setCustomSmallStockWidthMm] = useState("");
-  const [customSmallStockLengthMm, setCustomSmallStockLengthMm] = useState("");
-  const [customSmallStockGsm, setCustomSmallStockGsm] = useState("");
-  const [ncrCopies, setNcrCopies] = useState("");
-  const [ncrSetsPerBook, setNcrSetsPerBook] = useState("");
-  const [ncrPageColours, setNcrPageColours] = useState(["White", "Yellow", "Pink", "Blue"]);
-  const [ncrCoverColour, setNcrCoverColour] = useState("");
-  const [ncrTapeColour, setNcrTapeColour] = useState("");
-  const [smallPrintColour, setSmallPrintColour] = useState<SmallPrintColour>("");
-  const [smallCoatingId, setSmallCoatingId] = useState("");
-  const [smallFinishings, setSmallFinishings] = useState<string[]>([]);
-  const [smallFinishingMinutes, setSmallFinishingMinutes] = useState<Record<string, string>>({});
+  const [smallType, setSmallType] = useState<SmallFormatType | "">(snapshotString(initialSnapshot, "smallType") as SmallFormatType | "");
+  const [smallStockId, setSmallStockId] = useState(snapshotString(initialSnapshot, "smallStockId"));
+  const [customSmallStockEnabled, setCustomSmallStockEnabled] = useState(Boolean(initialSnapshot?.customSmallStockEnabled));
+  const [customSmallStockName, setCustomSmallStockName] = useState(snapshotString(initialSnapshot, "customSmallStockName"));
+  const [customSmallStockSupplier, setCustomSmallStockSupplier] = useState(snapshotString(initialSnapshot, "customSmallStockSupplier"));
+  const [customSmallStockCost, setCustomSmallStockCost] = useState(snapshotString(initialSnapshot, "customSmallStockCost"));
+  const [customSmallStockWidthMm, setCustomSmallStockWidthMm] = useState(snapshotString(initialSnapshot, "customSmallStockWidthMm"));
+  const [customSmallStockLengthMm, setCustomSmallStockLengthMm] = useState(snapshotString(initialSnapshot, "customSmallStockLengthMm"));
+  const [customSmallStockGsm, setCustomSmallStockGsm] = useState(snapshotString(initialSnapshot, "customSmallStockGsm"));
+  const [ncrCopies, setNcrCopies] = useState(snapshotString(initialSnapshot, "ncrCopies"));
+  const [ncrSetsPerBook, setNcrSetsPerBook] = useState(snapshotString(initialSnapshot, "ncrSetsPerBook"));
+  const [ncrPageColours, setNcrPageColours] = useState(initialSnapshot?.ncrPageColours?.length ? initialSnapshot.ncrPageColours : ["White", "Yellow", "Pink", "Blue"]);
+  const [ncrCoverColour, setNcrCoverColour] = useState(snapshotString(initialSnapshot, "ncrCoverColour"));
+  const [ncrTapeColour, setNcrTapeColour] = useState(snapshotString(initialSnapshot, "ncrTapeColour"));
+  const [smallPrintColour, setSmallPrintColour] = useState<SmallPrintColour>(snapshotString(initialSnapshot, "smallPrintColour") as SmallPrintColour);
+  const [smallCoatingId, setSmallCoatingId] = useState(snapshotString(initialSnapshot, "smallCoatingId"));
+  const [smallFinishings, setSmallFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "smallFinishings"));
+  const [smallFinishingMinutes, setSmallFinishingMinutes] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "smallFinishingMinutes"));
 
-  const [serviceType, setServiceType] = useState<ServiceType>("");
-  const [deliveryCharge, setDeliveryCharge] = useState("");
-  const [installCrewSize, setInstallCrewSize] = useState("1");
-  const [installMinutes, setInstallMinutes] = useState("");
-  const [travelCharge, setTravelCharge] = useState("");
-  const [serviceFixings, setServiceFixings] = useState<string[]>([]);
-  const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>({});
-  const [serviceFixingRate, setServiceFixingRate] = useState<Record<string, string>>({});
+  const [serviceType, setServiceType] = useState<ServiceType>(snapshotString(initialSnapshot, "serviceType") as ServiceType);
+  const [deliveryCharge, setDeliveryCharge] = useState(snapshotString(initialSnapshot, "deliveryCharge"));
+  const [installCrewSize, setInstallCrewSize] = useState(snapshotString(initialSnapshot, "installCrewSize", "1"));
+  const [installMinutes, setInstallMinutes] = useState(snapshotString(initialSnapshot, "installMinutes"));
+  const [travelCharge, setTravelCharge] = useState(snapshotString(initialSnapshot, "travelCharge"));
+  const [serviceFixings, setServiceFixings] = useState<string[]>(snapshotStringArray(initialSnapshot, "serviceFixings"));
+  const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingQty"));
+  const [serviceFixingRate, setServiceFixingRate] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingRate"));
 
-  const [componentName, setComponentName] = useState("");
-  const [componentDescription, setComponentDescription] = useState("");
-  const [componentParts, setComponentParts] = useState<CustomComponentPart[]>(() => [createBlankComponentPart()]);
-  const [componentLabourLabel, setComponentLabourLabel] = useState("Build / assembly labour");
-  const [componentLabourMinutes, setComponentLabourMinutes] = useState("");
+  const [componentName, setComponentName] = useState(snapshotString(initialSnapshot, "componentName"));
+  const [componentDescription, setComponentDescription] = useState(snapshotString(initialSnapshot, "componentDescription"));
+  const [componentParts, setComponentParts] = useState<CustomComponentPart[]>(initialComponentParts);
+  const [componentLabourLabel, setComponentLabourLabel] = useState(snapshotString(initialSnapshot, "componentLabourLabel", "Build / assembly labour"));
+  const [componentLabourMinutes, setComponentLabourMinutes] = useState(snapshotString(initialSnapshot, "componentLabourMinutes"));
 
-  const [quantity, setQuantity] = useState("1");
-  const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
-  const [manualUnitPrice, setManualUnitPrice] = useState("0.00");
+  const [quantity, setQuantity] = useState(editingLine?.quantity ?? snapshotString(initialSnapshot, "quantity", "1"));
+  const [unitPriceOverridden, setUnitPriceOverridden] = useState(Boolean(initialSnapshot?.unitPriceOverridden));
+  const [manualUnitPrice, setManualUnitPrice] = useState(editingLine?.unitPrice ?? snapshotString(initialSnapshot, "manualUnitPrice", "0.00"));
+  const [lineNotes, setLineNotes] = useState(editingLine?.notes ?? snapshotString(initialSnapshot, "notes"));
 
   const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
@@ -963,8 +1011,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
   const baseMaterials = useMemo(() => {
     if (!baseType) return [];
-    return materials.filter((material) => isSignageStock(material) && materialMatchesBase(material, baseType));
-  }, [materials, baseType]);
+    return materialPool.filter((material) => isSignageStock(material) && materialMatchesBase(material, baseType));
+  }, [materialPool, baseType]);
 
   const thicknessOptions = useMemo(() => uniq(baseMaterials.map(thicknessFor)), [baseMaterials]);
   const colourOptions = useMemo(() => {
@@ -981,7 +1029,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     return materialPool[0];
   }, [baseMaterials, thickness, colour]);
 
-  const rollMedia = useMemo(() => materials.filter((material) => isSignageStock(material) && isPrintRollMaterial(material)), [materials]);
+  const rollMedia = useMemo(() => materialPool.filter((material) => isSignageStock(material) && isPrintRollMaterial(material)), [materialPool]);
   const laminateMaterials = useMemo(() => {
     const departmentGroup: MaterialDepartmentGroup = flowType === "plan_printing"
       ? "plan-printing"
@@ -991,21 +1039,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           ? "small-format"
           : "signage";
 
-    return materials.filter((material) => {
+    return materialPool.filter((material) => {
       if (!isLaminateMaterial(material)) return false;
       const group = explicitMaterialGroup(material);
       return group === null || group === departmentGroup;
     });
-  }, [materials, flowType]);
-  const smallStocks = useMemo(() => materials.filter(isSmallFormatStock), [materials]);
+  }, [materialPool, flowType]);
+  const smallStocks = useMemo(() => materialPool.filter(isSmallFormatStock), [materialPool]);
   const planPrintingStocks = useMemo(() => {
-    const matched = materials.filter(isPlanPrintingStock);
+    const matched = materialPool.filter(isPlanPrintingStock);
     return matched.length > 0 ? matched : smallStocks;
-  }, [materials, smallStocks]);
+  }, [materialPool, smallStocks]);
   const posterPrintingStocks = useMemo(() => {
-    const matched = materials.filter(isPosterPrintingStock);
+    const matched = materialPool.filter(isPosterPrintingStock);
     return matched.length > 0 ? matched : [...rollMedia, ...smallStocks];
-  }, [materials, rollMedia, smallStocks]);
+  }, [materialPool, rollMedia, smallStocks]);
   const departmentStocks = flowType === "plan_printing" ? planPrintingStocks : flowType === "poster_printing" ? posterPrintingStocks : smallStocks;
   const customSmallStock = useMemo<QuoteMaterial | undefined>(() => {
     if (!customSmallStockEnabled || !customSmallStockName.trim()) return undefined;
@@ -1028,7 +1076,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const selectedLaminate = laminateMaterials.find((material) => material.id === laminateId);
   const selectedSmallStock = customSmallStockEnabled ? customSmallStock : departmentStocks.find((material) => material.id === smallStockId);
   const selectedSmallCoating = laminateMaterials.find((material) => material.id === smallCoatingId);
-  const eyeletMaterial = materials.find((material) => materialText(material).includes("eyelet")) ?? materials.find((material) => String(material.materialType ?? "").toLowerCase().includes("fix"));
+  const eyeletMaterial = materialPool.find((material) => materialText(material).includes("eyelet")) ?? materialPool.find((material) => String(material.materialType ?? "").toLowerCase().includes("fix"));
 
   const selectedBase = baseTypes.find((item) => item.key === baseType);
   const selectedSmallType = smallFormatTypes.find((item) => item.key === smallType);
@@ -1047,7 +1095,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
   const pricedComponentParts = componentParts.filter((part) => {
     const qty = numberValue(part.qty, 0);
-    const material = materials.find((item) => item.id === part.materialId);
+    const material = materialPool.find((item) => item.id === part.materialId);
     const rate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : rateForComponentUnit(material, part.unit).rate;
     return qty > 0 && rate > 0 && (part.name.trim() || material);
   });
@@ -1558,7 +1606,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
     if (flowType === "component") {
       for (const part of componentParts) {
-        const material = materials.find((item) => item.id === part.materialId);
+        const material = materialPool.find((item) => item.id === part.materialId);
         const qty = numberValue(part.qty, 0);
         const derivedRate = rateForComponentUnit(material, part.unit);
         const rate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : derivedRate.rate;
@@ -1584,7 +1632,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materials, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1674,7 +1722,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const smallFinishingSummary = selectedKeys(smallFinishingOptions, smallFinishings);
 
   const componentPartSummary = pricedComponentParts.map((part) => {
-    const material = materials.find((item) => item.id === part.materialId);
+    const material = materialPool.find((item) => item.id === part.materialId);
     return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || material?.name || "part"}`;
   }).join(", ");
   const finishedSizeLabel = width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : "";
@@ -1765,6 +1813,122 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       : flowType === "small_format"
         ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
         : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateMinutes, 0) > 0) && dispatchComplete);
+
+  const configurationSnapshot: QuickQuoteSnapshot = {
+    version: 1,
+    source: "quick_quote_builder",
+    reconstructed: false,
+    linkedDispatchLineId: initialSnapshot?.linkedDispatchLineId ?? null,
+    builderMode: builderMode === "saved" ? "quick" : builderMode,
+    activeStep,
+    flowType,
+    baseType,
+    thickness,
+    colour,
+    widthMm,
+    heightMm,
+    artworkChoice,
+    artworkMinutes,
+    printMethod,
+    printSetupMinutes,
+    mediaId,
+    ink,
+    sides,
+    printDirection,
+    laminateId,
+    laminateMinutes,
+    finishings,
+    finishingMinutes,
+    eyeletPresetLabel,
+    customEyeletQty,
+    smallType,
+    smallStockId,
+    customSmallStockEnabled,
+    customSmallStockName,
+    customSmallStockSupplier,
+    customSmallStockCost,
+    customSmallStockWidthMm,
+    customSmallStockLengthMm,
+    customSmallStockGsm,
+    ncrCopies,
+    ncrSetsPerBook,
+    ncrPageColours,
+    ncrCoverColour,
+    ncrTapeColour,
+    smallPrintColour,
+    smallCoatingId,
+    smallFinishings,
+    smallFinishingMinutes,
+    serviceType,
+    deliveryCharge,
+    installCrewSize,
+    installMinutes,
+    travelCharge,
+    serviceFixings,
+    serviceFixingQty,
+    serviceFixingRate,
+    componentName,
+    componentDescription,
+    componentParts,
+    componentLabourLabel,
+    componentLabourMinutes,
+    quantity,
+    unitPriceOverridden,
+    manualUnitPrice: (unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2),
+    notes: lineNotes,
+    materialSnapshots: {
+      main: snapshotMaterialForSave(selectedMainMaterial),
+      media: snapshotMaterialForSave(selectedMedia),
+      laminate: snapshotMaterialForSave(selectedLaminate),
+      smallStock: snapshotMaterialForSave(selectedSmallStock),
+      smallCoating: snapshotMaterialForSave(selectedSmallCoating),
+      eyelet: snapshotMaterialForSave(eyeletMaterial),
+      componentParts: Array.from(new Map(componentParts
+        .map((part) => materialPool.find((material) => material.id === part.materialId))
+        .filter((material): material is QuoteMaterial => Boolean(material))
+        .map((material) => [material.id, snapshotMaterialForSave(material) as SnapshotMaterial])).values())
+    },
+    pricingSnapshot: {
+      markupMultiplier,
+      profitMultiplier,
+      labourRate,
+      inkRatePerSqm,
+      monoRatePerSqm,
+      rawCost,
+      autoUnitPrice,
+      pricingBreakdown: costs.map((row) => ({ ...row }))
+    }
+  };
+
+  const dispatchConfigurationSnapshot: QuickQuoteSnapshot = {
+    version: 1,
+    source: "quick_quote_builder",
+    parentLineId: editingLine?.id ?? null,
+    builderMode: "advanced",
+    activeStep: "service_details",
+    flowType: "service",
+    serviceType,
+    deliveryCharge,
+    installCrewSize,
+    installMinutes,
+    travelCharge,
+    serviceFixings,
+    serviceFixingQty,
+    serviceFixingRate,
+    quantity: "1",
+    unitPriceOverridden: false,
+    manualUnitPrice: dispatchUnitPrice.toFixed(2),
+    notes: "",
+    materialSnapshots: { componentParts: [] },
+    pricingSnapshot: {
+      markupMultiplier,
+      profitMultiplier,
+      labourRate,
+      rawCost: dispatchRawCost,
+      autoUnitPrice: dispatchUnitPrice,
+      pricingBreakdown: dispatchCosts.map((row) => ({ ...row }))
+    }
+  };
 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
@@ -1990,9 +2154,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
             {flowType !== "component" ? renderDispatchSection() : null}
 
-            <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" placeholder="Optional notes for this line" style={textareaStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} placeholder="Optional notes for this line" style={textareaStyle} /></label>
 
-            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 58, justifySelf: "center", minWidth: 240, fontSize: 18, background: "#65a30d", opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Add item to quote" : "Complete required fields"}</button>
+            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 58, justifySelf: "center", minWidth: 240, fontSize: 18, background: "#65a30d", opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? editingLine ? "Update quote line" : "Add item to quote" : "Complete required fields"}</button>
           </section>
 
           <aside style={{ position: "sticky", top: 18, display: "grid", gap: 14 }}>
@@ -2051,7 +2215,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <QuoteLineBuilder
             quoteId={quoteId}
             products={savedProducts}
-            materials={materials}
+            materials={materialPool}
             pricingSettings={{
               markupMultiplier: pricingSettings?.markupMultiplier,
               profitMultiplier: pricingSettings?.profitMultiplier
@@ -2128,7 +2292,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <StepIntro icon="3" title="Add parts used" text="Add each part that makes up the component. Pick an existing material or type a custom part. Quantity × cost is added to the quote line." />
           <div style={{ display: "grid", gap: 12 }}>
             {componentParts.map((part, index) => {
-              const selectedPartMaterial = materials.find((item) => item.id === part.materialId);
+              const selectedPartMaterial = materialPool.find((item) => item.id === part.materialId);
               const suggested = rateForComponentUnit(selectedPartMaterial, part.unit);
               const shownRate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : suggested.rate;
               return (
@@ -2141,7 +2305,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                     <label style={{ display: "grid", gap: 6 }}>
                       <b>From material library</b>
                       <select value={part.materialId} onChange={(event) => {
-                        const material = materials.find((item) => item.id === event.target.value);
+                        const material = materialPool.find((item) => item.id === event.target.value);
                         updateComponentPart(part.id, {
                           materialId: event.target.value,
                           name: part.name.trim() || material?.name || "",
@@ -2150,7 +2314,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                         });
                       }} style={inputStyle}>
                         <option value="">Custom / not in materials</option>
-                        {materials.map((material) => <option key={material.id} value={material.id}>{material.name}{material.supplierName ? ` · ${material.supplierName}` : ""}</option>)}
+                        {materialPool.map((material) => <option key={material.id} value={material.id}>{material.name}{material.supplierName ? ` · ${material.supplierName}` : ""}</option>)}
                       </select>
                     </label>
                     <label style={{ display: "grid", gap: 6 }}>
@@ -2305,7 +2469,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <StepIntro icon="2" title="Start with the base material" text="No product setup first. Choose the material family for this quote line." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
             {baseTypes.map((item) => {
-              const count = materials.filter((material) => materialMatchesBase(material, item.key)).length;
+              const count = materialPool.filter((material) => materialMatchesBase(material, item.key)).length;
               return (
                 <button key={item.key} type="button" onClick={() => resetAfterBase(item.key)} style={cardButtonStyle(baseType === item.key, item.accent)}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
@@ -2811,8 +2975,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
 
   return (
-    <form action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
+    <form id="quote-builder" action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid", scrollMarginTop: 18 }}>
       <input type="hidden" name="quoteId" value={quoteId} />
+      <input type="hidden" name="editingLineId" value={editingLine?.id ?? ""} />
+      <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
       <input type="hidden" name="productName" value={lineName} />
       <input type="hidden" name="optionSummary" value={optionSummary} />
       <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
@@ -2823,7 +2989,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <input type="hidden" name="serviceLineOptionSummary" value={dispatchSummary} />
           <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
           <input type="hidden" name="serviceLineQuantity" value="1" />
+          <input type="hidden" name="serviceLineConfigurationSnapshot" value={JSON.stringify(dispatchConfigurationSnapshot)} />
         </>
+      ) : null}
+      {editingLine ? (
+        <section style={{ borderBottom: "1px solid #bfdbfe", background: initialSnapshot?.reconstructed ? "#fff7ed" : "#eff6ff", color: initialSnapshot?.reconstructed ? "#9a3412" : "#1d4ed8", padding: "14px 18px", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "grid", gap: 3 }}>
+            <strong>{initialSnapshot?.reconstructed ? "Rebuilding an older quote line" : `Editing ${editingLine.productName}`}</strong>
+            <span style={{ fontSize: 13 }}>{initialSnapshot?.reconstructed ? "Known values were reconstructed from the old summary. Check each selection before saving; the original line remains unchanged until you update it." : "This is the original structured configuration. Changing selections recalculates the price and updates the same quote line."}</span>
+          </div>
+          <a href={`/quotes?selected=${quoteId}#saved-lines`} style={{ minHeight: 38, borderRadius: 12, border: "1px solid currentColor", color: "inherit", background: "#fff", padding: "0 12px", display: "inline-flex", alignItems: "center", textDecoration: "none", fontWeight: 900 }}>Cancel edit</a>
+        </section>
       ) : null}
       {builderMode === "quick" ? renderQuickQuoteLayout() : (
         <>
@@ -2912,7 +3088,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {activeStep !== "review" && nextStep ? <button type="button" onClick={() => setActiveStep(nextStep)} style={ghostButton}>Skip / next</button> : null}
               {activeStep === "review" ? (
-                <button type="submit" disabled={!canSave} style={{ ...primaryButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save quote line" : "Complete required cards"}</button>
+                <button type="submit" disabled={!canSave} style={{ ...primaryButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? editingLine ? "Update quote line" : "Save quote line" : "Complete required cards"}</button>
               ) : <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review</button>}
             </div>
           </div>
@@ -2920,12 +3096,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       </div>
 
       <div style={{ borderTop: "1px solid #e5e7eb", padding: 18, display: "grid", gap: 12, background: "#fff" }}>
-        <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" placeholder="Optional notes for this line" style={textareaStyle} /></label>
+        <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} placeholder="Optional notes for this line" style={textareaStyle} /></label>
         <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, background: "#f8fafc", display: "grid", gap: 5 }}>
           <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current unsaved line</span>
           <span style={{ color: optionSummary ? "#111827" : "#667085" }}>{optionSummary || "Complete the card flow above to build this quote line."}</span>
         </div>
-        <button type="submit" disabled={!canSave || activeStep !== "review"} style={{ ...darkButton, opacity: canSave && activeStep === "review" ? 1 : 0.45, cursor: canSave && activeStep === "review" ? "pointer" : "not-allowed" }}>{activeStep === "review" ? canSave ? "Save quote line" : "Complete required cards before saving" : "Review before saving"}</button>
+        <button type="submit" disabled={!canSave || activeStep !== "review"} style={{ ...darkButton, opacity: canSave && activeStep === "review" ? 1 : 0.45, cursor: canSave && activeStep === "review" ? "pointer" : "not-allowed" }}>{activeStep === "review" ? canSave ? editingLine ? "Update quote line" : "Save quote line" : "Complete required cards before saving" : "Review before saving"}</button>
       </div>
         </>
       )}

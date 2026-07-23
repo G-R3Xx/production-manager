@@ -10,6 +10,7 @@ import {
   createArtworkApprovalFromQuote,
   createQuoteDraftForTenant,
   deleteQuoteLineForTenant,
+  getQuoteLineForTenant,
   linkQuoteLineToProductForTenant,
   markArtworkApprovalSentForTenant,
   updateQuoteLineForTenant,
@@ -20,6 +21,7 @@ import {
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
 import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
+import { getCustomerById } from "@/server/customers";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -33,6 +35,22 @@ async function requireTenant() {
 function nullable(value: FormDataEntryValue | null): string | null {
   const trimmed = String(value ?? "").trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function jsonObject(value: FormDataEntryValue | null): Record<string, unknown> {
+  const raw = String(value ?? "").trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch {
+    return {};
+  }
+}
+
+function snapshotText(snapshot: Record<string, unknown>, key: string): string {
+  const value = snapshot[key];
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function buildEditableOptionSummary(formData: FormData): string | null {
@@ -319,10 +337,18 @@ export async function createQuoteDraftAction(formData: FormData): Promise<void> 
     redirect("/quotes?error=Client%20name%20is%20required");
   }
 
+  const linkedCustomerId = nullable(formData.get("linkedCustomerId"));
+  if (linkedCustomerId) {
+    const linkedCustomer = await getCustomerById(activeTenant.tenantId, linkedCustomerId);
+    if (!linkedCustomer) {
+      redirect("/quotes?error=The%20selected%20client%20could%20not%20be%20found");
+    }
+  }
+
   const created = await createQuoteDraftForTenant(activeTenant.tenantId, {
     enquiryId: nullable(formData.get("enquiryId")),
     surveyRequestId: nullable(formData.get("surveyRequestId")),
-    linkedCustomerId: nullable(formData.get("linkedCustomerId")),
+    linkedCustomerId,
     clientName,
     contactName: nullable(formData.get("contactName")),
     email: nullable(formData.get("email")),
@@ -337,10 +363,12 @@ export async function createQuoteDraftAction(formData: FormData): Promise<void> 
 export async function addQuoteLineAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const editingLineId = String(formData.get("editingLineId") ?? "").trim();
   const productId = String(formData.get("productId") ?? "").trim();
   const formProductName = String(formData.get("productName") ?? "").trim();
   const quantity = String(formData.get("quantity") ?? "1").trim();
   const unitPrice = String(formData.get("unitPrice") ?? "0").trim();
+  const configurationSnapshot = jsonObject(formData.get("configurationSnapshot"));
 
   if (!quoteId) {
     redirect("/quotes?error=Select%20a%20quote%20first");
@@ -358,27 +386,107 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
     productName = product.name;
   }
 
-  await addQuoteLine(quoteId, {
+  const serviceLineProductName = String(formData.get("serviceLineProductName") ?? "").trim();
+  const serviceLineUnitPrice = String(formData.get("serviceLineUnitPrice") ?? "").trim();
+  const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
+  const serviceLineSnapshot = jsonObject(formData.get("serviceLineConfigurationSnapshot"));
+
+  if (editingLineId) {
+    const existingLine = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, editingLineId);
+    if (!existingLine) {
+      redirect(`/quotes?selected=${quoteId}&error=The%20quote%20line%20could%20not%20be%20found`);
+    }
+
+    const existingSnapshot = existingLine.configurationSnapshot ?? {};
+    const existingDispatchLineId = snapshotText(existingSnapshot, "linkedDispatchLineId");
+    let linkedDispatchLineId = existingDispatchLineId;
+
+    if (serviceLineProductName && serviceLineUnitPrice) {
+      const dispatchSnapshot = { ...serviceLineSnapshot, parentLineId: editingLineId };
+      if (existingDispatchLineId) {
+        const existingDispatch = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId);
+        if (existingDispatch) {
+          await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId, {
+            productName: serviceLineProductName,
+            optionSummary: nullable(formData.get("serviceLineOptionSummary")),
+            quantity: serviceLineQuantity,
+            unitPrice: serviceLineUnitPrice,
+            notes: nullable(formData.get("serviceLineNotes")),
+            configurationSnapshot: dispatchSnapshot
+          });
+        } else {
+          const createdDispatch = await addQuoteLine(quoteId, {
+            productId: null,
+            productName: serviceLineProductName,
+            optionSummary: nullable(formData.get("serviceLineOptionSummary")),
+            quantity: serviceLineQuantity,
+            unitPrice: serviceLineUnitPrice,
+            notes: nullable(formData.get("serviceLineNotes")),
+            configurationSnapshot: dispatchSnapshot
+          });
+          linkedDispatchLineId = createdDispatch.id;
+        }
+      } else {
+        const createdDispatch = await addQuoteLine(quoteId, {
+          productId: null,
+          productName: serviceLineProductName,
+          optionSummary: nullable(formData.get("serviceLineOptionSummary")),
+          quantity: serviceLineQuantity,
+          unitPrice: serviceLineUnitPrice,
+          notes: nullable(formData.get("serviceLineNotes")),
+          configurationSnapshot: dispatchSnapshot
+        });
+        linkedDispatchLineId = createdDispatch.id;
+      }
+    } else if (existingDispatchLineId) {
+      await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId);
+      linkedDispatchLineId = "";
+    }
+
+    await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, editingLineId, {
+      productName,
+      optionSummary: nullable(formData.get("optionSummary")),
+      quantity,
+      unitPrice,
+      notes: nullable(formData.get("notes")),
+      configurationSnapshot: { ...configurationSnapshot, linkedDispatchLineId: linkedDispatchLineId || null }
+    });
+
+    redirect(`/quotes?selected=${quoteId}&message=Quote%20line%20rebuilt%20and%20updated#saved-lines`);
+  }
+
+  const createdMain = await addQuoteLine(quoteId, {
     productId: savedProductId,
     productName,
     optionSummary: nullable(formData.get("optionSummary")),
     quantity,
     unitPrice,
-    notes: nullable(formData.get("notes"))
+    notes: nullable(formData.get("notes")),
+    configurationSnapshot
   });
 
-  const serviceLineProductName = String(formData.get("serviceLineProductName") ?? "").trim();
-  const serviceLineUnitPrice = String(formData.get("serviceLineUnitPrice") ?? "").trim();
-  const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
-
+  let linkedDispatchLineId = "";
   if (serviceLineProductName && serviceLineUnitPrice) {
-    await addQuoteLine(quoteId, {
+    const createdDispatch = await addQuoteLine(quoteId, {
       productId: null,
       productName: serviceLineProductName,
       optionSummary: nullable(formData.get("serviceLineOptionSummary")),
       quantity: serviceLineQuantity,
       unitPrice: serviceLineUnitPrice,
-      notes: nullable(formData.get("serviceLineNotes"))
+      notes: nullable(formData.get("serviceLineNotes")),
+      configurationSnapshot: { ...serviceLineSnapshot, parentLineId: createdMain.id }
+    });
+    linkedDispatchLineId = createdDispatch.id;
+  }
+
+  if (linkedDispatchLineId) {
+    await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, createdMain.id, {
+      productName,
+      optionSummary: nullable(formData.get("optionSummary")),
+      quantity,
+      unitPrice,
+      notes: nullable(formData.get("notes")),
+      configurationSnapshot: { ...configurationSnapshot, linkedDispatchLineId }
     });
   }
 
@@ -394,6 +502,11 @@ export async function deleteQuoteLineAction(formData: FormData): Promise<void> {
     redirect("/quotes?error=Select%20a%20saved%20quote%20line%20to%20remove");
   }
 
+  const line = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId);
+  const linkedDispatchLineId = snapshotText(line?.configurationSnapshot ?? {}, "linkedDispatchLineId");
+  if (linkedDispatchLineId) {
+    await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, linkedDispatchLineId);
+  }
   await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId);
 
   redirect(`/quotes?selected=${quoteId}&message=Saved%20quote%20line%20removed`);

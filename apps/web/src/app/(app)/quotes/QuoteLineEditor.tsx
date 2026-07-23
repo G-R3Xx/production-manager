@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { saveQuoteLineAsProductAction, updateQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue, splitQuoteAnswerValues } from "./quoteOptionDependencies";
 import {
@@ -11,6 +12,7 @@ import {
   type QuoteProduct,
   type QuoteQuestion
 } from "./QuoteLineBuilder";
+import { readQuickQuoteSnapshot, stepForQuoteSummaryRow, type QuickQuoteStep } from "./quoteLineSnapshot";
 
 type QuoteLineEditorChoice = QuoteChoice;
 type QuoteLineEditorField = QuoteQuestion;
@@ -25,6 +27,7 @@ type QuoteLineEditorProps = {
     quantity: string;
     unitPrice: string;
     notes: string | null;
+    configurationSnapshot?: unknown;
     createdAt: string | null;
   };
   product?: QuoteLineEditorProduct | null;
@@ -380,6 +383,10 @@ function productFamilyForDepartment(department: string): string {
 }
 
 export function QuoteLineEditor({ quoteId, line, product, materials, pricingSettings }: QuoteLineEditorProps) {
+  const router = useRouter();
+  const quickSnapshot = useMemo(() => readQuickQuoteSnapshot(line.configurationSnapshot), [line.configurationSnapshot]);
+  const hasStructuredQuickSnapshot = !product && Boolean(quickSnapshot);
+  const needsLegacyRebuild = !product && !quickSnapshot;
   const summaryRows = useMemo(() => parseSummary(line.optionSummary), [line.optionSummary]);
   const indexedSummaryRows = useMemo(() => summaryRows.map((row, index) => ({ ...row, index })), [summaryRows]);
   const configuredFields = useMemo(() => (product?.fields ?? []).filter((field) => field.key !== "quantity"), [product]);
@@ -403,8 +410,8 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
   }, [indexedSummaryRows, line.productName]);
 
   const [answers, setAnswers] = useState<Record<string, string>>(() => initialAnswers);
-  const [legacyValues, setLegacyValues] = useState<Record<number, string>>(() => Object.fromEntries(indexedSummaryRows.map((row) => [row.index, row.value])));
-  const [rawSummary, setRawSummary] = useState(line.optionSummary ?? "");
+  const [legacyValues] = useState<Record<number, string>>(() => Object.fromEntries(indexedSummaryRows.map((row) => [row.index, row.value])));
+  const [rawSummary] = useState(line.optionSummary ?? "");
   const [lineTitle, setLineTitle] = useState(line.productName);
   const [quantity, setQuantity] = useState(line.quantity);
   const [unitPrice, setUnitPrice] = useState(() => cleanMoneyInput(line.unitPrice));
@@ -479,6 +486,12 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     setShowSaveProduct(true);
   }
 
+  function openQuickBuilder(step: QuickQuoteStep | null = null) {
+    const params = new URLSearchParams({ selected: quoteId, editLine: line.id });
+    if (step) params.set("editStep", step);
+    router.push(`/quotes?${params.toString()}#quote-builder`);
+  }
+
   const optionCards: BreakdownOptionCard[] = [];
   const representedFields = new Set<string>();
 
@@ -515,6 +528,28 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
 
   function renderOptionCard(card: BreakdownOptionCard) {
     if (card.kind === "line_title") {
+      const step = quickSnapshot?.flowType === "service" ? "service_type" : quickSnapshot?.flowType === "small_format" ? "small_type" : quickSnapshot?.flowType === "plan_printing" || quickSnapshot?.flowType === "poster_printing" ? "small_stock" : "base";
+      if (!product) {
+        return (
+          <BreakdownCard
+            key={card.key}
+            cardKey={card.key}
+            label={card.label}
+            value={lineTitle || "Not set"}
+            editable={hasStructuredQuickSnapshot}
+            active={false}
+            onActivate={() => openQuickBuilder(step)}
+          >
+            {card.summaryLabel ? (
+              <>
+                <input type="hidden" name="optionDetailLabel" value={card.summaryLabel} />
+                <input type="hidden" name="optionDetailValue" value={lineTitle} />
+              </>
+            ) : null}
+          </BreakdownCard>
+        );
+      }
+
       return (
         <BreakdownCard
           key={card.key}
@@ -539,44 +574,63 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
 
     if (card.kind === "legacy") {
       const value = legacyValues[card.rowIndex] ?? "";
+      const step = stepForQuoteSummaryRow(card.label, value, quickSnapshot);
+      if (!product) {
+        return (
+          <BreakdownCard
+            key={card.key}
+            cardKey={card.key}
+            label={card.label}
+            value={value || "Not set"}
+            editable={hasStructuredQuickSnapshot && Boolean(step)}
+            active={false}
+            onActivate={() => openQuickBuilder(step)}
+          >
+            <input type="hidden" name="optionDetailLabel" value={card.label} />
+            <input type="hidden" name="optionDetailValue" value={value} />
+          </BreakdownCard>
+        );
+      }
+
       return (
         <BreakdownCard
           key={card.key}
           cardKey={card.key}
           label={card.label}
           value={value || "Not set"}
-          editable
-          active={activeEditor === card.key}
+          active={false}
           onActivate={setActiveEditor}
         >
           <input type="hidden" name="optionDetailLabel" value={card.label} />
           <input type="hidden" name="optionDetailValue" value={value} />
-          <input
-           
-            value={value}
-            onChange={(event) => setLegacyValues((current) => ({ ...current, [card.rowIndex]: event.target.value }))}
-            onKeyDown={finishTextEdit}
-            style={inputStyle}
-          />
-          <DoneButton onClick={() => setActiveEditor(null)} />
         </BreakdownCard>
       );
     }
 
     if (card.kind === "raw_summary") {
+      if (!product) {
+        return (
+          <BreakdownCard
+            key={card.key}
+            cardKey={card.key}
+            label={card.label}
+            value={rawSummary || "No summary details"}
+            editable={hasStructuredQuickSnapshot}
+            active={false}
+            onActivate={() => openQuickBuilder(quickSnapshot?.activeStep ?? "base")}
+          />
+        );
+      }
+
       return (
         <BreakdownCard
           key={card.key}
           cardKey={card.key}
           label={card.label}
           value={rawSummary || "No summary details"}
-          editable
-          active={activeEditor === card.key}
+          active={false}
           onActivate={setActiveEditor}
-        >
-          <textarea value={rawSummary} onChange={(event) => setRawSummary(event.target.value)} style={{ ...textareaStyle, minHeight: 90 }} />
-          <DoneButton onClick={() => setActiveEditor(null)} />
-        </BreakdownCard>
+        />
       );
     }
 
@@ -704,37 +758,78 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
         <div style={{ display: "grid", gap: 3 }}>
           <strong>Line breakdown</strong>
-          <span style={{ color: "#64748b", fontSize: 13 }}>Click an editable card to change it. Available product options and dependent lists are used automatically.</span>
+          <span style={{ color: "#64748b", fontSize: 13 }}>
+            {product
+              ? "Click an editable card to change it. Available product options and dependent lists are used automatically."
+              : hasStructuredQuickSnapshot
+                ? "Click a card to reopen the original quick-builder control. Pricing is recalculated from the saved configuration."
+                : "This older line contains a finished summary only. Rebuild its options in the quick quote builder rather than editing wording directly."}
+          </span>
         </div>
         <span style={{ color: "#475467", fontSize: 13 }}>Created {formatDateTime(line.createdAt)}</span>
       </div>
 
+      {!product ? (
+        <section style={{ border: hasStructuredQuickSnapshot ? "1px solid #bfdbfe" : "1px solid #fed7aa", borderRadius: 14, padding: 12, background: hasStructuredQuickSnapshot ? "#eff6ff" : "#fffbeb", display: "grid", gap: 5 }}>
+          <strong style={{ color: hasStructuredQuickSnapshot ? "#1d4ed8" : "#9a3412" }}>
+            {hasStructuredQuickSnapshot ? "Structured quick-quote line" : "Older line needs its options rebuilt"}
+          </strong>
+          <span style={{ color: "#475467", fontSize: 13 }}>
+            {hasStructuredQuickSnapshot
+              ? "Material IDs, sizes, print choices, finishing, labour, dispatch and pricing inputs are preserved. Archived material snapshots remain available for this historical line."
+              : "Direct text editing has been removed. The builder will reconstruct the known material, size, print and finishing selections from this summary, then let you confirm or correct them."}
+          </span>
+        </section>
+      ) : null}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, alignItems: "start" }}>
         {optionCards.map(renderOptionCard)}
-        <BreakdownCard
-          cardKey="quantity"
-          label="Quantity"
-          value={quantity || "0"}
-          editable
-          active={activeEditor === "quantity"}
-          onActivate={setActiveEditor}
-        >
-          <input type="number" min="0" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={finishTextEdit} style={inputStyle} />
-          <DoneButton onClick={() => setActiveEditor(null)} />
-        </BreakdownCard>
+        {product ? (
+          <BreakdownCard
+            cardKey="quantity"
+            label="Quantity"
+            value={quantity || "0"}
+            editable
+            active={activeEditor === "quantity"}
+            onActivate={setActiveEditor}
+          >
+            <input type="number" min="0" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={finishTextEdit} style={inputStyle} />
+            <DoneButton onClick={() => setActiveEditor(null)} />
+          </BreakdownCard>
+        ) : (
+          <BreakdownCard
+            cardKey="quantity"
+            label="Quantity"
+            value={quantity || "0"}
+            editable={hasStructuredQuickSnapshot}
+            active={false}
+            onActivate={() => openQuickBuilder(quickSnapshot?.flowType === "small_format" || quickSnapshot?.flowType === "plan_printing" || quickSnapshot?.flowType === "poster_printing" ? "small_quantity" : "review")}
+          />
+        )}
         <BreakdownCard cardKey="unit-price" label="Unit price" value={formatMoney(unitPrice)} active={false} onActivate={setActiveEditor} />
         <BreakdownCard cardKey="line-total" label="Line total" value={formatMoney(enteredLineTotal)} active={false} onActivate={setActiveEditor} />
-        <BreakdownCard
-          cardKey="notes"
-          label="Internal notes"
-          value={notes || "No internal notes"}
-          editable
-          active={activeEditor === "notes"}
-          onActivate={setActiveEditor}
-        >
-          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} style={textareaStyle} />
-          <DoneButton onClick={() => setActiveEditor(null)} />
-        </BreakdownCard>
+        {product ? (
+          <BreakdownCard
+            cardKey="notes"
+            label="Internal notes"
+            value={notes || "No internal notes"}
+            editable
+            active={activeEditor === "notes"}
+            onActivate={setActiveEditor}
+          >
+            <textarea value={notes} onChange={(event) => setNotes(event.target.value)} style={textareaStyle} />
+            <DoneButton onClick={() => setActiveEditor(null)} />
+          </BreakdownCard>
+        ) : (
+          <BreakdownCard
+            cardKey="notes"
+            label="Internal notes"
+            value={notes || "No internal notes"}
+            editable={hasStructuredQuickSnapshot}
+            active={false}
+            onActivate={() => openQuickBuilder("review")}
+          />
+        )}
       </div>
 
       {product ? (
@@ -756,10 +851,21 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
 
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <button type="submit" style={buttonStyle}>Save line changes</button>
+          {product ? <button type="submit" style={buttonStyle}>Save line changes</button> : null}
+          {!product ? (
+            <button type="button" onClick={() => openQuickBuilder(needsLegacyRebuild ? null : quickSnapshot?.activeStep ?? "review")} style={buttonStyle}>
+              {needsLegacyRebuild ? "Rebuild line options" : "Edit whole line in builder"}
+            </button>
+          ) : null}
           <button type="button" onClick={openSaveProduct} style={{ ...buttonStyle, background: "#ffffff", color: "#155eef", border: "1px solid #b9cdfc" }}>Save as reusable product</button>
         </div>
-        <span style={{ color: "#64748b", fontSize: 13 }}>Only one breakdown is shown. Editable cards open in place; calculated price cards stay locked.</span>
+        <span style={{ color: "#64748b", fontSize: 13 }}>
+          {product
+            ? "Editable cards open in place; calculated price cards stay locked."
+            : hasStructuredQuickSnapshot
+              ? "Quick-builder lines are changed through their original controls; unit price and line total stay calculated."
+              : "Rebuilding replaces the legacy text summary with a structured, recalculating line."}
+        </span>
       </div>
 
       {showSaveProduct ? (
