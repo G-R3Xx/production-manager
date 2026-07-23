@@ -133,7 +133,7 @@ const optionUsageModes = [
   { value: "sqm_charge", label: "$ per m²", short: "Adds charge", amountLabel: "Sell $/m²", amountPlaceholder: "eg 10" },
   { value: "fixed_charge", label: "$ each", short: "Adds charge", amountLabel: "Sell $ each", amountPlaceholder: "eg 15" },
   { value: "material_each", label: "Hardware / consumable each", short: "Uses hardware", amountLabel: "Qty each", amountPlaceholder: "eg 1" },
-  { value: "labour_hours", label: "Labour hours", short: "Adds labour", amountLabel: "Hours", amountPlaceholder: "eg 0.25" }
+  { value: "labour_hours", label: "Labour minutes", short: "Adds labour", amountLabel: "Minutes", amountPlaceholder: "eg 15" }
 ];
 
 const quickQuestionPresets = [
@@ -186,8 +186,8 @@ const quickQuestionPresets = [
     type: "multi_select",
     required: "no",
     rows: [
-      { answer: "Jingwei cutting", mode: "labour_hours", amount: "0.25" },
-      { answer: "Drill holes", mode: "labour_hours", amount: "0.10" }
+      { answer: "Jingwei cutting", mode: "labour_hours", amount: "15" },
+      { answer: "Drill holes", mode: "labour_hours", amount: "6" }
     ]
   },
   {
@@ -231,6 +231,13 @@ function cleanUsageNumber(value: unknown): string {
   const text = String(value ?? "").trim();
   if (!text || text === "0" || text === "0.00") return "";
   return text;
+}
+
+function hoursToMinutesText(value: unknown): string {
+  const hours = Number(String(value ?? "").replace(/,/g, "").trim());
+  if (!Number.isFinite(hours) || hours <= 0) return "";
+  const minutes = Math.round(hours * 60 * 100) / 100;
+  return Number.isInteger(minutes) ? String(minutes) : String(minutes).replace(/0+$/, "").replace(/\.$/, "");
 }
 
 function optionKeyValue(option: any): string {
@@ -303,7 +310,7 @@ function optionUsageAmountFromComponent(component: any): string {
   if (mode === "sheets_per_item") return cleanUsageNumber(stockUsage?.sheetsPerUnit) || "1";
   if (mode === "roll_metres") return cleanUsageNumber(stockUsage?.metresPerUnit);
   if (mode === "material_each") return cleanUsageNumber(component?.quantity) || "1";
-  if (mode === "labour_hours") return cleanUsageNumber(component?.quantity ?? stockUsage?.hoursPerUnit) || "";
+  if (mode === "labour_hours") return hoursToMinutesText(component?.quantity ?? stockUsage?.hoursPerUnit);
   if (mode === "sqm_charge" || mode === "fixed_charge") return cleanUsageNumber(stockUsage?.sellRate ?? component?.quantity) || "";
   return "";
 }
@@ -684,7 +691,7 @@ function BuilderHelpPanel() {
         <RecipeLine label="Roll vinyl" body="Material from size, linked to roll stock" />
         <RecipeLine label="CMYK ink" body="$ per m², rate 10" />
         <RecipeLine label="White ink" body="Yes answer = $ per m², rate 10" />
-        <RecipeLine label="Labour" body="Choose Labour hours, eg 0.25 at $66/hr" />
+        <RecipeLine label="Labour" body="Choose Labour minutes, eg 15 at $66/hr. The system converts minutes internally." />
         <RecipeLine label="Eyelets" body="Hardware each + ask placement presets like 4 corners=4" />
         <RecipeLine label="No laminate" body="No extra cost" />
       </div>
@@ -850,7 +857,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
           <span style={labelTextStyle}>Adds</span>
           <span style={labelTextStyle}>Material</span>
           <span style={labelTextStyle}>Amount / rate</span>
-          <span style={labelTextStyle}>Labour hrs</span>
+          <span style={labelTextStyle}>Labour mins</span>
         </div>
 
         {rows.map((row: any, index: number) => {
@@ -900,7 +907,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
               </label>
               <label style={labelStyle}>
                 <span style={labelTextStyle}>Extra labour</span>
-                <input name="optionLabourHours" defaultValue={cleanUsageNumber(labourComponent?.quantity)} placeholder="eg 0.25" style={inputStyle} />
+                <input name="optionLabourMinutes" defaultValue={hoursToMinutesText(labourComponent?.quantity)} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} />
                 <input type="hidden" name="optionLabourName" value={String(labourComponent?.label ?? "")} />
               </label>
               <details style={{ gridColumn: "1 / -1", borderTop: "1px solid #e2e8f0", paddingTop: 8 }}>
@@ -935,7 +942,7 @@ function VisualAnswerBuilder({ materials, field, components = [] }: { materials:
 
       <div style={{ ...whitePanelStyle, background: "#fff" }}>
         <strong>Examples</strong>
-        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Print setup / laminate apply / Jingwei: add <b>Labour hrs</b> like <b>0.25</b> on the same answer line. Roll vinyl: <b>Material from size</b> + SAV roll stock. Eyelets: <b>Hardware / consumable each</b> + Eyelet material + ask placement presets.</p>
+        <p style={mutedStyle}>ACM size: <b>Parts per sheet</b> + ACM + <b>8</b>. Ink: <b>$ per m²</b> + no material + <b>10</b>. Print setup / laminate apply / Jingwei: add <b>Labour mins</b> like <b>15</b> on the same answer line. Roll vinyl: <b>Material from size</b> + SAV roll stock. Eyelets: <b>Hardware / consumable each</b> + Eyelet material + ask placement presets.</p>
       </div>
     </section>
   );
@@ -1130,7 +1137,7 @@ function recipeBasisText(component: any): string {
   const stockUsage = component?.stockUsage ?? {};
   if (ruleType === "sell_sqm") return `$${cleanUsageNumber(stockUsage.sellRate ?? component.quantity) || "0"} / m²`;
   if (ruleType === "sell_each") return `$${cleanUsageNumber(stockUsage.sellRate ?? component.quantity) || "0"} each`;
-  if (ruleType === "labour_hours") return `${cleanUsageNumber(component.quantity) || "0"} hr × $${cleanUsageNumber(stockUsage.sellRate) || "0"}/hr`;
+  if (ruleType === "labour_hours") return `${hoursToMinutesText(component.quantity) || "0"} min × $${cleanUsageNumber(stockUsage.sellRate) || "0"}/hr`;
   if (ruleType === "outsourced_each") return `${cleanUsageNumber(component.quantity) || "1"} × $${cleanUsageNumber(stockUsage.sellRate) || "0"}`;
   if (ruleType === "choice_only") return String(component?.notes ?? "").includes("Direct print") ? "Direct print / no roll stock" : "Choice only";
   if (ruleType === "per_linear_metre") return cleanUsageNumber(stockUsage.metresPerUnit) ? `${cleanUsageNumber(stockUsage.metresPerUnit)} lm each` : "Roll length from size";
@@ -1307,8 +1314,8 @@ function AddLabourRecipeRow({ productId, fields }: { productId: string; fields: 
             <input name="label" placeholder="eg Print setup, Laminate apply, Jingwei" style={inputStyle} />
           </label>
           <label style={labelStyle}>
-            <span style={labelTextStyle}>Hours per item</span>
-            <input name="quantity" placeholder="eg 0.25" style={inputStyle} />
+            <span style={labelTextStyle}>Minutes per item</span>
+            <input name="labourMinutes" placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} />
           </label>
           <label style={labelStyle}>
             <span style={labelTextStyle}>Rate $/hr</span>

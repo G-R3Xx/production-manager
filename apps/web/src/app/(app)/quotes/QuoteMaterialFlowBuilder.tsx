@@ -274,7 +274,7 @@ const smallFinishingOptions = [
 const serviceTypes: Array<{ key: Exclude<ServiceType, "">; label: string; icon: string; description: string }> = [
   { key: "pickup", label: "Pickup", icon: "↗", description: "Client collects the job. Usually no charge unless you add notes or a manual price." },
   { key: "delivery", label: "Delivery", icon: "▣", description: "Add a delivery charge as its own quote line." },
-  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, hours and fixing consumables." }
+  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, minutes and fixing consumables." }
 ];
 
 const fixingOptions = [
@@ -343,11 +343,6 @@ function usage(value: number): string {
   if (value < 0.01) return value.toFixed(4);
   if (value < 1) return value.toFixed(3);
   return value.toFixed(2);
-}
-
-function minutesToHours(value: string | number | null | undefined): number {
-  const minutes = numberValue(value, 0);
-  return minutes > 0 ? minutes / 60 : 0;
 }
 
 function minutesLabel(value: string | number | null | undefined): string {
@@ -898,7 +893,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [widthMm, setWidthMm] = useState("");
   const [heightMm, setHeightMm] = useState("");
   const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>("");
-  const [artworkHours, setArtworkHours] = useState("");
+  const [artworkMinutes, setArtworkMinutes] = useState("");
   const [printMethod, setPrintMethod] = useState<PrintMethod>("");
   const [printSetupMinutes, setPrintSetupMinutes] = useState("");
   const [mediaId, setMediaId] = useState("");
@@ -906,9 +901,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [sides, setSides] = useState<SidesChoice>("");
   const [printDirection, setPrintDirection] = useState<PrintDirection>("");
   const [laminateId, setLaminateId] = useState("");
-  const [laminateHours, setLaminateHours] = useState("");
+  const [laminateMinutes, setLaminateMinutes] = useState("");
   const [finishings, setFinishings] = useState<string[]>([]);
-  const [finishingHours, setFinishingHours] = useState<Record<string, string>>({});
+  const [finishingMinutes, setFinishingMinutes] = useState<Record<string, string>>({});
   const [eyeletPresetLabel, setEyeletPresetLabel] = useState(eyeletPresets[0]?.label ?? "");
   const [customEyeletQty, setCustomEyeletQty] = useState("");
 
@@ -929,12 +924,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [smallPrintColour, setSmallPrintColour] = useState<SmallPrintColour>("");
   const [smallCoatingId, setSmallCoatingId] = useState("");
   const [smallFinishings, setSmallFinishings] = useState<string[]>([]);
-  const [smallFinishingHours, setSmallFinishingHours] = useState<Record<string, string>>({});
+  const [smallFinishingMinutes, setSmallFinishingMinutes] = useState<Record<string, string>>({});
 
   const [serviceType, setServiceType] = useState<ServiceType>("");
   const [deliveryCharge, setDeliveryCharge] = useState("");
   const [installCrewSize, setInstallCrewSize] = useState("1");
-  const [installHours, setInstallHours] = useState("");
+  const [installMinutes, setInstallMinutes] = useState("");
   const [travelCharge, setTravelCharge] = useState("");
   const [serviceFixings, setServiceFixings] = useState<string[]>([]);
   const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>({});
@@ -944,7 +939,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [componentDescription, setComponentDescription] = useState("");
   const [componentParts, setComponentParts] = useState<CustomComponentPart[]>(() => [createBlankComponentPart()]);
   const [componentLabourLabel, setComponentLabourLabel] = useState("Build / assembly labour");
-  const [componentLabourHours, setComponentLabourHours] = useState("");
+  const [componentLabourMinutes, setComponentLabourMinutes] = useState("");
 
   const [quantity, setQuantity] = useState("1");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
@@ -1056,7 +1051,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     const rate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : rateForComponentUnit(material, part.unit).rate;
     return qty > 0 && rate > 0 && (part.name.trim() || material);
   });
-  const componentHasCost = pricedComponentParts.length > 0 || numberValue(componentLabourHours, 0) > 0;
+  const componentHasCost = pricedComponentParts.length > 0 || numberValue(componentLabourMinutes, 0) > 0;
 
   const steps = useMemo(() => {
     const next: Array<{ key: StepKey; label: string; complete: boolean; icon: string }> = [
@@ -1065,7 +1060,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
     if (flowType === "service") {
       next.push({ key: "service_type", label: "Service", complete: Boolean(serviceType), icon: "2" });
-      next.push({ key: "service_details", label: serviceType === "install" ? "Crew / time" : serviceType === "delivery" ? "Charge" : "Details", complete: serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) >= 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0), icon: "3" });
+      next.push({ key: "service_details", label: serviceType === "install" ? "Crew / time" : serviceType === "delivery" ? "Charge" : "Details", complete: serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) >= 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0), icon: "3" });
       if (serviceType === "install") next.push({ key: "service_fixings", label: "Fixings", complete: true, icon: "4" });
       next.push({ key: "review", label: "Review", complete: Boolean(serviceType), icon: "✓" });
       return next;
@@ -1083,13 +1078,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (isPrintDepartment) {
       next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: "2" });
       next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: "3" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: "4" });
+      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: "4" });
       next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "5" });
       next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "6" });
       next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "7" });
       next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: "8" });
       next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: "9" });
-      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0))), icon: "→" });
+      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
       next.push({ key: "review", label: "Review", complete: Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && serviceType), icon: "✓" });
       return next;
     }
@@ -1099,7 +1094,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       if (isDuplicateBook) next.push({ key: "ncr_details", label: "Book details", complete: ncrDetailsComplete, icon: "3" });
       next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: isDuplicateBook ? "4" : "3" });
       next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: isDuplicateBook ? "5" : "4" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: isDuplicateBook ? "6" : "5" });
+      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: isDuplicateBook ? "6" : "5" });
       if (!isDuplicateBook) {
         next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "6" });
         next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "7" });
@@ -1107,7 +1102,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
       next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: isDuplicateBook ? "7" : "9" });
       next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: isDuplicateBook ? "8" : "10" });
-      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0))), icon: "→" });
+      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
       next.push({ key: "review", label: "Review", complete: Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && serviceType), icon: "✓" });
       return next;
     }
@@ -1117,19 +1112,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       next.push({ key: "thickness", label: "Thickness", complete: Boolean(thickness), icon: "3" });
       next.push({ key: "colour", label: "Colour", complete: Boolean(colour && selectedMainMaterial), icon: "4" });
       next.push({ key: "size", label: "Size", complete: width > 0 && height > 0, icon: "5" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkHours, 0) > 0), icon: "6" });
+      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: "6" });
       next.push({ key: "print", label: "Print method", complete: Boolean(printMethod && printSetupComplete), icon: "7" });
       if (needsMediaStep) next.push({ key: "media", label: printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
       if (needsInkStep) next.push({ key: "ink", label: "Ink", complete: Boolean(ink), icon: "9" });
       if (printed) next.push({ key: "sides", label: isClearAcrylic ? "Sides / direction" : "Sides", complete: Boolean(sides && (!isClearAcrylic || printDirection)), icon: "•" });
-      if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId && (laminateId === "none" || laminateHours.trim().length > 0)), icon: "•" });
+      if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId && (laminateId === "none" || laminateMinutes.trim().length > 0)), icon: "•" });
       next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
-      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0))), icon: "→" });
+      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
       next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && printMethod && printSetupComplete && serviceType), icon: "✓" });
     }
 
     return next;
-  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkHours, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateHours, serviceType, deliveryCharge, installCrewSize, installHours]);
+  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -1163,7 +1158,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setWidthMm("");
     setHeightMm("");
     setArtworkChoice("");
-    setArtworkHours("");
+    setArtworkMinutes("");
     setPrintMethod("");
     setPrintSetupMinutes("");
     setMediaId("");
@@ -1171,7 +1166,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setSides("");
     setPrintDirection("");
     setLaminateId("");
-    setLaminateHours("");
+    setLaminateMinutes("");
     setSmallPrintColour("");
     setSmallCoatingId("");
     setFinishings([]);
@@ -1180,7 +1175,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setServiceType("");
     setDeliveryCharge("");
     setInstallCrewSize("1");
-    setInstallHours("");
+    setInstallMinutes("");
     setTravelCharge("");
     setServiceFixings([]);
     setServiceFixingQty({});
@@ -1189,7 +1184,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setComponentDescription("");
     setComponentParts([createBlankComponentPart()]);
     setComponentLabourLabel("Build / assembly labour");
-    setComponentLabourHours("");
+    setComponentLabourMinutes("");
     setUnitPriceOverridden(false);
     setActiveStep(nextFlow === "small_format" ? "small_type" : isPrintDepartmentFlow(nextFlow) ? "small_stock" : nextFlow === "service" ? "service_type" : nextFlow === "component" ? "component_details" : "base");
   }
@@ -1201,7 +1196,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setWidthMm("");
     setHeightMm("");
     setArtworkChoice("");
-    setArtworkHours("");
+    setArtworkMinutes("");
     setPrintMethod("");
     setPrintSetupMinutes("");
     setMediaId("");
@@ -1209,7 +1204,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setSides("");
     setPrintDirection("");
     setLaminateId("");
-    setLaminateHours("");
+    setLaminateMinutes("");
     setFinishings([]);
     setUnitPriceOverridden(false);
     setActiveStep("thickness");
@@ -1236,7 +1231,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       setSides("");
       setPrintDirection("");
       setLaminateId("none");
-      setLaminateHours("");
+      setLaminateMinutes("");
       setActiveStep("finishing");
     }
     setUnitPriceOverridden(false);
@@ -1302,27 +1297,28 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (artworkChoice === "required") {
-        const hours = numberValue(artworkHours, 0);
-        if (hours > 0) {
-          const amount = hours / quantityNumber;
-          rows.push({ label: "Artwork", detail: "Artwork/design time", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        const minutes = numberValue(artworkMinutes, 0);
+        if (minutes > 0) {
+          const amount = minutes / quantityNumber;
+          const rate = labourRate / 60;
+          rows.push({ label: "Artwork", detail: "Artwork/design time", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
         }
       }
 
       if (printed) {
         const minutes = numberValue(printSetupMinutes, 0);
-        const hours = minutesToHours(minutes);
         const methodLabel = printMethods.find((item) => item.key === printMethod)?.label ?? "Print";
-        if (hours > 0) {
-          const amount = hours / quantityNumber;
+        if (minutes > 0) {
+          const amount = minutes / quantityNumber;
+          const rate = labourRate / 60;
           rows.push({
             label: "Print setup labour",
             detail: methodLabel,
             amount,
-            unit: "hr",
-            rate: labourRate,
-            cost: amount * labourRate,
-            note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line` : minutesLabel(minutes)
+            unit: "min",
+            rate,
+            cost: amount * rate,
+            note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr`
           });
         }
       }
@@ -1373,10 +1369,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           cost: amount * rate.rate,
           note: [lm.note, sides === "double" ? "double sided" : null, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
         });
-        const hours = numberValue(laminateHours, 0);
-        if (hours > 0) {
-          const amount = hours / quantityNumber;
-          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        const minutes = numberValue(laminateMinutes, 0);
+        if (minutes > 0) {
+          const amount = minutes / quantityNumber;
+          const rate = labourRate / 60;
+          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
         }
       }
 
@@ -1389,16 +1386,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             const rate = eachRate(eyeletMaterial);
             rows.push({ label: "Eyelets", detail: eyeletMaterial.name, amount: qty, unit: "each", rate: rate.rate, cost: qty * rate.rate, note: [eyeletPresetLabel, rate.note].filter(Boolean).join(" · ") || undefined });
           }
-          const eyeletMinutes = numberValue(finishingHours[item.key], 0);
-          const eyeletHours = eyeletMinutes > 0 ? eyeletMinutes / 60 : 0;
-          if (qty > 0 && eyeletHours > 0) rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount: qty * eyeletHours, unit: "hr", rate: labourRate, cost: qty * eyeletHours * labourRate, note: `${minutesLabel(eyeletMinutes)} each` });
+          const eyeletMinutes = numberValue(finishingMinutes[item.key], 0);
+          if (qty > 0 && eyeletMinutes > 0) {
+            const amount = qty * eyeletMinutes;
+            const rate = labourRate / 60;
+            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: `${minutesLabel(eyeletMinutes)} each · ${money(labourRate)}/hr` });
+          }
           continue;
         }
-        const minutes = numberValue(finishingHours[item.key], 0);
-        const hours = minutesToHours(minutes);
-        if (hours > 0) {
-          const amount = hours / quantityNumber;
-          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line` : minutesLabel(minutes) });
+        const minutes = numberValue(finishingMinutes[item.key], 0);
+        if (minutes > 0) {
+          const amount = minutes / quantityNumber;
+          const rate = labourRate / 60;
+          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
         }
       }
     }
@@ -1441,8 +1441,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (artworkChoice === "required") {
-        const hours = numberValue(artworkHours, 0);
-        if (hours > 0) rows.push({ label: "Artwork", detail: "Artwork/design time", amount: hours / quantityNumber, unit: "hr", rate: labourRate, cost: (hours / quantityNumber) * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        const minutes = numberValue(artworkMinutes, 0);
+        if (minutes > 0) {
+          const amount = minutes / quantityNumber;
+          const rate = labourRate / 60;
+          rows.push({ label: "Artwork", detail: "Artwork/design time", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+        }
       }
 
       if (smallPrintColour && itemArea > 0) {
@@ -1460,8 +1464,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
-        const hours = numberValue(smallFinishingHours[item.key], 0);
-        if (hours > 0) rows.push({ label: item.label, detail: "Finishing labour", amount: hours / quantityNumber, unit: "hr", rate: labourRate, cost: (hours / quantityNumber) * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+        const minutes = numberValue(smallFinishingMinutes[item.key], 0);
+        if (minutes > 0) {
+          const amount = minutes / quantityNumber;
+          const rate = labourRate / 60;
+          rows.push({ label: item.label, detail: "Finishing labour", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+        }
       }
     }
 
@@ -1481,8 +1489,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (artworkChoice === "required") {
-        const hours = numberValue(artworkHours, 0);
-        if (hours > 0) rows.push({ label: "Artwork", detail: "Artwork/design time", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+        const minutes = numberValue(artworkMinutes, 0);
+        if (minutes > 0) {
+          const rate = labourRate / 60;
+          rows.push({ label: "Artwork", detail: "Artwork/design time", amount: minutes, unit: "min", rate, cost: minutes * rate, note: `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+        }
       }
 
       if (isDuplicateBook && itemArea > 0 && quantityNumber > 0) {
@@ -1507,9 +1518,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
-        const minutes = numberValue(smallFinishingHours[item.key], 0);
-        const hours = minutesToHours(minutes);
-        if (hours > 0) rows.push({ label: item.label, detail: "Bindery / finishing labour", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate, note: minutesLabel(minutes) });
+        const minutes = numberValue(smallFinishingMinutes[item.key], 0);
+        if (minutes > 0) {
+          const rate = labourRate / 60;
+          rows.push({ label: item.label, detail: "Bindery / finishing labour", amount: minutes, unit: "min", rate, cost: minutes * rate, note: `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+        }
       }
     }
 
@@ -1526,8 +1539,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (serviceType === "install") {
         const people = Math.max(1, numberValue(installCrewSize, 1));
-        const hours = numberValue(installHours, 0);
-        if (hours > 0) rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount: people * hours, unit: "hr", rate: labourRate, cost: people * hours * labourRate, note: `${usage(hours)}hr on site` });
+        const minutes = numberValue(installMinutes, 0);
+        if (minutes > 0) {
+          const amount = people * minutes;
+          const rate = labourRate / 60;
+          rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount, unit: "min", rate, cost: amount * rate, note: `${minutesLabel(minutes)} on site per installer · ${money(labourRate)}/hr` });
+        }
         const travel = numberValue(travelCharge, 0);
         if (travel > 0) rows.push({ label: "Travel / delivery", detail: "Travel or call-out allowance", amount: 1, unit: "each", rate: travel, cost: travel });
         for (const item of fixingOptions) {
@@ -1559,14 +1576,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         }
       }
 
-      const hours = numberValue(componentLabourHours, 0);
-      if (hours > 0) {
-        rows.push({ label: componentLabourLabel.trim() || "Assembly labour", detail: componentName.trim() || "Custom component", amount: hours, unit: "hr", rate: labourRate, cost: hours * labourRate });
+      const minutes = numberValue(componentLabourMinutes, 0);
+      if (minutes > 0) {
+        const rate = labourRate / 60;
+        rows.push({ label: componentLabourLabel.trim() || "Assembly labour", detail: componentName.trim() || "Custom component", amount: minutes, unit: "min", rate, cost: minutes * rate, note: `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
       }
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, printed, printSetupMinutes, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materials, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1604,8 +1622,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
     if (serviceType === "install") {
       const people = Math.max(1, numberValue(installCrewSize, 1));
-      const hours = numberValue(installHours, 0);
-      if (hours > 0) rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount: people * hours, unit: "hr", rate: labourRate, cost: people * hours * labourRate, note: `${usage(hours)}hr on site` });
+      const minutes = numberValue(installMinutes, 0);
+      if (minutes > 0) {
+        const amount = people * minutes;
+        const rate = labourRate / 60;
+        rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount, unit: "min", rate, cost: amount * rate, note: `${minutesLabel(minutes)} on site per installer · ${money(labourRate)}/hr` });
+      }
       const travel = numberValue(travelCharge, 0);
       if (travel > 0) rows.push({ label: "Travel / delivery", detail: "Travel or call-out allowance", amount: 1, unit: "each", rate: travel, cost: travel });
       for (const item of fixingOptions) {
@@ -1617,7 +1639,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate]);
+  }, [serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate]);
   const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
   const dispatchUnitPrice = dispatchRawCost * sellMultiplier;
   const dispatchSummary = serviceType === "pickup"
@@ -1625,7 +1647,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : serviceType === "delivery"
       ? `Delivery${deliveryCharge ? ` · allowance ${money(numberValue(deliveryCharge, 0))}` : ""}`
       : serviceType === "install"
-        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installHours ? `${installHours}hr` : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
+        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? minutesLabel(installMinutes) : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
         : "";
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
   const baseSheetUse = flowType === "signage" ? costs.find((row) => row.label === "Base material" && row.unit === "sheet") : undefined;
@@ -1672,7 +1694,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ? [
       componentName.trim() || "Custom component",
       componentPartSummary ? `Parts: ${componentPartSummary}` : null,
-      numberValue(componentLabourHours, 0) > 0 ? `${usage(numberValue(componentLabourHours, 0))}hr ${componentLabourLabel.trim() || "labour"}` : null,
+      numberValue(componentLabourMinutes, 0) > 0 ? `${minutesLabel(componentLabourMinutes)} ${componentLabourLabel.trim() || "labour"}` : null,
       componentDescription.trim() || null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
@@ -1681,7 +1703,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       serviceLabel,
       serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
-      serviceType === "install" && installHours ? `${installHours}hr install` : null,
+      serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install` : null,
       serviceType === "install" && travelCharge ? `Travel ${money(numberValue(travelCharge, 0))}` : null,
       serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
     ].filter(Boolean).join(" · ")
@@ -1690,7 +1712,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       flowDepartmentProductName(flowType),
       selectedSmallStock?.name ? `Stock: ${selectedSmallStock.name}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
-      artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
@@ -1708,7 +1730,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       isDuplicateBook && ncrCoverColour ? `Cover: ${ncrCoverColour}` : null,
       isDuplicateBook && ncrTapeColour ? `Tape: ${ncrTapeColour}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
-      artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
@@ -1720,7 +1742,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       selectedBase?.label,
       selectedMainMaterial?.name ? `Substrate: ${selectedMainMaterial.name}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
-      artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       printMethods.find((item) => item.key === printMethod)?.label,
       printed && numberValue(printSetupMinutes, 0) > 0 ? `Print setup ${minutesLabel(printSetupMinutes)}` : null,
       selectedMediaName || null,
@@ -1732,17 +1754,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
     ].filter(Boolean).join(" · ");
 
-  const dispatchComplete = serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0);
+  const dispatchComplete = serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0);
 
   const canSave = flowType === "component"
     ? Boolean(componentName.trim() && componentHasCost)
     : flowType === "service"
-    ? Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (numberValue(installCrewSize, 0) > 0 && numberValue(installHours, 0) > 0)))
+    ? Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0)))
     : isPrintDepartment
-      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
+      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
       : flowType === "small_format"
-        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
-        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkHours, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateHours, 0) > 0) && dispatchComplete);
+        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
+        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateMinutes, 0) > 0) && dispatchComplete);
 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
@@ -1752,9 +1774,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   function renderArtworkStep(nextAfterChoice: StepKey) {
     return (
       <div style={{ display: "grid", gap: 16 }}>
-        <StepIntro icon="✎" title="Does this item need artwork?" text="Every quote line now asks this. Client-supplied artwork adds no labour; required artwork charges the hours you enter." />
+        <StepIntro icon="✎" title="Does this item need artwork?" text="Every quote line now asks this. Client-supplied artwork adds no labour; required artwork charges the minutes you enter." />
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
-          <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkHours(""); setActiveStep(nextAfterChoice); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#64748b")}>
+          <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); setActiveStep(nextAfterChoice); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#64748b")}>
             <span style={{ fontSize: 32 }}>✓</span>
             <strong>No - client supplied</strong>
             <span style={{ color: "#64748b" }}>No artwork charge is added.</span>
@@ -1767,8 +1789,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         </div>
         {artworkChoice === "required" ? (
           <div style={{ border: "1px solid #fecdd3", borderRadius: 20, padding: 14, background: "#fff1f2", display: "grid", gap: 10 }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Artwork hours</b><input value={artworkHours} onChange={(event) => setArtworkHours(event.target.value)} placeholder="eg 0.5" type="number" min="0" step="0.05" style={inputStyle} /></label>
-            <button type="button" onClick={() => setActiveStep(nextAfterChoice)} disabled={numberValue(artworkHours, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(artworkHours, 0) > 0 ? 1 : 0.45 }}>Continue</button>
+            <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="eg 30" type="number" min="0" step="1" style={inputStyle} /></label>
+            <button type="button" onClick={() => setActiveStep(nextAfterChoice)} disabled={numberValue(artworkMinutes, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(artworkMinutes, 0) > 0 ? 1 : 0.45 }}>Continue</button>
           </div>
         ) : null}
       </div>
@@ -1815,7 +1837,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <div style={{ border: "1px solid #fed7aa", borderRadius: 18, padding: 14, background: "#fff7ed", display: "grid", gap: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="1" step="1" style={inputStyle} /></label>
-              <label style={{ display: "grid", gap: 6 }}><b>Install hours</b><input value={installHours} onChange={(event) => { setInstallHours(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="0" step="0.25" style={inputStyle} /></label>
+              <label style={{ display: "grid", gap: 6 }}><b>Install minutes</b><input value={installMinutes} onChange={(event) => { setInstallMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 120" type="number" min="0" step="1" style={inputStyle} /></label>
               <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out cost</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="optional" type="number" min="0" step="0.01" style={inputStyle} /></label>
             </div>
             <div style={{ display: "grid", gap: 10 }}>
@@ -1905,7 +1927,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
                 {isClearAcrylic && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
-                {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour hours</b><input value={laminateHours} onChange={(event) => setLaminateHours(event.target.value)} placeholder="eg 0.25" type="number" min="0" step="0.05" style={inputStyle} /></label> : null}
+                {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour minutes</b><input value={laminateMinutes} onChange={(event) => setLaminateMinutes(event.target.value)} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /></label> : null}
               </div>
             ) : null}
 
@@ -1942,7 +1964,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
                   {finishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleFinishing(item.key)} style={cardButtonStyle(finishings.includes(item.key), "#0f766e")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
                 </div>
-                <SelectedLabourHours options={finishingOptions.filter((item) => item.key !== "eyelets")} selected={finishings} values={finishingHours} onChange={setFinishingHours} labourRate={labourRate} />
+                <SelectedLabourMinutes options={finishingOptions.filter((item) => item.key !== "eyelets")} selected={finishings} values={finishingMinutes} onChange={setFinishingMinutes} labourRate={labourRate} />
                 {finishings.includes("eyelets") ? <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><label style={{ display: "grid", gap: 6 }}><b>Eyelet placement</b><select value={eyeletPresetLabel} onChange={(event) => setEyeletPresetLabel(event.target.value)} style={inputStyle}>{eyeletPresets.map((preset) => <option key={preset.label} value={preset.label}>{preset.label}</option>)}</select></label>{eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} type="number" min="0" step="1" style={inputStyle} /></label> : null}</div> : null}
               </div>
             ) : null}
@@ -1953,17 +1975,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
                   {smallFinishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleSmallFinishing(item.key)} style={cardButtonStyle(smallFinishings.includes(item.key), "#7c3aed")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
                 </div>
-                <SelectedLabourHours options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingHours} onChange={setSmallFinishingHours} labourRate={labourRate} />
+                <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} onChange={setSmallFinishingMinutes} labourRate={labourRate} />
               </div>
             ) : null}
 
             <div style={{ display: "grid", gap: 10 }}>
               <strong>How will print-ready artwork be supplied?</strong>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkHours(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
+                <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
                 <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}><span style={{ fontSize: 30 }}>✎</span><strong>Artwork required</strong><span style={{ color: "#64748b" }}>Add artwork/design labour.</span></button>
               </div>
-              {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork hours</b><input value={artworkHours} onChange={(event) => setArtworkHours(event.target.value)} placeholder="eg 0.5" type="number" min="0" step="0.05" style={inputStyle} /></label> : null}
+              {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="eg 30" type="number" min="0" step="1" style={inputStyle} /></label> : null}
             </div>
 
             {flowType !== "component" ? renderDispatchSection() : null}
@@ -1982,7 +2004,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {flowType === "signage" && rollUseLabel ? <SummaryRow label="Roll use" value={rollUseLabel} /> : null}
               {flowType === "small_format" || isPrintDepartment ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-              <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
+              <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${minutesLabel(artworkMinutes)} required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
               <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
             </div>
             <div style={{ border: "1px solid #bbf7d0", borderRadius: 22, padding: 16, background: "#f0fdf4", display: "grid", gap: 8 }}>
@@ -2044,7 +2066,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "dispatch") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="→" title="How can we get this order to the client?" text="Choose pickup, delivery or install. Install asks for crew, hours and fixings so it can become a separate install quote line." />
+          <StepIntro icon="→" title="How can we get this order to the client?" text="Choose pickup, delivery or install. Install asks for crew, minutes and fixings so it can become a separate install quote line." />
           {renderDispatchSection()}
           <button type="button" onClick={() => setActiveStep("review")} disabled={!dispatchComplete} style={{ ...primaryButton, opacity: dispatchComplete ? 1 : 0.45, justifySelf: "start" }}>Continue to review</button>
         </div>
@@ -2176,7 +2198,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "component_labour") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="4" title="Add assembly labour" text="Add the time to cut, assemble, weld, screw, tape, pack or prepare this component. Leave hours blank if the parts only need to be charged." />
+          <StepIntro icon="4" title="Add assembly labour" text="Add the time to cut, assemble, weld, screw, tape, pack or prepare this component. Leave minutes blank if the parts only need to be charged." />
           <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
               <label style={{ display: "grid", gap: 6 }}>
@@ -2184,8 +2206,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <input value={componentLabourLabel} onChange={(event) => setComponentLabourLabel(event.target.value)} placeholder="eg Frame assembly labour" style={inputStyle} />
               </label>
               <label style={{ display: "grid", gap: 6 }}>
-                <b>Hours</b>
-                <input value={componentLabourHours} onChange={(event) => { setComponentLabourHours(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 0.75" type="number" min="0" step="0.05" style={inputStyle} />
+                <b>Minutes</b>
+                <input value={componentLabourMinutes} onChange={(event) => { setComponentLabourMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="1" style={inputStyle} />
               </label>
             </div>
             <span style={{ color: "#9a3412", fontSize: 13 }}>Charged at {money(labourRate)}/hr before global markup and profit.</span>
@@ -2215,7 +2237,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "service_details") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="3" title={serviceType === "install" ? "Set install crew and time" : serviceType === "delivery" ? "Set delivery charge" : "Pickup details"} text={serviceType === "install" ? "Install labour is calculated as people × hours × the global labour rate, then markup/profit are applied." : serviceType === "delivery" ? "Enter the delivery/courier charge as a cost price. Markup and profit are applied on the review step." : "Pickup can be saved as a no-charge line if you want it visible on the quote."} />
+          <StepIntro icon="3" title={serviceType === "install" ? "Set install crew and time" : serviceType === "delivery" ? "Set delivery charge" : "Pickup details"} text={serviceType === "install" ? "Install labour is calculated from people × minutes, converted internally to hours against the global labour rate, then markup/profit are applied." : serviceType === "delivery" ? "Enter the delivery/courier charge as a cost price. Markup and profit are applied on the review step." : "Pickup can be saved as a no-charge line if you want it visible on the quote."} />
           {serviceType === "pickup" ? (
             <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 10 }}>
               <strong>Pickup / client collection</strong>
@@ -2234,11 +2256,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 12 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
                 <label style={{ display: "grid", gap: 6 }}><b>Installers</b><select value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}>{["1", "2", "3", "4"].map((count) => <option key={count} value={count}>{count} {count === "1" ? "person" : "people"}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Install hours</b><input value={installHours} onChange={(event) => { setInstallHours(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="0" step="0.25" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Install minutes</b><input value={installMinutes} onChange={(event) => { setInstallMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 120" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out cost</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="optional" type="number" min="0" step="0.01" style={inputStyle} /></label>
               </div>
-              <span style={{ color: "#475467", fontSize: 13 }}>Labour cost: installers × hours × {money(labourRate)}/hr.</span>
-              <button type="button" onClick={() => setActiveStep("service_fixings")} disabled={numberValue(installHours, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(installHours, 0) > 0 ? 1 : 0.45 }}>Continue to fixings</button>
+              <span style={{ color: "#475467", fontSize: 13 }}>Labour cost: installers × minutes, converted at {money(labourRate)}/hr.</span>
+              <button type="button" onClick={() => setActiveStep("service_fixings")} disabled={numberValue(installMinutes, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(installMinutes, 0) > 0 ? 1 : 0.45 }}>Continue to fixings</button>
             </div>
           ) : null}
         </div>
@@ -2387,7 +2409,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
               onContinue={() => setActiveStep(nextStepAfterPrint(printMethod))}
               labourRate={labourRate}
-              unit="minutes"
             />
           ) : null}
         </div>
@@ -2463,7 +2484,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         <div style={{ display: "grid", gap: 16 }}>
           <StepIntro icon="•" title="Choose laminate" text="Choose None or select an actual laminate material from Materials. If laminate is selected, enter the labour time." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            <button type="button" onClick={() => { setLaminateId("none"); setLaminateHours(""); setActiveStep("finishing"); }} style={cardButtonStyle(laminateId === "none", "#64748b")}>
+            <button type="button" onClick={() => { setLaminateId("none"); setLaminateMinutes(""); setActiveStep("finishing"); }} style={cardButtonStyle(laminateId === "none", "#64748b")}>
               <span style={{ fontSize: 30 }}>—</span>
               <strong>None</strong>
               <span style={{ color: "#64748b" }}>No laminate added.</span>
@@ -2471,7 +2492,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             {laminateMaterials.map((material) => {
               const rate = rollRate(material);
               return (
-                <button key={material.id} type="button" onClick={() => { setLaminateId(material.id); setLaminateHours(""); }} style={cardButtonStyle(laminateId === material.id, "#16a34a")}>
+                <button key={material.id} type="button" onClick={() => { setLaminateId(material.id); setLaminateMinutes(""); }} style={cardButtonStyle(laminateId === material.id, "#16a34a")}>
                   <span style={{ fontSize: 30 }}>▱</span>
                   <strong>{material.name}</strong>
                   <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
@@ -2481,7 +2502,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             })}
           </div>
           {laminateSelected ? (
-            <LabourPrompt label="Laminate application hours" value={laminateHours} onChange={setLaminateHours} onContinue={() => setActiveStep("finishing")} labourRate={labourRate} />
+            <LabourPrompt label="Laminate application minutes" value={laminateMinutes} onChange={setLaminateMinutes} onContinue={() => setActiveStep("finishing")} labourRate={labourRate} />
           ) : null}
         </div>
       );
@@ -2511,7 +2532,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} placeholder="Custom eyelet quantity" type="number" min="0" step="1" style={inputStyle} /> : null}
             </div>
           ) : null}
-          <SelectedLabourHours options={finishingOptions} selected={finishings} values={finishingHours} onChange={setFinishingHours} eachLabelFor="eyelets" labourRate={labourRate} />
+          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} onChange={setFinishingMinutes} eachLabelFor="eyelets" labourRate={labourRate} />
           <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review quote line</button>
         </div>
       );
@@ -2717,7 +2738,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               </button>
             ))}
           </div>
-          <SelectedLabourHours options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingHours} onChange={setSmallFinishingHours} labourRate={labourRate} />
+          <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} onChange={setSmallFinishingMinutes} labourRate={labourRate} />
           <button type="button" onClick={() => setActiveStep("small_quantity")} style={primaryButton}>Continue to quantity</button>
         </div>
       );
@@ -2836,14 +2857,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <>
                 <SummaryRow label="Component" value={componentName || undefined} />
                 <SummaryRow label="Parts" value={pricedComponentParts.length ? `${pricedComponentParts.length} costed part${pricedComponentParts.length === 1 ? "" : "s"}` : undefined} />
-                <SummaryRow label="Labour" value={componentLabourHours ? `${componentLabourHours}hr` : undefined} />
+                <SummaryRow label="Labour" value={componentLabourMinutes ? minutesLabel(componentLabourMinutes) : undefined} />
               </>
             ) : flowType === "service" ? (
               <>
                 <SummaryRow label="Service" value={serviceLabel} />
                 {serviceType === "delivery" ? <SummaryRow label="Delivery charge" value={deliveryCharge ? money(numberValue(deliveryCharge, 0)) : undefined} /> : null}
                 {serviceType === "install" ? <SummaryRow label="Crew" value={`${installCrewSize || "1"} person${numberValue(installCrewSize, 1) === 1 ? "" : "s"}`} /> : null}
-                {serviceType === "install" ? <SummaryRow label="Install time" value={installHours ? `${installHours}hr` : undefined} /> : null}
+                {serviceType === "install" ? <SummaryRow label="Install time" value={installMinutes ? minutesLabel(installMinutes) : undefined} /> : null}
                 {serviceType === "install" ? <SummaryRow label="Travel" value={travelCharge ? money(numberValue(travelCharge, 0)) : undefined} /> : null}
                 {serviceType === "install" ? <SummaryRow label="Fixings" value={serviceFixings.length ? selectedKeys(fixingOptions, serviceFixings) : undefined} /> : null}
               </>
@@ -2855,7 +2876,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 {isDuplicateBook ? <SummaryRow label="Page colours" value={ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : undefined} /> : null}
                 {isDuplicateBook ? <SummaryRow label="Cover / tape" value={ncrCoverColour && ncrTapeColour ? `${ncrCoverColour} cover · ${ncrTapeColour} tape` : undefined} /> : null}
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-                <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
+                <SummaryRow label="Artwork" value={artworkChoice === "required" ? minutesLabel(artworkMinutes) : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 {!isDuplicateBook ? <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} /> : null}
                 {!isDuplicateBook ? <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} /> : null}
                 {!isDuplicateBook ? <SummaryRow label="Coating" value={selectedSmallCoatingName || undefined} /> : null}
@@ -2867,7 +2888,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Material" value={selectedMainMaterial?.name} />
                 <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-                <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
+                <SummaryRow label="Artwork" value={artworkChoice === "required" ? minutesLabel(artworkMinutes) : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 <SummaryRow label="Print" value={printMethods.find((item) => item.key === printMethod)?.label} />
                 <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />
                 <SummaryRow label="Media" value={selectedMedia?.name} />
@@ -2937,18 +2958,17 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
   );
 }
 
-function LabourPrompt({ label, value, onChange, onContinue, labourRate, unit = "hours" }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void; labourRate: number; unit?: "hours" | "minutes" }) {
-  const isMinutes = unit === "minutes";
-  const enteredValue = numberValue(value, 0);
-  const convertedHours = isMinutes ? minutesToHours(enteredValue) : enteredValue;
+function LabourPrompt({ label, value, onChange, onContinue, labourRate }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void; labourRate: number }) {
+  const enteredMinutes = numberValue(value, 0);
+  const labourCost = enteredMinutes * (labourRate / 60);
 
   return (
     <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 14, background: "#f0fdf4", display: "grid", gap: 10 }}>
-      <label style={{ display: "grid", gap: 6 }}><b>{label}</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={isMinutes ? "eg 15" : "eg 0.25"} type="number" min="0" step={isMinutes ? "1" : "0.05"} style={inputStyle} /></label>
+      <label style={{ display: "grid", gap: 6 }}><b>{label}</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /></label>
       <span style={{ color: "#475467", fontSize: 13 }}>
-        {isMinutes && enteredValue > 0 ? `${minutesLabel(enteredValue)} = ${usage(convertedHours)}hr · ` : ""}Charged at {money(labourRate)}/hr.
+        {enteredMinutes > 0 ? `${minutesLabel(enteredMinutes)} at ${money(labourRate)}/hr = ${money(labourCost)} labour` : `Charged at ${money(labourRate)}/hr.`}
       </span>
-      <button type="button" onClick={onContinue} disabled={enteredValue <= 0} style={{ ...primaryButton, opacity: enteredValue > 0 ? 1 : 0.45 }}>Continue</button>
+      <button type="button" onClick={onContinue} disabled={enteredMinutes <= 0} style={{ ...primaryButton, opacity: enteredMinutes > 0 ? 1 : 0.45 }}>Continue</button>
     </div>
   );
 }
@@ -2967,7 +2987,7 @@ function SidesCards({ sides, setSides, onComplete }: { sides: SidesChoice; setSi
   );
 }
 
-function SelectedLabourHours<T extends { key: string; label: string }>({ options, selected, values, onChange, eachLabelFor, labourRate }: { options: T[]; selected: string[]; values: Record<string, string>; onChange: (value: Record<string, string>) => void; eachLabelFor?: string; labourRate: number }) {
+function SelectedLabourMinutes<T extends { key: string; label: string }>({ options, selected, values, onChange, eachLabelFor, labourRate }: { options: T[]; selected: string[]; values: Record<string, string>; onChange: (value: Record<string, string>) => void; eachLabelFor?: string; labourRate: number }) {
   const chosen = options.filter((item) => selected.includes(item.key));
   if (chosen.length === 0) return null;
   return (

@@ -692,6 +692,7 @@ function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<stri
     const isChargePerSqm = usageMode === "sqm_charge";
     const isFixedCharge = usageMode === "fixed_charge";
     const isLabour = usageMode === "labour_hours";
+    const labourHours = isLabour ? minutesToHoursText(usageAmount) : null;
     const isRoll = usageMode === "roll_metres";
     const isMaterialEach = usageMode === "material_each";
     const isWholeSheet = usageMode === "sheets_per_item";
@@ -714,10 +715,10 @@ function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<stri
       supplierId: null,
       labourRateName: isLabour ? "Factory" : null,
       label: componentLabel,
-      quantity: isLabour ? (usageAmount ?? "0") : isFixedCharge ? "1" : isMaterialEach ? (usageAmount ?? "1") : "1",
+      quantity: isLabour ? (labourHours ?? "0") : isFixedCharge ? "1" : isMaterialEach ? (usageAmount ?? "1") : "1",
       unit: isLabour ? "hr" : isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : isMaterialEach ? "each" : "sheet",
       notes: isLabour
-        ? `Labour for ${preset.label} = ${String(option.label ?? row.answer)}. Calculates hours × hourly rate.`
+        ? `Labour for ${preset.label} = ${String(option.label ?? row.answer)}. Minutes are converted internally and calculated against the hourly rate.`
         : isChargePerSqm
           ? `Sell charge for ${preset.label} = ${String(option.label ?? row.answer)}. Calculates from finished square metres.`
           : isFixedCharge
@@ -760,7 +761,7 @@ type CostedOptionRow = {
   notes: string;
   chargeName: string;
   labourRate: string;
-  labourHours: string | null;
+  labourMinutes: string | null;
   labourName: string;
   quantityPrompt: string;
   quantityPresets: Array<{ id: string; label: string; value: string; qty: string }>;
@@ -833,8 +834,8 @@ const quickQuestionPresetDefinitions: Record<string, QuickQuestionPreset> = {
     type: "multi_select",
     required: false,
     rows: [
-      { answer: "Jingwei cutting", mode: "labour_hours", amount: "0.25", chargeName: "Jingwei cutting labour" },
-      { answer: "Drill holes", mode: "labour_hours", amount: "0.10", chargeName: "Drill holes labour" }
+      { answer: "Jingwei cutting", mode: "labour_hours", amount: "15", chargeName: "Jingwei cutting labour" },
+      { answer: "Drill holes", mode: "labour_hours", amount: "6", chargeName: "Drill holes labour" }
     ]
   },
   quantity: {
@@ -850,6 +851,15 @@ function optionalNumberText(value: unknown): string | null {
   const raw = String(value ?? "").replace(/,/g, "").replace(/\$/g, "").trim();
   if (!raw) return null;
   return Number.isFinite(Number(raw)) ? raw : null;
+}
+
+function minutesToHoursText(value: unknown): string | null {
+  const minutesText = optionalNumberText(value);
+  if (!minutesText) return null;
+  const minutes = Number(minutesText);
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  const hours = Math.round((minutes / 60) * 1_000_000) / 1_000_000;
+  return String(hours);
 }
 
 function parseQuantityPresets(value: string): Array<{ id: string; label: string; value: string; qty: string }> {
@@ -893,13 +903,13 @@ function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
   const notes = readStringArray(formData, "optionNotes");
   const chargeNames = readStringArray(formData, "optionChargeName");
   const labourRates = readStringArray(formData, "optionLabourRate");
-  const labourHours = readStringArray(formData, "optionLabourHours");
+  const labourMinutes = readStringArray(formData, "optionLabourMinutes");
   const labourNames = readStringArray(formData, "optionLabourName");
   const quantityPrompts = readStringArray(formData, "optionQuantityPrompt");
   const quantityPresets = readStringArray(formData, "optionQuantityPresets");
   const allowCustomQuantities = readStringArray(formData, "optionAllowCustomQuantity");
   const customQuantityLabels = readStringArray(formData, "optionCustomQuantityLabel");
-  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length, chargeNames.length, labourRates.length, labourHours.length, labourNames.length, quantityPrompts.length, quantityPresets.length, allowCustomQuantities.length, customQuantityLabels.length);
+  const totalRows = Math.max(labels.length, materialIds.length, usageModes.length, usageAmounts.length, wastePercents.length, notes.length, chargeNames.length, labourRates.length, labourMinutes.length, labourNames.length, quantityPrompts.length, quantityPresets.length, allowCustomQuantities.length, customQuantityLabels.length);
 
   const rows: CostedOptionRow[] = [];
   for (let index = 0; index < totalRows; index += 1) {
@@ -915,7 +925,7 @@ function costedOptionRowsFromForm(formData: FormData): CostedOptionRow[] {
       notes: String(notes[index] ?? "").trim(),
       chargeName: String(chargeNames[index] ?? "").trim(),
       labourRate: safeNumberString(String(labourRates[index] ?? "66"), "66"),
-      labourHours: optionalNumberText(labourHours[index]),
+      labourMinutes: optionalNumberText(labourMinutes[index]),
       labourName: String(labourNames[index] ?? "").trim(),
       quantityPrompt: String(quantityPrompts[index] ?? "").trim(),
       quantityPresets: parseQuantityPresets(String(quantityPresets[index] ?? "")),
@@ -943,6 +953,8 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
     const isChargePerSqm = usageMode === "sqm_charge";
     const isFixedCharge = usageMode === "fixed_charge";
     const isLabour = usageMode === "labour_hours";
+    const labourHours = isLabour ? minutesToHoursText(usageAmount) : null;
+    const extraLabourHours = minutesToHoursText(row.labourMinutes);
     const isRoll = usageMode === "roll_metres";
     const isMaterialEach = usageMode === "material_each";
     const isWholeSheet = usageMode === "sheets_per_item";
@@ -950,9 +962,9 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
     const isMaterialAuto = usageMode === "auto_sheet";
     const isMaterialMode = isMaterialAuto || isPartsPerSheet || isWholeSheet || isRoll || isMaterialEach;
 
-    if (usageMode === "none" && !row.labourHours) return [];
+    if (usageMode === "none" && !extraLabourHours) return [];
 
-    if (usageMode === "none" && row.labourHours) {
+    if (usageMode === "none" && extraLabourHours) {
       const labourLabel = row.labourName || `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)} labour`;
       return [{
         id: randomUUID(),
@@ -962,7 +974,7 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
         supplierId: null,
         labourRateName: "Factory",
         label: labourLabel,
-        quantity: row.labourHours,
+        quantity: extraLabourHours,
         unit: "hr",
         notes: `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`,
         ruleType: "labour_hours",
@@ -1007,10 +1019,10 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
       supplierId: null,
       labourRateName: isLabour ? "Factory" : null,
       label: componentLabel,
-      quantity: isLabour ? (usageAmount ?? "0") : isFixedCharge ? "1" : isMaterialEach ? (usageAmount ?? "1") : "1",
+      quantity: isLabour ? (labourHours ?? "0") : isFixedCharge ? "1" : isMaterialEach ? (usageAmount ?? "1") : "1",
       unit: isLabour ? "hr" : isChargePerSqm ? "sqm" : isFixedCharge ? "each" : isRoll ? "lm" : isMaterialEach ? "each" : "sheet",
       notes: row.notes || (isLabour
-        ? `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Calculates hours × hourly rate.`
+        ? `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Minutes are converted internally and calculated against the hourly rate.`
         : isChargePerSqm
           ? `Sell charge for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}. Calculates from finished square metres.`
           : isFixedCharge
@@ -1040,7 +1052,7 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
       }
     }];
 
-    if (!isLabour && row.labourHours) {
+    if (!isLabour && extraLabourHours) {
       const labourLabel = row.labourName || `${String(field.label ?? "Option")}: ${String(option.label ?? row.answerLabel)} labour`;
       nextComponents.push({
         id: randomUUID(),
@@ -1050,7 +1062,7 @@ function componentsLinkedToOptionRows(formData: FormData, field: Record<string, 
         supplierId: null,
         labourRateName: "Factory",
         label: labourLabel,
-        quantity: row.labourHours,
+        quantity: extraLabourHours,
         unit: "hr",
         notes: `Labour for ${String(field.label ?? "option")} = ${String(option.label ?? row.answerLabel)}.`,
         ruleType: "labour_hours",
@@ -1261,6 +1273,9 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
 
   const existingStockUsage = existingComponent?.stockUsage ?? {};
   const sellRate = optionalNumberString(formData, "sellRate", existingStockUsage?.sellRate ?? null);
+  const quantity = isLabourUsage
+    ? (minutesToHoursText(readString(formData, "labourMinutes")) ?? String(existingComponent?.quantity ?? "0"))
+    : safeNumberString(readString(formData, "quantity"), String(existingComponent?.quantity ?? "1"));
 
   return {
     id: existingComponent?.id ?? randomUUID(),
@@ -1270,7 +1285,7 @@ function buildComponentFromForm(formData: FormData, existingComponent?: Record<s
     supplierId: existingComponent?.supplierId ?? null,
     labourRateName: readString(formData, "labourRateName") || existingComponent?.labourRateName || null,
     label,
-    quantity: safeNumberString(readString(formData, "quantity"), String(existingComponent?.quantity ?? "1")),
+    quantity,
     unit,
     notes: readString(formData, "notes") || existingComponent?.notes || "Material linked to this product.",
     ruleType,

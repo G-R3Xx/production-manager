@@ -776,16 +776,17 @@ function componentCostBreakdownFor(
 
       if (rawRuleType === "labour_hours") {
         const hours = allowance;
-        const rate = numberValue(component.stockUsage?.sellRate, 66);
+        const minutes = hours * 60;
+        const hourlyRate = numberValue(component.stockUsage?.sellRate, 66);
         return [costBreakdownItem({
           componentLabel,
           materialName: "Factory labour",
-          basis: "Hours",
-          amount: hours,
-          unit: "hr",
-          rate,
-          cost: hours * rate,
-          note: ["factory labour row from product setup", followUp.note, answerMultiplier.note].filter(Boolean).join(" · ")
+          basis: "Minutes",
+          amount: minutes,
+          unit: "min",
+          rate: hourlyRate / 60,
+          cost: hours * hourlyRate,
+          note: ["minutes from product setup, converted internally to the hourly labour rate", followUp.note, answerMultiplier.note].filter(Boolean).join(" · ")
         })];
       }
 
