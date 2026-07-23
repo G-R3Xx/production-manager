@@ -13,6 +13,7 @@ export type MaterialRecord = {
   sku: string | null;
   materialType: string;
   materialGroup: string | null;
+  minimumBillableSheetFraction: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -35,6 +36,7 @@ export type CreateMaterialInput = {
   sku: string | null;
   materialType: string;
   materialGroup: string | null;
+  minimumBillableSheetFraction: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -50,12 +52,13 @@ export type UpdateMaterialInput = CreateMaterialInput & {
   id: string;
 };
 
-async function ensureMaterialGroupColumn(): Promise<void> {
+async function ensureMaterialPricingColumns(): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
   await pool.query(`
     ALTER TABLE catalog.materials
-      ADD COLUMN IF NOT EXISTS material_group varchar(50)
+      ADD COLUMN IF NOT EXISTS material_group varchar(50),
+      ADD COLUMN IF NOT EXISTS minimum_billable_sheet_fraction numeric(6, 4)
   `);
 }
 
@@ -117,7 +120,7 @@ function presentMaterialType(value: string): string {
 }
 
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
-  await ensureMaterialGroupColumn();
+  await ensureMaterialPricingColumns();
 
   const result = await pool.query<MaterialRecord>(`
     SELECT
@@ -134,6 +137,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
         ELSE m.type::text
       END AS "materialType",
       m.material_group AS "materialGroup",
+      m.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
       m.stock_quantity::text AS "stockQuantity",
@@ -157,7 +161,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
 }
 
 export async function createMaterial(input: CreateMaterialInput): Promise<void> {
-  await ensureMaterialGroupColumn();
+  await ensureMaterialPricingColumns();
 
   await pool.query(`
     INSERT INTO catalog.materials (
@@ -169,6 +173,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       type,
       material_type,
       material_group,
+      minimum_billable_sheet_fraction,
       stock_uom,
       purchase_uom,
       stock_quantity,
@@ -190,15 +195,16 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $6::material_type,
       $7::varchar,
       $8::varchar,
-      $9::varchar,
+      $9::numeric,
       $10::varchar,
-      $11::numeric,
+      $11::varchar,
       $12::numeric,
       $13::numeric,
       $14::numeric,
       $15::numeric,
       $16::numeric,
-      $17::varchar,
+      $17::numeric,
+      $18::varchar,
       true,
       now(),
       now()
@@ -212,6 +218,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),
     input.materialGroup,
+    input.minimumBillableSheetFraction,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,
@@ -225,7 +232,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
 }
 
 export async function updateMaterial(input: UpdateMaterialInput): Promise<void> {
-  await ensureMaterialGroupColumn();
+  await ensureMaterialPricingColumns();
 
   await pool.query(`
     UPDATE catalog.materials
@@ -237,15 +244,16 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       type = $7::material_type,
       material_type = $8::varchar,
       material_group = $9::varchar,
-      stock_uom = $10::varchar,
-      purchase_uom = $11::varchar,
-      stock_quantity = $12::numeric,
-      purchase_cost = $13::numeric,
-      width_mm = $14::numeric,
-      length_mm = $15::numeric,
-      roll_width_mm = $16::numeric,
-      gsm = $17::numeric,
-      notes = $18::varchar,
+      minimum_billable_sheet_fraction = $10::numeric,
+      stock_uom = $11::varchar,
+      purchase_uom = $12::varchar,
+      stock_quantity = $13::numeric,
+      purchase_cost = $14::numeric,
+      width_mm = $15::numeric,
+      length_mm = $16::numeric,
+      roll_width_mm = $17::numeric,
+      gsm = $18::numeric,
+      notes = $19::varchar,
       updated_at = now()
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
@@ -259,6 +267,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),
     input.materialGroup,
+    input.minimumBillableSheetFraction,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,

@@ -78,6 +78,7 @@ export type QuoteMaterial = {
   id: string;
   name: string;
   materialType?: string | null;
+  minimumBillableSheetFraction?: string | null;
   stockUom?: string | null;
   purchaseUom?: string | null;
   stockQuantity?: string | null;
@@ -536,6 +537,65 @@ function sheetAreaSqm(material: QuoteMaterial): number {
   return (widthMm / 1000) * (lengthMm / 1000);
 }
 
+type SheetBillingAllocation = {
+  amountPerUnit: number;
+  calculatedTotal: number;
+  billableTotal: number;
+  physicalSheets: number;
+  note: string;
+};
+
+function recommendedSheetBillingIncrement(material: QuoteMaterial): number {
+  const description = String(material.name ?? "").toLowerCase();
+  if (/\b(acm|aluminium|aluminum|acrylic|perspex|composite)\b/.test(description)) return 0.25;
+  if (/\b(pvc|corflute|coreflute)\b/.test(description)) return 0.5;
+  return 0;
+}
+
+function sheetBillingIncrement(material: QuoteMaterial): { increment: number; label: string } {
+  const raw = String(material.minimumBillableSheetFraction ?? "").trim();
+  if (raw !== "") {
+    const configured = Math.max(0, numberValue(raw, 0));
+    if (configured <= 0) return { increment: 0, label: "exact calculated usage" };
+    if (Math.abs(configured - 0.25) < 0.0001) return { increment: 0.25, label: "¼-sheet increment" };
+    if (Math.abs(configured - 0.5) < 0.0001) return { increment: 0.5, label: "½-sheet increment" };
+    if (Math.abs(configured - 1) < 0.0001) return { increment: 1, label: "full-sheet increment" };
+    return { increment: configured, label: `${formatUsage(configured)}-sheet increment` };
+  }
+
+  const recommended = recommendedSheetBillingIncrement(material);
+  if (Math.abs(recommended - 0.25) < 0.0001) return { increment: 0.25, label: "recommended ¼-sheet increment" };
+  if (Math.abs(recommended - 0.5) < 0.0001) return { increment: 0.5, label: "recommended ½-sheet increment" };
+  return { increment: 0, label: "recommended exact usage" };
+}
+
+function roundSheetUsage(totalSheets: number, increment: number): number {
+  if (!Number.isFinite(totalSheets) || totalSheets <= 0) return 0;
+  if (!Number.isFinite(increment) || increment <= 0) return totalSheets;
+  return Math.max(totalSheets, Math.ceil((totalSheets - 0.0000001) / increment) * increment);
+}
+
+function billableSheetAllocation(material: QuoteMaterial, calculatedSheetsPerUnit: number, quoteQuantity: number): SheetBillingAllocation {
+  const safeQuantity = Math.max(1, quoteQuantity);
+  const calculatedTotal = Math.max(0, calculatedSheetsPerUnit) * safeQuantity;
+  const billing = sheetBillingIncrement(material);
+  const billableTotal = roundSheetUsage(calculatedTotal, billing.increment);
+  const physicalSheets = calculatedTotal > 0 ? Math.max(1, Math.ceil(calculatedTotal - 0.0000001)) : 0;
+
+  return {
+    amountPerUnit: billableTotal / safeQuantity,
+    calculatedTotal,
+    billableTotal,
+    physicalSheets,
+    note: [
+      `calculated ${formatUsage(calculatedTotal)} sheet${Math.abs(calculatedTotal - 1) < 0.0001 ? "" : "s"} across qty ${formatUsage(safeQuantity)}`,
+      `${formatUsage(billableTotal)} billable sheet${Math.abs(billableTotal - 1) < 0.0001 ? "" : "s"}`,
+      physicalSheets > 0 ? `${physicalSheets} physical parent sheet${physicalSheets === 1 ? "" : "s"} opened` : null,
+      billing.label
+    ].filter(Boolean).join(" · ")
+  };
+}
+
 function materialLooksLikeRoll(material: QuoteMaterial): boolean {
   const materialType = String(material.materialType ?? "").toLowerCase();
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
@@ -650,7 +710,14 @@ function costBreakdownItem(item: Omit<CostBreakdownItem, "note"> & { note?: stri
   return note ? { ...base, note } : base;
 }
 
-function componentCostBreakdownFor(product: QuoteProduct | undefined, materials: QuoteMaterial[], answers: Record<string, string>, followUpAnswers: Record<string, string> = {}, customFollowUpAnswers: Record<string, string> = {}): CostBreakdownItem[] {
+function componentCostBreakdownFor(
+  product: QuoteProduct | undefined,
+  materials: QuoteMaterial[],
+  answers: Record<string, string>,
+  followUpAnswers: Record<string, string> = {},
+  customFollowUpAnswers: Record<string, string> = {},
+  quoteQuantity = 1
+): CostBreakdownItem[] {
   if (!product) return [];
 
   return product.components
@@ -769,34 +836,41 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
 
       if (ruleType === "per_sqm") {
         const area = dimensions ? (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000) : 0;
-        const amount = area * allowance * waste;
+        const calculatedAmount = area * allowance * waste;
+        const parentArea = sheetAreaSqm(material);
+        const sheetAllocation = parentArea > 0 && !materialLooksLikeRoll(material)
+          ? billableSheetAllocation(material, calculatedAmount / parentArea, quoteQuantity)
+          : null;
+        const amount = sheetAllocation ? sheetAllocation.amountPerUnit * parentArea : calculatedAmount;
         const rate = costRateFor(material, "sqm");
         return [costBreakdownItem({
           componentLabel,
           materialName: material.name,
-          basis: component.stockUsage?.widthMm && component.stockUsage?.heightMm ? "Fixed square metres used" : "Square metres used",
+          basis: sheetAllocation ? "Billable sheet area used" : component.stockUsage?.widthMm && component.stockUsage?.heightMm ? "Fixed square metres used" : "Square metres used",
           amount,
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
+          note: [sheetAllocation?.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
       if (ruleType === "per_unit" || ruleType === "selected_by_option") {
         const fixedSheetsPerUnit = numberValue(component.stockUsage?.sheetsPerUnit, 0);
         const isSheetUnit = String(component.unit ?? "each") === "sheet";
-        const amount = (isSheetUnit && fixedSheetsPerUnit > 0 ? fixedSheetsPerUnit : allowance) * waste;
+        const calculatedAmount = (isSheetUnit && fixedSheetsPerUnit > 0 ? fixedSheetsPerUnit : allowance) * waste;
+        const sheetAllocation = isSheetUnit ? billableSheetAllocation(material, calculatedAmount, quoteQuantity) : null;
+        const amount = sheetAllocation ? sheetAllocation.amountPerUnit : calculatedAmount;
         const rate = costRateFor(material, isSheetUnit ? "sheet" : "each");
         return [costBreakdownItem({
           componentLabel,
           materialName: material.name,
-          basis: isSheetUnit ? "Full sheets used" : "Fixed items used",
+          basis: isSheetUnit ? "Billable sheets used" : "Fixed items used",
           amount,
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, followUp.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
+          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, sheetAllocation?.note, followUp.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -811,7 +885,9 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           : parentArea > 0
             ? signArea / parentArea
             : 0;
-      const sheetsUsed = sheetsBeforeAllowance * allowance * waste;
+      const calculatedSheetsPerUnit = sheetsBeforeAllowance * allowance * waste;
+      const sheetAllocation = billableSheetAllocation(material, calculatedSheetsPerUnit, quoteQuantity);
+      const sheetsUsed = sheetAllocation.amountPerUnit;
       const rate = costRateFor(material, "sheet");
 
       return [costBreakdownItem({
@@ -828,6 +904,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
             : partsPerSheet > 0
               ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}`
               : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing",
+          sheetAllocation.note,
           answerMultiplier.note
         ].filter(Boolean).join(" · ")
       })];
@@ -864,12 +941,13 @@ export function calculateQuoteProductPricing(
   answers: Record<string, string>,
   pricingSettings?: PricingSettings,
   followUpAnswers: Record<string, string> = {},
-  customFollowUpAnswers: Record<string, string> = {}
+  customFollowUpAnswers: Record<string, string> = {},
+  quoteQuantity = 1
 ): QuoteProductPricing {
   const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
   const sellMultiplier = markupMultiplier * profitMultiplier;
-  const materialBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers);
+  const materialBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers, quoteQuantity);
   const unitCost = materialBreakdown.reduce((total, item) => total + item.cost, 0);
   const markedUpUnitCost = unitCost * markupMultiplier;
 
@@ -919,6 +997,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const [manualSummary, setManualSummary] = useState("");
   const [unitPrice, setUnitPrice] = useState("0.00");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
+  const [standaloneQuantity, setStandaloneQuantity] = useState("1");
 
   const visibleFields = useMemo(
     () => (selectedProduct?.fields ?? []).filter((field) => isVisible(field, answers)),
@@ -926,12 +1005,12 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   );
 
   const quantityField = visibleFields.find((field) => field.key === "quantity");
-  const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : "1";
+  const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : standaloneQuantity;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
   const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct, selectedProduct.fields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
   const autoPricing = useMemo(
-    () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers),
-    [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers]
+    () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber),
+    [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber]
   );
   const materialBreakdown = autoPricing.materialBreakdown;
   const missingMaterials = autoPricing.missingMaterials;
@@ -958,6 +1037,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     setCustomFollowUpAnswers({});
     setManualSummary("");
     setUnitPriceOverridden(false);
+    setStandaloneQuantity("1");
   }
 
   function updateAnswer(key: string, value: string) {
@@ -1190,7 +1270,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
           {!quantityField ? (
             <label style={labelStyle}>
               <span style={labelTextStyle}>Quantity</span>
-              <input name="quantity" defaultValue="1" type="number" min="1" step="any" style={inputStyle} />
+              <input name="quantity" value={standaloneQuantity} onChange={(event) => setStandaloneQuantity(event.target.value)} type="number" min="1" step="any" style={inputStyle} />
             </label>
           ) : null}
           <label style={labelStyle}>

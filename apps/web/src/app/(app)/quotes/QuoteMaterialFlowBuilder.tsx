@@ -9,6 +9,7 @@ type QuoteMaterial = {
   name: string;
   materialType?: string | null;
   materialGroup?: string | null;
+  minimumBillableSheetFraction?: string | null;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -576,34 +577,94 @@ function panelizedSheets(parentWidth: number, parentHeight: number, pieceWidth: 
   return [normal, rotated].sort((a, b) => a.sheets - b.sheets)[0] ?? null;
 }
 
-function sheetUsageForItem(material: QuoteMaterial, pieceWidthMm: number, pieceHeightMm: number): { amount: number; note?: string } {
+type SheetBillingRule = { increment: number; label: string; source: "configured" | "recommended" | "exact" };
+
+function recommendedSheetBillingIncrement(material: QuoteMaterial): number {
+  const description = [material.name, material.sku, material.notes].filter(Boolean).join(" ").toLowerCase();
+  if (/\b(acm|aluminium|aluminum|acrylic|perspex|composite)\b/.test(description)) return 0.25;
+  if (/\b(pvc|corflute|coreflute)\b/.test(description)) return 0.5;
+  return 0;
+}
+
+function sheetBillingRule(material: QuoteMaterial): SheetBillingRule {
+  const raw = String(material.minimumBillableSheetFraction ?? "").trim();
+  if (raw !== "") {
+    const configured = Math.max(0, numberValue(raw, 0));
+    if (configured <= 0) return { increment: 0, label: "exact calculated usage", source: "exact" };
+    if (Math.abs(configured - 0.25) < 0.0001) return { increment: 0.25, label: "¼-sheet increment", source: "configured" };
+    if (Math.abs(configured - 0.5) < 0.0001) return { increment: 0.5, label: "½-sheet increment", source: "configured" };
+    if (Math.abs(configured - 1) < 0.0001) return { increment: 1, label: "full-sheet increment", source: "configured" };
+    return { increment: configured, label: `${usage(configured)}-sheet increment`, source: "configured" };
+  }
+
+  const recommended = recommendedSheetBillingIncrement(material);
+  if (Math.abs(recommended - 0.25) < 0.0001) return { increment: 0.25, label: "recommended ¼-sheet increment", source: "recommended" };
+  if (Math.abs(recommended - 0.5) < 0.0001) return { increment: 0.5, label: "recommended ½-sheet increment", source: "recommended" };
+  return { increment: 0, label: "recommended exact usage", source: "recommended" };
+}
+
+function roundSheetUsage(totalSheets: number, increment: number): number {
+  if (!Number.isFinite(totalSheets) || totalSheets <= 0) return 0;
+  if (!Number.isFinite(increment) || increment <= 0) return totalSheets;
+  return Math.max(totalSheets, Math.ceil((totalSheets - 0.0000001) / increment) * increment);
+}
+
+function sheetUsageForQuoteLine(
+  material: QuoteMaterial,
+  pieceWidthMm: number,
+  pieceHeightMm: number,
+  quantity: number
+): { amount: number; calculatedTotal: number; billableTotal: number; physicalSheets: number; note?: string } {
   const dimensions = bestSheetDimensions(material);
-  if (!dimensions || pieceWidthMm <= 0 || pieceHeightMm <= 0) return { amount: 0, note: "sheet size missing" };
+  const safeQuantity = Math.max(0, quantity);
+  if (!dimensions || pieceWidthMm <= 0 || pieceHeightMm <= 0 || safeQuantity <= 0) {
+    return { amount: 0, calculatedTotal: 0, billableTotal: 0, physicalSheets: 0, note: "sheet size missing" };
+  }
 
   const parentArea = (dimensions.width / 1000) * (dimensions.length / 1000);
   const perSheet = piecesPerSheet(dimensions.width, dimensions.length, pieceWidthMm, pieceHeightMm);
+  const billing = sheetBillingRule(material);
 
   if (perSheet > 0) {
+    const calculatedTotal = safeQuantity / perSheet;
+    const billableTotal = roundSheetUsage(calculatedTotal, billing.increment);
+    const physicalSheets = Math.max(1, Math.ceil(calculatedTotal - 0.0000001));
     return {
-      amount: 1 / perSheet,
-      note: `${perSheet} up per parent sheet · ${usage(parentArea)}sqm parent sheet`
+      amount: billableTotal / safeQuantity,
+      calculatedTotal,
+      billableTotal,
+      physicalSheets,
+      note: [
+        `${perSheet} up per parent sheet`,
+        `calculated ${usage(calculatedTotal)} sheet${Math.abs(calculatedTotal - 1) < 0.0001 ? "" : "s"}`,
+        `${physicalSheets} physical parent sheet${physicalSheets === 1 ? "" : "s"} opened`,
+        billing.label,
+        `${usage(parentArea)}sqm parent sheet`
+      ].join(" · ")
     };
   }
 
   const panelized = panelizedSheets(dimensions.width, dimensions.length, pieceWidthMm, pieceHeightMm);
   if (panelized && panelized.sheets > 0) {
+    const calculatedTotal = panelized.sheets * safeQuantity;
+    const billableTotal = roundSheetUsage(calculatedTotal, billing.increment);
+    const physicalSheets = Math.ceil(calculatedTotal - 0.0000001);
     return {
-      amount: panelized.sheets,
+      amount: billableTotal / safeQuantity,
+      calculatedTotal,
+      billableTotal,
+      physicalSheets,
       note: [
-        `${panelized.sheets} parent sheet${panelized.sheets === 1 ? "" : "s"} required`,
+        `${physicalSheets} physical parent sheet${physicalSheets === 1 ? "" : "s"} required`,
         `panelled ${panelized.across} across × ${panelized.rows} high`,
         panelized.rotated ? "rotated sheet orientation" : null,
+        billing.label,
         `${usage(parentArea)}sqm parent sheet`
       ].filter(Boolean).join(" · ")
     };
   }
 
-  return { amount: 0, note: "sheet size missing" };
+  return { amount: 0, calculatedTotal: 0, billableTotal: 0, physicalSheets: 0, note: "sheet size missing" };
 }
 
 function sheetUnitRate(material: QuoteMaterial): { rate: number; note?: string } {
@@ -1233,7 +1294,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             ].filter(Boolean).join(" · ") || undefined
           });
         } else {
-          const sheetUse = sheetUsageForItem(selectedMainMaterial, width, height);
+          const sheetUse = sheetUsageForQuoteLine(selectedMainMaterial, width, height, quantityNumber);
           const rate = sheetUnitRate(selectedMainMaterial);
           rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: sheetUse.amount, unit: "sheet", rate: rate.rate, cost: sheetUse.amount * rate.rate, note: [sheetUse.note, rate.note].filter(Boolean).join(" · ") || undefined });
         }
@@ -1560,7 +1621,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const baseSheetUse = flowType === "signage" ? costs.find((row) => row.label === "Base material" && row.unit === "sheet") : undefined;
   const totalSheetUse = baseSheetUse ? baseSheetUse.amount * quantityNumber : 0;
   const sheetUseLabel = baseSheetUse && totalSheetUse > 0
-    ? `${usage(totalSheetUse)} sheet${Math.abs(totalSheetUse - 1) < 0.0001 ? "" : "s"}${baseSheetUse.note ? ` · ${baseSheetUse.note}` : ""}`
+    ? `${usage(totalSheetUse)} billable sheet${Math.abs(totalSheetUse - 1) < 0.0001 ? "" : "s"}${baseSheetUse.note ? ` · ${baseSheetUse.note}` : ""}`
     : "";
   const rollUseRow = flowType === "signage"
     ? costs.find((row) => row.unit === "lm" && ["Roll print media", "Cut vinyl", "Base material"].includes(row.label))

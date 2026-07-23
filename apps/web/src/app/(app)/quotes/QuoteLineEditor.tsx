@@ -333,9 +333,10 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
   const [createEditableOptions, setCreateEditableOptions] = useState(true);
 
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
+  const quantityNumber = Math.max(0, numberInput(quantity, 0));
   const automaticPricing = useMemo(
-    () => calculateQuoteProductPricing(product ?? undefined, materials, answers, pricingSettings),
-    [product, materials, answers, pricingSettings]
+    () => calculateQuoteProductPricing(product ?? undefined, materials, answers, pricingSettings, {}, {}, Math.max(1, quantityNumber)),
+    [product, materials, answers, pricingSettings, quantityNumber]
   );
   const productSetupPriceAvailable = Boolean(
     product &&
@@ -349,7 +350,6 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
   );
   const recalculationMode = productSetupPriceAvailable ? "product_setup" : savedPriceScale.available ? "saved_price_scale" : "none";
   const recalculatedUnitPrice = productSetupPriceAvailable ? automaticPricing.unitPrice : savedPriceScale.unitPrice;
-  const quantityNumber = Math.max(0, numberInput(quantity, 0));
   const recalculatedLineTotal = recalculatedUnitPrice * quantityNumber;
   const enteredLineTotal = numberInput(unitPrice, 0) * quantityNumber;
 

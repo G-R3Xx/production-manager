@@ -16,6 +16,7 @@ type MaterialFormRecord = {
   sku: string | null;
   materialType: string;
   materialGroup: string | null;
+  minimumBillableSheetFraction: string | null;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -163,6 +164,16 @@ function defaultStockUomFor(kind: MaterialKind): string {
   }
 }
 
+function sheetBillingFormValue(value: string | null | undefined): string {
+  if (value == null || String(value).trim() === "") return "auto";
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "0";
+  if (Math.abs(amount - 0.25) < 0.0001) return "0.25";
+  if (Math.abs(amount - 0.5) < 0.0001) return "0.5";
+  if (Math.abs(amount - 1) < 0.0001) return "1";
+  return "auto";
+}
+
 function defaultPurchaseUomFor(kind: MaterialKind): string {
   switch (kind) {
     case "roll_media":
@@ -284,6 +295,18 @@ function SheetFields({ material, kind }: { material?: MaterialFormRecord; kind: 
         </Field>
         <Field label="GSM / Thickness" helper={isPaperOrCard ? "Paper and card stock usually use GSM. Rigid sheets usually use thickness." : "Use thickness for rigid sheets, eg 3mm, 5mm, 10mm."}>
           <input name="gsm" defaultValue={material?.gsm ?? ""} placeholder={isPaperOrCard ? "eg 150gsm, 250gsm, 350gsm" : "eg 3mm"} style={inputStyle} />
+        </Field>
+        <Field
+          label="Minimum billable sheet fraction"
+          helper="Rounds the total sheet use for the whole quote line, not every individual item. Physical nesting and the number that fit on a sheet stay unchanged."
+        >
+          <select name="minimumBillableSheetFraction" defaultValue={sheetBillingFormValue(material?.minimumBillableSheetFraction)} style={inputStyle}>
+            <option value="auto">Recommended by material (Acrylic/ACM ¼ · PVC/Corflute ½)</option>
+            <option value="0">Exact calculated usage</option>
+            <option value="0.25">¼ sheet increments</option>
+            <option value="0.5">½ sheet increments</option>
+            <option value="1">Full sheet increments</option>
+          </select>
         </Field>
       </div>
       <div style={gridStyle}>

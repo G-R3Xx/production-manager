@@ -25,6 +25,22 @@ function formatMaterialType(value: string): string {
   return value.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function minimumSheetBillingLabel(material: MaterialSummary): string {
+  const explicit = String(material.minimumBillableSheetFraction ?? "").trim();
+  if (explicit) {
+    const amount = Number(explicit);
+    if (Number.isFinite(amount) && amount <= 0) return "Exact calculated usage";
+    if (Math.abs(amount - 0.25) < 0.0001) return "¼ sheet increments";
+    if (Math.abs(amount - 0.5) < 0.0001) return "½ sheet increments";
+    if (Math.abs(amount - 1) < 0.0001) return "Full sheet increments";
+  }
+
+  const name = String(material.name ?? "").toLowerCase();
+  if (/\b(acm|aluminium|aluminum|acrylic|perspex|composite)\b/.test(name)) return "Recommended: ¼ sheet increments";
+  if (/\b(pvc|corflute|coreflute)\b/.test(name)) return "Recommended: ½ sheet increments";
+  return "Recommended: exact calculated usage";
+}
+
 function normaliseMaterialType(value: string | null | undefined): string {
   switch (value) {
     case "sheet":
@@ -202,6 +218,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
       </div>
       <div style={mutedTextStyle}>Supplier: {material.supplierName ?? "Not linked"} · SKU: {material.sku ?? "—"}</div>
       <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
+      {isSheetType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Sheet billing: {minimumSheetBillingLabel(material)}</div> : null}
       {material.sourceProductName ? <div style={{ ...mutedTextStyle, color: "#b54708" }}>Legacy source product link: {material.sourceProductName}</div> : null}
       {material.notes ? <div style={mutedTextStyle}>{material.notes}</div> : null}
 
