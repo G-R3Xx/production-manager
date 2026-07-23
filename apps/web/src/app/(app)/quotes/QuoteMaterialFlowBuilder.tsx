@@ -353,7 +353,8 @@ function minutesToHours(value: string | number | null | undefined): number {
 function minutesLabel(value: string | number | null | undefined): string {
   const minutes = numberValue(value, 0);
   if (minutes <= 0) return "";
-  return `${usage(minutes)}min`;
+  const roundedMinutes = Math.round(minutes * 100) / 100;
+  return `${roundedMinutes}min`;
 }
 
 function multiplierValue(value: string | number | null | undefined, fallback: number): number {
@@ -899,7 +900,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>("");
   const [artworkHours, setArtworkHours] = useState("");
   const [printMethod, setPrintMethod] = useState<PrintMethod>("");
-  const [printSetupHours, setPrintSetupHours] = useState("");
+  const [printSetupMinutes, setPrintSetupMinutes] = useState("");
   const [mediaId, setMediaId] = useState("");
   const [ink, setInk] = useState<InkChoice>("");
   const [sides, setSides] = useState<SidesChoice>("");
@@ -1041,7 +1042,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
   const printed = printMethod !== "" && printMethod !== "no_print";
-  const printSetupComplete = !printed || numberValue(printSetupHours, 0) > 0;
+  const printSetupComplete = !printed || numberValue(printSetupMinutes, 0) > 0;
   const needsMediaStep = printMethod === "roll_stock" || printMethod === "cut_vinyl";
   const needsInkStep = printMethod === "direct_print" || printMethod === "roll_stock";
   const width = numberValue(widthMm, 0);
@@ -1164,7 +1165,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setArtworkChoice("");
     setArtworkHours("");
     setPrintMethod("");
-    setPrintSetupHours("");
+    setPrintSetupMinutes("");
     setMediaId("");
     setInk("");
     setSides("");
@@ -1202,7 +1203,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setArtworkChoice("");
     setArtworkHours("");
     setPrintMethod("");
-    setPrintSetupHours("");
+    setPrintSetupMinutes("");
     setMediaId("");
     setInk("");
     setSides("");
@@ -1228,7 +1229,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
   function setPrint(nextMethod: Exclude<PrintMethod, "">) {
     setPrintMethod(nextMethod);
-    setPrintSetupHours("");
+    setPrintSetupMinutes("");
     setMediaId("");
     if (nextMethod === "no_print" || nextMethod === "cut_vinyl") setInk("");
     if (nextMethod === "no_print") {
@@ -1309,11 +1310,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (printed) {
-        const hours = numberValue(printSetupHours, 0);
+        const minutes = numberValue(printSetupMinutes, 0);
+        const hours = minutesToHours(minutes);
         const methodLabel = printMethods.find((item) => item.key === printMethod)?.label ?? "Print";
         if (hours > 0) {
           const amount = hours / quantityNumber;
-          rows.push({ label: "Print setup labour", detail: methodLabel, amount, unit: "hr", rate: labourRate, cost: amount * labourRate, note: quantityNumber > 1 ? `${usage(hours)}hr once per quote line` : undefined });
+          rows.push({
+            label: "Print setup labour",
+            detail: methodLabel,
+            amount,
+            unit: "hr",
+            rate: labourRate,
+            cost: amount * labourRate,
+            note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line` : minutesLabel(minutes)
+          });
         }
       }
 
@@ -1556,7 +1566,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, printed, printSetupHours, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkHours, printed, printSetupMinutes, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateHours, finishings, finishingHours, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingHours, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installHours, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourHours, componentLabourLabel, componentName, materials, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1712,7 +1722,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? `Artwork ${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       printMethods.find((item) => item.key === printMethod)?.label,
-      printed && numberValue(printSetupHours, 0) > 0 ? `Print setup ${usage(numberValue(printSetupHours, 0))}hr` : null,
+      printed && numberValue(printSetupMinutes, 0) > 0 ? `Print setup ${minutesLabel(printSetupMinutes)}` : null,
       selectedMediaName || null,
       inkChoices.find((item) => item.key === ink)?.label,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
@@ -1889,7 +1899,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 6000" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour hours</b><input value={printSetupHours} onChange={(event) => setPrintSetupHours(event.target.value)} placeholder="eg 0.25" type="number" min="0" step="0.05" style={inputStyle} /></label> : null}
+                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Enter normal minutes. The system converts them to labour at {money(labourRate)}/hr.</small></label> : null}
                 {needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => setMediaId(event.target.value)} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => setInk(event.target.value as InkChoice)} style={inputStyle}><option value="">Choose ink</option>{inkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
@@ -2372,11 +2382,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           </div>
           {printed ? (
             <LabourPrompt
-              label="Print setup labour hours"
-              value={printSetupHours}
-              onChange={(value) => { setPrintSetupHours(value); setUnitPriceOverridden(false); }}
+              label="Print setup labour minutes"
+              value={printSetupMinutes}
+              onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
               onContinue={() => setActiveStep(nextStepAfterPrint(printMethod))}
               labourRate={labourRate}
+              unit="minutes"
             />
           ) : null}
         </div>
@@ -2858,7 +2869,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${usage(numberValue(artworkHours, 0))}hr` : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 <SummaryRow label="Print" value={printMethods.find((item) => item.key === printMethod)?.label} />
-                <SummaryRow label="Print setup" value={printed && printSetupHours ? `${usage(numberValue(printSetupHours, 0))}hr` : undefined} />
+                <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />
                 <SummaryRow label="Media" value={selectedMedia?.name} />
                 <SummaryRow label="Ink" value={inkChoices.find((item) => item.key === ink)?.label} />
                 <SummaryRow label="Laminate" value={selectedLaminateName || undefined} />
@@ -2926,12 +2937,18 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
   );
 }
 
-function LabourPrompt({ label, value, onChange, onContinue, labourRate }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void; labourRate: number }) {
+function LabourPrompt({ label, value, onChange, onContinue, labourRate, unit = "hours" }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void; labourRate: number; unit?: "hours" | "minutes" }) {
+  const isMinutes = unit === "minutes";
+  const enteredValue = numberValue(value, 0);
+  const convertedHours = isMinutes ? minutesToHours(enteredValue) : enteredValue;
+
   return (
     <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 14, background: "#f0fdf4", display: "grid", gap: 10 }}>
-      <label style={{ display: "grid", gap: 6 }}><b>{label}</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="eg 0.25" type="number" min="0" step="0.05" style={inputStyle} /></label>
-      <span style={{ color: "#475467", fontSize: 13 }}>Charged at {money(labourRate)}/hr.</span>
-      <button type="button" onClick={onContinue} disabled={numberValue(value, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(value, 0) > 0 ? 1 : 0.45 }}>Continue</button>
+      <label style={{ display: "grid", gap: 6 }}><b>{label}</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder={isMinutes ? "eg 15" : "eg 0.25"} type="number" min="0" step={isMinutes ? "1" : "0.05"} style={inputStyle} /></label>
+      <span style={{ color: "#475467", fontSize: 13 }}>
+        {isMinutes && enteredValue > 0 ? `${minutesLabel(enteredValue)} = ${usage(convertedHours)}hr · ` : ""}Charged at {money(labourRate)}/hr.
+      </span>
+      <button type="button" onClick={onContinue} disabled={enteredValue <= 0} style={{ ...primaryButton, opacity: enteredValue > 0 ? 1 : 0.45 }}>Continue</button>
     </div>
   );
 }
