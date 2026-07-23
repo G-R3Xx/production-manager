@@ -167,15 +167,18 @@ function cleanQuoteLineAmount(value: string | number | null | undefined): string
   return parsed.toFixed(2);
 }
 
-function quoteLineBreakdownRows(line: { optionSummary: string | null; quantity: string; unitPrice: string; lineTotal: string; notes: string | null }): { label: string; value: string }[] {
-  const rows = splitQuoteLineSummary(line.optionSummary).map((part) => {
+function quoteLineOptionRows(line: { optionSummary: string | null }): { label: string; value: string }[] {
+  return splitQuoteLineSummary(line.optionSummary).map((part) => {
     const colonIndex = part.indexOf(":");
     if (colonIndex > 0 && colonIndex < 36) {
       return { label: part.slice(0, colonIndex).trim(), value: part.slice(colonIndex + 1).trim() };
     }
     return { label: "Detail", value: part };
   });
+}
 
+function quoteLineBreakdownRows(line: { optionSummary: string | null; quantity: string; unitPrice: string; lineTotal: string; notes: string | null }): { label: string; value: string }[] {
+  const rows = quoteLineOptionRows(line);
   rows.push({ label: "Quantity", value: line.quantity });
   rows.push({ label: "Unit price", value: formatMoney(parseMoney(line.unitPrice)) });
   rows.push({ label: "Line total", value: formatMoney(parseMoney(line.lineTotal)) });
@@ -494,6 +497,7 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                 </div>
                 {quoteLines.map((line) => {
                   const breakdownRows = quoteLineBreakdownRows(line);
+                  const optionRows = quoteLineOptionRows(line);
                   return (
                     <details key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 0, background: "#fbfdff", overflow: "hidden" }}>
                       <summary style={{ listStyle: "none", cursor: "pointer", padding: 14 }}>
@@ -522,9 +526,33 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                           </div>
                         </section>
 
-                        <form action={updateQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 16, padding: 12, background: "#f8fbff", display: "grid", gap: 10 }}>
+                        <form action={updateQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 16, padding: 12, background: "#f8fbff", display: "grid", gap: 12 }}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
                           <input type="hidden" name="lineId" value={line.id} />
+
+                          {optionRows.length > 0 ? (
+                            <section style={{ display: "grid", gap: 10 }}>
+                              <div style={{ display: "grid", gap: 3 }}>
+                                <strong>Editable option details</strong>
+                                <span style={{ color: "#64748b", fontSize: 13 }}>Click into any value below to change it. Saving rebuilds the client-facing summary automatically.</span>
+                              </div>
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+                                {optionRows.map((row, index) => (
+                                  <label key={`option-edit-${line.id}-${row.label}-${index}`} style={labelStyle}>
+                                    <span style={labelTextStyle}>{row.label}</span>
+                                    <input type="hidden" name="optionDetailLabel" value={row.label} />
+                                    <input name="optionDetailValue" defaultValue={row.value} style={inputStyle} />
+                                  </label>
+                                ))}
+                              </div>
+                            </section>
+                          ) : (
+                            <label style={labelStyle}>
+                              <span style={labelTextStyle}>Client-facing / production summary</span>
+                              <textarea name="optionSummary" defaultValue={line.optionSummary ?? ""} style={{ ...textareaStyle, minHeight: 74 }} />
+                            </label>
+                          )}
+
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
                             <label style={labelStyle}>
                               <span style={labelTextStyle}>Line title</span>
@@ -539,10 +567,6 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                               <input name="unitPrice" defaultValue={cleanQuoteLineAmount(line.unitPrice)} inputMode="decimal" style={inputStyle} />
                             </label>
                           </div>
-                          <label style={labelStyle}>
-                            <span style={labelTextStyle}>Client-facing / production summary</span>
-                            <textarea name="optionSummary" defaultValue={line.optionSummary ?? ""} style={{ ...textareaStyle, minHeight: 74 }} />
-                          </label>
                           <label style={labelStyle}>
                             <span style={labelTextStyle}>Internal notes</span>
                             <textarea name="notes" defaultValue={line.notes ?? ""} style={{ ...textareaStyle, minHeight: 66 }} />

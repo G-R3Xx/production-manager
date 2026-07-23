@@ -32,6 +32,27 @@ function nullable(value: FormDataEntryValue | null): string | null {
   return trimmed.length > 0 ? trimmed : null;
 }
 
+function buildEditableOptionSummary(formData: FormData): string | null {
+  const labels = formData.getAll("optionDetailLabel");
+  const values = formData.getAll("optionDetailValue");
+
+  if (labels.length === 0 && values.length === 0) {
+    return nullable(formData.get("optionSummary"));
+  }
+
+  const parts = values
+    .map((rawValue, index) => {
+      const value = String(rawValue ?? "").trim();
+      const label = String(labels[index] ?? "").trim();
+      if (!value) return "";
+      if (!label || label.toLowerCase() === "detail") return value;
+      return `${label}: ${value}`;
+    })
+    .filter(Boolean);
+
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 export async function createQuoteDraftAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const clientName = String(formData.get("clientName") ?? "").trim();
@@ -138,7 +159,7 @@ export async function updateQuoteLineAction(formData: FormData): Promise<void> {
 
   await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId, {
     productName,
-    optionSummary: nullable(formData.get("optionSummary")),
+    optionSummary: buildEditableOptionSummary(formData),
     quantity: quantity || "1",
     unitPrice: unitPrice || "0",
     notes: nullable(formData.get("notes"))
