@@ -17,7 +17,7 @@ Products/templates are still allowed to exist as future shortcuts, but they are 
 
 The selected quote now shows a card/carousel style line builder:
 
-1. Base material/category: Acrylic, ACM, Corflute, PVC, Banner/roll, or other sheet.
+1. Base material/category: Acrylic, ACM, Corflute, PVC, Vinyl/Roll Stock, or other sheet.
 2. Thickness, derived from material names or GSM/thickness fields.
 3. Colour/finish, derived from the matching material names.
 4. Finished sign size.

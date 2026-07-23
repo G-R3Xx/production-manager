@@ -865,12 +865,16 @@ function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kin
   const qty = normaliseMoney(line.quantity, "1");
 
   const colourParts = uniqueSpecificSummaryLines(parts.filter((part) => /\b(cmyk|mono|white ink|white|pantone|colour|color|clear|reverse|positive)\b/i.test(part)));
+  const explicitSubstrate = parts.find((part) => /^(?:substrate|stock|material)\s*:/i.test(part));
+  const explicitSubstrateName = explicitSubstrate
+    ? explicitSubstrate.replace(/^(?:substrate|stock|material)\s*:\s*/i, "").trim()
+    : "";
   const materialParts = uniqueSpecificSummaryLines(parts.filter((part) =>
-    /\b(acrylic|acm|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|satin|cello|sheet)\b/i.test(part)
+    /\b(acrylic|acm|corflute|coreflute|pvc|foamboard|banner|vinyl|sav|adhesive|air release|roll|stock|paper|gsm|satin|cello|sheet)\b/i.test(part)
     && !/\b(laminate|lamination|lam-|gloss laminate|matt laminate|matte laminate|coating)\b/i.test(part)
   ));
   const finishingParts = uniqueSpecificSummaryLines(parts.filter((part) => /\b(finishing|jingwei|router|cnc|drill|holes|eyelet|trim|cutting|fold|score|crease|staple|saddle|numbering|padding|tape|laminate|lamination|lam-|coating)\b/i.test(part)));
-  const fallbackSubstrate = uniqueSpecificSummaryLines([line.productName, ...materialParts]).join("\n") || line.productName;
+  const fallbackSubstrate = explicitSubstrateName || uniqueSpecificSummaryLines([line.productName, ...materialParts]).join("\n") || line.productName;
 
   return {
     title: line.productName || `${kind === "small_format" ? "Small format" : kind === "plan_printing" ? "Plan printing" : kind === "poster_printing" ? "Poster printing" : "Sign"} proof`,

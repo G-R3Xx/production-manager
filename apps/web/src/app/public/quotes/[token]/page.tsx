@@ -111,11 +111,6 @@ function findDimension(parts: string[], fallbackSource: string): string | null {
   return dimensionFromText(fallbackSource);
 }
 
-function findThickness(source: string): string | null {
-  const match = source.match(/\b\d+(?:\.\d+)?\s*mm\b/i);
-  return match ? compactText(match[0]).replace(/\s+/g, "") : null;
-}
-
 function cleanBaseMaterialName(value: string | null | undefined): string {
   const productName = compactText(value);
   const firstPart = compactText(productName.split(" - ")[0] ?? productName);
@@ -124,12 +119,27 @@ function cleanBaseMaterialName(value: string | null | undefined): string {
 
 function cleanSelectedMaterialName(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): string {
   const parts = summaryParts(line);
+  const explicitlySelected = parts.find((part) => /^(?:substrate|stock|material)\s*:/i.test(part));
+  if (explicitlySelected) {
+    return compactText(explicitlySelected.replace(/^(?:substrate|stock|material)\s*:\s*/i, ""));
+  }
+
   const productBase = cleanBaseMaterialName(line.productName);
   const materialPart = parts.find((part) => {
     const lower = part.toLowerCase();
     return lower.includes(productBase.toLowerCase()) && /\b\d+(?:\.\d+)?\s*mm\b/i.test(part);
   });
-  return titleCaseLabel(materialPart || line.productName.replace(/^.+?\s+-\s+/i, "") || productBase);
+  return compactText(materialPart || line.productName.replace(/^.+?\s+-\s+/i, "") || productBase);
+}
+
+function clientMaterialTitle(value: string | null | undefined): string {
+  const source = compactText(value);
+  if (!source) return "";
+
+  // Keep the exact purchased substrate name in the quote data, but avoid repeating a
+  // parent-sheet dimension in the headline when the finished size is shown separately.
+  const withoutTrailingParentSize = source.replace(/\s+\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?(?:\s*mm)?\s*$/i, "").trim();
+  return withoutTrailingParentSize || source;
 }
 
 function friendlyLaminate(raw: string | null | undefined): string | null {
@@ -186,16 +196,15 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   const combined = [line.productName, line.optionSummary].filter(Boolean).join(" · ");
   const base = cleanBaseMaterialName(line.productName);
   const selectedMaterial = cleanSelectedMaterialName(line);
+  const materialTitle = clientMaterialTitle(selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
-  const thickness = findThickness(selectedMaterial);
   const printMethod = friendlyPrintMethod(parts.find((part) => /^(no print|direct print|roll stock|cut vinyl)$/i.test(part)));
   const ink = parts.find((part) => /^(cmyk|mono|cmyk \+ white|white ink|cmyk \+ special)$/i.test(part));
   const side = friendlySide(parts.find((part) => /\bsided\b/i.test(part)));
   const laminate = friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
-  const materialDescriptor = [base, thickness].filter(Boolean).join(" ");
-  const title = [base, dimension, laminate].filter(Boolean).join(" ") || line.productName;
+  const title = [materialTitle, dimension, laminate].filter(Boolean).join(" ") || line.productName;
   const detailParts = [
-    [materialDescriptor || selectedMaterial, dimension ? `- ${dimension}` : null].filter(Boolean).join(" "),
+    selectedMaterial && selectedMaterial !== materialTitle ? `Substrate: ${selectedMaterial}` : null,
     printMethod,
     ink ? ink.toUpperCase().replace("CMYK + WHITE", "CMYK + White") : null,
     laminate,

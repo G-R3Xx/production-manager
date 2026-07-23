@@ -178,7 +178,7 @@ const baseTypes: Array<{ key: BaseType; label: string; icon: string; description
   { key: "acm", label: "ACM", icon: "◫", description: "Aluminium composite panel signs.", accent: "#2563eb" },
   { key: "corflute", label: "Corflute", icon: "▤", description: "Corrugated plastic signs.", accent: "#0891b2" },
   { key: "pvc", label: "PVC / Foam", icon: "◰", description: "PVC, foamboard or similar sheet materials.", accent: "#16a34a" },
-  { key: "banner", label: "Banner / roll", icon: "▰", description: "Roll-stock banner style items.", accent: "#ea580c" },
+  { key: "banner", label: "Vinyl/Roll Stock", icon: "▰", description: "SAV, printable vinyl, banner media and other roll-stock products.", accent: "#ea580c" },
   { key: "other_sheet", label: "Other sheet", icon: "◧", description: "Any other sheet material in the material library.", accent: "#475569" }
 ];
 
