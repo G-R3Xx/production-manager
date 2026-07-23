@@ -246,6 +246,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         id: product.id,
         name: product.name,
         sku: product.sku,
+        department: product.department,
+        productFamily: product.productFamily,
         fields,
         components
       };

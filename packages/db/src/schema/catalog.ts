@@ -16,6 +16,8 @@ export const catalogSchema = pgSchema("catalog");
 export const departmentEnum = pgEnum("department", [
   "signage",
   "small_format",
+  "plan_printing",
+  "poster_printing",
   "installation",
   "general"
 ]);

@@ -476,6 +476,28 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
 }
 
 
+export async function linkQuoteLineToProductForTenant(
+  tenantId: string,
+  quoteId: string,
+  lineId: string,
+  productId: string,
+  productName: string
+): Promise<void> {
+  await pool.query(`
+    UPDATE sales.quote_lines ql
+    SET
+      product_id = $4::uuid,
+      product_name = $5::varchar,
+      updated_at = now()
+    FROM sales.quote_drafts qd
+    WHERE ql.quote_id = qd.id
+      AND qd.tenant_id = $1::uuid
+      AND ql.quote_id = $2::uuid
+      AND ql.id = $3::uuid
+  `, [tenantId, quoteId, lineId, productId, productName]);
+}
+
+
 export async function markQuoteSentForTenant(tenantId: string, quoteId: string): Promise<void> {
   await ensureQuoteLifecycleColumns();
   await pool.query(`

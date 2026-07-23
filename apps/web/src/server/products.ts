@@ -31,6 +31,14 @@ export type ProductCreateInput = {
   taxCode: string | null;
 };
 
+const extendedDepartmentValues = new Set(["plan_printing", "poster_printing"]);
+
+async function ensureDepartmentEnumValue(department: string): Promise<void> {
+  if (!extendedDepartmentValues.has(department)) return;
+  const safeValue = department === "plan_printing" ? "plan_printing" : "poster_printing";
+  await pool.query(`ALTER TYPE department ADD VALUE IF NOT EXISTS '${safeValue}'`);
+}
+
 export async function listProductsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<ProductRecord[]> {
   if (!process.env.DATABASE_URL) {
     return [];
@@ -69,6 +77,8 @@ export async function createProduct(input: ProductCreateInput): Promise<{ id: st
   if (!process.env.DATABASE_URL) {
     throw new Error('DATABASE_URL is not configured');
   }
+
+  await ensureDepartmentEnumValue(input.department);
 
   const result = await pool.query<{ id: string }>(
     `
@@ -113,6 +123,7 @@ export async function upsertImportedProduct(tenantId: string, input: {
   calculatorType?: string;
   payloadJson?: Record<string, unknown>;
 }): Promise<{ id: string }> {
+  await ensureDepartmentEnumValue(input.department ?? "general");
   const result = await pool.query<{ id: string }>(
     `
       INSERT INTO catalog.products (
@@ -220,6 +231,8 @@ export async function updateProduct(tenantId: string, productId: string, input: 
   if (!process.env.DATABASE_URL) {
     return;
   }
+
+  await ensureDepartmentEnumValue(input.department);
 
   await pool.query(
     `

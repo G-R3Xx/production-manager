@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { updateQuoteLineAction } from "./actions";
+import { saveQuoteLineAsProductAction, updateQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue, splitQuoteAnswerValues } from "./quoteOptionDependencies";
 import {
   calculateQuoteProductPricing,
@@ -299,6 +299,17 @@ function carbonBookSavedPriceScale(
   };
 }
 
+function productFamilyForDepartment(department: string): string {
+  switch (department) {
+    case "small_format":
+    case "plan_printing": return "small_format_print";
+    case "poster_printing": return "roll_media";
+    case "installation":
+    case "general": return "display_products";
+    default: return "rigid_signage";
+  }
+}
+
 export function QuoteLineEditor({ quoteId, line, product, materials, pricingSettings }: QuoteLineEditorProps) {
   const summaryRows = useMemo(() => parseSummary(line.optionSummary), [line.optionSummary]);
   const configuredFields = useMemo(() => (product?.fields ?? []).filter((field) => field.key !== "quantity"), [product]);
@@ -310,10 +321,16 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     return sanitiseAnswers(configuredFields, initial);
   }, [configuredFields, summaryRows]);
   const [answers, setAnswers] = useState<Record<string, string>>(() => initialAnswers);
+  const [lineTitle, setLineTitle] = useState(line.productName);
   const [quantity, setQuantity] = useState(line.quantity);
   const [unitPrice, setUnitPrice] = useState(() => cleanMoneyInput(line.unitPrice));
   const [optionsEdited, setOptionsEdited] = useState(false);
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
+  const [showSaveProduct, setShowSaveProduct] = useState(false);
+  const [productSaveName, setProductSaveName] = useState(line.productName);
+  const [productDepartment, setProductDepartment] = useState(product?.department ?? "signage");
+  const [productPricingMode, setProductPricingMode] = useState(product ? "recipe" : "current_price");
+  const [createEditableOptions, setCreateEditableOptions] = useState(true);
 
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
   const automaticPricing = useMemo(
@@ -361,10 +378,26 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     setUnitPriceOverridden(false);
   }
 
+  function openSaveProduct() {
+    setProductSaveName(lineTitle.trim() || line.productName);
+    setProductDepartment(product?.department ?? productDepartment ?? "signage");
+    setProductPricingMode(product ? "recipe" : "current_price");
+    setShowSaveProduct(true);
+  }
+
   return (
     <form action={updateQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 16, padding: 12, background: "#f8fbff", display: "grid", gap: 12 }}>
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="lineId" value={line.id} />
+      <input type="hidden" name="linkedProductId" value={product?.id ?? ""} />
+      <input type="hidden" name="productSaveMarkupMultiplier" value={String(pricingSettings?.markupMultiplier ?? "1.5")} />
+      <input type="hidden" name="productSaveProfitMultiplier" value={String(pricingSettings?.profitMultiplier ?? "1.2")} />
+      {configuredFields.map((field) => (
+        <span key={`saved-product-answer-${field.id ?? field.key}`} style={{ display: "none" }}>
+          <input type="hidden" name="productOptionKey" value={field.key} />
+          <input type="hidden" name="productOptionValue" value={answers[field.key] ?? ""} />
+        </span>
+      ))}
 
       {product && configuredFields.length > 0 ? (
         <section style={{ display: "grid", gap: 10 }}>
@@ -473,7 +506,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
         <label style={labelStyle}>
           <span style={labelTextStyle}>Line title</span>
-          <input name="productName" defaultValue={line.productName} style={inputStyle} />
+          <input name="productName" value={lineTitle} onChange={(event) => setLineTitle(event.target.value)} style={inputStyle} />
         </label>
         <label style={labelStyle}>
           <span style={labelTextStyle}>Quantity</span>
@@ -517,9 +550,75 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
         <textarea name="notes" defaultValue={line.notes ?? ""} style={textareaStyle} />
       </label>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-        <button type="submit" style={buttonStyle}>Save line changes</button>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button type="submit" style={buttonStyle}>Save line changes</button>
+          <button type="button" onClick={openSaveProduct} style={{ ...buttonStyle, background: "#ffffff", color: "#155eef", border: "1px solid #b9cdfc" }}>Save as reusable product</button>
+        </div>
         <span style={{ color: "#64748b", fontSize: 13 }}>Product option changes recalculate the unit price; quantity recalculates the line total.</span>
       </div>
+
+      {showSaveProduct ? (
+        <section style={{ border: "1px solid #c7d7fe", borderRadius: 18, padding: 14, background: "linear-gradient(135deg,#ffffff,#f4f7ff)", display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+            <div style={{ display: "grid", gap: 4 }}>
+              <strong style={{ fontSize: 17 }}>{product ? "Reuse or update this saved product" : "Save this quote line as a product"}</strong>
+              <span style={{ color: "#64748b", fontSize: 13 }}>Current selections become the defaults. Quote-specific quantity, client details, due dates and notes are not saved to the product.</span>
+            </div>
+            <button type="button" onClick={() => setShowSaveProduct(false)} style={{ border: "1px solid #cfd9e8", borderRadius: 12, background: "#fff", color: "#475467", padding: "7px 10px", fontWeight: 900, cursor: "pointer" }}>Close</button>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Product name</span>
+              <input name="productSaveName" value={productSaveName} onChange={(event) => setProductSaveName(event.target.value)} required style={inputStyle} />
+            </label>
+            <label style={labelStyle}>
+              <span style={labelTextStyle}>Department</span>
+              <select name="productDepartment" value={productDepartment} onChange={(event) => setProductDepartment(event.target.value)} style={inputStyle}>
+                <option value="signage">Signage</option>
+                <option value="plan_printing">Plan printing</option>
+                <option value="poster_printing">Poster printing</option>
+                <option value="small_format">Small format</option>
+                <option value="installation">Install</option>
+                <option value="general">Outsourced / general</option>
+              </select>
+            </label>
+          </div>
+          <input type="hidden" name="productFamily" value={product?.productFamily ?? productFamilyForDepartment(productDepartment)} />
+
+          {product ? (
+            <fieldset style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 9 }}>
+              <legend style={labelTextStyle}>Pricing to save</legend>
+              <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
+                <input type="radio" name="productPricingMode" value="recipe" checked={productPricingMode === "recipe"} onChange={() => setProductPricingMode("recipe")} />
+                <span><strong>Keep the product pricing recipe</strong><br /><small style={{ color: "#64748b" }}>Copies the linked materials, labour, charges and available option lists. These selections become its defaults.</small></span>
+              </label>
+              <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
+                <input type="radio" name="productPricingMode" value="current_price" checked={productPricingMode === "current_price"} onChange={() => setProductPricingMode("current_price")} />
+                <span><strong>Use the current {formatMoney(unitPrice)} unit price</strong><br /><small style={{ color: "#64748b" }}>Keeps the option lists but replaces the recipe with this quote line's current price basis.</small></span>
+              </label>
+            </fieldset>
+          ) : (
+            <section style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 9 }}>
+              <input type="hidden" name="productPricingMode" value="current_price" />
+              <input type="hidden" name="productCreateEditableOptions" value={createEditableOptions ? "yes" : "no"} />
+              <strong>Saved price: {formatMoney(unitPrice)} per unit</strong>
+              <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
+                <input type="checkbox" checked={createEditableOptions} onChange={(event) => setCreateEditableOptions(event.target.checked)} />
+                <span>Create editable dropdowns from the current line details<br /><small style={{ color: "#64748b" }}>The present values become defaults. More choices can be added later on the Products page.</small></span>
+              </label>
+            </section>
+          )}
+
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <button type="submit" name="productSaveMode" value="new" formAction={saveQuoteLineAsProductAction} style={{ ...buttonStyle, background: "#155eef" }}>Save as new product</button>
+            {product ? (
+              <button type="submit" name="productSaveMode" value="update" formAction={saveQuoteLineAsProductAction} style={{ ...buttonStyle, background: productPricingMode === "current_price" ? "#b54708" : "#067647" }}>Update existing product</button>
+            ) : null}
+            <span style={{ color: "#64748b", fontSize: 12 }}>{product ? "Saving as new leaves the original product untouched. Updating changes the product used by every future quote." : "The new product will appear immediately in Predefined products."}</span>
+          </div>
+        </section>
+      ) : null}
     </form>
   );
 }

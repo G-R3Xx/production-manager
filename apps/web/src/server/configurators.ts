@@ -155,6 +155,29 @@ export async function updateConfiguratorDefinitionJson(
   );
 }
 
+
+export async function updateConfiguratorTemplateMetadata(
+  tenantId: string,
+  templateId: string,
+  input: { name: string; department: string; productFamily: string; status?: string }
+): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+
+  await pool.query(
+    `
+      UPDATE catalog.configurator_templates
+      SET
+        name = $3,
+        department = $4,
+        product_family = $5,
+        status = COALESCE($6, status),
+        updated_at = now()
+      WHERE tenant_id = $1 AND id = $2
+    `,
+    [tenantId, templateId, input.name, input.department, input.productFamily, input.status ?? null]
+  );
+}
+
 export async function ensureProductEditorTemplate(input: {
   tenantId: string;
   productId: string;

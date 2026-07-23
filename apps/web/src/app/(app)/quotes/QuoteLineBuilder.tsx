@@ -91,6 +91,8 @@ export type QuoteProduct = {
   id: string;
   name: string;
   sku?: string | null;
+  department?: string | null;
+  productFamily?: string | null;
   fields: QuoteQuestion[];
   components: QuoteComponent[];
 };

@@ -610,8 +610,8 @@ function ProductBasicsPanel({ selectedProduct }: { selectedProduct: any }) {
               <option value="plan_printing">Plan printing</option>
               <option value="poster_printing">Poster printing</option>
               <option value="small_format">Small format</option>
-              <option value="install">Install</option>
-              <option value="outsourced">Outsourced</option>
+              <option value="installation">Install</option>
+              <option value="general">Outsourced / general</option>
             </select>
           </label>
         </div>
