@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { saveQuoteLineAsProductAction, updateQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue, splitQuoteAnswerValues } from "./quoteOptionDependencies";
 import {
@@ -25,6 +25,7 @@ type QuoteLineEditorProps = {
     quantity: string;
     unitPrice: string;
     notes: string | null;
+    createdAt: string | null;
   };
   product?: QuoteLineEditorProduct | null;
   materials: QuoteMaterial[];
@@ -32,6 +33,74 @@ type QuoteLineEditorProps = {
 };
 
 type SummaryRow = { label: string; value: string };
+
+type BreakdownOptionCard =
+  | { kind: "line_title"; key: string; label: string; summaryLabel?: string }
+  | { kind: "field"; key: string; field: QuoteLineEditorField }
+  | { kind: "legacy"; key: string; label: string; rowIndex: number }
+  | { kind: "raw_summary"; key: string; label: string };
+
+type BreakdownCardProps = {
+  cardKey: string;
+  label: string;
+  value: string;
+  editable?: boolean;
+  active: boolean;
+  onActivate: (key: string) => void;
+  helpText?: string | null;
+  children?: ReactNode;
+};
+
+function BreakdownCard({ cardKey, label, value, editable = false, active, onActivate, helpText, children }: BreakdownCardProps) {
+  return (
+    <div
+      role={editable && !active ? "button" : undefined}
+      tabIndex={editable && !active ? 0 : undefined}
+      onClick={editable && !active ? () => onActivate(cardKey) : undefined}
+      onKeyDown={editable && !active ? (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          onActivate(cardKey);
+        }
+      } : undefined}
+      style={{
+        border: active ? "2px solid #155eef" : editable ? "1px solid #b9cdfc" : "1px solid #e2e8f0",
+        borderRadius: 14,
+        background: active ? "#f8fbff" : "#fff",
+        padding: 10,
+        display: "grid",
+        gap: 6,
+        minHeight: active ? undefined : 82,
+        alignContent: "start",
+        cursor: editable && !active ? "pointer" : "default",
+        boxShadow: active ? "0 0 0 3px rgba(21,94,239,0.08)" : "none",
+        gridColumn: active ? "1 / -1" : undefined
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+        <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b", fontWeight: 950 }}>{label}</span>
+        {editable ? <span style={{ borderRadius: 999, background: active ? "#dbeafe" : "#eef4ff", color: "#155eef", padding: "3px 7px", fontSize: 10, fontWeight: 950 }}>{active ? "Editing" : "Edit"}</span> : null}
+      </div>
+      {!active ? <strong style={{ lineHeight: 1.35, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{value}</strong> : null}
+      <div style={{ display: active ? "grid" : "none", gap: 8 }} onClick={(event) => event.stopPropagation()}>
+        {children}
+      </div>
+      {helpText && active ? <small style={{ color: "#667085" }}>{helpText}</small> : null}
+    </div>
+  );
+}
+
+function DoneButton({ onClick }: { onClick: () => void }) {
+  return <button type="button" onClick={onClick} style={{ minHeight: 36, borderRadius: 10, border: "none", background: "#155eef", color: "#fff", fontWeight: 900, padding: "0 12px", justifySelf: "start", cursor: "pointer" }}>Done</button>;
+}
+
+function formatDateTime(value: string | null | undefined): string {
+  if (!value) return "Not yet";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
 
 const inputStyle = {
   minHeight: 44,
@@ -312,20 +381,36 @@ function productFamilyForDepartment(department: string): string {
 
 export function QuoteLineEditor({ quoteId, line, product, materials, pricingSettings }: QuoteLineEditorProps) {
   const summaryRows = useMemo(() => parseSummary(line.optionSummary), [line.optionSummary]);
+  const indexedSummaryRows = useMemo(() => summaryRows.map((row, index) => ({ ...row, index })), [summaryRows]);
   const configuredFields = useMemo(() => (product?.fields ?? []).filter((field) => field.key !== "quantity"), [product]);
-  const configuredLabels = useMemo(() => new Set(configuredFields.map((field) => normalise(field.label))), [configuredFields]);
-  const legacyRows = useMemo(() => summaryRows.filter((row) => !configuredLabels.has(normalise(row.label))), [summaryRows, configuredLabels]);
+  const configuredByLabel = useMemo(() => {
+    const result = new Map<string, QuoteLineEditorField>();
+    configuredFields.forEach((field) => {
+      const label = normalise(field.label);
+      if (label && !result.has(label)) result.set(label, field);
+    });
+    return result;
+  }, [configuredFields]);
   const initialAnswers = useMemo(() => {
     const valuesByLabel = new Map(summaryRows.map((row) => [normalise(row.label), row.value]));
     const initial = Object.fromEntries(configuredFields.map((field) => [field.key, answerFromSummary(field, valuesByLabel.get(normalise(field.label)))]));
     return sanitiseAnswers(configuredFields, initial);
   }, [configuredFields, summaryRows]);
+  const lineTitleSummaryIndex = useMemo(() => {
+    const firstRow = indexedSummaryRows[0];
+    if (!firstRow) return -1;
+    return normalise(firstRow.label) === "detail" && normalise(firstRow.value) === normalise(line.productName) ? firstRow.index : -1;
+  }, [indexedSummaryRows, line.productName]);
+
   const [answers, setAnswers] = useState<Record<string, string>>(() => initialAnswers);
+  const [legacyValues, setLegacyValues] = useState<Record<number, string>>(() => Object.fromEntries(indexedSummaryRows.map((row) => [row.index, row.value])));
+  const [rawSummary, setRawSummary] = useState(line.optionSummary ?? "");
   const [lineTitle, setLineTitle] = useState(line.productName);
   const [quantity, setQuantity] = useState(line.quantity);
   const [unitPrice, setUnitPrice] = useState(() => cleanMoneyInput(line.unitPrice));
+  const [notes, setNotes] = useState(line.notes ?? "");
+  const [activeEditor, setActiveEditor] = useState<string | null>(null);
   const [optionsEdited, setOptionsEdited] = useState(false);
-  const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
   const [showSaveProduct, setShowSaveProduct] = useState(false);
   const [productSaveName, setProductSaveName] = useState(line.productName);
   const [productDepartment, setProductDepartment] = useState(product?.department ?? "signage");
@@ -333,6 +418,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
   const [createEditableOptions, setCreateEditableOptions] = useState(true);
 
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
+  const visibleFieldKeys = new Set(visibleFields.map((field) => field.key));
   const quantityNumber = Math.max(0, numberInput(quantity, 0));
   const automaticPricing = useMemo(
     () => calculateQuoteProductPricing(product ?? undefined, materials, answers, pricingSettings, {}, {}, Math.max(1, quantityNumber)),
@@ -354,10 +440,16 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
   const enteredLineTotal = numberInput(unitPrice, 0) * quantityNumber;
 
   useEffect(() => {
-    if (optionsEdited && recalculationMode !== "none" && !unitPriceOverridden) {
+    if (optionsEdited && recalculationMode !== "none") {
       setUnitPrice(recalculatedUnitPrice.toFixed(2));
     }
-  }, [optionsEdited, recalculationMode, recalculatedUnitPrice, unitPriceOverridden]);
+  }, [optionsEdited, recalculationMode, recalculatedUnitPrice]);
+
+  useEffect(() => {
+    if (activeEditor?.startsWith("field:") && !visibleFieldKeys.has(activeEditor.slice("field:".length))) {
+      setActiveEditor(null);
+    }
+  }, [activeEditor, visibleFieldKeys]);
 
   function updateAnswer(key: string, value: string) {
     setOptionsEdited(true);
@@ -373,9 +465,11 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     });
   }
 
-  function useRecalculatedPrice() {
-    setUnitPrice(recalculatedUnitPrice.toFixed(2));
-    setUnitPriceOverridden(false);
+  function finishTextEdit(event: { key: string; preventDefault: () => void }) {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      setActiveEditor(null);
+    }
   }
 
   function openSaveProduct() {
@@ -385,11 +479,219 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     setShowSaveProduct(true);
   }
 
+  const optionCards: BreakdownOptionCard[] = [];
+  const representedFields = new Set<string>();
+
+  indexedSummaryRows.forEach((row) => {
+    if (row.index === lineTitleSummaryIndex) {
+      optionCards.push({ kind: "line_title", key: "line-title", label: "Line title", summaryLabel: row.label });
+      return;
+    }
+
+    const field = configuredByLabel.get(normalise(row.label));
+    if (field) {
+      if (!visibleFieldKeys.has(field.key) || representedFields.has(field.key)) return;
+      representedFields.add(field.key);
+      optionCards.push({ kind: "field", key: `field:${field.key}`, field });
+      return;
+    }
+
+    optionCards.push({ kind: "legacy", key: `legacy:${row.index}`, label: row.label, rowIndex: row.index });
+  });
+
+  visibleFields.forEach((field) => {
+    if (representedFields.has(field.key)) return;
+    representedFields.add(field.key);
+    optionCards.push({ kind: "field", key: `field:${field.key}`, field });
+  });
+
+  if (!optionCards.some((card) => card.kind === "line_title")) {
+    optionCards.unshift({ kind: "line_title", key: "line-title", label: "Line title" });
+  }
+
+  if (summaryRows.length === 0 && configuredFields.length === 0) {
+    optionCards.push({ kind: "raw_summary", key: "raw-summary", label: "Summary" });
+  }
+
+  function renderOptionCard(card: BreakdownOptionCard) {
+    if (card.kind === "line_title") {
+      return (
+        <BreakdownCard
+          key={card.key}
+          cardKey={card.key}
+          label={card.label}
+          value={lineTitle || "Not set"}
+          editable
+          active={activeEditor === card.key}
+          onActivate={setActiveEditor}
+        >
+          {card.summaryLabel ? (
+            <>
+              <input type="hidden" name="optionDetailLabel" value={card.summaryLabel} />
+              <input type="hidden" name="optionDetailValue" value={lineTitle} />
+            </>
+          ) : null}
+          <input value={lineTitle} onChange={(event) => setLineTitle(event.target.value)} onKeyDown={finishTextEdit} style={inputStyle} />
+          <DoneButton onClick={() => setActiveEditor(null)} />
+        </BreakdownCard>
+      );
+    }
+
+    if (card.kind === "legacy") {
+      const value = legacyValues[card.rowIndex] ?? "";
+      return (
+        <BreakdownCard
+          key={card.key}
+          cardKey={card.key}
+          label={card.label}
+          value={value || "Not set"}
+          editable
+          active={activeEditor === card.key}
+          onActivate={setActiveEditor}
+        >
+          <input type="hidden" name="optionDetailLabel" value={card.label} />
+          <input type="hidden" name="optionDetailValue" value={value} />
+          <input
+           
+            value={value}
+            onChange={(event) => setLegacyValues((current) => ({ ...current, [card.rowIndex]: event.target.value }))}
+            onKeyDown={finishTextEdit}
+            style={inputStyle}
+          />
+          <DoneButton onClick={() => setActiveEditor(null)} />
+        </BreakdownCard>
+      );
+    }
+
+    if (card.kind === "raw_summary") {
+      return (
+        <BreakdownCard
+          key={card.key}
+          cardKey={card.key}
+          label={card.label}
+          value={rawSummary || "No summary details"}
+          editable
+          active={activeEditor === card.key}
+          onActivate={setActiveEditor}
+        >
+          <textarea value={rawSummary} onChange={(event) => setRawSummary(event.target.value)} style={{ ...textareaStyle, minHeight: 90 }} />
+          <DoneButton onClick={() => setActiveEditor(null)} />
+        </BreakdownCard>
+      );
+    }
+
+    const field = card.field;
+    const fieldType = normalizedQuestionType(field);
+    const value = answers[field.key] ?? "";
+    const displayValue = displayAnswer(field, value) || "Not set";
+    const choices = availableChoicesForField(field, answers);
+
+    if (fieldType === "multi_select") {
+      const selected = splitQuoteAnswerValues(value);
+      return (
+        <BreakdownCard
+          key={card.key}
+          cardKey={card.key}
+          label={field.label}
+          value={displayValue}
+          editable
+          active={activeEditor === card.key}
+          onActivate={setActiveEditor}
+          helpText={field.helpText}
+        >
+          <input type="hidden" name="optionDetailLabel" value={field.label} />
+          <input type="hidden" name="optionDetailValue" value={displayAnswer(field, value)} />
+          <div style={{ display: "grid", gap: 8 }}>
+            {choices.length === 0 ? <span style={{ color: "#b42318", fontSize: 13 }}>No matching options are set up.</span> : null}
+            {choices.map((choice) => {
+              const choiceValue = quoteChoiceValue(choice);
+              return (
+                <label key={choice.id ?? choiceValue} style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800 }}>
+                  <input type="checkbox" checked={selected.includes(choiceValue)} onChange={(event) => toggleMultiAnswer(field, choiceValue, event.target.checked)} />
+                  <span>{choiceLabel(choice, humanize(choiceValue))}</span>
+                </label>
+              );
+            })}
+          </div>
+          <DoneButton onClick={() => setActiveEditor(null)} />
+        </BreakdownCard>
+      );
+    }
+
+    if (["select", "size_select", "color", "yes_no"].includes(fieldType)) {
+      return (
+        <BreakdownCard
+          key={card.key}
+          cardKey={card.key}
+          label={field.label}
+          value={displayValue}
+          editable
+          active={activeEditor === card.key}
+          onActivate={setActiveEditor}
+          helpText={field.helpText}
+        >
+          <input type="hidden" name="optionDetailLabel" value={field.label} />
+          <input type="hidden" name="optionDetailValue" value={displayAnswer(field, value)} />
+          <select
+           
+            value={value}
+           
+            onChange={(event) => {
+              updateAnswer(field.key, event.target.value);
+              setActiveEditor(null);
+            }}
+            style={inputStyle}
+          >
+            <option value="">Choose {field.label.toLowerCase()}</option>
+            {choices.length === 0 ? <option value="">No matching options set up</option> : null}
+            {choices.map((choice) => {
+              const choiceValue = quoteChoiceValue(choice);
+              return <option key={choice.id ?? choiceValue} value={choiceValue}>{choiceLabel(choice, humanize(choiceValue))}</option>;
+            })}
+          </select>
+        </BreakdownCard>
+      );
+    }
+
+    return (
+      <BreakdownCard
+        key={card.key}
+        cardKey={card.key}
+        label={field.label}
+        value={displayValue}
+        editable
+        active={activeEditor === card.key}
+        onActivate={setActiveEditor}
+        helpText={field.helpText}
+      >
+        <input type="hidden" name="optionDetailLabel" value={field.label} />
+        <input type="hidden" name="optionDetailValue" value={displayAnswer(field, value)} />
+        <input
+         
+          type={["number", "quantity"].includes(fieldType) ? "number" : "text"}
+          min={["number", "quantity"].includes(fieldType) ? "0" : undefined}
+          step={["number", "quantity"].includes(fieldType) ? "any" : undefined}
+          value={value}
+         
+          onChange={(event) => updateAnswer(field.key, event.target.value)}
+          onKeyDown={finishTextEdit}
+          style={inputStyle}
+        />
+        <DoneButton onClick={() => setActiveEditor(null)} />
+      </BreakdownCard>
+    );
+  }
+
   return (
-    <form action={updateQuoteLineAction} style={{ border: "1px solid #dbeafe", borderRadius: 16, padding: 12, background: "#f8fbff", display: "grid", gap: 12 }}>
+    <form action={updateQuoteLineAction} style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 12, background: "#f8fafc", display: "grid", gap: 12 }}>
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="lineId" value={line.id} />
       <input type="hidden" name="linkedProductId" value={product?.id ?? ""} />
+      <input type="hidden" name="productName" value={lineTitle} />
+      <input type="hidden" name="quantity" value={quantity} />
+      <input type="hidden" name="unitPrice" value={unitPrice} />
+      <input type="hidden" name="notes" value={notes} />
+      <input type="hidden" name="optionSummary" value={rawSummary} />
       <input type="hidden" name="productSaveMarkupMultiplier" value={String(pricingSettings?.markupMultiplier ?? "1.5")} />
       <input type="hidden" name="productSaveProfitMultiplier" value={String(pricingSettings?.profitMultiplier ?? "1.2")} />
       {configuredFields.map((field) => (
@@ -399,132 +701,40 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
         </span>
       ))}
 
-      {product && configuredFields.length > 0 ? (
-        <section style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gap: 3 }}>
-            <strong>Editable product options</strong>
-            <span style={{ color: "#64748b", fontSize: 13 }}>Choose from the options saved on the Products page. Dependent lists update automatically.</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-            {visibleFields.map((field) => {
-              const fieldType = normalizedQuestionType(field);
-              const value = answers[field.key] ?? "";
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gap: 3 }}>
+          <strong>Line breakdown</strong>
+          <span style={{ color: "#64748b", fontSize: 13 }}>Click an editable card to change it. Available product options and dependent lists are used automatically.</span>
+        </div>
+        <span style={{ color: "#475467", fontSize: 13 }}>Created {formatDateTime(line.createdAt)}</span>
+      </div>
 
-              if (fieldType === "multi_select") {
-                const choices = availableChoicesForField(field, answers);
-                const selected = splitQuoteAnswerValues(value);
-                return (
-                  <fieldset key={field.id ?? field.key} style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 8 }}>
-                    <legend style={labelTextStyle}>{field.label}</legend>
-                    <input type="hidden" name="optionDetailLabel" value={field.label} />
-                    <input type="hidden" name="optionDetailValue" value={displayAnswer(field, value)} />
-                    {choices.map((choice) => {
-                      const choiceValue = quoteChoiceValue(choice);
-                      return (
-                        <label key={choice.id ?? choiceValue} style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 800 }}>
-                          <input type="checkbox" checked={selected.includes(choiceValue)} onChange={(event) => toggleMultiAnswer(field, choiceValue, event.target.checked)} />
-                          <span>{choiceLabel(choice, humanize(choiceValue))}</span>
-                        </label>
-                      );
-                    })}
-                    {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
-                  </fieldset>
-                );
-              }
-
-              if (["select", "size_select", "color", "yes_no"].includes(fieldType)) {
-                const choices = availableChoicesForField(field, answers);
-                return (
-                  <label key={field.id ?? field.key} style={labelStyle}>
-                    <span style={labelTextStyle}>{field.label}</span>
-                    <input type="hidden" name="optionDetailLabel" value={field.label} />
-                    <input type="hidden" name="optionDetailValue" value={displayAnswer(field, value)} />
-                    <select value={value} required={field.required !== false} onChange={(event) => updateAnswer(field.key, event.target.value)} style={inputStyle}>
-                      <option value="">Choose {field.label.toLowerCase()}</option>
-                      {choices.length === 0 ? <option value="">No matching options set up</option> : null}
-                      {choices.map((choice) => {
-                        const choiceValue = quoteChoiceValue(choice);
-                        return <option key={choice.id ?? choiceValue} value={choiceValue}>{choiceLabel(choice, humanize(choiceValue))}</option>;
-                      })}
-                    </select>
-                    {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
-                  </label>
-                );
-              }
-
-              return (
-                <label key={field.id ?? field.key} style={labelStyle}>
-                  <span style={labelTextStyle}>{field.label}</span>
-                  <input type="hidden" name="optionDetailLabel" value={field.label} />
-                  <input
-                    name="optionDetailValue"
-                    type={["number", "quantity"].includes(fieldType) ? "number" : "text"}
-                    min={["number", "quantity"].includes(fieldType) ? "0" : undefined}
-                    step={["number", "quantity"].includes(fieldType) ? "any" : undefined}
-                    value={value}
-                    required={field.required !== false}
-                    onChange={(event) => updateAnswer(field.key, event.target.value)}
-                    style={inputStyle}
-                  />
-                  {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
-                </label>
-              );
-            })}
-
-            {legacyRows.map((row, index) => (
-              <label key={`legacy-${row.label}-${index}`} style={labelStyle}>
-                <span style={labelTextStyle}>{row.label}</span>
-                <input type="hidden" name="optionDetailLabel" value={row.label} />
-                <input name="optionDetailValue" defaultValue={row.value} style={inputStyle} />
-              </label>
-            ))}
-          </div>
-        </section>
-      ) : summaryRows.length > 0 ? (
-        <section style={{ display: "grid", gap: 10 }}>
-          <div style={{ display: "grid", gap: 3 }}>
-            <strong>Editable option details</strong>
-            <span style={{ color: "#64748b", fontSize: 13 }}>This line is not linked to an available saved product, so its existing details remain editable as text.</span>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-            {summaryRows.map((row, index) => (
-              <label key={`${row.label}-${index}`} style={labelStyle}>
-                <span style={labelTextStyle}>{row.label}</span>
-                <input type="hidden" name="optionDetailLabel" value={row.label} />
-                <input name="optionDetailValue" defaultValue={row.value} style={inputStyle} />
-              </label>
-            ))}
-          </div>
-        </section>
-      ) : (
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Client-facing / production summary</span>
-          <textarea name="optionSummary" defaultValue={line.optionSummary ?? ""} style={{ ...textareaStyle, minHeight: 74 }} />
-        </label>
-      )}
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Line title</span>
-          <input name="productName" value={lineTitle} onChange={(event) => setLineTitle(event.target.value)} style={inputStyle} />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Quantity</span>
-          <input name="quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" style={inputStyle} />
-        </label>
-        <label style={labelStyle}>
-          <span style={labelTextStyle}>Unit price</span>
-          <input
-            name="unitPrice"
-            value={unitPrice}
-            onChange={(event) => {
-              setUnitPrice(event.target.value);
-              setUnitPriceOverridden(true);
-            }}
-            inputMode="decimal"
-            style={inputStyle}
-          />
-        </label>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 8, alignItems: "start" }}>
+        {optionCards.map(renderOptionCard)}
+        <BreakdownCard
+          cardKey="quantity"
+          label="Quantity"
+          value={quantity || "0"}
+          editable
+          active={activeEditor === "quantity"}
+          onActivate={setActiveEditor}
+        >
+          <input type="number" min="0" step="any" value={quantity} onChange={(event) => setQuantity(event.target.value)} onKeyDown={finishTextEdit} style={inputStyle} />
+          <DoneButton onClick={() => setActiveEditor(null)} />
+        </BreakdownCard>
+        <BreakdownCard cardKey="unit-price" label="Unit price" value={formatMoney(unitPrice)} active={false} onActivate={setActiveEditor} />
+        <BreakdownCard cardKey="line-total" label="Line total" value={formatMoney(enteredLineTotal)} active={false} onActivate={setActiveEditor} />
+        <BreakdownCard
+          cardKey="notes"
+          label="Internal notes"
+          value={notes || "No internal notes"}
+          editable
+          active={activeEditor === "notes"}
+          onActivate={setActiveEditor}
+        >
+          <textarea value={notes} onChange={(event) => setNotes(event.target.value)} style={textareaStyle} />
+          <DoneButton onClick={() => setActiveEditor(null)} />
+        </BreakdownCard>
       </div>
 
       {product ? (
@@ -534,27 +744,22 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
           </span>
           {recalculationMode !== "none" ? (
             <>
-              <strong>{formatMoney(recalculatedUnitPrice)} recalculated unit price · {formatMoney(recalculatedLineTotal)} recalculated line total at qty {quantityNumber}</strong>
+              <strong>{formatMoney(recalculatedUnitPrice)} unit price · {formatMoney(recalculatedLineTotal)} line total at qty {quantityNumber}</strong>
               {recalculationMode === "saved_price_scale" ? <span style={{ color: "#475467", fontSize: 13 }}>{savedPriceScale.explanation}. The original {formatMoney(line.unitPrice)} price remains the baseline.</span> : null}
-              <span style={{ color: "#475467", fontSize: 13 }}>Current entered value: {formatMoney(unitPrice)} per unit · {formatMoney(enteredLineTotal)} line total.</span>
-              {unitPriceOverridden ? <button type="button" onClick={useRecalculatedPrice} style={{ ...buttonStyle, background: "#067647", justifySelf: "start" }}>Use recalculated price</button> : null}
+              <span style={{ color: "#475467", fontSize: 13 }}>Unit price and line total are read-only here and follow the saved product pricing setup.</span>
             </>
           ) : (
-            <span style={{ color: "#7a2e0e", fontSize: 13 }}>This product has no active material or charge rows and is not a Carbon Book with scalable size/pages/copies, so the existing manual unit price is preserved.</span>
+            <span style={{ color: "#7a2e0e", fontSize: 13 }}>This product has no active material or charge rows and is not a Carbon Book with scalable size/pages/copies, so its existing unit price is preserved.</span>
           )}
         </section>
       ) : null}
 
-      <label style={labelStyle}>
-        <span style={labelTextStyle}>Internal notes</span>
-        <textarea name="notes" defaultValue={line.notes ?? ""} style={textareaStyle} />
-      </label>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <button type="submit" style={buttonStyle}>Save line changes</button>
           <button type="button" onClick={openSaveProduct} style={{ ...buttonStyle, background: "#ffffff", color: "#155eef", border: "1px solid #b9cdfc" }}>Save as reusable product</button>
         </div>
-        <span style={{ color: "#64748b", fontSize: 13 }}>Product option changes recalculate the unit price; quantity recalculates the line total.</span>
+        <span style={{ color: "#64748b", fontSize: 13 }}>Only one breakdown is shown. Editable cards open in place; calculated price cards stay locked.</span>
       </div>
 
       {showSaveProduct ? (

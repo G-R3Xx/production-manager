@@ -153,36 +153,10 @@ function publicQuoteUrl(token: string | null | undefined): string {
   return `${base}/public/quotes/${token}`;
 }
 
-function splitQuoteLineSummary(summary: string | null | undefined): string[] {
-  return String(summary ?? "")
-    .split(/\s+[·•]\s+/g)
-    .map((part) => part.trim())
-    .filter(Boolean);
-}
-
 function cleanQuoteLineAmount(value: string | number | null | undefined): string {
   const parsed = parseMoney(String(value ?? "0"));
   if (!Number.isFinite(parsed)) return String(value ?? "");
   return parsed.toFixed(2);
-}
-
-function quoteLineOptionRows(line: { optionSummary: string | null }): { label: string; value: string }[] {
-  return splitQuoteLineSummary(line.optionSummary).map((part) => {
-    const colonIndex = part.indexOf(":");
-    if (colonIndex > 0 && colonIndex < 36) {
-      return { label: part.slice(0, colonIndex).trim(), value: part.slice(colonIndex + 1).trim() };
-    }
-    return { label: "Detail", value: part };
-  });
-}
-
-function quoteLineBreakdownRows(line: { optionSummary: string | null; quantity: string; unitPrice: string; lineTotal: string; notes: string | null }): { label: string; value: string }[] {
-  const rows = quoteLineOptionRows(line);
-  rows.push({ label: "Quantity", value: line.quantity });
-  rows.push({ label: "Unit price", value: formatMoney(parseMoney(line.unitPrice)) });
-  rows.push({ label: "Line total", value: formatMoney(parseMoney(line.lineTotal)) });
-  if (line.notes) rows.push({ label: "Notes", value: line.notes });
-  return rows;
 }
 
 function myobOrderTone(status: string | null | undefined): { bg: string; fg: string; border: string; label: string } {
@@ -494,10 +468,9 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
               <div style={{ display: "grid", gap: 10 }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <h4 style={{ margin: 0 }}>Saved quote lines</h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Click a saved line to see the breakdown, edit wording/pricing, or remove it.</p>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Click a saved line, then click any editable breakdown card to change its value or available option.</p>
                 </div>
                 {quoteLines.map((line) => {
-                  const breakdownRows = quoteLineBreakdownRows(line);
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
                   return (
                     <details key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 0, background: "#fbfdff", overflow: "hidden" }}>
@@ -512,21 +485,6 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                       </summary>
 
                       <div style={{ borderTop: "1px solid #e5edf7", padding: 14, display: "grid", gap: 14, background: "#ffffff" }}>
-                        <section style={{ border: "1px solid #e2e8f0", borderRadius: 16, padding: 12, background: "#f8fafc", display: "grid", gap: 10 }}>
-                          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                            <strong>Line breakdown</strong>
-                            <span style={{ color: "#475467", fontSize: 13 }}>Created {formatDateTime(line.createdAt)}</span>
-                          </div>
-                          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
-                            {breakdownRows.map((row, index) => (
-                              <div key={`${row.label}-${index}`} style={{ border: "1px solid #e2e8f0", borderRadius: 14, background: "#fff", padding: 10, display: "grid", gap: 3 }}>
-                                <span style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: "0.06em", color: "#64748b", fontWeight: 950 }}>{row.label}</span>
-                                <strong style={{ lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{row.value}</strong>
-                              </div>
-                            ))}
-                          </div>
-                        </section>
-
                         <QuoteLineEditor
                           quoteId={selectedQuote.id}
                           line={{
@@ -535,7 +493,8 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                             optionSummary: line.optionSummary,
                             quantity: line.quantity,
                             unitPrice: line.unitPrice,
-                            notes: line.notes
+                            notes: line.notes,
+                            createdAt: line.createdAt
                           }}
                           product={editableProduct}
                           materials={activeMaterials}
