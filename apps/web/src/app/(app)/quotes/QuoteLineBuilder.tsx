@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { addQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
 
-type QuoteChoice = {
+export type QuoteChoice = {
   id?: string | null;
   label?: string | null;
   value?: string | null;
+  priceDelta?: string | null;
   widthMm?: string | null;
   heightMm?: string | null;
   showWhen?: {
@@ -16,7 +17,7 @@ type QuoteChoice = {
   } | null;
 };
 
-type QuoteQuestion = {
+export type QuoteQuestion = {
   id?: string | null;
   key: string;
   label: string;
@@ -31,14 +32,14 @@ type QuoteQuestion = {
   } | null;
 };
 
-type QuantityPreset = {
+export type QuantityPreset = {
   id?: string | null;
   label?: string | null;
   value?: string | null;
   qty?: string | number | null;
 };
 
-type QuoteComponent = {
+export type QuoteComponent = {
   id?: string | null;
   label?: string | null;
   kind?: string | null;
@@ -73,7 +74,7 @@ type QuoteComponent = {
   } | null;
 };
 
-type QuoteMaterial = {
+export type QuoteMaterial = {
   id: string;
   name: string;
   materialType?: string | null;
@@ -86,7 +87,7 @@ type QuoteMaterial = {
   rollWidthMm?: string | null;
 };
 
-type QuoteProduct = {
+export type QuoteProduct = {
   id: string;
   name: string;
   sku?: string | null;
@@ -94,7 +95,7 @@ type QuoteProduct = {
   components: QuoteComponent[];
 };
 
-type CostBreakdownItem = {
+export type CostBreakdownItem = {
   componentLabel: string;
   materialName: string;
   basis: string;
@@ -105,7 +106,7 @@ type CostBreakdownItem = {
   note?: string;
 };
 
-type PricingSettings = {
+export type PricingSettings = {
   markupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
 };
@@ -409,7 +410,21 @@ function inputTypeFor(type: string): string {
 }
 
 function parseDimensionsFromText(value: string | null | undefined): { widthMm: number; heightMm: number } | null {
-  const match = String(value ?? "").match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  const text = String(value ?? "").trim();
+  const standardSizes: Record<string, { widthMm: number; heightMm: number }> = {
+    a0: { widthMm: 841, heightMm: 1189 },
+    a1: { widthMm: 594, heightMm: 841 },
+    a2: { widthMm: 420, heightMm: 594 },
+    a3: { widthMm: 297, heightMm: 420 },
+    a4: { widthMm: 210, heightMm: 297 },
+    a5: { widthMm: 148, heightMm: 210 },
+    a6: { widthMm: 105, heightMm: 148 },
+    dl: { widthMm: 99, heightMm: 210 }
+  };
+  const standard = standardSizes[text.toLowerCase().replace(/[^a-z0-9]/g, "")];
+  if (standard) return standard;
+
+  const match = text.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
   if (!match) return null;
   const widthMm = numberValue(match[1]);
   const heightMm = numberValue(match[2]);
@@ -446,13 +461,22 @@ function materialFor(materials: QuoteMaterial[], materialId: string | null | und
 }
 
 function componentApplies(component: QuoteComponent, answers: Record<string, string>): boolean {
-  const triggerKey = String(component.trigger?.optionKey ?? "");
-  if (!triggerKey) return true;
+  const triggerKey = String(component.trigger?.optionKey ?? "").trim();
+  if (triggerKey) {
+    const currentAnswers = selectedValues(answers[triggerKey] ?? "");
+    const requiredValues = Array.isArray(component.trigger?.optionValues) ? component.trigger?.optionValues ?? [] : [];
+    if (requiredValues.length === 0) return currentAnswers.length > 0;
+    return requiredValues.some((required) => currentAnswers.includes(required));
+  }
 
-  const currentAnswers = selectedValues(answers[triggerKey] ?? "");
-  const requiredValues = Array.isArray(component.trigger?.optionValues) ? component.trigger?.optionValues ?? [] : [];
-  if (requiredValues.length === 0) return currentAnswers.length > 0;
-  return requiredValues.some((required) => currentAnswers.includes(required));
+  const usageKey = String(component.stockUsage?.optionKey ?? "").trim();
+  const usageValues = Array.isArray(component.stockUsage?.optionValues) ? component.stockUsage?.optionValues ?? [] : [];
+  if (usageKey && usageValues.length > 0) {
+    const currentAnswers = selectedValues(answers[usageKey] ?? "");
+    return usageValues.some((required) => currentAnswers.includes(required));
+  }
+
+  return true;
 }
 
 function wasteMultiplier(component: QuoteComponent): number {
@@ -462,6 +486,45 @@ function wasteMultiplier(component: QuoteComponent): number {
 
 function componentAllowance(component: QuoteComponent): number {
   return Math.max(0, numberValue(component.quantity, 1));
+}
+
+function answerForField(product: QuoteProduct, answers: Record<string, string>, keys: string[]): string {
+  const normalizedKeys = new Set(keys.map((key) => key.toLowerCase()));
+  const field = product.fields.find((item) => {
+    const key = String(item.key ?? "").toLowerCase();
+    const label = String(item.label ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
+    return normalizedKeys.has(key) || normalizedKeys.has(label);
+  });
+  if (!field) return "";
+  return String(answers[field.key] ?? field.defaultValue ?? "");
+}
+
+function copyCountFromAnswer(value: string | null | undefined): number {
+  const normalized = String(value ?? "").trim().toLowerCase();
+  if (normalized.includes("quadruplicate") || normalized === "4" || normalized.includes("4_part")) return 4;
+  if (normalized.includes("triplicate") || normalized === "3" || normalized.includes("3_part")) return 3;
+  if (normalized.includes("duplicate") || normalized === "2" || normalized.includes("2_part")) return 2;
+  const parsed = numberValue(normalized, 1);
+  return parsed > 0 ? parsed : 1;
+}
+
+function componentAnswerMultiplier(product: QuoteProduct, component: QuoteComponent, answers: Record<string, string>): { multiplier: number; note?: string } {
+  const optionKey = String(component.stockUsage?.optionKey ?? "").trim().toLowerCase();
+  const descriptor = `${component.label ?? ""} ${component.notes ?? ""}`.toLowerCase();
+  const pageCount = Math.max(1, numberValue(answerForField(product, answers, ["page_count", "pages", "sets_per_book", "sets"]), 1));
+  const copyCount = copyCountFromAnswer(answerForField(product, answers, ["copy_set", "copies", "copy_count"]));
+  const isCarbonPaperRow = optionKey === "copy_set" || descriptor.includes("carbonless") || descriptor.includes("ncr") || descriptor.includes("copy sheet");
+
+  if (isCarbonPaperRow && pageCount > 0) {
+    const multiplier = pageCount * copyCount;
+    return { multiplier, note: `${formatUsage(pageCount)} sets/pages × ${formatUsage(copyCount)} copies` };
+  }
+
+  if (["page_count", "pages", "sets_per_book", "sets"].includes(optionKey)) {
+    return { multiplier: pageCount, note: `${formatUsage(pageCount)} pages/sets` };
+  }
+
+  return { multiplier: 1 };
 }
 
 function sheetAreaSqm(material: QuoteMaterial): number {
@@ -595,7 +658,8 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
       const dimensions = dimensionsForComponent(product.fields, answers, component);
       const baseAllowance = componentAllowance(component);
       const followUp = followUpMultiplierFor(component, followUpAnswers, customFollowUpAnswers);
-      const allowance = baseAllowance * followUp.multiplier;
+      const answerMultiplier = componentAnswerMultiplier(product, component, answers);
+      const allowance = baseAllowance * followUp.multiplier * answerMultiplier.multiplier;
       const waste = wasteMultiplier(component);
       const componentLabel = String(component.stockUsage?.chargeName ?? component.label ?? "Material");
 
@@ -610,7 +674,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
         // also stored that same rate in component.quantity, so never use
         // component.quantity as a square-metre multiplier here. The amount is just
         // finished area, optionally multiplied by a follow-up quantity preset.
-        const amount = area * followUp.multiplier;
+        const amount = area * followUp.multiplier * answerMultiplier.multiplier;
         return [costBreakdownItem({
           componentLabel,
           materialName: "Sell charge",
@@ -619,7 +683,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "sqm",
           rate,
           cost: amount * rate,
-          note: ["price rule from product answer line", followUp.note].filter(Boolean).join(" · ")
+          note: ["price rule from product answer line", followUp.note, answerMultiplier.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -628,7 +692,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
         // For fixed sell charges, component.quantity is the fallback rate for
         // older recipe rows. Quantity/placement presets control how many are
         // charged. Without a preset, charge one item.
-        const amount = followUp.multiplier;
+        const amount = followUp.multiplier * answerMultiplier.multiplier;
         return [costBreakdownItem({
           componentLabel,
           materialName: "Sell charge",
@@ -637,7 +701,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "each",
           rate,
           cost: amount * rate,
-          note: ["price rule from product recipe row", followUp.note].filter(Boolean).join(" · ")
+          note: ["price rule from product recipe row", followUp.note, answerMultiplier.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -652,7 +716,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "hr",
           rate,
           cost: hours * rate,
-          note: ["factory labour row from product setup", followUp.note].filter(Boolean).join(" · ")
+          note: ["factory labour row from product setup", followUp.note, answerMultiplier.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -667,7 +731,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: "each",
           rate,
           cost: amount * rate,
-          note: ["outsourced row from product setup", followUp.note].filter(Boolean).join(" · ")
+          note: ["outsourced row from product setup", followUp.note, answerMultiplier.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -694,6 +758,8 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           note: [
             String(component.ruleType ?? component.stockUsage?.usageBasis ?? "") === "per_linear_metre" ? undefined : "auto-detected roll stock",
             metres.note,
+            followUp.note,
+            answerMultiplier.note,
             rate.note
           ].filter(Boolean).join(" · ")
         })];
@@ -711,7 +777,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: rate.note
+          note: [answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -728,7 +794,7 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, followUp.note, rate.note].filter(Boolean).join(" · ")
+          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, followUp.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -754,11 +820,14 @@ function componentCostBreakdownFor(product: QuoteProduct | undefined, materials:
         unit: "sheet",
         rate: rate.rate,
         cost: sheetsUsed * rate.rate,
-        note: fixedSheetsPerUnit > 0
-          ? "fixed sheets per item set on product usage"
-          : partsPerSheet > 0
-            ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}`
-            : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing"
+        note: [
+          fixedSheetsPerUnit > 0
+            ? "fixed sheets per item set on product usage"
+            : partsPerSheet > 0
+              ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}`
+              : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing",
+          answerMultiplier.note
+        ].filter(Boolean).join(" · ")
       })];
     });
 }
@@ -774,6 +843,44 @@ function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: R
     .filter((component) => componentApplies(component, answers))
     .filter((component) => !["sell_sqm", "sell_each", "labour_hours", "outsourced_each"].includes(String(component.ruleType ?? component.stockUsage?.usageBasis ?? "")))
     .filter((component) => !component.materialId);
+}
+
+export type QuoteProductPricing = {
+  materialBreakdown: CostBreakdownItem[];
+  missingMaterials: QuoteComponent[];
+  unitCost: number;
+  markedUpUnitCost: number;
+  unitPrice: number;
+  markupMultiplier: number;
+  profitMultiplier: number;
+  sellMultiplier: number;
+};
+
+export function calculateQuoteProductPricing(
+  product: QuoteProduct | undefined,
+  materials: QuoteMaterial[],
+  answers: Record<string, string>,
+  pricingSettings?: PricingSettings,
+  followUpAnswers: Record<string, string> = {},
+  customFollowUpAnswers: Record<string, string> = {}
+): QuoteProductPricing {
+  const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
+  const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
+  const sellMultiplier = markupMultiplier * profitMultiplier;
+  const materialBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers);
+  const unitCost = materialBreakdown.reduce((total, item) => total + item.cost, 0);
+  const markedUpUnitCost = unitCost * markupMultiplier;
+
+  return {
+    materialBreakdown,
+    missingMaterials: missingLinkedMaterialRows(product, answers),
+    unitCost,
+    markedUpUnitCost,
+    unitPrice: markedUpUnitCost * profitMultiplier,
+    markupMultiplier,
+    profitMultiplier,
+    sellMultiplier
+  };
 }
 
 function sanitiseAnswersForAvailableChoices(product: QuoteProduct | undefined, answers: Record<string, string>): Record<string, string> {
@@ -804,9 +911,6 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     () => products.find((product) => product.id === selectedProductId),
     [products, selectedProductId]
   );
-  const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
-  const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
-  const sellMultiplier = markupMultiplier * profitMultiplier;
   const [answers, setAnswers] = useState<Record<string, string>>(() => defaultAnswersFor(products[0]));
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, string>>({});
   const [customFollowUpAnswers, setCustomFollowUpAnswers] = useState<Record<string, string>>({});
@@ -823,11 +927,18 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : "1";
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
   const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct, selectedProduct.fields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
-  const materialBreakdown = useMemo(() => componentCostBreakdownFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
-  const missingMaterials = useMemo(() => missingLinkedMaterialRows(selectedProduct, answers), [selectedProduct, answers]);
-  const autoUnitCost = useMemo(() => autoUnitCostFor(selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers), [selectedProduct, materials, answers, followUpAnswers, customFollowUpAnswers]);
-  const markedUpUnitCost = autoUnitCost * markupMultiplier;
-  const autoUnitPrice = markedUpUnitCost * profitMultiplier;
+  const autoPricing = useMemo(
+    () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers),
+    [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers]
+  );
+  const materialBreakdown = autoPricing.materialBreakdown;
+  const missingMaterials = autoPricing.missingMaterials;
+  const autoUnitCost = autoPricing.unitCost;
+  const markedUpUnitCost = autoPricing.markedUpUnitCost;
+  const autoUnitPrice = autoPricing.unitPrice;
+  const markupMultiplier = autoPricing.markupMultiplier;
+  const profitMultiplier = autoPricing.profitMultiplier;
+  const sellMultiplier = autoPricing.sellMultiplier;
   const autoLineTotal = autoUnitPrice * quantityNumber;
   const autoLineCost = autoUnitCost * quantityNumber;
 

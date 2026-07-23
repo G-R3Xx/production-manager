@@ -536,6 +536,11 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                             notes: line.notes
                           }}
                           product={editableProduct}
+                          materials={activeMaterials}
+                          pricingSettings={{
+                            markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
+                            profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2"
+                          }}
                         />
 
                         <form action={deleteQuoteLineAction} style={{ display: "flex", justifyContent: "flex-end" }}>

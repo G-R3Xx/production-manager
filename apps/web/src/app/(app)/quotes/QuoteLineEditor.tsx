@@ -1,34 +1,20 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { updateQuoteLineAction } from "./actions";
-import { availableQuoteChoices, quoteChoiceValue, splitQuoteAnswerValues, type QuoteOptionChoiceLike } from "./quoteOptionDependencies";
+import { availableQuoteChoices, quoteChoiceValue, splitQuoteAnswerValues } from "./quoteOptionDependencies";
+import {
+  calculateQuoteProductPricing,
+  type PricingSettings,
+  type QuoteChoice,
+  type QuoteMaterial,
+  type QuoteProduct,
+  type QuoteQuestion
+} from "./QuoteLineBuilder";
 
-type QuoteLineEditorChoice = QuoteOptionChoiceLike & {
-  widthMm?: string | null;
-  heightMm?: string | null;
-};
-
-type QuoteLineEditorField = {
-  id?: string | null;
-  key: string;
-  label: string;
-  type?: string | null;
-  required?: boolean;
-  defaultValue?: string | null;
-  helpText?: string | null;
-  options?: QuoteLineEditorChoice[] | null;
-  showWhen?: {
-    optionKey?: string | null;
-    optionValues?: string[] | null;
-  } | null;
-};
-
-type QuoteLineEditorProduct = {
-  id: string;
-  name: string;
-  fields: QuoteLineEditorField[];
-};
+type QuoteLineEditorChoice = QuoteChoice;
+type QuoteLineEditorField = QuoteQuestion;
+type QuoteLineEditorProduct = QuoteProduct;
 
 type QuoteLineEditorProps = {
   quoteId: string;
@@ -41,6 +27,8 @@ type QuoteLineEditorProps = {
     notes: string | null;
   };
   product?: QuoteLineEditorProduct | null;
+  materials: QuoteMaterial[];
+  pricingSettings?: PricingSettings;
 };
 
 type SummaryRow = { label: string; value: string };
@@ -212,29 +200,165 @@ function cleanMoneyInput(value: string): string {
   return Number.isFinite(parsed) ? parsed.toFixed(2) : "0.00";
 }
 
-export function QuoteLineEditor({ quoteId, line, product }: QuoteLineEditorProps) {
+function numberInput(value: string | number | null | undefined, fallback = 0): number {
+  const parsed = Number(String(value ?? "").replace(/[$,]/g, "").trim());
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function formatMoney(value: string | number | null | undefined): string {
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(numberInput(value));
+}
+
+function fieldForKeys(product: QuoteLineEditorProduct, keys: string[]): QuoteLineEditorField | undefined {
+  const normalizedKeys = new Set(keys.map((key) => normalise(key).replace(/[^a-z0-9]+/g, "_")));
+  return product.fields.find((field) => {
+    const key = normalise(field.key).replace(/[^a-z0-9]+/g, "_");
+    const label = normalise(field.label).replace(/[^a-z0-9]+/g, "_");
+    return normalizedKeys.has(key) || normalizedKeys.has(label);
+  });
+}
+
+function dimensionsFromText(value: string | null | undefined): { widthMm: number; heightMm: number } | null {
+  const text = String(value ?? "").trim();
+  const standardSizes: Record<string, { widthMm: number; heightMm: number }> = {
+    a0: { widthMm: 841, heightMm: 1189 },
+    a1: { widthMm: 594, heightMm: 841 },
+    a2: { widthMm: 420, heightMm: 594 },
+    a3: { widthMm: 297, heightMm: 420 },
+    a4: { widthMm: 210, heightMm: 297 },
+    a5: { widthMm: 148, heightMm: 210 },
+    a6: { widthMm: 105, heightMm: 148 },
+    dl: { widthMm: 99, heightMm: 210 }
+  };
+  const standard = standardSizes[text.toLowerCase().replace(/[^a-z0-9]/g, "")];
+  if (standard) return standard;
+
+  const match = text.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
+  if (!match) return null;
+  const widthMm = numberInput(match[1], 0);
+  const heightMm = numberInput(match[2], 0);
+  return widthMm > 0 && heightMm > 0 ? { widthMm, heightMm } : null;
+}
+
+function areaForSizeAnswer(product: QuoteLineEditorProduct, answers: Record<string, string>): number {
+  const field = fieldForKeys(product, ["finished_size", "size"]);
+  if (!field) return 0;
+  const answer = String(answers[field.key] ?? field.defaultValue ?? "");
+  const choice = baseChoicesForField(field).find((item) => quoteChoiceValue(item) === answer);
+  const widthMm = numberInput(choice?.widthMm, 0);
+  const heightMm = numberInput(choice?.heightMm, 0);
+  const dimensions = widthMm > 0 && heightMm > 0
+    ? { widthMm, heightMm }
+    : dimensionsFromText(choice?.label) ?? dimensionsFromText(choice?.value) ?? dimensionsFromText(answer);
+  return dimensions ? dimensions.widthMm * dimensions.heightMm : 0;
+}
+
+function copyCount(value: string | null | undefined): number {
+  const normalized = normalise(value);
+  if (normalized.includes("quadruplicate") || normalized === "4" || normalized.includes("4_part")) return 4;
+  if (normalized.includes("triplicate") || normalized === "3" || normalized.includes("3_part")) return 3;
+  if (normalized.includes("duplicate") || normalized === "2" || normalized.includes("2_part")) return 2;
+  return Math.max(1, numberInput(normalized, 1));
+}
+
+type SavedPriceScale = {
+  available: boolean;
+  unitPrice: number;
+  explanation: string;
+};
+
+function carbonBookSavedPriceScale(
+  product: QuoteLineEditorProduct | null | undefined,
+  originalAnswers: Record<string, string>,
+  currentAnswers: Record<string, string>,
+  originalUnitPrice: string
+): SavedPriceScale {
+  const basePrice = numberInput(originalUnitPrice, 0);
+  if (!product || basePrice <= 0) return { available: false, unitPrice: basePrice, explanation: "" };
+
+  const pageField = fieldForKeys(product, ["page_count", "pages", "sets_per_book", "sets"]);
+  const copyField = fieldForKeys(product, ["copy_set", "copies", "copy_count"]);
+  if (!pageField || !copyField) return { available: false, unitPrice: basePrice, explanation: "" };
+
+  const originalArea = areaForSizeAnswer(product, originalAnswers);
+  const currentArea = areaForSizeAnswer(product, currentAnswers);
+  const originalPages = Math.max(1, numberInput(originalAnswers[pageField.key] ?? pageField.defaultValue, 1));
+  const currentPages = Math.max(1, numberInput(currentAnswers[pageField.key] ?? pageField.defaultValue, 1));
+  const originalCopies = copyCount(originalAnswers[copyField.key] ?? copyField.defaultValue);
+  const currentCopies = copyCount(currentAnswers[copyField.key] ?? copyField.defaultValue);
+
+  const sizeFactor = originalArea > 0 && currentArea > 0 ? currentArea / originalArea : 1;
+  const pageFactor = currentPages / originalPages;
+  const copyFactor = currentCopies / originalCopies;
+  const factor = sizeFactor * pageFactor * copyFactor;
+
+  return {
+    available: Number.isFinite(factor) && factor > 0,
+    unitPrice: basePrice * (Number.isFinite(factor) && factor > 0 ? factor : 1),
+    explanation: `Size × ${sizeFactor.toFixed(3)} · pages × ${pageFactor.toFixed(3)} · copies × ${copyFactor.toFixed(3)}`
+  };
+}
+
+export function QuoteLineEditor({ quoteId, line, product, materials, pricingSettings }: QuoteLineEditorProps) {
   const summaryRows = useMemo(() => parseSummary(line.optionSummary), [line.optionSummary]);
   const configuredFields = useMemo(() => (product?.fields ?? []).filter((field) => field.key !== "quantity"), [product]);
   const configuredLabels = useMemo(() => new Set(configuredFields.map((field) => normalise(field.label))), [configuredFields]);
   const legacyRows = useMemo(() => summaryRows.filter((row) => !configuredLabels.has(normalise(row.label))), [summaryRows, configuredLabels]);
-  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+  const initialAnswers = useMemo(() => {
     const valuesByLabel = new Map(summaryRows.map((row) => [normalise(row.label), row.value]));
     const initial = Object.fromEntries(configuredFields.map((field) => [field.key, answerFromSummary(field, valuesByLabel.get(normalise(field.label)))]));
     return sanitiseAnswers(configuredFields, initial);
-  });
+  }, [configuredFields, summaryRows]);
+  const [answers, setAnswers] = useState<Record<string, string>>(() => initialAnswers);
+  const [quantity, setQuantity] = useState(line.quantity);
+  const [unitPrice, setUnitPrice] = useState(() => cleanMoneyInput(line.unitPrice));
+  const [optionsEdited, setOptionsEdited] = useState(false);
+  const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
 
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
+  const automaticPricing = useMemo(
+    () => calculateQuoteProductPricing(product ?? undefined, materials, answers, pricingSettings),
+    [product, materials, answers, pricingSettings]
+  );
+  const productSetupPriceAvailable = Boolean(
+    product &&
+    automaticPricing.unitPrice > 0 &&
+    automaticPricing.missingMaterials.length === 0 &&
+    automaticPricing.materialBreakdown.some((item) => item.rate > 0 || item.cost > 0)
+  );
+  const savedPriceScale = useMemo(
+    () => carbonBookSavedPriceScale(product, initialAnswers, answers, line.unitPrice),
+    [product, initialAnswers, answers, line.unitPrice]
+  );
+  const recalculationMode = productSetupPriceAvailable ? "product_setup" : savedPriceScale.available ? "saved_price_scale" : "none";
+  const recalculatedUnitPrice = productSetupPriceAvailable ? automaticPricing.unitPrice : savedPriceScale.unitPrice;
+  const quantityNumber = Math.max(0, numberInput(quantity, 0));
+  const recalculatedLineTotal = recalculatedUnitPrice * quantityNumber;
+  const enteredLineTotal = numberInput(unitPrice, 0) * quantityNumber;
+
+  useEffect(() => {
+    if (optionsEdited && recalculationMode !== "none" && !unitPriceOverridden) {
+      setUnitPrice(recalculatedUnitPrice.toFixed(2));
+    }
+  }, [optionsEdited, recalculationMode, recalculatedUnitPrice, unitPriceOverridden]);
 
   function updateAnswer(key: string, value: string) {
+    setOptionsEdited(true);
     setAnswers((current) => sanitiseAnswers(configuredFields, { ...current, [key]: value }));
   }
 
   function toggleMultiAnswer(field: QuoteLineEditorField, value: string, checked: boolean) {
+    setOptionsEdited(true);
     setAnswers((current) => {
       const selected = splitQuoteAnswerValues(current[field.key]);
       const nextValues = checked ? Array.from(new Set([...selected, value])) : selected.filter((item) => item !== value);
       return sanitiseAnswers(configuredFields, { ...current, [field.key]: nextValues.join(",") });
     });
+  }
+
+  function useRecalculatedPrice() {
+    setUnitPrice(recalculatedUnitPrice.toFixed(2));
+    setUnitPriceOverridden(false);
   }
 
   return (
@@ -353,20 +477,48 @@ export function QuoteLineEditor({ quoteId, line, product }: QuoteLineEditorProps
         </label>
         <label style={labelStyle}>
           <span style={labelTextStyle}>Quantity</span>
-          <input name="quantity" defaultValue={line.quantity} inputMode="decimal" style={inputStyle} />
+          <input name="quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} inputMode="decimal" style={inputStyle} />
         </label>
         <label style={labelStyle}>
           <span style={labelTextStyle}>Unit price</span>
-          <input name="unitPrice" defaultValue={cleanMoneyInput(line.unitPrice)} inputMode="decimal" style={inputStyle} />
+          <input
+            name="unitPrice"
+            value={unitPrice}
+            onChange={(event) => {
+              setUnitPrice(event.target.value);
+              setUnitPriceOverridden(true);
+            }}
+            inputMode="decimal"
+            style={inputStyle}
+          />
         </label>
       </div>
+
+      {product ? (
+        <section style={{ border: recalculationMode !== "none" ? "1px solid #bbf7d0" : "1px solid #fed7aa", borderRadius: 16, padding: 12, background: recalculationMode !== "none" ? "#f0fdf4" : "#fffcf5", display: "grid", gap: 7 }}>
+          <span style={{ fontSize: 12, fontWeight: 950, color: recalculationMode !== "none" ? "#067647" : "#b54708", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+            {recalculationMode === "product_setup" ? "Recalculated from product setup" : recalculationMode === "saved_price_scale" ? "Scaled from the saved Carbon Book price" : "Automatic pricing not available"}
+          </span>
+          {recalculationMode !== "none" ? (
+            <>
+              <strong>{formatMoney(recalculatedUnitPrice)} recalculated unit price · {formatMoney(recalculatedLineTotal)} recalculated line total at qty {quantityNumber}</strong>
+              {recalculationMode === "saved_price_scale" ? <span style={{ color: "#475467", fontSize: 13 }}>{savedPriceScale.explanation}. The original {formatMoney(line.unitPrice)} price remains the baseline.</span> : null}
+              <span style={{ color: "#475467", fontSize: 13 }}>Current entered value: {formatMoney(unitPrice)} per unit · {formatMoney(enteredLineTotal)} line total.</span>
+              {unitPriceOverridden ? <button type="button" onClick={useRecalculatedPrice} style={{ ...buttonStyle, background: "#067647", justifySelf: "start" }}>Use recalculated price</button> : null}
+            </>
+          ) : (
+            <span style={{ color: "#7a2e0e", fontSize: 13 }}>This product has no active material or charge rows and is not a Carbon Book with scalable size/pages/copies, so the existing manual unit price is preserved.</span>
+          )}
+        </section>
+      ) : null}
+
       <label style={labelStyle}>
         <span style={labelTextStyle}>Internal notes</span>
         <textarea name="notes" defaultValue={line.notes ?? ""} style={textareaStyle} />
       </label>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
         <button type="submit" style={buttonStyle}>Save line changes</button>
-        <span style={{ color: "#64748b", fontSize: 13 }}>Saving rebuilds the summary and recalculates quantity × unit price.</span>
+        <span style={{ color: "#64748b", fontSize: 13 }}>Product option changes recalculate the unit price; quantity recalculates the line total.</span>
       </div>
     </form>
   );
