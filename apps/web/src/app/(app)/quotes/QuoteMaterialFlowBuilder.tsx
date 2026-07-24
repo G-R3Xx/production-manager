@@ -780,6 +780,37 @@ function roundedRollMetresForQuantity(widthMm: number, heightMm: number, materia
   };
 }
 
+
+function roundedInkSquareMetresForQuoteLine(
+  areaPerItemSqm: number,
+  sideMultiplier: number,
+  quantity: number,
+  rollUsage?: { amount: number; unroundedAmount: number } | null
+): { amount: number; calculatedTotal: number; mediaAdjustedTotal: number; billableTotal: number; note?: string } {
+  const safeQuantity = Math.max(1, quantity);
+  const calculatedTotal = Math.max(0, areaPerItemSqm) * Math.max(1, sideMultiplier) * safeQuantity;
+  const rollRoundingMultiplier = rollUsage && rollUsage.unroundedAmount > 0
+    ? Math.max(1, rollUsage.amount / rollUsage.unroundedAmount)
+    : 1;
+  const mediaAdjustedTotal = calculatedTotal * rollRoundingMultiplier;
+  const billableTotal = mediaAdjustedTotal > 0 ? Math.max(1, Math.ceil(mediaAdjustedTotal - 0.0000001)) : 0;
+
+  return {
+    amount: billableTotal / safeQuantity,
+    calculatedTotal,
+    mediaAdjustedTotal,
+    billableTotal,
+    note: calculatedTotal > 0
+      ? [
+          `${usage(calculatedTotal)}sqm artwork area`,
+          rollRoundingMultiplier > 1.0000001 ? `${usage(mediaAdjustedTotal)}sqm after whole-metre media rounding` : null,
+          "whole-square-metre ink rounding",
+          `charged as ${usage(billableTotal)}sqm`
+        ].filter(Boolean).join(" · ")
+      : undefined
+  };
+}
+
 function piecesPerSheet(parentWidth: number, parentHeight: number, pieceWidth: number, pieceHeight: number): number {
   if (parentWidth <= 0 || parentHeight <= 0 || pieceWidth <= 0 || pieceHeight <= 0) return 0;
   const normal = Math.floor(parentWidth / pieceWidth) * Math.floor(parentHeight / pieceHeight);
@@ -1090,7 +1121,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
   const resolvedPrintMethod: PrintMethod = isRollStockBase ? "roll_stock" : printMethod;
   const printed = resolvedPrintMethod !== "" && resolvedPrintMethod !== "no_print";
-  const printSetupComplete = !printed || numberValue(printSetupMinutes, 0) > 0;
   const needsMediaStep = isRollStockBase || resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl";
   const needsAdditionalMediaCost = !isRollStockBase && (resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl");
   const needsInkStep = resolvedPrintMethod === "direct_print" || resolvedPrintMethod === "roll_stock";
@@ -1132,7 +1162,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (isPrintDepartment) {
       next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: "2" });
       next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: "3" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: "4" });
+      next.push({ key: "artwork", label: "Artwork", complete: Boolean(artworkChoice), icon: "4" });
       next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "5" });
       next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "6" });
       next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "7" });
@@ -1148,7 +1178,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       if (isDuplicateBook) next.push({ key: "ncr_details", label: "Book details", complete: ncrDetailsComplete, icon: "3" });
       next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: isDuplicateBook ? "4" : "3" });
       next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: isDuplicateBook ? "5" : "4" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: isDuplicateBook ? "6" : "5" });
+      next.push({ key: "artwork", label: "Artwork", complete: Boolean(artworkChoice), icon: isDuplicateBook ? "6" : "5" });
       if (!isDuplicateBook) {
         next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "6" });
         next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "7" });
@@ -1170,19 +1200,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         next.push({ key: "colour", label: "Colour", complete: Boolean(colour && selectedMainMaterial), icon: "4" });
       }
       next.push({ key: "size", label: "Size", complete: width > 0 && height > 0, icon: "5" });
-      next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: "6" });
-      next.push({ key: "print", label: isRollStockBase ? "Print setup" : "Print method", complete: Boolean(resolvedPrintMethod && printSetupComplete), icon: "7" });
+      next.push({ key: "artwork", label: "Artwork", complete: Boolean(artworkChoice), icon: "6" });
+      next.push({ key: "print", label: isRollStockBase ? "Print setup" : "Print method", complete: Boolean(resolvedPrintMethod), icon: "7" });
       if (!isRollStockBase && needsMediaStep) next.push({ key: "media", label: resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
       if (needsInkStep) next.push({ key: "ink", label: "Ink", complete: Boolean(ink), icon: "9" });
       if (printed) next.push({ key: "sides", label: isClearAcrylic ? "Sides / direction" : "Sides", complete: Boolean(sides && (!isClearAcrylic || printDirection)), icon: "•" });
-      if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId && (laminateId === "none" || laminateMinutes.trim().length > 0)), icon: "•" });
+      if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId), icon: "•" });
       next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
       next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
-      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && printSetupComplete && serviceType), icon: "✓" });
+      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && serviceType), icon: "✓" });
     }
 
     return next;
-  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, resolvedPrintMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, isRollStockBase, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
+  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, resolvedPrintMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, isRollStockBase, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -1405,13 +1435,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (needsInkStep && ink && areaSqm > 0) {
+        const inkRollMaterial = isRollStockBase ? selectedMainMaterial : needsAdditionalMediaCost ? selectedMedia : undefined;
+        const inkRollPieces = isRollStockBase ? quantityNumber : quantityNumber * sideMultiplier;
+        const inkRollUse = inkRollMaterial
+          ? roundedRollMetresForQuantity(width, height, inkRollMaterial, inkRollPieces)
+          : null;
+        const inkUse = roundedInkSquareMetresForQuoteLine(areaSqm, sideMultiplier, quantityNumber, inkRollUse);
+        const inkNote = [inkUse.note, sides === "double" ? "double sided" : null].filter(Boolean).join(" · ") || undefined;
         if (ink === "cmyk" || ink === "both") {
-          const amount = areaSqm * sideMultiplier;
-          rows.push({ label: "CMYK ink", detail: "Sell charge", amount, unit: "sqm", rate: inkRatePerSqm, cost: amount * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
+          rows.push({ label: "CMYK ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
         }
         if (ink === "white" || ink === "both") {
-          const amount = areaSqm * sideMultiplier;
-          rows.push({ label: "White ink", detail: "Sell charge", amount, unit: "sqm", rate: inkRatePerSqm, cost: amount * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
+          rows.push({ label: "White ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
         }
       }
 
@@ -1722,6 +1757,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const rollUseLabel = rollUseRow && totalRollUse > 0
     ? `${usage(totalRollUse)}lm total${rollUseRow.note ? ` · ${rollUseRow.note}` : ""}`
     : "";
+  const inkUseRow = flowType === "signage"
+    ? costs.find((row) => row.unit === "sqm" && (row.label === "CMYK ink" || row.label === "White ink"))
+    : undefined;
+  const totalInkUse = inkUseRow ? inkUseRow.amount * quantityNumber : 0;
+  const inkUseLabel = inkUseRow && totalInkUse > 0
+    ? `${usage(totalInkUse)}sqm billable${inkUseRow.note ? ` · ${inkUseRow.note}` : ""}`
+    : "";
 
   const finishingSummary = finishings.map((key) => {
     if (key === "eyelets") {
@@ -1774,7 +1816,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       flowDepartmentProductName(flowType),
       selectedSmallStock?.name ? `Stock: ${selectedSmallStock.name}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
-      artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `Artwork ${minutesLabel(artworkMinutes)}` : "Artwork required" : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
@@ -1792,7 +1834,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       isDuplicateBook && ncrCoverColour ? `Cover: ${ncrCoverColour}` : null,
       isDuplicateBook && ncrTapeColour ? `Tape: ${ncrTapeColour}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
-      artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `Artwork ${minutesLabel(artworkMinutes)}` : "Artwork required" : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
@@ -1804,7 +1846,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       selectedBase?.label,
       selectedMainMaterial?.name ? `Substrate: ${selectedMainMaterial.name}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
-      artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
+      artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `Artwork ${minutesLabel(artworkMinutes)}` : "Artwork required" : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       isRollStockBase ? null : printMethods.find((item) => item.key === resolvedPrintMethod)?.label,
       printed && numberValue(printSetupMinutes, 0) > 0 ? `Print setup ${minutesLabel(printSetupMinutes)}` : null,
       selectedMediaName || null,
@@ -1823,10 +1865,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : flowType === "service"
     ? Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0)))
     : isPrintDepartment
-      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
+      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
       : flowType === "small_format"
-        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
-        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && resolvedPrintMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateMinutes, 0) > 0) && dispatchComplete);
+        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
+        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || Boolean(laminateId)) && dispatchComplete);
 
   const configurationSnapshot: QuickQuoteSnapshot = {
     version: 1,
@@ -1967,8 +2009,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         </div>
         {artworkChoice === "required" ? (
           <div style={{ border: "1px solid #fecdd3", borderRadius: 20, padding: 14, background: "#fff1f2", display: "grid", gap: 10 }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="eg 30" type="number" min="0" step="1" style={inputStyle} /></label>
-            <button type="button" onClick={() => setActiveStep(nextAfterChoice)} disabled={numberValue(artworkMinutes, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(artworkMinutes, 0) > 0 ? 1 : 0.45 }}>Continue</button>
+            <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes (optional)</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="Optional, eg 30" type="number" min="0" step="1" style={inputStyle} /></label>
+            <small style={{ color: "#64748b" }}>Leave blank or enter 0 when no artwork labour charge is needed.</small>
+            <button type="button" onClick={() => setActiveStep(nextAfterChoice)} style={primaryButton}>Continue</button>
           </div>
         ) : null}
       </div>
@@ -2103,13 +2146,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 6000" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
                 {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
-                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Enter normal minutes. The system converts them to labour at {money(labourRate)}/hr.</small></label> : null}
+                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes (optional)</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no setup charge. Entered minutes are priced at {money(labourRate)}/hr.</small></label> : null}
                 {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => setInk(event.target.value as InkChoice)} style={inputStyle}><option value="">Choose ink</option>{inkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
                 {isClearAcrylic && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
-                {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour minutes</b><input value={laminateMinutes} onChange={(event) => setLaminateMinutes(event.target.value)} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /></label> : null}
+                {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour minutes (optional)</b><input value={laminateMinutes} onChange={(event) => setLaminateMinutes(event.target.value)} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /></label> : null}
               </div>
             ) : null}
 
@@ -2167,7 +2210,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
                 <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}><span style={{ fontSize: 30 }}>✎</span><strong>Artwork required</strong><span style={{ color: "#64748b" }}>Add artwork/design labour.</span></button>
               </div>
-              {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="eg 30" type="number" min="0" step="1" style={inputStyle} /></label> : null}
+              {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes (optional)</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="Optional, eg 30" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no artwork labour charge.</small></label> : null}
             </div>
 
             {flowType !== "component" ? renderDispatchSection() : null}
@@ -2184,9 +2227,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
               {flowType === "signage" && sheetUseLabel ? <SummaryRow label="Sheet use" value={sheetUseLabel} /> : null}
               {flowType === "signage" && rollUseLabel ? <SummaryRow label="Roll use" value={rollUseLabel} /> : null}
+              {flowType === "signage" && inkUseLabel ? <SummaryRow label="Ink use" value={inkUseLabel} /> : null}
               {flowType === "small_format" || isPrintDepartment ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-              <SummaryRow label="Artwork" value={artworkChoice === "required" ? `${minutesLabel(artworkMinutes)} required` : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
+              <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `${minutesLabel(artworkMinutes)} required` : "Artwork required" : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
               <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
             </div>
             <div style={{ border: "1px solid #bbf7d0", borderRadius: 22, padding: 16, background: "#f0fdf4", display: "grid", gap: 8 }}>
@@ -2679,7 +2723,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       const laminateSelected = Boolean(laminateId && laminateId !== "none");
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title="Choose laminate" text="Choose None or select an actual laminate material from Materials. If laminate is selected, enter the labour time." />
+          <StepIntro icon="•" title="Choose laminate" text="Choose None or select an actual laminate material from Materials. Laminate labour is optional and may be left blank or set to 0." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
             <button type="button" onClick={() => { setLaminateId("none"); setLaminateMinutes(""); setActiveStep("finishing"); }} style={cardButtonStyle(laminateId === "none", "#64748b")}>
               <span style={{ fontSize: 30 }}>—</span>
@@ -3085,7 +3129,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 {isDuplicateBook ? <SummaryRow label="Page colours" value={ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : undefined} /> : null}
                 {isDuplicateBook ? <SummaryRow label="Cover / tape" value={ncrCoverColour && ncrTapeColour ? `${ncrCoverColour} cover · ${ncrTapeColour} tape` : undefined} /> : null}
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-                <SummaryRow label="Artwork" value={artworkChoice === "required" ? minutesLabel(artworkMinutes) : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
+                <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? minutesLabel(artworkMinutes) : "Required" : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 {!isDuplicateBook ? <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} /> : null}
                 {!isDuplicateBook ? <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} /> : null}
                 {!isDuplicateBook ? <SummaryRow label="Coating" value={selectedSmallCoatingName || undefined} /> : null}
@@ -3097,7 +3141,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Material" value={selectedMainMaterial?.name} />
                 <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-                <SummaryRow label="Artwork" value={artworkChoice === "required" ? minutesLabel(artworkMinutes) : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
+                <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? minutesLabel(artworkMinutes) : "Required" : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 {!isRollStockBase ? <SummaryRow label="Print" value={printMethods.find((item) => item.key === resolvedPrintMethod)?.label} /> : null}
                 <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />
                 {!isRollStockBase ? <SummaryRow label="Media" value={selectedMedia?.name} /> : null}
@@ -3173,11 +3217,11 @@ function LabourPrompt({ label, value, onChange, onContinue, labourRate }: { labe
 
   return (
     <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 14, background: "#f0fdf4", display: "grid", gap: 10 }}>
-      <label style={{ display: "grid", gap: 6 }}><b>{label}</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /></label>
+      <label style={{ display: "grid", gap: 6 }}><b>{label} (optional)</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /></label>
       <span style={{ color: "#475467", fontSize: 13 }}>
-        {enteredMinutes > 0 ? `${minutesLabel(enteredMinutes)} at ${money(labourRate)}/hr = ${money(labourCost)} labour` : `Charged at ${money(labourRate)}/hr.`}
+        {enteredMinutes > 0 ? `${minutesLabel(enteredMinutes)} at ${money(labourRate)}/hr = ${money(labourCost)} labour` : "Leave blank or enter 0 to add no labour charge."}
       </span>
-      <button type="button" onClick={onContinue} disabled={enteredMinutes <= 0} style={{ ...primaryButton, opacity: enteredMinutes > 0 ? 1 : 0.45 }}>Continue</button>
+      <button type="button" onClick={onContinue} style={primaryButton}>Continue</button>
     </div>
   );
 }
