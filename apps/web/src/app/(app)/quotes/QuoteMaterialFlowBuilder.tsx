@@ -1020,14 +1020,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     return uniq(materialPool.map(colourFor));
   }, [baseMaterials, thickness]);
 
+  const isRollStockBase = baseType === "banner";
+
   const selectedMainMaterial = useMemo(() => {
-    const materialPool = baseMaterials.filter((material) => {
+    if (baseType === "banner") return baseMaterials.find((material) => material.id === mediaId);
+
+    const matchingMaterials = baseMaterials.filter((material) => {
       const thicknessOk = !thickness || thicknessFor(material) === thickness;
       const colourOk = !colour || colourFor(material) === colour;
       return thicknessOk && colourOk;
     });
-    return materialPool[0];
-  }, [baseMaterials, thickness, colour]);
+    return matchingMaterials[0];
+  }, [baseMaterials, thickness, colour, baseType, mediaId]);
 
   const rollMedia = useMemo(() => materialPool.filter((material) => isSignageStock(material) && isPrintRollMaterial(material)), [materialPool]);
   const laminateMaterials = useMemo(() => {
@@ -1084,10 +1088,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const ncrCopiesCount = ncrCopyCount(ncrCopies);
   const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
-  const printed = printMethod !== "" && printMethod !== "no_print";
+  const resolvedPrintMethod: PrintMethod = isRollStockBase ? "roll_stock" : printMethod;
+  const printed = resolvedPrintMethod !== "" && resolvedPrintMethod !== "no_print";
   const printSetupComplete = !printed || numberValue(printSetupMinutes, 0) > 0;
-  const needsMediaStep = printMethod === "roll_stock" || printMethod === "cut_vinyl";
-  const needsInkStep = printMethod === "direct_print" || printMethod === "roll_stock";
+  const needsMediaStep = isRollStockBase || resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl";
+  const needsAdditionalMediaCost = !isRollStockBase && (resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl");
+  const needsInkStep = resolvedPrintMethod === "direct_print" || resolvedPrintMethod === "roll_stock";
   const width = numberValue(widthMm, 0);
   const height = numberValue(heightMm, 0);
   const areaSqm = width > 0 && height > 0 ? (width / 1000) * (height / 1000) : 0;
@@ -1157,22 +1163,26 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
     if (flowType === "signage") {
       next.push({ key: "base", label: "Base material", complete: Boolean(baseType), icon: "2" });
-      next.push({ key: "thickness", label: "Thickness", complete: Boolean(thickness), icon: "3" });
-      next.push({ key: "colour", label: "Colour", complete: Boolean(colour && selectedMainMaterial), icon: "4" });
+      if (isRollStockBase) {
+        next.push({ key: "media", label: "Roll stock", complete: Boolean(mediaId && selectedMainMaterial), icon: "3" });
+      } else {
+        next.push({ key: "thickness", label: "Thickness", complete: Boolean(thickness), icon: "3" });
+        next.push({ key: "colour", label: "Colour", complete: Boolean(colour && selectedMainMaterial), icon: "4" });
+      }
       next.push({ key: "size", label: "Size", complete: width > 0 && height > 0, icon: "5" });
       next.push({ key: "artwork", label: "Artwork", complete: artworkChoice === "client_supplied" || (artworkChoice === "required" && numberValue(artworkMinutes, 0) > 0), icon: "6" });
-      next.push({ key: "print", label: "Print method", complete: Boolean(printMethod && printSetupComplete), icon: "7" });
-      if (needsMediaStep) next.push({ key: "media", label: printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
+      next.push({ key: "print", label: isRollStockBase ? "Print setup" : "Print method", complete: Boolean(resolvedPrintMethod && printSetupComplete), icon: "7" });
+      if (!isRollStockBase && needsMediaStep) next.push({ key: "media", label: resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
       if (needsInkStep) next.push({ key: "ink", label: "Ink", complete: Boolean(ink), icon: "9" });
       if (printed) next.push({ key: "sides", label: isClearAcrylic ? "Sides / direction" : "Sides", complete: Boolean(sides && (!isClearAcrylic || printDirection)), icon: "•" });
       if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId && (laminateId === "none" || laminateMinutes.trim().length > 0)), icon: "•" });
       next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
       next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
-      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && printMethod && printSetupComplete && serviceType), icon: "✓" });
+      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && printSetupComplete && serviceType), icon: "✓" });
     }
 
     return next;
-  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, printMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
+  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, resolvedPrintMethod, printSetupComplete, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, isRollStockBase, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -1238,6 +1248,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   }
 
   function resetAfterBase(nextBase: BaseType) {
+    const rollStockBase = nextBase === "banner";
     setBaseType(nextBase);
     setThickness("");
     setColour("");
@@ -1245,7 +1256,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setHeightMm("");
     setArtworkChoice("");
     setArtworkMinutes("");
-    setPrintMethod("");
+    setPrintMethod(rollStockBase ? "roll_stock" : "");
     setPrintSetupMinutes("");
     setMediaId("");
     setInk("");
@@ -1255,7 +1266,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setLaminateMinutes("");
     setFinishings([]);
     setUnitPriceOverridden(false);
-    setActiveStep("thickness");
+    setActiveStep(rollStockBase ? "media" : "thickness");
   }
 
   function setPresetSize(widthValue: string, heightValue: string, next: StepKey) {
@@ -1265,6 +1276,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   }
 
   function nextStepAfterPrint(method: PrintMethod): StepKey {
+    if (isRollStockBase) return "ink";
     if (method === "roll_stock" || method === "cut_vinyl") return "media";
     if (method === "direct_print") return "ink";
     return "finishing";
@@ -1355,7 +1367,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (printed) {
         const minutes = numberValue(printSetupMinutes, 0);
-        const methodLabel = printMethods.find((item) => item.key === printMethod)?.label ?? "Print";
+        const methodLabel = printMethods.find((item) => item.key === resolvedPrintMethod)?.label ?? "Print";
         if (minutes > 0) {
           const amount = minutes / quantityNumber;
           const rate = labourRate / 60;
@@ -1371,13 +1383,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         }
       }
 
-      if (selectedMedia && needsMediaStep && areaSqm > 0) {
+      if (selectedMedia && needsAdditionalMediaCost && areaSqm > 0) {
         const mediaFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
         const lm = roundedRollMetresForQuantity(width, height, selectedMedia, mediaFaces);
         const rate = rollRate(selectedMedia);
         const amount = lm.amount / quantityNumber;
         rows.push({
-          label: printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll print media",
+          label: resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll print media",
           detail: selectedMedia.name,
           amount,
           unit: "lm",
@@ -1632,7 +1644,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsMediaStep, sideMultiplier, printMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1657,7 +1669,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const autoUnitPrice = rawCost * sellMultiplier * discountMultiplier;
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
-  const selectedMediaName = selectedMedia?.name ?? "";
+  const selectedMediaName = isRollStockBase ? "" : selectedMedia?.name ?? "";
   const selectedLaminateName = laminateId === "none" ? "None" : selectedLaminate?.name ?? "";
   const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : selectedSmallCoating?.name ?? "";
   const dispatchCosts = useMemo<CostRow[]>(() => {
@@ -1736,7 +1748,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         ? "Plan Printing"
         : flowType === "poster_printing"
           ? "Poster Printing"
-          : selectedBase?.label ?? "Signage item";
+          : isRollStockBase
+            ? selectedMainMaterial?.name ?? selectedBase?.label ?? "Vinyl/Roll Stock"
+            : selectedBase?.label ?? "Signage item";
 
   const optionSummary = flowType === "component"
     ? [
@@ -1791,7 +1805,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       selectedMainMaterial?.name ? `Substrate: ${selectedMainMaterial.name}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? `Artwork ${minutesLabel(artworkMinutes)}` : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
-      printMethods.find((item) => item.key === printMethod)?.label,
+      isRollStockBase ? null : printMethods.find((item) => item.key === resolvedPrintMethod)?.label,
       printed && numberValue(printSetupMinutes, 0) > 0 ? `Print setup ${minutesLabel(printSetupMinutes)}` : null,
       selectedMediaName || null,
       inkChoices.find((item) => item.key === ink)?.label,
@@ -1812,7 +1826,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
       : flowType === "small_format"
         ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
-        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && printMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateMinutes, 0) > 0) && dispatchComplete);
+        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && (artworkChoice === "client_supplied" || numberValue(artworkMinutes, 0) > 0) && resolvedPrintMethod && printSetupComplete && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || laminateId) && (laminateId === "none" || !laminateId || numberValue(laminateMinutes, 0) > 0) && dispatchComplete);
 
   const configurationSnapshot: QuickQuoteSnapshot = {
     version: 1,
@@ -1829,7 +1843,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     heightMm,
     artworkChoice,
     artworkMinutes,
-    printMethod,
+    printMethod: resolvedPrintMethod,
     printSetupMinutes,
     mediaId,
     ink,
@@ -1878,7 +1892,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     notes: lineNotes,
     materialSnapshots: {
       main: snapshotMaterialForSave(selectedMainMaterial),
-      media: snapshotMaterialForSave(selectedMedia),
+      media: snapshotMaterialForSave(isRollStockBase ? undefined : selectedMedia),
       laminate: snapshotMaterialForSave(selectedLaminate),
       smallStock: snapshotMaterialForSave(selectedSmallStock),
       smallCoating: snapshotMaterialForSave(selectedSmallCoating),
@@ -2079,14 +2093,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             {flowType === "signage" ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
                 <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Thickness / stock</b><select value={thickness} onChange={(event) => { setThickness(event.target.value); setColour(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose thickness</option>{thicknessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Colour</b><select value={colour} onChange={(event) => { setColour(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose colour</option>{colourOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                {isRollStockBase ? (
+                  <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+                ) : (
+                  <label style={{ display: "grid", gap: 6 }}><b>Thickness / stock</b><select value={thickness} onChange={(event) => { setThickness(event.target.value); setColour(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose thickness</option>{thicknessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
+                )}
+                {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Colour</b><select value={colour} onChange={(event) => { setColour(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose colour</option>{colourOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label> : null}
                 <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 6000" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+                {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Enter normal minutes. The system converts them to labour at {money(labourRate)}/hr.</small></label> : null}
-                {needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{printMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => setMediaId(event.target.value)} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
+                {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => setInk(event.target.value as InkChoice)} style={inputStyle}><option value="">Choose ink</option>{inkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
                 {isClearAcrylic && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
@@ -2554,6 +2572,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "artwork") return renderArtworkStep(flowType === "small_format" ? (isDuplicateBook ? "small_finishing" : "small_sides") : "print");
 
     if (activeStep === "print") {
+      if (isRollStockBase) {
+        return (
+          <div style={{ display: "grid", gap: 16 }}>
+            <StepIntro icon="7" title="Roll stock print setup" text="The selected product is already roll stock, so there is no separate print-method choice." />
+            <LabourPrompt
+              label="Print setup labour minutes"
+              value={printSetupMinutes}
+              onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
+              onContinue={() => setActiveStep("ink")}
+              labourRate={labourRate}
+            />
+          </div>
+        );
+      }
+
       return (
         <div style={{ display: "grid", gap: 16 }}>
           <StepIntro icon="7" title="Is it printed?" text="Choose the print method for this quote line. No option is selected by default." />
@@ -2571,7 +2604,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               label="Print setup labour minutes"
               value={printSetupMinutes}
               onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
-              onContinue={() => setActiveStep(nextStepAfterPrint(printMethod))}
+              onContinue={() => setActiveStep(nextStepAfterPrint(resolvedPrintMethod))}
               labourRate={labourRate}
             />
           ) : null}
@@ -2582,13 +2615,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "media") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="8" title={printMethod === "cut_vinyl" ? "Choose cut vinyl" : "Choose roll stock"} text="Pick the actual roll material from Materials. Roll stock is shown as a linear metre cost where possible." />
+          <StepIntro icon="8" title={resolvedPrintMethod === "cut_vinyl" ? "Choose cut vinyl" : "Choose roll stock"} text="Pick the actual roll material from Materials. Roll stock is shown as a linear metre cost where possible." />
           {rollMedia.length === 0 ? <EmptyStep text="No roll media found. Create roll stock in Materials first." /> : null}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, maxHeight: 480, overflow: "auto", paddingRight: 4 }}>
             {rollMedia.map((material) => {
               const rate = rollRate(material);
               return (
-                <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setActiveStep(printMethod === "cut_vinyl" ? "sides" : "ink"); }} style={cardButtonStyle(mediaId === material.id, "#ea580c")}>
+                <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setUnitPriceOverridden(false); setActiveStep(isRollStockBase ? "size" : resolvedPrintMethod === "cut_vinyl" ? "sides" : "ink"); }} style={cardButtonStyle(mediaId === material.id, "#ea580c")}>
                   <span style={{ fontSize: 28 }}>↻</span>
                   <strong>{material.name}</strong>
                   <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
@@ -3065,9 +3098,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? minutesLabel(artworkMinutes) : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
-                <SummaryRow label="Print" value={printMethods.find((item) => item.key === printMethod)?.label} />
+                {!isRollStockBase ? <SummaryRow label="Print" value={printMethods.find((item) => item.key === resolvedPrintMethod)?.label} /> : null}
                 <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />
-                <SummaryRow label="Media" value={selectedMedia?.name} />
+                {!isRollStockBase ? <SummaryRow label="Media" value={selectedMedia?.name} /> : null}
                 <SummaryRow label="Ink" value={inkChoices.find((item) => item.key === ink)?.label} />
                 <SummaryRow label="Laminate" value={selectedLaminateName || undefined} />
                 <SummaryRow label="Finishing" value={finishingSummary || undefined} />
