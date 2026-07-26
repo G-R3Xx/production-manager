@@ -1690,7 +1690,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       : flowType === "poster_printing"
         ? ["poster_printing", "Poster printing"]
         : flowType === "service"
-          ? ["service", serviceLabel ?? ""]
+          ? ["service", serviceLabel ?? "", serviceType === "install" ? "installation" : "", serviceType === "install" ? "signage" : ""]
           : flowType === "component"
             ? ["component", componentName.trim()]
             : ["signage", selectedBase?.label ?? "", baseType];
@@ -1783,7 +1783,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const lineName = flowType === "component"
     ? componentName.trim() || "Custom component"
     : flowType === "service"
-    ? serviceLabel ?? "Service item"
+    ? serviceType === "install" ? "Sign Install" : serviceLabel ?? "Service item"
     : flowType === "small_format"
       ? selectedSmallType?.label ?? "Small format item"
       : flowType === "plan_printing"
@@ -1804,7 +1804,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ].filter(Boolean).join(" · ")
     : flowType === "service"
     ? [
-      serviceLabel,
+      serviceType === "install" ? "Install only — client-supplied signage" : serviceLabel,
       serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
       serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install` : null,
@@ -2018,36 +2018,49 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     );
   }
 
+  function chooseInstallOnly() {
+    chooseFlow("service");
+    setServiceType("install");
+    setQuantity("1");
+    setActiveStep("service_details");
+  }
+
   function chooseQuickFlow(nextFlow: FlowType) {
     if (nextFlow === flowType) return;
+    if (nextFlow === "service") {
+      chooseInstallOnly();
+      return;
+    }
     chooseFlow(nextFlow);
   }
 
-  function renderDispatchSection() {
+  function renderDispatchSection(installOnly = false) {
     return (
       <div style={{ display: "grid", gap: 14 }}>
         <div style={{ display: "grid", gap: 4 }}>
-          <strong style={{ fontSize: 18 }}>How can we get your order to you?</strong>
-          <span style={{ color: "#64748b", fontSize: 13 }}>Pickup is no charge. Delivery and install add their own clear line to the quote.</span>
+          <strong style={{ fontSize: 18 }}>{installOnly ? "Install client-supplied signage" : "How can we get your order to you?"}</strong>
+          <span style={{ color: "#64748b", fontSize: 13 }}>{installOnly ? "No substrate or production material is added. Quote only the installation labour, travel and fixings." : "Pickup is no charge. Delivery and install add their own clear line to the quote."}</span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-          {serviceTypes.map((choice) => (
-            <button
-              key={choice.key}
-              type="button"
-              onClick={() => { setServiceType(choice.key); setUnitPriceOverridden(false); }}
-              style={{
-                ...cardButtonStyle(serviceType === choice.key, choice.key === "install" ? "#ea580c" : choice.key === "delivery" ? "#0891b2" : "#16a34a"),
-                minHeight: 96,
-                padding: 14
-              }}
-            >
-              <span style={{ fontSize: 28 }}>{choice.icon}</span>
-              <strong>{choice.label}</strong>
-              <span style={{ color: "#64748b", fontSize: 13 }}>{choice.description}</span>
-            </button>
-          ))}
-        </div>
+        {!installOnly ? (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+            {serviceTypes.map((choice) => (
+              <button
+                key={choice.key}
+                type="button"
+                onClick={() => { setServiceType(choice.key); setUnitPriceOverridden(false); }}
+                style={{
+                  ...cardButtonStyle(serviceType === choice.key, choice.key === "install" ? "#ea580c" : choice.key === "delivery" ? "#0891b2" : "#16a34a"),
+                  minHeight: 96,
+                  padding: 14
+                }}
+              >
+                <span style={{ fontSize: 28 }}>{choice.icon}</span>
+                <strong>{choice.label}</strong>
+                <span style={{ color: "#64748b", fontSize: 13 }}>{choice.description}</span>
+              </button>
+            ))}
+          </div>
+        ) : null}
         {serviceType === "delivery" ? (
           <div style={{ border: "1px solid #bae6fd", borderRadius: 18, padding: 14, background: "#f0f9ff", display: "grid", gap: 10 }}>
             <label style={{ display: "grid", gap: 6 }}><b>Delivery / courier cost</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="0.01" style={inputStyle} /></label>
@@ -2082,7 +2095,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 })}
               </div>
             </div>
-            <span style={{ color: "#475467", fontSize: 13 }}>Install becomes a separate Sign Install line on the quote and can later hand off to Install Scheduler.</span>
+            <span style={{ color: "#475467", fontSize: 13 }}>{installOnly ? "This is saved as one Sign Install quote line and can later hand off to Install Scheduler." : "Install becomes a separate Sign Install line on the quote and can later hand off to Install Scheduler."}</span>
           </div>
         ) : null}
       </div>
@@ -2109,7 +2122,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
               <div>
                 <p style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 12, fontWeight: 950, color: "#65a30d" }}>Fast quote builder</p>
-                <h3 style={{ margin: "4px 0 0", fontSize: 28, letterSpacing: "-0.04em" }}>Build the item, choose artwork, then choose pickup / delivery / install.</h3>
+                <h3 style={{ margin: "4px 0 0", fontSize: 28, letterSpacing: "-0.04em" }}>{flowType === "service" ? "Quote installation of client-supplied signage without adding a substrate." : "Build the item, choose artwork, then choose pickup / delivery / install."}</h3>
               </div>
               <span style={{ borderRadius: 999, background: "#ecfccb", color: "#3f6212", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>Quick layout</span>
             </div>
@@ -2118,11 +2131,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <label style={{ display: "grid", gap: 6 }}>
                 <b>Quote type</b>
                 <select value={flowType} onChange={(event) => chooseQuickFlow(event.target.value as FlowType)} style={inputStyle}>
-                  {printDepartments.map((department) => <option key={department.key} value={department.key}>{department.label}</option>)}
+                  <option value="signage">Large format / signage</option>
+                  <option value="service">↳ Install only — client-supplied signage</option>
+                  {printDepartments.filter((department) => department.key !== "signage").map((department) => <option key={department.key} value={department.key}>{department.label}</option>)}
                   <option value="component">Custom component / assembly</option>
                 </select>
               </label>
-              <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="1" style={inputStyle} /></label>
+              {flowType === "service" ? (
+                <div style={{ minHeight: 48, borderRadius: 16, border: "1px solid #fed7aa", padding: "0 14px", background: "#fff7ed", display: "flex", alignItems: "center", color: "#9a3412", fontWeight: 900 }}>Quantity: 1 install job</div>
+              ) : (
+                <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="1" style={inputStyle} /></label>
+              )}
             </div>
 
             {flowType === "component" ? (
@@ -2135,7 +2154,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
             {flowType === "signage" ? (
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
-                <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => event.target.value === "install_only" ? chooseInstallOnly() : resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option><option value="install_only">Install only — client-supplied signage</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
                 {isRollStockBase ? (
                   <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
                 ) : (
@@ -2204,16 +2223,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               </div>
             ) : null}
 
-            <div style={{ display: "grid", gap: 10 }}>
-              <strong>How will print-ready artwork be supplied?</strong>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
-                <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}><span style={{ fontSize: 30 }}>✎</span><strong>Artwork required</strong><span style={{ color: "#64748b" }}>Add artwork/design labour.</span></button>
+            {flowType !== "service" && flowType !== "component" ? (
+              <div style={{ display: "grid", gap: 10 }}>
+                <strong>How will print-ready artwork be supplied?</strong>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+                  <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
+                  <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}><span style={{ fontSize: 30 }}>✎</span><strong>Artwork required</strong><span style={{ color: "#64748b" }}>Add artwork/design labour.</span></button>
+                </div>
+                {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes (optional)</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="Optional, eg 30" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no artwork labour charge.</small></label> : null}
               </div>
-              {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes (optional)</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="Optional, eg 30" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no artwork labour charge.</small></label> : null}
-            </div>
+            ) : null}
 
-            {flowType !== "component" ? renderDispatchSection() : null}
+            {flowType === "service" ? renderDispatchSection(true) : flowType !== "component" ? renderDispatchSection() : null}
 
             <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} placeholder="Optional notes for this line" style={textareaStyle} /></label>
 
@@ -2223,7 +2244,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <aside style={{ position: "sticky", top: 18, display: "grid", gap: 14 }}>
             <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
               <strong>Current item</strong>
-              <SummaryRow label="Type" value={flowTypeLabel(flowType)} />
+              <SummaryRow label="Type" value={flowType === "service" && serviceType === "install" ? "Install only — client-supplied signage" : flowTypeLabel(flowType)} />
               {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
               {flowType === "signage" && sheetUseLabel ? <SummaryRow label="Sheet use" value={sheetUseLabel} /> : null}
               {flowType === "signage" && rollUseLabel ? <SummaryRow label="Roll use" value={rollUseLabel} /> : null}
@@ -2530,6 +2551,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         <div style={{ display: "grid", gap: 16 }}>
           <StepIntro icon="2" title="Start with the base material" text="No product setup first. Choose the material family for this quote line." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
+            <button type="button" onClick={chooseInstallOnly} style={cardButtonStyle(false, "#ea580c")}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 42, height: 42, borderRadius: 14, display: "grid", placeItems: "center", background: "#ea580c1a", color: "#ea580c", fontWeight: 950, fontSize: 22 }}>⚒</span>
+                <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 9px", fontSize: 12, fontWeight: 900 }}>No material</span>
+              </div>
+              <strong style={{ fontSize: 18 }}>Install only</strong>
+              <span style={{ color: "#64748b", lineHeight: 1.45 }}>Install client-supplied signage. Add crew time, travel, fixings and onsite consumables only.</span>
+            </button>
             {baseTypes.map((item) => {
               const count = materialPool.filter((material) => materialMatchesBase(material, item.key)).length;
               return (
