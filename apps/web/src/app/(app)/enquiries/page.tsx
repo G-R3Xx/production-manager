@@ -70,10 +70,31 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
-      <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Enquiries</p>
-        <h1 style={{ margin: 0 }}>Quick intake first</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Capture the client, a rough requirement, and decide the next step later. This does not need to tie to MYOB immediately.</p>
+      <section style={{ ...cardStyle(), display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ display: "grid", gap: 8, minWidth: 0 }}>
+          <p style={{ margin: 0, fontSize: 12, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>Enquiries</p>
+          <h1 style={{ margin: 0 }}>Quick intake first</h1>
+          <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Capture the client, a rough requirement, and decide the next step later. This does not need to tie to MYOB immediately.</p>
+        </div>
+        <Link
+          href="/enquiries/tablet"
+          style={{
+            minHeight: 48,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: "0 18px",
+            borderRadius: 14,
+            background: "#155eef",
+            color: "#fff",
+            fontWeight: 900,
+            textDecoration: "none",
+            boxShadow: "0 10px 24px rgba(21, 94, 239, 0.22)",
+            whiteSpace: "nowrap"
+          }}
+        >
+          Open Tablet Mode
+        </Link>
       </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>

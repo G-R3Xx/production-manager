@@ -103,7 +103,14 @@ async function uploadIntakeCorrespondence(file: File): Promise<SignedIntakeUploa
   };
 }
 
-export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
+type NewEnquiryFormProps = {
+  clients: ClientOption[];
+  mode?: "standard" | "tablet";
+  returnTo?: "/enquiries" | "/enquiries/tablet";
+};
+
+export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquiries" }: NewEnquiryFormProps) {
+  const isTablet = mode === "tablet";
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [clientName, setClientName] = useState("");
@@ -114,6 +121,12 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
   const [dragActive, setDragActive] = useState(false);
   const [uploadStatus, setUploadStatus] = useState("Drag an email, .eml/.msg file, PDF or screenshot here before creating the enquiry.");
   const [pendingUploads, setPendingUploads] = useState<PendingCorrespondenceUpload[]>([]);
+  const fieldStyle = isTablet
+    ? { ...inputStyle, minHeight: 58, borderRadius: 16, padding: "0 16px", fontSize: 17 } as const
+    : inputStyle;
+  const tabletTextareaStyle = isTablet
+    ? { ...textareaStyle, minHeight: 140, borderRadius: 16, padding: "14px 16px", fontSize: 17 } as const
+    : textareaStyle;
 
   function applySelectedClient(nextClientId: string) {
     setSelectedClientId(nextClientId);
@@ -188,45 +201,63 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
   }
 
   return (
-    <form action={createEnquiryAction} encType="multipart/form-data" style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 20, padding: 22, display: "grid", gap: 12 }}>
-      <h2 style={{ margin: 0 }}>New enquiry</h2>
-      <select name="linkedCustomerId" value={selectedClientId} onChange={(event) => applySelectedClient(event.currentTarget.value)} style={inputStyle}>
+    <form
+      action={createEnquiryAction}
+      encType="multipart/form-data"
+      className={isTablet ? "tablet-enquiry-form" : undefined}
+      style={{
+        background: "#fff",
+        border: "1px solid #e5e7eb",
+        borderRadius: isTablet ? 28 : 20,
+        padding: isTablet ? 28 : 22,
+        display: "grid",
+        gap: isTablet ? 16 : 12,
+        boxShadow: isTablet ? "0 24px 60px rgba(15, 23, 42, 0.10)" : undefined
+      }}
+    >
+      <input type="hidden" name="returnTo" value={returnTo} />
+      <h2 style={{ margin: 0, fontSize: isTablet ? 28 : undefined }}>New enquiry</h2>
+      {isTablet ? <p style={{ margin: "-6px 0 2px", color: "#64748b", fontSize: 15 }}>Capture the essentials now. Extra files and correspondence can be added later from the main Enquiries page.</p> : null}
+      <select name="linkedCustomerId" value={selectedClientId} onChange={(event) => applySelectedClient(event.currentTarget.value)} style={fieldStyle}>
         <option value="">New / unlinked client</option>
         {clients.map((client) => (
           <option key={client.id} value={client.id}>{client.displayName}</option>
         ))}
       </select>
-      <input name="clientName" value={clientName} onChange={(event) => setClientName(event.currentTarget.value)} placeholder="Client / business name (or choose existing above)" style={inputStyle} />
-      <section style={{ border: "1px dashed #c7d7fe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 8 }}>
-        <strong style={{ fontSize: 13 }}>Client logo (optional)</strong>
-        <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>Add a logo for a new/unlinked client. Existing linked clients already use their saved client logo.</span>
-        <input type="file" name="clientLogoFile" accept="image/*" style={{ ...inputStyle, minHeight: 38, paddingTop: 8, background: "#fff" }} />
-        <input name="clientLogoUrl" placeholder="or paste client logo URL" style={{ ...inputStyle, background: "#fff" }} />
-      </section>
-      <input name="contactName" value={contactName} onChange={(event) => setContactName(event.currentTarget.value)} placeholder="Contact name" style={inputStyle} />
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <input name="phone" value={phone} onChange={(event) => setPhone(event.currentTarget.value)} placeholder="Phone" style={inputStyle} />
-        <input name="email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="Email" style={inputStyle} />
+      <input name="clientName" value={clientName} onChange={(event) => setClientName(event.currentTarget.value)} placeholder="Client / business name (or choose existing above)" required={isTablet} style={fieldStyle} />
+      {!isTablet ? (
+        <section style={{ border: "1px dashed #c7d7fe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 8 }}>
+          <strong style={{ fontSize: 13 }}>Client logo (optional)</strong>
+          <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>Add a logo for a new/unlinked client. Existing linked clients already use their saved client logo.</span>
+          <input type="file" name="clientLogoFile" accept="image/*" style={{ ...fieldStyle, minHeight: 38, paddingTop: 8, background: "#fff" }} />
+          <input name="clientLogoUrl" placeholder="or paste client logo URL" style={{ ...fieldStyle, background: "#fff" }} />
+        </section>
+      ) : null}
+      <input name="contactName" value={contactName} onChange={(event) => setContactName(event.currentTarget.value)} placeholder="Contact name" style={fieldStyle} />
+      <div className={isTablet ? "tablet-enquiry-two-column" : undefined} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: isTablet ? 14 : 10 }}>
+        <input name="phone" value={phone} onChange={(event) => setPhone(event.currentTarget.value)} placeholder="Phone" style={fieldStyle} />
+        <input name="email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="Email" style={fieldStyle} />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <select name="source" defaultValue="" style={inputStyle}>
+      <div className={isTablet ? "tablet-enquiry-two-column" : undefined} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: isTablet ? 14 : 10 }}>
+        <select name="source" defaultValue={isTablet ? "Walk-in" : ""} style={fieldStyle}>
           <option value="">Source</option>
           {sourceOptions.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
-        <select name="urgency" defaultValue="Normal" style={inputStyle}>
+        <select name="urgency" defaultValue="Normal" style={fieldStyle}>
           {urgencyOptions.map((option) => (
             <option key={option} value={option}>{option}</option>
           ))}
         </select>
       </div>
-      <input name="siteAddress" value={siteAddress} onChange={(event) => setSiteAddress(event.currentTarget.value)} placeholder="Site address if relevant" style={inputStyle} />
-      <input name="clientPurchaseOrderNumber" placeholder="Client purchase order number (optional)" style={inputStyle} />
-      <textarea name="requestSummary" placeholder="Rough idea of what they require" style={textareaStyle} />
-      <textarea name="notes" placeholder="Internal notes" style={textareaStyle} />
+      <input name="siteAddress" value={siteAddress} onChange={(event) => setSiteAddress(event.currentTarget.value)} placeholder="Site address if relevant" style={fieldStyle} />
+      <input name="clientPurchaseOrderNumber" placeholder="Client purchase order number (optional)" style={fieldStyle} />
+      <textarea name="requestSummary" placeholder="Rough idea of what they require" required style={tabletTextareaStyle} />
+      <textarea name="notes" placeholder="Internal notes" style={tabletTextareaStyle} />
 
-      <div
+      {!isTablet ? (
+        <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
         onDrop={onDrop}
@@ -270,8 +301,16 @@ export function NewEnquiryForm({ clients }: { clients: ClientOption[] }) {
           </div>
         ) : null}
       </div>
+      ) : null}
 
-      <button type="submit" style={buttonStyle}>Create enquiry</button>
+      <button
+        type="submit"
+        style={isTablet
+          ? { ...buttonStyle, minHeight: 66, borderRadius: 18, fontSize: 20, background: "#155eef", boxShadow: "0 12px 28px rgba(21, 94, 239, 0.24)" }
+          : buttonStyle}
+      >
+        Create enquiry
+      </button>
     </form>
   );
 }

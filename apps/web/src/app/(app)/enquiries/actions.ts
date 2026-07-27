@@ -40,6 +40,16 @@ function isValidHttpUrl(value: string | null): boolean {
   }
 }
 
+function enquiryReturnPath(formData: FormData): "/enquiries" | "/enquiries/tablet" {
+  return String(formData.get("returnTo") ?? "") === "/enquiries/tablet"
+    ? "/enquiries/tablet"
+    : "/enquiries";
+}
+
+function enquiryRedirectUrl(basePath: "/enquiries" | "/enquiries/tablet", key: "message" | "error", value: string): string {
+  return `${basePath}?${key}=${encodeURIComponent(value)}`;
+}
+
 async function uploadEnquiryLogoIfPresent(tenantId: string, enquiryId: string, formData: FormData): Promise<{ logoUrl?: string; logoStoragePath?: string }> {
   const rawFile = formData.get("clientLogoFile");
   if (!rawFile || typeof rawFile !== "object" || !("size" in rawFile) || !("arrayBuffer" in rawFile)) return {};
@@ -67,6 +77,7 @@ async function uploadEnquiryLogoIfPresent(tenantId: string, enquiryId: string, f
 
 
 export async function createEnquiryAction(formData: FormData): Promise<void> {
+  const returnTo = enquiryReturnPath(formData);
   const activeTenant = await requireTenant();
   const user = await getRequiredSessionUser();
 
@@ -76,12 +87,12 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
   const requestSummary = String(formData.get("requestSummary") ?? "").trim();
 
   if (!clientName || !requestSummary) {
-    redirect("/enquiries?error=Client%20name%20and%20request%20summary%20are%20required");
+    redirect(enquiryRedirectUrl(returnTo, "error", "Client name and request summary are required"));
   }
 
   const pastedClientLogoUrl = nullable(formData.get("clientLogoUrl"));
   if (!isValidHttpUrl(pastedClientLogoUrl)) {
-    redirect("/enquiries?error=Client%20logo%20URL%20must%20start%20with%20http%20or%20https");
+    redirect(enquiryRedirectUrl(returnTo, "error", "Client logo URL must start with http or https"));
   }
 
   const created = await createEnquiryForTenant(activeTenant.tenantId, {
@@ -106,7 +117,7 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    redirect(`/enquiries?error=${encodeURIComponent(message)}`);
+    redirect(enquiryRedirectUrl(returnTo, "error", message));
   }
 
   const fileNames = getAllStrings(formData, "pendingCorrespondenceFileName");
@@ -144,7 +155,7 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
   }
 
   const message = fileNames.length > 0 ? "Enquiry created and correspondence attached" : "Enquiry created";
-  redirect(`/enquiries?message=${encodeURIComponent(message)}`);
+  redirect(enquiryRedirectUrl(returnTo, "message", message));
 }
 
 
