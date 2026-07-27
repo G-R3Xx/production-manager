@@ -40,10 +40,13 @@ export default async function TabletEnquiriesPage({ searchParams }: TabletEnquir
         @media (max-width: 760px) {
           .tablet-enquiry-two-column { grid-template-columns: 1fr !important; }
           .tablet-mode-header { align-items: flex-start !important; }
+          .tablet-photo-heading { align-items: stretch !important; flex-direction: column !important; }
+          .tablet-photo-heading button { width: 100% !important; }
         }
         @media (max-width: 520px) {
           .tablet-enquiry-form { padding: 20px !important; border-radius: 22px !important; }
           .tablet-mode-header { display: grid !important; }
+          .tablet-photo-grid { grid-template-columns: 1fr !important; }
         }
       `}</style>
 
@@ -107,7 +110,7 @@ export default async function TabletEnquiriesPage({ searchParams }: TabletEnquir
         <NewEnquiryForm clients={clients} mode="tablet" returnTo="/enquiries/tablet" />
 
         <p style={{ margin: "0 0 8px", textAlign: "center", color: "#94a3b8", fontSize: 12, fontWeight: 800 }}>
-          V26.07.27.02
+          V26.07.27.03
         </p>
       </div>
     </main>

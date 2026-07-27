@@ -112,6 +112,7 @@ type NewEnquiryFormProps = {
 export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquiries" }: NewEnquiryFormProps) {
   const isTablet = mode === "tablet";
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
   const [clientName, setClientName] = useState("");
   const [contactName, setContactName] = useState("");
@@ -119,7 +120,12 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
   const [email, setEmail] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
   const [dragActive, setDragActive] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState("Drag an email, .eml/.msg file, PDF or screenshot here before creating the enquiry.");
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadStatus, setUploadStatus] = useState(
+    isTablet
+      ? "Take a photo of the supplied signage, site, sketch or reference material."
+      : "Drag an email, .eml/.msg file, PDF or screenshot here before creating the enquiry."
+  );
   const [pendingUploads, setPendingUploads] = useState<PendingCorrespondenceUpload[]>([]);
   const fieldStyle = isTablet
     ? { ...inputStyle, minHeight: 58, borderRadius: 16, padding: "0 16px", fontSize: 17 } as const
@@ -150,14 +156,18 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
   async function handleFile(file: File | null) {
     if (!file) return;
     if (file.size > MAX_CORRESPONDENCE_FILE_SIZE_BYTES) {
-      setUploadStatus("That file is over 50MB. Save a smaller email/PDF, or attach the important correspondence as a smaller file.");
+      setUploadStatus(isTablet
+        ? "That photo is over 50MB. Please take another photo at a lower resolution."
+        : "That file is over 50MB. Save a smaller email/PDF, or attach the important correspondence as a smaller file.");
       if (inputRef.current) inputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
       return;
     }
 
     try {
-      setUploadStatus("Uploading correspondence…");
-      window.dispatchEvent(new CustomEvent("pm:loading", { detail: { message: "Uploading enquiry correspondence…" } }));
+      setIsUploading(true);
+      setUploadStatus(isTablet ? "Uploading photo…" : "Uploading correspondence…");
+      window.dispatchEvent(new CustomEvent("pm:loading", { detail: { message: isTablet ? "Uploading enquiry photo…" : "Uploading enquiry correspondence…" } }));
       const preview = await buildCorrespondencePreviewForFile(file);
       const upload = await uploadIntakeCorrespondence(file);
       setPendingUploads((current) => [
@@ -172,13 +182,35 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
           preview
         }
       ]);
-      setUploadStatus("Correspondence uploaded. It will attach when you create the enquiry.");
+      setUploadStatus(isTablet
+        ? "Photo ready. It will attach when you create the enquiry."
+        : "Correspondence uploaded. It will attach when you create the enquiry.");
       if (inputRef.current) inputRef.current.value = "";
+      if (cameraInputRef.current) cameraInputRef.current.value = "";
     } catch (error) {
-      setUploadStatus(error instanceof Error ? error.message : "Correspondence upload failed.");
+      setUploadStatus(error instanceof Error ? error.message : isTablet ? "Photo upload failed." : "Correspondence upload failed.");
     } finally {
+      setIsUploading(false);
       window.dispatchEvent(new CustomEvent("pm:loading-done"));
     }
+  }
+
+  function pendingUploadFields(upload: PendingCorrespondenceUpload) {
+    return (
+      <>
+        <input type="hidden" name="pendingCorrespondenceFileName" value={upload.fileName} />
+        <input type="hidden" name="pendingCorrespondenceFileUrl" value={upload.fileUrl} />
+        <input type="hidden" name="pendingCorrespondenceStoragePath" value={upload.storagePath} />
+        <input type="hidden" name="pendingCorrespondenceMimeType" value={upload.mimeType} />
+        <input type="hidden" name="pendingCorrespondenceSizeBytes" value={String(upload.sizeBytes)} />
+        <input type="hidden" name="pendingCorrespondencePreviewKind" value={upload.preview.previewKind} />
+        <input type="hidden" name="pendingCorrespondenceEmailSubject" value={upload.preview.emailSubject} />
+        <input type="hidden" name="pendingCorrespondenceEmailFrom" value={upload.preview.emailFrom} />
+        <input type="hidden" name="pendingCorrespondenceEmailTo" value={upload.preview.emailTo} />
+        <input type="hidden" name="pendingCorrespondenceEmailDate" value={upload.preview.emailDate} />
+        <input type="hidden" name="pendingCorrespondenceBodyPreview" value={upload.preview.bodyPreview} />
+      </>
+    );
   }
 
   function onDragOver(event: DragEvent<HTMLDivElement>) {
@@ -217,7 +249,7 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
     >
       <input type="hidden" name="returnTo" value={returnTo} />
       <h2 style={{ margin: 0, fontSize: isTablet ? 28 : undefined }}>New enquiry</h2>
-      {isTablet ? <p style={{ margin: "-6px 0 2px", color: "#64748b", fontSize: 15 }}>Capture the essentials now. Extra files and correspondence can be added later from the main Enquiries page.</p> : null}
+      {isTablet ? <p style={{ margin: "-6px 0 2px", color: "#64748b", fontSize: 15 }}>Capture the essentials and attach reference photos now. Extra files and correspondence can still be added later.</p> : null}
       <select name="linkedCustomerId" value={selectedClientId} onChange={(event) => applySelectedClient(event.currentTarget.value)} style={fieldStyle}>
         <option value="">New / unlinked client</option>
         {clients.map((client) => (
@@ -256,7 +288,90 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
       <textarea name="requestSummary" placeholder="Rough idea of what they require" required style={tabletTextareaStyle} />
       <textarea name="notes" placeholder="Internal notes" style={tabletTextareaStyle} />
 
-      {!isTablet ? (
+      {isTablet ? (
+        <section
+          style={{
+            border: "1px solid #bfdbfe",
+            borderRadius: 20,
+            background: "#eff6ff",
+            padding: 16,
+            display: "grid",
+            gap: 13
+          }}
+        >
+          <div className="tablet-photo-heading" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14 }}>
+            <div style={{ display: "grid", gap: 4 }}>
+              <strong style={{ fontSize: 17, color: "#172554" }}>Reference photos</strong>
+              <span style={{ color: "#475569", fontSize: 13, lineHeight: 1.4 }}>Use the rear camera to photograph supplied signage, a sketch, damage, measurements or the installation area.</span>
+            </div>
+            <button
+              type="button"
+              disabled={isUploading}
+              onClick={() => cameraInputRef.current?.click()}
+              style={{
+                minHeight: 56,
+                flex: "0 0 auto",
+                borderRadius: 16,
+                border: "none",
+                background: "#155eef",
+                color: "#fff",
+                padding: "0 18px",
+                fontSize: 16,
+                fontWeight: 900,
+                cursor: isUploading ? "wait" : "pointer",
+                opacity: isUploading ? 0.65 : 1,
+                boxShadow: "0 10px 24px rgba(21, 94, 239, 0.22)"
+              }}
+            >
+              {isUploading ? "Uploading…" : pendingUploads.length > 0 ? "📷 Take another photo" : "📷 Take photo"}
+            </button>
+          </div>
+
+          <input
+            ref={cameraInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            aria-label="Take an enquiry reference photo"
+            style={{ display: "none" }}
+            onChange={async (event) => {
+              const file = event.currentTarget.files ? firstUsefulFile(event.currentTarget.files) : null;
+              await handleFile(file);
+            }}
+          />
+
+          <span style={{ color: uploadStatus.includes("failed") || uploadStatus.includes("over 50MB") ? "#b42318" : "#475569", fontSize: 13, fontWeight: 700 }}>
+            {uploadStatus}
+          </span>
+
+          {pendingUploads.length > 0 ? (
+            <div className="tablet-photo-grid" style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 12 }}>
+              {pendingUploads.map((upload, index) => (
+                <article key={upload.id} style={{ overflow: "hidden", border: "1px solid #bfdbfe", borderRadius: 16, background: "#fff", display: "grid" }}>
+                  <img
+                    src={upload.fileUrl}
+                    alt={`Enquiry reference photo ${index + 1}`}
+                    style={{ display: "block", width: "100%", height: 190, objectFit: "cover", background: "#e2e8f0" }}
+                  />
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", padding: "10px 12px" }}>
+                    <span style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#334155", fontSize: 12, fontWeight: 750 }}>
+                      Photo {index + 1} {formatFileSize(upload.sizeBytes) ? `· ${formatFileSize(upload.sizeBytes)}` : ""}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setPendingUploads((current) => current.filter((item) => item.id !== upload.id))}
+                      style={{ border: "none", background: "transparent", color: "#b42318", fontWeight: 900, cursor: "pointer", padding: 4 }}
+                    >
+                      Remove
+                    </button>
+                  </div>
+                  {pendingUploadFields(upload)}
+                </article>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : (
         <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -285,31 +400,22 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
               <div key={upload.id} style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", border: "1px solid #e5e7eb", borderRadius: 12, padding: "7px 9px", background: "#fff" }}>
                 <span style={{ fontSize: 12, color: "#344054" }}>{upload.fileName} {formatFileSize(upload.sizeBytes) ? `· ${formatFileSize(upload.sizeBytes)}` : ""}</span>
                 <button type="button" onClick={() => setPendingUploads((current) => current.filter((item) => item.id !== upload.id))} style={{ border: "none", background: "transparent", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Remove</button>
-                <input type="hidden" name="pendingCorrespondenceFileName" value={upload.fileName} />
-                <input type="hidden" name="pendingCorrespondenceFileUrl" value={upload.fileUrl} />
-                <input type="hidden" name="pendingCorrespondenceStoragePath" value={upload.storagePath} />
-                <input type="hidden" name="pendingCorrespondenceMimeType" value={upload.mimeType} />
-                <input type="hidden" name="pendingCorrespondenceSizeBytes" value={String(upload.sizeBytes)} />
-                <input type="hidden" name="pendingCorrespondencePreviewKind" value={upload.preview.previewKind} />
-                <input type="hidden" name="pendingCorrespondenceEmailSubject" value={upload.preview.emailSubject} />
-                <input type="hidden" name="pendingCorrespondenceEmailFrom" value={upload.preview.emailFrom} />
-                <input type="hidden" name="pendingCorrespondenceEmailTo" value={upload.preview.emailTo} />
-                <input type="hidden" name="pendingCorrespondenceEmailDate" value={upload.preview.emailDate} />
-                <input type="hidden" name="pendingCorrespondenceBodyPreview" value={upload.preview.bodyPreview} />
+                {pendingUploadFields(upload)}
               </div>
             ))}
           </div>
         ) : null}
-      </div>
-      ) : null}
+        </div>
+      )}
 
       <button
         type="submit"
+        disabled={isUploading}
         style={isTablet
-          ? { ...buttonStyle, minHeight: 66, borderRadius: 18, fontSize: 20, background: "#155eef", boxShadow: "0 12px 28px rgba(21, 94, 239, 0.24)" }
-          : buttonStyle}
+          ? { ...buttonStyle, minHeight: 66, borderRadius: 18, fontSize: 20, background: "#155eef", boxShadow: "0 12px 28px rgba(21, 94, 239, 0.24)", opacity: isUploading ? 0.65 : 1, cursor: isUploading ? "wait" : "pointer" }
+          : { ...buttonStyle, opacity: isUploading ? 0.65 : 1, cursor: isUploading ? "wait" : "pointer" }}
       >
-        Create enquiry
+        {isUploading ? (isTablet ? "Uploading photo…" : "Uploading attachment…") : "Create enquiry"}
       </button>
     </form>
   );
