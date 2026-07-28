@@ -67,7 +67,7 @@ export default async function ProcessesPage({
   return (
     <main style={{ display: "grid", gap: 22 }}>
       <header>
-        <div style={eyebrow}>Settings · production resources</div>
+        <div style={eyebrow}>Settings · advanced production setup</div>
         <h1 style={{ margin: "6px 0", fontSize: 38 }}>Production steps</h1>
         <p style={{ margin: 0, maxWidth: 960, color: "#64748b", lineHeight: 1.6 }}>
           A production step is one thing that happens to a job—such as print, laminate, trim, eyelet, pack or install. Manufacturing methods combine these steps in the order the work is completed.

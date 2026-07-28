@@ -13,7 +13,7 @@ The main app workflow is intentionally focused on:
 - Quotes
 - Integrations
 
-Materials are purchased stock from suppliers. Products are sellable items. Product setup happens inside the Products page through product details, components and options. Components consume materials and labour; options drive quoting choices such as finished size, sides, laminate, cello, binding, cover colour, tape colour, duplicate/triplicate copies and copy colours.
+Materials are purchased stock from suppliers. Products are sellable items. Normal product setup happens inside the five-tab Product editor. The Build tab now combines the material, ordered production actions, optional machine/labour resources and customer choices on one page. Technical Production Steps and Manufacturing Methods remain available under Settings for advanced maintenance.
 
 Tax code defaults to `GST` for products and is not shown on product creation.
 

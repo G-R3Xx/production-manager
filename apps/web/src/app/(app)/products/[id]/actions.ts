@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
+import { saveProductProductionFlow, type ProductProductionFlowStepInput } from "@/server/productionResources";
 import {
   getProductById,
   touchProductWebsiteSync,
@@ -53,6 +54,50 @@ export async function saveProductBuildAction(formData: FormData) {
   revalidatePath("/products");
   revalidatePath(`/products/${productId}`);
   redirect(`/products/${productId}?tab=build&message=Build%20method%20saved`);
+}
+
+function parseProductionFlowSteps(value: string): ProductProductionFlowStepInput[] {
+  if (!value) return [];
+  const parsed: unknown = JSON.parse(value);
+  if (!Array.isArray(parsed)) throw new Error("The production workflow is invalid.");
+  return parsed.flatMap((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
+    const row = entry as Record<string, unknown>;
+    const processToken = String(row.processToken ?? "").trim();
+    if (!processToken) return [];
+    return [{
+      processToken,
+      machineId: String(row.machineId ?? "").trim() || null,
+      labourOperationId: String(row.labourOperationId ?? "").trim() || null
+    }];
+  });
+}
+
+export async function saveSimpleProductProductionFlowAction(formData: FormData) {
+  const productId = read(formData, "productId");
+  const { tenant, product } = await context(productId);
+
+  try {
+    const steps = parseProductionFlowSteps(read(formData, "flowJson"));
+    await saveProductProductionFlow({
+      tenantId: tenant.tenantId,
+      productId,
+      productName: product.name,
+      department: product.department,
+      materialId: read(formData, "materialId") || null,
+      steps
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The production workflow could not be saved.";
+    redirect(`/products/${productId}?tab=build&error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/products");
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/manufacturing-methods");
+  revalidatePath("/processes");
+  revalidatePath("/integrations/wordpress");
+  redirect(`/products/${productId}?tab=build&message=Production%20workflow%20saved%20and%20pricing%20updated`);
 }
 
 export async function saveProductWebsiteAction(formData: FormData) {

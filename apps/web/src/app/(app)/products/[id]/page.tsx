@@ -4,12 +4,19 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getConfiguratorTemplateById } from "@/server/configurators";
 import { getProductById } from "@/server/products";
-import { listRecipesForTenant, previewRecipeCost } from "@/server/productionResources";
+import { listMaterialsForTenant } from "@/server/materials";
+import {
+  listLabourForTenant,
+  listMachinesForTenant,
+  listProcessesForTenant,
+  listRecipesForTenant,
+  previewRecipeCost
+} from "@/server/productionResources";
+import { ProductProductionFlowBuilder } from "./ProductProductionFlowBuilder";
 import {
   addSimpleProductQuestionAction,
   deleteSimpleProductQuestionAction,
   moveSimpleProductQuestionAction,
-  saveProductBuildAction,
   saveProductGeneralAction,
   saveProductWebsiteAction,
   updateSimpleProductQuestionAction
@@ -21,6 +28,7 @@ const asObject = (value: unknown): Record<string, any> => value && typeof value 
 const asArray = (value: unknown): any[] => Array.isArray(value) ? value : [];
 const card = { border: "1px solid #dbe4f0", borderRadius: 20, padding: 21, background: "#fff", boxShadow: "0 10px 30px rgba(15,23,42,.05)" };
 const input = { width: "100%", minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", boxSizing: "border-box" as const, background: "#fff" };
+const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" });
 const tabs = [
   ["general", "General"], ["build", "Build"], ["pricing", "Pricing"], ["website", "Website"], ["preview", "Preview"]
 ] as const;
@@ -56,21 +64,52 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!tenant) redirect("/bootstrap");
   const [{ id }, query] = await Promise.all([params, searchParams ?? Promise.resolve({})]);
-  const [product, recipes] = await Promise.all([getProductById(tenant.tenantId, id), listRecipesForTenant(tenant.tenantId)]);
+  const product = await getProductById(tenant.tenantId, id);
   if (!product) notFound();
+
+  const requestedTab = read(query, "tab") || "general";
+  const tab = tabs.some(([value]) => value === requestedTab) ? requestedTab : "general";
   const template = product.defaultTemplateId ? await getConfiguratorTemplateById(tenant.tenantId, product.defaultTemplateId).catch(() => null) : null;
   const definition = asObject(template?.definitionJson);
   const fields = asArray(definition.fields);
   const components = asArray(definition.components);
   const config = asObject(product.websiteConfigJson);
-  const requestedTab = read(query, "tab") || "general";
-  const tab = tabs.some(([value]) => value === requestedTab) ? requestedTab : "general";
   const message = read(query, "message");
   const error = read(query, "error");
   const width = Math.max(1, Number(read(query, "width") || config.defaultWidthMm || 600));
   const height = Math.max(1, Number(read(query, "height") || config.defaultHeightMm || 450));
   const quantity = Math.max(1, Number(read(query, "quantity") || config.defaultQuantity || 1));
-  const pricingPreview = tab === "pricing" && product.productionRecipeId
+
+  let recipes: Awaited<ReturnType<typeof listRecipesForTenant>> = [];
+  let materials: Awaited<ReturnType<typeof listMaterialsForTenant>> = [];
+  let processes: Awaited<ReturnType<typeof listProcessesForTenant>> = [];
+  let machines: Awaited<ReturnType<typeof listMachinesForTenant>> = [];
+  let labour: Awaited<ReturnType<typeof listLabourForTenant>> = [];
+  if (tab === "build") {
+    [recipes, materials, processes, machines, labour] = await Promise.all([
+      listRecipesForTenant(tenant.tenantId),
+      listMaterialsForTenant(tenant.tenantId),
+      listProcessesForTenant(tenant.tenantId),
+      listMachinesForTenant(tenant.tenantId),
+      listLabourForTenant(tenant.tenantId)
+    ]);
+  }
+  const currentRecipe = recipes.find((recipe) => recipe.id === product.productionRecipeId) ?? null;
+  const currentProcessSteps = currentRecipe?.processSteps.length
+    ? currentRecipe.processSteps
+    : currentRecipe?.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null })) ?? [];
+  const initialProductionSteps = currentProcessSteps.flatMap((step) => {
+    const process = processes.find((item) => item.id === step.processId);
+    if (!process) return [];
+    return [{
+      processToken: process.id,
+      name: process.name,
+      processType: process.processType,
+      machineId: step.machineId,
+      labourOperationId: step.labourOperationId
+    }];
+  });
+  const pricingPreview = (tab === "pricing" || tab === "build") && product.productionRecipeId
     ? await previewRecipeCost(tenant.tenantId, product.productionRecipeId, width, height, quantity).catch(() => null)
     : null;
 
@@ -110,11 +149,45 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     </section> : null}
 
     {tab === "build" ? <section style={{ display: "grid", gap: 16 }}>
-      <div style={card}><h2 style={{ marginTop: 0 }}>Build</h2><p style={{ color:"#64748b",lineHeight:1.6 }}>Choose the manufacturing method that resolves materials, machines, labour and costing. Customer questions remain visual cards instead of exposing production resources.</p>
-        <form action={saveProductBuildAction} style={{ display:"grid",gridTemplateColumns:"minmax(280px,1fr) auto",gap:10,alignItems:"end" }}><input type="hidden" name="productId" value={product.id}/><label style={{ display:"grid",gap:7,fontWeight:850 }}>Manufacturing method<select name="productionRecipeId" defaultValue={product.productionRecipeId ?? ""} style={input}><option value="">No manufacturing method</option>{recipes.filter(recipe=>recipe.active).map(recipe=><option key={recipe.id} value={recipe.id}>{recipe.name} · {recipe.department}</option>)}</select></label><button style={{ minHeight:44,border:0,borderRadius:11,background:"#0f766e",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Save build</button></form>
-      </div>
+      <ProductProductionFlowBuilder
+        productId={product.id}
+        department={product.department}
+        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId).map((material) => ({
+          id: material.id,
+          name: material.name,
+          materialType: material.materialType,
+          materialGroup: material.materialGroup,
+          widthMm: material.widthMm,
+          lengthMm: material.lengthMm,
+          rollWidthMm: material.rollWidthMm
+        }))}
+        processes={processes.filter((process) => process.active || currentProcessSteps.some((step) => step.processId === process.id)).map((process) => ({
+          id: process.id,
+          name: process.name,
+          department: process.department,
+          processType: process.processType,
+          labourOperationId: process.labourOperationId,
+          labourOperationName: process.labourOperationName
+        }))}
+        machines={machines.filter((machine) => machine.active).map((machine) => ({ id: machine.id, name: machine.name, processIds: machine.processIds }))}
+        labour={labour.filter((item) => item.active).map((item) => ({ id: item.id, name: item.name, department: item.department, hourlyRate: item.hourlyRate }))}
+        initialMaterialId={currentRecipe?.materialId ?? ""}
+        initialSteps={initialProductionSteps}
+        preview={pricingPreview ? {
+          materialCost: pricingPreview.materialCost,
+          machineCost: pricingPreview.machineCost,
+          inkCost: pricingPreview.inkCost,
+          labourCost: pricingPreview.labourCost,
+          totalCost: pricingPreview.totalCost,
+          sellPrice: pricingPreview.sellPrice,
+          processBreakdown: pricingPreview.processBreakdown
+        } : null}
+        previewWidth={width}
+        previewHeight={height}
+        previewQuantity={quantity}
+      />
       <div style={card}>
-        <div style={{ display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",flexWrap:"wrap" }}><div><h2 style={{ margin:0 }}>Customer questions</h2><p style={{ margin:"6px 0 0",color:"#64748b" }}>Arrange the website-style questions customers answer. Detailed material triggers and legacy rules remain under Advanced setup.</p></div><Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration:"none",border:"1px solid #cbd5e1",color:"#334155",borderRadius:11,padding:"10px 14px",fontWeight:900 }}>Advanced rules</Link></div>
+        <div style={{ display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",flexWrap:"wrap" }}><div><div style={{ fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>Website and quoting</div><h2 style={{ margin:"5px 0 0" }}>What does the customer choose?</h2><p style={{ margin:"6px 0 0",color:"#64748b" }}>Arrange the website-style questions customers answer after the production workflow has been defined.</p></div><Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration:"none",border:"1px solid #cbd5e1",color:"#334155",borderRadius:11,padding:"10px 14px",fontWeight:900 }}>Advanced question rules</Link></div>
         <div style={{ display:"grid",gap:11,marginTop:16 }}>
           {fields.map((field,index)=><details key={field.id ?? index} open={fields.length <= 4} style={{ border:"1px solid #dbe4f0",borderRadius:15,background:"#f8fafc",overflow:"hidden" }}>
             <summary style={{ cursor:"pointer",padding:15,display:"flex",justifyContent:"space-between",gap:12,alignItems:"center",listStyle:"none" }}><span style={{ display:"flex",gap:11,alignItems:"center" }}><span style={{ width:29,height:29,borderRadius:999,display:"grid",placeItems:"center",background:"#2563eb",color:"#fff",fontSize:12,fontWeight:950 }}>{index+1}</span><span><b>{field.label}</b><span style={{ display:"block",fontSize:12,color:"#64748b",marginTop:2 }}>{String(field.type ?? "select").replace(/_/g," ")} · {asArray(field.options).length} choices {field.showWhen?.optionKey ? `· conditional` : ""}</span></span></span><span style={{ color:"#64748b",fontWeight:900 }}>Edit</span></summary>
@@ -149,10 +222,10 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     </section> : null}
 
     {tab === "pricing" ? <section style={{ display:"grid",gap:16 }}>
-      <div style={card}><h2 style={{ marginTop:0 }}>Pricing</h2><p style={{ color:"#64748b",lineHeight:1.6 }}>The same manufacturing method calculates internal cost and website price. There is no separate WordPress price table.</p>
-        {product.productionRecipeId ? <form method="get" style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr) auto",gap:10 }}><input type="hidden" name="tab" value="pricing"/><label style={{ display:"grid",gap:7,fontWeight:850 }}>Width mm<input name="width" type="number" defaultValue={width} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Height mm<input name="height" type="number" defaultValue={height} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Quantity<input name="quantity" type="number" defaultValue={quantity} style={input}/></label><button style={{ minHeight:44,alignSelf:"end",border:0,borderRadius:11,background:"#0f172a",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Calculate</button></form> : <div style={{ padding:16,borderRadius:14,background:"#fff7ed",border:"1px solid #fed7aa",color:"#9a3412" }}>Choose a manufacturing method on the Build tab first.</div>}
+      <div style={card}><h2 style={{ marginTop:0 }}>Pricing</h2><p style={{ color:"#64748b",lineHeight:1.6 }}>The production workflow saved on the Build tab calculates internal cost and website price. There is no separate WordPress price table.</p>
+        {product.productionRecipeId ? <form method="get" style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr) auto",gap:10 }}><input type="hidden" name="tab" value="pricing"/><label style={{ display:"grid",gap:7,fontWeight:850 }}>Width mm<input name="width" type="number" defaultValue={width} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Height mm<input name="height" type="number" defaultValue={height} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Quantity<input name="quantity" type="number" defaultValue={quantity} style={input}/></label><button style={{ minHeight:44,alignSelf:"end",border:0,borderRadius:11,background:"#0f172a",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Calculate</button></form> : <div style={{ padding:16,borderRadius:14,background:"#fff7ed",border:"1px solid #fed7aa",color:"#9a3412" }}>Choose the material and production actions on the Build tab first.</div>}
       </div>
-      {pricingPreview ? <div style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ display:"flex",justifyContent:"space-between",gap:14 }}><div><div style={{ fontSize:12,fontWeight:900,color:"#0f766e",textTransform:"uppercase" }}>Live shared calculation</div><h2 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h2></div><Link href="/manufacturing-methods" style={{ color:"#0f766e",fontWeight:900 }}>Edit manufacturing method →</Link></div><div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:9,marginTop:14 }}>{[["Material",pricingPreview.materialCost],["Machines",pricingPreview.machineCost],["Ink",pricingPreview.inkCost],["Labour",pricingPreview.labourCost],["Total cost",pricingPreview.totalCost],["Sell price",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ padding:13,borderRadius:12,background:"#fff",border:"1px solid #ccfbf1" }}><div style={{ fontSize:12,color:"#64748b" }}>{label}</div><div style={{ marginTop:5,fontSize:20,fontWeight:950 }}>${Number(value).toFixed(2)}</div></div>)}</div></div> : null}
+      {pricingPreview ? <div style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ display:"flex",justifyContent:"space-between",gap:14 }}><div><div style={{ fontSize:12,fontWeight:900,color:"#0f766e",textTransform:"uppercase" }}>Live shared calculation</div><h2 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h2></div><Link href="/manufacturing-methods" style={{ color:"#0f766e",fontWeight:900 }}>Advanced method details →</Link></div><div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:9,marginTop:14 }}>{[["Material",pricingPreview.materialCost],["Machines",pricingPreview.machineCost],["Ink",pricingPreview.inkCost],["Labour",pricingPreview.labourCost],["Total cost",pricingPreview.totalCost],["Sell price",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ padding:13,borderRadius:12,background:"#fff",border:"1px solid #ccfbf1" }}><div style={{ fontSize:12,color:"#64748b" }}>{label}</div><div style={{ marginTop:5,fontSize:20,fontWeight:950 }}>{aud.format(Number(value))}</div></div>)}</div></div> : null}
     </section> : null}
 
     {tab === "website" ? <section style={card}>
