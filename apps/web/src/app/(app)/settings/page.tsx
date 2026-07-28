@@ -12,7 +12,7 @@ const groups = [
     { href: "/manufacturing-methods", title: "Manufacturing methods", body: "Review the methods created by Products, or maintain unusual shared production workflows.", icon: "⌘" },
     { href: "/processes", title: "Production steps", body: "Maintain the reusable print, laminate, cut, pack and install actions available inside Products.", icon: "⇢" },
     { href: "/machines", title: "Machines", body: "Equipment, capabilities, speeds and operating costs.", icon: "⚙" },
-    { href: "/labour", title: "Labour & rates", body: "Reusable labour operations and costing rules.", icon: "◷" }
+    { href: "/labour", title: "Labour & rates", body: "Reusable labour time and cost rules entered in plain minutes.", icon: "◷" }
   ]},
   { title: "Connections", items: [
     { href: "/integrations", title: "MYOB & services", body: "MYOB, Install Scheduler and operational connections.", icon: "↔" },

@@ -1,10 +1,189 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listLabourForTenant } from "@/server/productionResources";
-import { createLabourAction,setLabourActiveAction,updateLabourAction } from "./actions";
-const card={border:"1px solid #dbe4f0",borderRadius:16,background:"#fff",padding:18,boxShadow:"0 10px 30px rgba(15,23,42,.06)"};
-const input={width:"100%",minHeight:42,border:"1px solid #cbd5e1",borderRadius:9,padding:"0 10px",background:"#fff"};
-const departments=["signage","small_format","plan_printing","poster_printing","general"];
-const bases=["fixed_minutes","per_sqm_hours","per_sheet_hours","per_linear_metre_hours","per_item_hours"];
-export default async function LabourPage(){const u=await getRequiredSessionUser();const t=await resolveActiveTenantForAuthUserId(u.id);if(!t)redirect("/bootstrap");const rows=await listLabourForTenant(t.tenantId);return <main style={{display:"grid",gap:20}}><header><div style={{fontSize:12,fontWeight:900,color:"#7c3aed",textTransform:"uppercase"}}>Production resources</div><h1 style={{margin:"6px 0",fontSize:36}}>Labour operations</h1><p style={{color:"#64748b"}}>Reusable setup, production, finishing and packing operations.</p></header><section style={card}><h2 style={{marginTop:0}}>Add labour operation</h2><form action={createLabourAction} style={{display:"grid",gridTemplateColumns:"2fr 1fr 1fr 1.3fr 1fr 1fr auto",gap:10,alignItems:"end"}}><label>Name<input name="name" style={input}/></label><label>Department<select name="department" style={input}>{departments.map(x=><option key={x}>{x}</option>)}</select></label><label>$/hr<input name="hourlyRate" type="number" step="0.01" style={input}/></label><label>Basis<select name="calculationBasis" style={input}>{bases.map(x=><option key={x} value={x}>{x.replaceAll("_"," ")}</option>)}</select></label><label>Value<input name="calculationValue" type="number" step="0.001" style={input}/></label><label>Min min<input name="minimumMinutes" type="number" step="0.1" style={input}/></label><button style={{minHeight:42,border:0,borderRadius:10,background:"#7c3aed",color:"#fff",fontWeight:900,padding:"0 16px"}}>Add</button></form></section><section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(320px,1fr))",gap:14}}>{rows.map(r=><article key={r.id} style={{...card,opacity:r.active?1:.6}}><div style={{display:"flex",justifyContent:"space-between",gap:12}}><div><h3 style={{margin:"0 0 6px"}}>{r.name}</h3><div style={{color:"#64748b"}}>{r.department.replaceAll("_"," ")}</div></div><div style={{display:"flex",gap:8,alignItems:"start"}}><details><summary style={{listStyle:"none",cursor:"pointer",border:"1px solid #94a3b8",borderRadius:9,background:"#fff",padding:"8px 10px",fontWeight:800}}>Edit</summary><div style={{position:"absolute",zIndex:20,right:24,marginTop:8,width:"min(720px,calc(100vw - 48px))",...card,boxShadow:"0 20px 60px rgba(15,23,42,.22)"}}><form action={updateLabourAction} style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}><input type="hidden" name="id" value={r.id}/><label style={{gridColumn:"span 2"}}>Name<input name="name" defaultValue={r.name} style={input}/></label><label>Department<select name="department" defaultValue={r.department} style={input}>{departments.map(x=><option key={x}>{x}</option>)}</select></label><label>$/hr<input name="hourlyRate" type="number" step="0.01" defaultValue={r.hourlyRate} style={input}/></label><label>Basis<select name="calculationBasis" defaultValue={r.calculationBasis} style={input}>{bases.map(x=><option key={x} value={x}>{x.replaceAll("_"," ")}</option>)}</select></label><label>Value<input name="calculationValue" type="number" step="0.001" defaultValue={r.calculationValue} style={input}/></label><label>Min min<input name="minimumMinutes" type="number" step="0.1" defaultValue={r.minimumMinutes} style={input}/></label><button style={{gridColumn:"1/-1",justifySelf:"start",minHeight:42,border:0,borderRadius:10,background:"#7c3aed",color:"#fff",fontWeight:900,padding:"0 18px"}}>Save changes</button></form></div></details><form action={setLabourActiveAction}><input type="hidden" name="id" value={r.id}/><input type="hidden" name="active" value={r.active?"false":"true"}/><button style={{border:"1px solid #cbd5e1",borderRadius:9,background:"#fff",padding:"8px 10px"}}>{r.active?"Archive":"Restore"}</button></form></div></div><div style={{marginTop:15,fontSize:14,display:"grid",gap:5}}><span><b>${r.hourlyRate}/hr</b></span><span>{r.calculationBasis.replaceAll("_"," ")} · {r.calculationValue}</span><span>Minimum {r.minimumMinutes} min</span></div></article>)}</section></main>}
+import { listLabourForTenant, type LabourRecord } from "@/server/productionResources";
+import { setLabourActiveAction } from "./actions";
+import { LabourOperationForm } from "./LabourOperationForm";
+import { labourBasisLabel, labourBasisUnit, storedLabourValueToMinutes, type LabourBasis } from "./labourConfig";
+import styles from "./labour.module.css";
+
+const DEPARTMENT_LABELS: Record<string, string> = {
+  signage: "Signage",
+  small_format: "Small format",
+  plan_printing: "Plan printing",
+  poster_printing: "Poster printing",
+  general: "General / shared"
+};
+
+function money(value: number): string {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  }).format(Number.isFinite(value) ? value : 0);
+}
+
+function number(value: number, decimals = 1): string {
+  return value.toFixed(decimals).replace(/\.0$/, "");
+}
+
+function operationSummary(row: LabourRecord) {
+  const rate = Math.max(0, Number(row.hourlyRate) || 0);
+  const minutes = Math.max(0, storedLabourValueToMinutes(row.calculationBasis, row.calculationValue));
+  const minimum = Math.max(0, Number(row.minimumMinutes) || 0);
+  const unitCost = minutes / 60 * rate;
+
+  return {
+    minutes,
+    minimum,
+    rate,
+    unitCost,
+    timeText: row.calculationBasis === "fixed_minutes"
+      ? `${number(minutes)} minutes per use`
+      : `${number(minutes)} minutes ${labourBasisUnit(row.calculationBasis)}`
+  };
+}
+
+function LabourOperationCard({ row }: { row: LabourRecord }) {
+  const summary = operationSummary(row);
+
+  return (
+    <article className={`${styles.operationCard} ${row.active ? "" : styles.operationCardArchived}`}>
+      <div className={styles.operationTop}>
+        <div>
+          <h3>{row.name}</h3>
+          <div className={styles.operationMeta}>
+            <span className={styles.metaPill}>{DEPARTMENT_LABELS[row.department] ?? row.department.replaceAll("_", " ")}</span>
+            <span className={styles.metaPill}>{labourBasisLabel(row.calculationBasis)}</span>
+            {!row.active ? <span className={styles.metaPill}>Archived</span> : null}
+          </div>
+        </div>
+        <div className={styles.operationActions}>
+          <form action={setLabourActiveAction}>
+            <input type="hidden" name="id" value={row.id} />
+            <input type="hidden" name="active" value={row.active ? "false" : "true"} />
+            <button className={styles.archiveButton}>{row.active ? "Archive" : "Restore"}</button>
+          </form>
+        </div>
+      </div>
+
+      <div className={styles.summaryLine}>
+        <div className={styles.summaryItem}>
+          <span>Hourly rate</span>
+          <strong>{money(summary.rate)}/hr</strong>
+        </div>
+        <div className={styles.summaryItem}>
+          <span>Time rule</span>
+          <strong>{summary.timeText}</strong>
+        </div>
+        <div className={styles.summaryItem}>
+          <span>{row.calculationBasis === "fixed_minutes" ? "Cost per use" : "Base unit cost before minimum"}</span>
+          <strong>{money(summary.unitCost)}{row.calculationBasis === "fixed_minutes" ? " per use" : ` ${labourBasisUnit(row.calculationBasis)}`}</strong>
+        </div>
+      </div>
+
+      {summary.minimum > 0 ? (
+        <p style={{ margin: "11px 0 0", color: "#64748b", fontSize: 13 }}>
+          Minimum charge: <strong style={{ color: "#334155" }}>{number(summary.minimum)} minutes ({money(summary.minimum / 60 * summary.rate)})</strong>
+        </p>
+      ) : null}
+
+      <details className={styles.editDetails}>
+        <summary>Edit operation</summary>
+        <div className={styles.editPanel}>
+          <LabourOperationForm
+            mode="edit"
+            initialValues={{
+              id: row.id,
+              name: row.name,
+              department: row.department,
+              hourlyRate: row.hourlyRate,
+              calculationBasis: row.calculationBasis as LabourBasis,
+              calculationValue: row.calculationValue,
+              minimumMinutes: row.minimumMinutes
+            }}
+          />
+        </div>
+      </details>
+    </article>
+  );
+}
+
+export default async function LabourPage({
+  searchParams
+}: {
+  searchParams?: Promise<{ message?: string; error?: string }>;
+}) {
+  const user = await getRequiredSessionUser();
+  const tenant = await resolveActiveTenantForAuthUserId(user.id);
+  if (!tenant) redirect("/bootstrap");
+
+  const params = searchParams ? await searchParams : {};
+  const rows = await listLabourForTenant(tenant.tenantId);
+  const activeRows = rows.filter((row) => row.active);
+  const archivedRows = rows.filter((row) => !row.active);
+
+  return (
+    <main className={styles.page}>
+      <header className={styles.header}>
+        <div className={styles.eyebrow}>Production resources</div>
+        <h1 className={styles.title}>Labour & time rates</h1>
+        <p className={styles.subtitle}>
+          Create reusable labour charges in plain minutes. Add them to production actions inside a Product; Production Manager then calculates the labour cost automatically.
+        </p>
+      </header>
+
+      {params.message ? <div className={styles.message}>{params.message}</div> : null}
+      {params.error ? <div className={styles.error}>{params.error}</div> : null}
+
+      <section className={styles.explainer}>
+        <div className={styles.explainerIcon}>1×</div>
+        <div>
+          <h2>Set each labour rule up once</h2>
+          <p>
+            Example: create “Mounting / application” at 15 minutes per m². You can then reuse it on Corflute, ACM, acrylic and other products without entering the rate again.
+          </p>
+        </div>
+      </section>
+
+      <section className={styles.card}>
+        <div className={styles.cardHeader}>
+          <div>
+            <h2>Add a labour operation</h2>
+            <p>Use a common template or build your own. The live example shows the actual charge before you save.</p>
+          </div>
+        </div>
+        <LabourOperationForm />
+      </section>
+
+      <section className={styles.operationList}>
+        <div className={styles.listHeader}>
+          <div>
+            <h2>Available labour operations</h2>
+            <p>These appear when assigning costing resources to a product’s production actions.</p>
+          </div>
+          <span className={styles.countPill}>{activeRows.length} active</span>
+        </div>
+
+        {activeRows.length ? activeRows.map((row) => <LabourOperationCard key={row.id} row={row} />) : (
+          <div className={styles.emptyState}>
+            <div>
+              <strong>No labour operations yet</strong>
+              <p>Start with one of the quick templates above.</p>
+            </div>
+          </div>
+        )}
+      </section>
+
+      {archivedRows.length ? (
+        <details className={styles.archivedSection}>
+          <summary>Archived labour operations ({archivedRows.length})</summary>
+          <div className={styles.operationList}>
+            {archivedRows.map((row) => <LabourOperationCard key={row.id} row={row} />)}
+          </div>
+        </details>
+      ) : null}
+    </main>
+  );
+}
