@@ -80,7 +80,8 @@ export const products = catalogSchema.table("products", {
   defaultTemplateId: uuid("default_template_id"),
   taxCode: varchar("tax_code", { length: 50 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  productionRecipeId: uuid("production_recipe_id")
 });
 
 export const configuratorTemplates = catalogSchema.table("configurator_templates", {
@@ -125,6 +126,54 @@ export const materials = catalogSchema.table("materials", {
   gsm: integer("gsm"),
   finish: varchar("finish", { length: 100 }),
   costJson: jsonb("cost_json").notNull().default({}),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const machines = catalogSchema.table("machines", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  machineType: varchar("machine_type", { length: 50 }).notNull().default("other"),
+  maxWidthMm: numeric("max_width_mm", { precision: 12, scale: 2 }),
+  speedValue: numeric("speed_value", { precision: 12, scale: 4 }).notNull().default("0"),
+  speedUom: varchar("speed_uom", { length: 40 }).notNull().default("sqm_per_hour"),
+  hourlyCost: numeric("hourly_cost", { precision: 12, scale: 2 }).notNull().default("0"),
+  setupMinutes: numeric("setup_minutes", { precision: 12, scale: 2 }).notNull().default("0"),
+  inkCostPerSqm: numeric("ink_cost_per_sqm", { precision: 12, scale: 2 }).notNull().default("0"),
+  capabilitiesJson: jsonb("capabilities_json").notNull().default({}),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const labourOperations = catalogSchema.table("labour_operations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  department: varchar("department", { length: 50 }).notNull().default("general"),
+  hourlyRate: numeric("hourly_rate", { precision: 12, scale: 2 }).notNull().default("0"),
+  calculationBasis: varchar("calculation_basis", { length: 40 }).notNull().default("fixed_minutes"),
+  calculationValue: numeric("calculation_value", { precision: 12, scale: 4 }).notNull().default("0"),
+  minimumMinutes: numeric("minimum_minutes", { precision: 12, scale: 2 }).notNull().default("0"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
+});
+
+export const productionRecipes = catalogSchema.table("production_recipes", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
+  name: varchar("name", { length: 200 }).notNull(),
+  department: varchar("department", { length: 50 }).notNull().default("general"),
+  materialId: uuid("material_id").references(() => materials.id, { onDelete: "set null" }),
+  machineId: uuid("machine_id").references(() => machines.id, { onDelete: "set null" }),
+  labourOperationIds: jsonb("labour_operation_ids").notNull().default([]),
+  wastePercent: numeric("waste_percent", { precision: 8, scale: 4 }).notNull().default("0"),
+  markupMultiplier: numeric("markup_multiplier", { precision: 8, scale: 4 }).notNull().default("1.5"),
+  profitMultiplier: numeric("profit_multiplier", { precision: 8, scale: 4 }).notNull().default("1.2"),
+  recipeJson: jsonb("recipe_json").notNull().default({}),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
