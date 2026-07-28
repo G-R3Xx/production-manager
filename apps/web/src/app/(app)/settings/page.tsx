@@ -9,7 +9,7 @@ const groups = [
     { href: "/suppliers", title: "Suppliers", body: "Supplier records used by materials and purchasing.", icon: "◫" }
   ]},
   { title: "Production resources", items: [
-    { href: "/processes", title: "Processes", body: "What must happen: print, laminate, cut, pack and install.", icon: "⇢" },
+    { href: "/processes", title: "Production steps", body: "Create the individual actions used by manufacturing methods: print, laminate, cut, pack and install.", icon: "⇢" },
     { href: "/machines", title: "Machines", body: "Equipment, capabilities, speeds and operating costs.", icon: "⚙" },
     { href: "/labour", title: "Labour & rates", body: "Reusable labour operations and costing rules.", icon: "◷" }
   ]},
