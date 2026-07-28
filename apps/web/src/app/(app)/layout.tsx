@@ -9,7 +9,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.07.28.01";
+const APP_VERSION = "V26.07.28.04";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -19,15 +19,10 @@ const navItems = [
   { href: "/artwork-approvals", label: "Artwork", emoji: "▧" },
   { href: "/production", label: "Production", emoji: "⚒" },
   { href: "/clients", label: "Clients", emoji: "◉" },
-  { href: "/suppliers", label: "Suppliers", emoji: "▣" },
   { href: "/materials", label: "Materials", emoji: "▥" },
-  { href: "/machines", label: "Machines", emoji: "⚙" },
-  { href: "/labour", label: "Labour", emoji: "◷" },
   { href: "/recipes", label: "Recipes", emoji: "⌘" },
   { href: "/products", label: "Products", emoji: "◇" },
-  { href: "/company", label: "Settings", emoji: "⚙" },
-  { href: "/users", label: "Staff & roles", emoji: "♙" },
-  { href: "/integrations", label: "Integrations", emoji: "↔" }
+  { href: "/settings", label: "Settings", emoji: "⚙" }
 ];
 
 export default async function AppLayout({ children }: AppLayoutProps) {

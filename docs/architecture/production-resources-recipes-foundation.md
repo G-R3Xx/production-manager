@@ -1,6 +1,6 @@
 # Production resources and recipes foundation
 
-Version: V26.07.28.01
+Version: V26.07.28.02
 
 This batch introduces tenant-scoped Machines, Labour Operations and Production Recipes while preserving existing materials, products, quoting and production workflows.
 
