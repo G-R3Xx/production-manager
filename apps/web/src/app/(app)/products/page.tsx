@@ -686,7 +686,7 @@ function BuilderHelpPanel() {
         </div>
       </div>
       <div style={whitePanelStyle}>
-        <strong>Common recipes</strong>
+        <strong>Common costing examples</strong>
         <RecipeLine label="ACM size" body="Parts per sheet, eg 600×900 = 8" />
         <RecipeLine label="Roll vinyl" body="Material from size, linked to roll stock" />
         <RecipeLine label="CMYK ink" body="$ per m², rate 10" />
@@ -1408,7 +1408,7 @@ function SpreadsheetRecipeRows({ selectedProduct, fields, components, materials 
 
       <section style={{ ...panelStyle, background: "#f8fafc", borderStyle: "dashed" }}>
         <div>
-          <h3 style={{ margin: 0, fontSize: 22 }}>Add a recipe row</h3>
+          <h3 style={{ margin: 0, fontSize: 22 }}>Add a costing row</h3>
           <p style={{ ...mutedStyle, marginTop: 4 }}>This now matches the spreadsheet idea: one row for each material, charge, labour line or outsourced item.</p>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(270px, 1fr))", gap: 12 }}>
@@ -2866,7 +2866,7 @@ function WorkflowProductBuilder({ selectedProduct, fields, components, materials
         </div>
       </div>
       <details style={{ margin: 18, marginTop: 0, ...whitePanelStyle }}>
-        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Advanced: edit raw quote questions / recipe rows</summary>
+        <summary style={{ cursor: "pointer", fontWeight: 950 }}>Advanced: edit raw quote questions / costing rows</summary>
         <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
           <QuoteQuestionsSpreadsheetPanel selectedProduct={selectedProduct} fields={fields} components={components} activeMaterials={materials} query={query} editOptionId={editOptionId} />
           <SpreadsheetRecipeRows selectedProduct={selectedProduct} fields={fields} components={components} materials={materials} />

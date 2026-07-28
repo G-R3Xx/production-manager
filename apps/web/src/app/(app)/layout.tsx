@@ -9,7 +9,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.07.28.04";
+const APP_VERSION = "V26.07.28.05";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -20,7 +20,7 @@ const navItems = [
   { href: "/production", label: "Production", emoji: "⚒" },
   { href: "/clients", label: "Clients", emoji: "◉" },
   { href: "/materials", label: "Materials", emoji: "▥" },
-  { href: "/recipes", label: "Recipes", emoji: "⌘" },
+  { href: "/manufacturing-methods", label: "Manufacturing Methods", emoji: "⌘" },
   { href: "/products", label: "Products", emoji: "◇" },
   { href: "/settings", label: "Settings", emoji: "⚙" }
 ];
