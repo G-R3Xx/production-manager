@@ -14,7 +14,8 @@ const groups = [
     { href: "/labour", title: "Labour & rates", body: "Reusable labour operations and costing rules.", icon: "◷" }
   ]},
   { title: "Connections", items: [
-    { href: "/integrations", title: "Integrations", body: "MYOB, Install Scheduler and external services.", icon: "↔" }
+    { href: "/integrations", title: "MYOB & services", body: "MYOB, Install Scheduler and operational connections.", icon: "↔" },
+    { href: "/integrations/wordpress", title: "WordPress & WooCommerce", body: "Publish products to the website and receive configured orders.", icon: "W" }
   ]}
 ];
 

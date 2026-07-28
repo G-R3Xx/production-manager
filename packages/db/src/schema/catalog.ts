@@ -6,6 +6,7 @@ import {
   pgEnum,
   pgSchema,
   timestamp,
+  text,
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
@@ -81,7 +82,17 @@ export const products = catalogSchema.table("products", {
   taxCode: varchar("tax_code", { length: 50 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-  productionRecipeId: uuid("production_recipe_id")
+  productionRecipeId: uuid("production_recipe_id"),
+  websiteEnabled: boolean("website_enabled").notNull().default(false),
+  websiteMode: varchar("website_mode", { length: 30 }).notNull().default("quote_only"),
+  websiteSlug: varchar("website_slug", { length: 200 }),
+  websiteCategory: varchar("website_category", { length: 200 }),
+  websiteShortDescription: text("website_short_description"),
+  websiteDescription: text("website_description"),
+  websiteImageUrl: text("website_image_url"),
+  websiteConfigJson: jsonb("website_config_json").notNull().default({}),
+  websiteSyncVersion: integer("website_sync_version").notNull().default(1),
+  websitePublishedAt: timestamp("website_published_at", { withTimezone: true })
 });
 
 export const configuratorTemplates = catalogSchema.table("configurator_templates", {

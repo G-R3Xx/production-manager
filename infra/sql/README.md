@@ -37,3 +37,5 @@ pnpm db:studio
 - `002_myob_token_exchange.sql` — adds tenant-scoped MYOB OAuth token storage for token exchange + callback persistence.
 
 - 014_suppliers_legacy_columns_fix.sql — repair migration for older app.suppliers tables missing contact/email/phone/status/notes fields.
+
+- `038_wordpress_product_publishing.sql` — adds website publishing fields to products, tenant-scoped WordPress API connections, and idempotent WooCommerce order tracking.

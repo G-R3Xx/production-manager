@@ -460,7 +460,7 @@ type ProductEditorTemplateInput = {
 
 async function getEditableDefinition(input: ProductEditorTemplateInput) {
   const product = await getProductById(input.tenantId, input.productId);
-  if (!product) redirect("/products?error=Product%20not%20found");
+  if (!product) redirect("/products/advanced?error=Product%20not%20found");
 
   const template = await ensureProductEditorTemplate({
     tenantId: input.tenantId,
@@ -523,7 +523,7 @@ export async function createProductAction(formData: FormData) {
     await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, makeQuoteBehaviour(starterType, baseMaterialId, baseUsage));
   }
 
-  redirect(`/products?selected=${created.id}&message=Base%20product%20created`);
+  redirect(`/products/${created.id}?message=Base%20product%20created`);
 }
 
 export async function updateProductAction(formData: FormData) {
@@ -536,7 +536,7 @@ export async function updateProductAction(formData: FormData) {
   const status = readString(formData, "status") || "draft";
   const defaultTemplateId = readString(formData, "defaultTemplateId");
 
-  if (!productId || !name) redirect("/products?error=Product%20selection%20and%20name%20are%20required");
+  if (!productId || !name) redirect("/products/advanced?error=Product%20selection%20and%20name%20are%20required");
 
   await updateProduct(activeTenant.tenantId, productId, {
     sku: sku || null,
@@ -548,7 +548,7 @@ export async function updateProductAction(formData: FormData) {
     taxCode: "GST"
   });
 
-  redirect(`/products?selected=${productId}&message=Product%20details%20updated`);
+  redirect(`/products/advanced?selected=${productId}&message=Product%20details%20updated`);
 }
 
 export async function applyQuoteBehaviourPresetAction(formData: FormData) {
@@ -558,7 +558,7 @@ export async function applyQuoteBehaviourPresetAction(formData: FormData) {
   const baseMaterialId = readString(formData, "baseMaterialId") || null;
   const baseUsage = readString(formData, "baseUsage") || "part_sheet";
 
-  if (!productId) redirect("/products?error=No%20product%20selected");
+  if (!productId) redirect("/products/advanced?error=No%20product%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const next = makeQuoteBehaviour(starterType, baseMaterialId, baseUsage);
@@ -572,14 +572,14 @@ export async function applyQuoteBehaviourPresetAction(formData: FormData) {
     productKindLabel: starterName(starterType)
   });
 
-  redirect(`/products?selected=${productId}&message=Quote%20behaviour%20preset%20applied`);
+  redirect(`/products/advanced?selected=${productId}&message=Quote%20behaviour%20preset%20applied`);
 }
 
 export async function addProductComponentAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
 
-  if (!productId) redirect("/products?error=No%20product%20selected");
+  if (!productId) redirect("/products/advanced?error=No%20product%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const nextComponent = buildComponentFromForm(formData);
@@ -589,7 +589,7 @@ export async function addProductComponentAction(formData: FormData) {
     components: [...definition.components, nextComponent]
   });
 
-  redirect(`/products?selected=${productId}&message=Component%20added`);
+  redirect(`/products/advanced?selected=${productId}&message=Component%20added`);
 }
 
 export async function addProductOptionAction(formData: FormData) {
@@ -597,8 +597,8 @@ export async function addProductOptionAction(formData: FormData) {
   const productId = readString(formData, "productId");
   const label = readString(formData, "label") || readString(formData, "questionLabel");
 
-  if (!productId) redirect("/products?error=No%20product%20selected");
-  if (!label) redirect(`/products?selected=${productId}&error=Question%20name%20is%20required`);
+  if (!productId) redirect("/products/advanced?error=No%20product%20selected");
+  if (!label) redirect(`/products/advanced?selected=${productId}&error=Question%20name%20is%20required`);
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const nextField = buildFieldFromForm(formData);
@@ -620,7 +620,7 @@ export async function addProductOptionAction(formData: FormData) {
     components
   });
 
-  redirect(`/products?selected=${productId}&message=Quote%20option%20saved`);
+  redirect(`/products/advanced?selected=${productId}&message=Quote%20option%20saved`);
 }
 
 export async function addQuickProductQuestionAction(formData: FormData) {
@@ -630,15 +630,15 @@ export async function addQuickProductQuestionAction(formData: FormData) {
   const fallbackMaterialId = readString(formData, "fallbackMaterialId") || null;
   const preset = quickQuestionPresetDefinitions[presetKey];
 
-  if (!productId) redirect("/products?error=No%20product%20selected");
-  if (!preset) redirect(`/products?selected=${productId}&error=Question%20preset%20not%20found`);
+  if (!productId) redirect("/products/advanced?error=No%20product%20selected");
+  if (!preset) redirect(`/products/advanced?selected=${productId}&error=Question%20preset%20not%20found`);
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const fieldKey = preset.key;
   const alreadyExists = definition.fields.some((field: Record<string, any>) => String(field.key ?? "") === fieldKey);
 
   if (alreadyExists) {
-    redirect(`/products?selected=${productId}&message=${encodeURIComponent(`${preset.label} already added`)}`);
+    redirect(`/products/advanced?selected=${productId}&message=${encodeURIComponent(`${preset.label} already added`)}`);
   }
 
   const options = ["select", "size_select", "multi_select", "color", "yes_no"].includes(preset.type)
@@ -677,7 +677,7 @@ export async function addQuickProductQuestionAction(formData: FormData) {
     ]
   });
 
-  redirect(`/products?selected=${productId}&message=${encodeURIComponent(`${preset.label} question added`)}`);
+  redirect(`/products/advanced?selected=${productId}&message=${encodeURIComponent(`${preset.label} question added`)}`);
 }
 
 function quickQuestionComponents(preset: QuickQuestionPreset, field: Record<string, any>, fallbackMaterialId: string | null): Array<Record<string, any>> {
@@ -1416,7 +1416,7 @@ function redirectWorkflow(productId: string, query: string, step: string, messag
   if (query) params.set("q", query);
   if (step) params.set("step", step);
   params.set("message", message);
-  redirect(`/products?${params.toString()}`);
+  redirect(`/products/advanced?${params.toString()}`);
 }
 
 export async function saveProductWorkflowStepAction(formData: FormData) {
@@ -1426,8 +1426,8 @@ export async function saveProductWorkflowStepAction(formData: FormData) {
   const nextStep = readString(formData, "nextStep");
   const query = readString(formData, "query");
 
-  if (!productId) redirect("/products?error=No%20product%20selected");
-  if (!step) redirect(`/products?selected=${productId}&error=No%20workflow%20step%20selected`);
+  if (!productId) redirect("/products/advanced?error=No%20product%20selected");
+  if (!step) redirect(`/products/advanced?selected=${productId}&error=No%20workflow%20step%20selected`);
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   let fields = Array.isArray(definition.fields) ? [...definition.fields] : [];
@@ -1692,7 +1692,7 @@ export async function saveProductWorkflowStepAction(formData: FormData) {
     redirectWorkflow(productId, query, nextStep || "review", "Finishing choices saved");
   }
 
-  redirect(`/products?selected=${productId}&error=Unknown%20workflow%20step`);
+  redirect(`/products/advanced?selected=${productId}&error=Unknown%20workflow%20step`);
 }
 
 export async function updateProductOptionAction(formData: FormData) {
@@ -1701,13 +1701,13 @@ export async function updateProductOptionAction(formData: FormData) {
   const fieldId = readString(formData, "fieldId");
   const label = readString(formData, "label") || readString(formData, "questionLabel");
 
-  if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
-  if (!label) redirect(`/products?selected=${productId}&editOption=${fieldId}&error=Question%20name%20is%20required`);
+  if (!productId || !fieldId) redirect("/products/advanced?error=No%20quote%20choice%20selected");
+  if (!label) redirect(`/products/advanced?selected=${productId}&editOption=${fieldId}&error=Question%20name%20is%20required`);
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const existingField = definition.fields.find((field: Record<string, any>) => String(field.id ?? "") === fieldId);
 
-  if (!existingField) redirect(`/products?selected=${productId}&error=Quote%20choice%20not%20found`);
+  if (!existingField) redirect(`/products/advanced?selected=${productId}&error=Quote%20choice%20not%20found`);
 
   const nextField = buildFieldFromForm(formData, existingField);
   const oldKey = String(existingField.key ?? "");
@@ -1725,7 +1725,7 @@ export async function updateProductOptionAction(formData: FormData) {
     ]
   });
 
-  redirect(`/products?selected=${productId}&message=Quote%20choice%20updated`);
+  redirect(`/products/advanced?selected=${productId}&message=Quote%20choice%20updated`);
 }
 
 export async function deleteProductOptionAction(formData: FormData) {
@@ -1733,7 +1733,7 @@ export async function deleteProductOptionAction(formData: FormData) {
   const productId = readString(formData, "productId");
   const fieldId = readString(formData, "fieldId");
 
-  if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
+  if (!productId || !fieldId) redirect("/products/advanced?error=No%20quote%20choice%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const field = definition.fields.find((item: Record<string, any>) => String(item.id ?? "") === fieldId);
@@ -1744,7 +1744,7 @@ export async function deleteProductOptionAction(formData: FormData) {
     components: definition.components.filter((item: Record<string, any>) => !isLinkedToOptionKey(item, deletedKey))
   });
 
-  redirect(`/products?selected=${productId}&message=Quote%20choice%20removed`);
+  redirect(`/products/advanced?selected=${productId}&message=Quote%20choice%20removed`);
 }
 
 export async function moveProductOptionAction(formData: FormData) {
@@ -1753,7 +1753,7 @@ export async function moveProductOptionAction(formData: FormData) {
   const fieldId = readString(formData, "fieldId");
   const direction = readString(formData, "direction");
 
-  if (!productId || !fieldId) redirect("/products?error=No%20quote%20choice%20selected");
+  if (!productId || !fieldId) redirect("/products/advanced?error=No%20quote%20choice%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const fields = [...definition.fields];
@@ -1770,7 +1770,7 @@ export async function moveProductOptionAction(formData: FormData) {
     fields
   });
 
-  redirect(`/products?selected=${productId}&message=Quote%20choice%20moved`);
+  redirect(`/products/advanced?selected=${productId}&message=Quote%20choice%20moved`);
 }
 
 export async function updateProductComponentAction(formData: FormData) {
@@ -1778,12 +1778,12 @@ export async function updateProductComponentAction(formData: FormData) {
   const productId = readString(formData, "productId");
   const componentId = readString(formData, "componentId");
 
-  if (!productId || !componentId) redirect("/products?error=No%20material%20row%20selected");
+  if (!productId || !componentId) redirect("/products/advanced?error=No%20material%20row%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
   const existingComponent = definition.components.find((item: Record<string, any>) => String(item.id ?? "") === componentId);
 
-  if (!existingComponent) redirect(`/products?selected=${productId}&error=Material%20row%20not%20found`);
+  if (!existingComponent) redirect(`/products/advanced?selected=${productId}&error=Material%20row%20not%20found`);
 
   const nextComponent = buildComponentFromForm(formData, existingComponent);
 
@@ -1792,7 +1792,7 @@ export async function updateProductComponentAction(formData: FormData) {
     components: definition.components.map((item: Record<string, any>) => String(item.id ?? "") === componentId ? nextComponent : item)
   });
 
-  redirect(`/products?selected=${productId}&message=Material%20row%20updated`);
+  redirect(`/products/advanced?selected=${productId}&message=Material%20row%20updated`);
 }
 
 export async function deleteProductComponentAction(formData: FormData) {
@@ -1800,7 +1800,7 @@ export async function deleteProductComponentAction(formData: FormData) {
   const productId = readString(formData, "productId");
   const componentId = readString(formData, "componentId");
 
-  if (!productId || !componentId) redirect("/products?error=No%20material%20row%20selected");
+  if (!productId || !componentId) redirect("/products/advanced?error=No%20material%20row%20selected");
 
   const { template, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
 
@@ -1809,24 +1809,24 @@ export async function deleteProductComponentAction(formData: FormData) {
     components: definition.components.filter((item: Record<string, any>) => String(item.id ?? "") !== componentId)
   });
 
-  redirect(`/products?selected=${productId}&message=Material%20row%20removed`);
+  redirect(`/products/advanced?selected=${productId}&message=Material%20row%20removed`);
 }
 
 
 export async function deleteProductAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
-  if (!productId) redirect("/products?error=Choose%20a%20product%20to%20delete");
+  if (!productId) redirect("/products/advanced?error=Choose%20a%20product%20to%20delete");
 
   await setProductStatusForTenant(activeTenant.tenantId, productId, "deleted");
-  redirect("/products?message=Product%20deleted%20from%20the%20active%20list");
+  redirect("/products/advanced?message=Product%20deleted%20from%20the%20active%20list");
 }
 
 export async function restoreProductAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
-  if (!productId) redirect("/products?filter=deleted&error=Choose%20a%20product%20to%20restore");
+  if (!productId) redirect("/products/advanced?filter=deleted&error=Choose%20a%20product%20to%20restore");
 
   await setProductStatusForTenant(activeTenant.tenantId, productId, "draft");
-  redirect(`/products?selected=${productId}&message=Product%20restored`);
+  redirect(`/products/advanced?selected=${productId}&message=Product%20restored`);
 }

@@ -17,6 +17,18 @@ export type ProductRecord = {
   updatedAt: string;
   templateName: string | null;
   myobUid: string | null;
+  productionRecipeId: string | null;
+  productionRecipeName: string | null;
+  websiteEnabled: boolean;
+  websiteMode: string;
+  websiteSlug: string | null;
+  websiteCategory: string | null;
+  websiteShortDescription: string | null;
+  websiteDescription: string | null;
+  websiteImageUrl: string | null;
+  websiteConfigJson: Record<string, unknown>;
+  websiteSyncVersion: number;
+  websitePublishedAt: string | null;
 };
 
 export type ProductCreateInput = {
@@ -32,6 +44,26 @@ export type ProductCreateInput = {
 };
 
 const extendedDepartmentValues = new Set(["plan_printing", "poster_printing"]);
+let wordPressProductPublishingSchemaReady = false;
+
+export async function ensureWordPressProductPublishingSchema(): Promise<void> {
+  if (!process.env.DATABASE_URL || wordPressProductPublishingSchemaReady) return;
+  await pool.query(`
+    ALTER TABLE catalog.products
+      ADD COLUMN IF NOT EXISTS production_recipe_id uuid REFERENCES catalog.production_recipes(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS website_enabled boolean NOT NULL DEFAULT false,
+      ADD COLUMN IF NOT EXISTS website_mode varchar(30) NOT NULL DEFAULT 'quote_only',
+      ADD COLUMN IF NOT EXISTS website_slug varchar(200),
+      ADD COLUMN IF NOT EXISTS website_category varchar(200),
+      ADD COLUMN IF NOT EXISTS website_short_description text,
+      ADD COLUMN IF NOT EXISTS website_description text,
+      ADD COLUMN IF NOT EXISTS website_image_url text,
+      ADD COLUMN IF NOT EXISTS website_config_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS website_sync_version integer NOT NULL DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS website_published_at timestamptz
+  `);
+  wordPressProductPublishingSchemaReady = true;
+}
 
 async function ensureDepartmentEnumValue(department: string): Promise<void> {
   if (!extendedDepartmentValues.has(department)) return;
@@ -44,6 +76,7 @@ export async function listProductsForTenant(tenantId: string, options?: { includ
     return [];
   }
 
+  await ensureWordPressProductPublishingSchema();
   const result = await pool.query<ProductRecord>(
     `
       SELECT
@@ -60,9 +93,22 @@ export async function listProductsForTenant(tenantId: string, options?: { includ
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
         ct.name AS "templateName",
-        p.myob_uid AS "myobUid"
+        p.myob_uid AS "myobUid",
+        p.production_recipe_id AS "productionRecipeId",
+        pr.name AS "productionRecipeName",
+        p.website_enabled AS "websiteEnabled",
+        p.website_mode AS "websiteMode",
+        p.website_slug AS "websiteSlug",
+        p.website_category AS "websiteCategory",
+        p.website_short_description AS "websiteShortDescription",
+        p.website_description AS "websiteDescription",
+        p.website_image_url AS "websiteImageUrl",
+        p.website_config_json AS "websiteConfigJson",
+        p.website_sync_version AS "websiteSyncVersion",
+        p.website_published_at AS "websitePublishedAt"
       FROM catalog.products p
       LEFT JOIN catalog.configurator_templates ct ON ct.id = p.default_template_id
+      LEFT JOIN catalog.production_recipes pr ON pr.id = p.production_recipe_id
       WHERE p.tenant_id = $1
         AND ($2::boolean OR p.status::text <> 'deleted')
       ORDER BY p.name ASC, p.created_at DESC
@@ -78,6 +124,7 @@ export async function createProduct(input: ProductCreateInput): Promise<{ id: st
     throw new Error('DATABASE_URL is not configured');
   }
 
+  await ensureWordPressProductPublishingSchema();
   await ensureDepartmentEnumValue(input.department);
 
   const result = await pool.query<{ id: string }>(
@@ -123,6 +170,7 @@ export async function upsertImportedProduct(tenantId: string, input: {
   calculatorType?: string;
   payloadJson?: Record<string, unknown>;
 }): Promise<{ id: string }> {
+  await ensureWordPressProductPublishingSchema();
   await ensureDepartmentEnumValue(input.department ?? "general");
   const result = await pool.query<{ id: string }>(
     `
@@ -191,6 +239,7 @@ export async function getProductById(tenantId: string, productId: string): Promi
     return null;
   }
 
+  await ensureWordPressProductPublishingSchema();
   const result = await pool.query<ProductRecord>(
     `
       SELECT
@@ -207,9 +256,22 @@ export async function getProductById(tenantId: string, productId: string): Promi
         p.created_at AS "createdAt",
         p.updated_at AS "updatedAt",
         ct.name AS "templateName",
-        p.myob_uid AS "myobUid"
+        p.myob_uid AS "myobUid",
+        p.production_recipe_id AS "productionRecipeId",
+        pr.name AS "productionRecipeName",
+        p.website_enabled AS "websiteEnabled",
+        p.website_mode AS "websiteMode",
+        p.website_slug AS "websiteSlug",
+        p.website_category AS "websiteCategory",
+        p.website_short_description AS "websiteShortDescription",
+        p.website_description AS "websiteDescription",
+        p.website_image_url AS "websiteImageUrl",
+        p.website_config_json AS "websiteConfigJson",
+        p.website_sync_version AS "websiteSyncVersion",
+        p.website_published_at AS "websitePublishedAt"
       FROM catalog.products p
       LEFT JOIN catalog.configurator_templates ct ON ct.id = p.default_template_id
+      LEFT JOIN catalog.production_recipes pr ON pr.id = p.production_recipe_id
       WHERE p.tenant_id = $1 AND p.id = $2
       LIMIT 1
     `,
@@ -232,6 +294,7 @@ export async function updateProduct(tenantId: string, productId: string, input: 
     return;
   }
 
+  await ensureWordPressProductPublishingSchema();
   await ensureDepartmentEnumValue(input.department);
 
   await pool.query(
@@ -245,6 +308,7 @@ export async function updateProduct(tenantId: string, productId: string, input: 
         status = $7,
         default_template_id = $8,
         tax_code = $9,
+        website_sync_version = website_sync_version + 1,
         updated_at = now()
       WHERE tenant_id = $1 AND id = $2
     `,
@@ -285,6 +349,7 @@ export async function setProductStatusForTenant(tenantId: string, productId: str
     `
       UPDATE catalog.products
       SET status = $3,
+          website_sync_version = website_sync_version + 1,
           updated_at = now()
       WHERE tenant_id = $1 AND id = $2
     `,
@@ -301,6 +366,80 @@ export async function setProductStatusForTenant(tenantId: string, productId: str
     await ensureDeletedProductStatusValue();
     await updateStatus();
   }
+}
+
+export async function updateProductProductionRecipe(
+  tenantId: string,
+  productId: string,
+  productionRecipeId: string | null
+): Promise<void> {
+  await ensureWordPressProductPublishingSchema();
+  await pool.query(`
+    UPDATE catalog.products
+    SET production_recipe_id = $3::uuid,
+        website_sync_version = website_sync_version + 1,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, productId, productionRecipeId]);
+}
+
+export async function updateProductWebsitePublishing(
+  tenantId: string,
+  productId: string,
+  input: {
+    enabled: boolean;
+    mode: "live_checkout" | "quote_only";
+    slug: string | null;
+    category: string | null;
+    shortDescription: string | null;
+    description: string | null;
+    imageUrl: string | null;
+    configJson: Record<string, unknown>;
+  }
+): Promise<void> {
+  await ensureWordPressProductPublishingSchema();
+  await pool.query(`
+    UPDATE catalog.products
+    SET website_enabled = $3,
+        website_mode = $4,
+        website_slug = $5,
+        website_category = $6,
+        website_short_description = $7,
+        website_description = $8,
+        website_image_url = $9,
+        website_config_json = $10::jsonb,
+        website_sync_version = website_sync_version + 1,
+        website_published_at = CASE WHEN $3 THEN COALESCE(website_published_at, now()) ELSE website_published_at END,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [
+    tenantId,
+    productId,
+    input.enabled,
+    input.mode,
+    input.slug,
+    input.category,
+    input.shortDescription,
+    input.description,
+    input.imageUrl,
+    JSON.stringify(input.configJson ?? {})
+  ]);
+}
+
+
+export async function touchProductWebsiteSync(tenantId: string, productId: string): Promise<void> {
+  await ensureWordPressProductPublishingSchema();
+  await pool.query(`
+    UPDATE catalog.products
+    SET website_sync_version = website_sync_version + 1,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, productId]);
+}
+
+export async function listPublishedWebsiteProductsForTenant(tenantId: string): Promise<ProductRecord[]> {
+  const products = await listProductsForTenant(tenantId);
+  return products.filter((product) => product.websiteEnabled && product.status === "active");
 }
 
 export async function listProductsByTenantId(tenantId: string): Promise<ProductRecord[]> {
