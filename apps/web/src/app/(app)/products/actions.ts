@@ -523,7 +523,7 @@ export async function createProductAction(formData: FormData) {
     await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, makeQuoteBehaviour(starterType, baseMaterialId, baseUsage));
   }
 
-  redirect(`/products/${created.id}?message=Base%20product%20created`);
+  redirect(`/products/${created.id}?tab=build&message=Product%20created.%20Choose%20the%20material,%20size%20and%20normal%20production%20options.`);
 }
 
 export async function updateProductAction(formData: FormData) {

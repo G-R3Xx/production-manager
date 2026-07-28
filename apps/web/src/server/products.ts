@@ -427,6 +427,37 @@ export async function updateProductWebsitePublishing(
 }
 
 
+export async function updateProductInternalDefaults(
+  tenantId: string,
+  productId: string,
+  defaults: {
+    widthMm: number;
+    heightMm: number;
+    quantity: number;
+    deliveryMethod: string;
+    printMethod: string;
+  }
+): Promise<void> {
+  await ensureWordPressProductPublishingSchema();
+  await pool.query(`
+    UPDATE catalog.products
+    SET website_config_json = COALESCE(website_config_json, '{}'::jsonb) || $3::jsonb,
+        website_sync_version = website_sync_version + 1,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [
+    tenantId,
+    productId,
+    JSON.stringify({
+      defaultWidthMm: Math.max(1, Math.round(defaults.widthMm)),
+      defaultHeightMm: Math.max(1, Math.round(defaults.heightMm)),
+      defaultQuantity: Math.max(1, Math.round(defaults.quantity)),
+      internalDeliveryMethod: defaults.deliveryMethod || "pickup",
+      internalPrintMethod: defaults.printMethod || "none"
+    })
+  ]);
+}
+
 export async function touchProductWebsiteSync(tenantId: string, productId: string): Promise<void> {
   await ensureWordPressProductPublishingSchema();
   await pool.query(`

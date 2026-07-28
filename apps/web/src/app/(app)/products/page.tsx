@@ -11,7 +11,9 @@ const card = { border: "1px solid #dbe4f0", borderRadius: 19, background: "#fff"
 const input = { minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", background: "#fff", boxSizing: "border-box" as const };
 
 const starterTypes = [
-  ["sign_acm", "Rigid sign"], ["banner", "Banner"], ["roll_print", "Roll print / sticker"],
+  ["sign_acm", "Rigid sign — ACM"], ["sign_corflute", "Rigid sign — Corflute"],
+  ["sign_acrylic", "Rigid sign — Acrylic"], ["sign_pvc", "Rigid sign — PVC"],
+  ["banner", "Banner"], ["roll_print", "Roll print / sticker"],
   ["business_cards", "Business cards"], ["flyers", "Flyers / brochures"],
   ["books", "Books / pads"], ["carbon_books", "Duplicate / triplicate books"]
 ];
@@ -39,13 +41,12 @@ export default async function ProductsPage({ searchParams }: Props) {
   return <main style={{ display: "grid", gap: 20 }}>
     <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start" }}>
       <div>
-        <div style={{ fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>Single product source</div>
+        <div style={{ fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>Internal workflow first</div>
         <h1 style={{ margin: "7px 0", fontSize: 40, letterSpacing: "-.04em" }}>Products</h1>
-        <p style={{ margin: 0, color: "#64748b", maxWidth: 790, lineHeight: 1.6 }}>Create the product once. Production Manager controls the build, costing and website configuration; WordPress displays the published version.</p>
+        <p style={{ margin: 0, color: "#64748b", maxWidth: 790, lineHeight: 1.6 }}>Create a reusable product for fast quoting and clear production instructions. Website publishing is optional and stays out of the normal workflow.</p>
       </div>
       <div style={{ display: "flex", gap: 9 }}>
-        <Link href="/integrations/wordpress" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>WordPress connection</Link>
-        <Link href="/products/advanced" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>Advanced builder</Link>
+        <Link href="/products/advanced" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>Advanced product tools</Link>
       </div>
     </header>
 
@@ -53,9 +54,9 @@ export default async function ProductsPage({ searchParams }: Props) {
     {error ? <div style={{ padding: 13, borderRadius: 13, background: "#fff1f2", border: "1px solid #fecdd3", color: "#be123c", fontWeight: 850 }}>{error}</div> : null}
 
     <section style={{ ...card, padding: 18 }}>
-      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 900, textTransform: "uppercase" }}>Create product</div>
-      <form action={createProductAction} style={{ display: "grid", gridTemplateColumns: "minmax(220px,2fr) minmax(150px,1fr) minmax(190px,1.2fr) auto", gap: 10, marginTop: 10 }}>
-        <input name="name" placeholder="Product name" required style={input} />
+      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 900, textTransform: "uppercase" }}>Quick product creation</div><h2 style={{ margin: "5px 0 0" }}>What do you quote repeatedly?</h2><p style={{ margin: "6px 0 0", color: "#64748b" }}>Name it, choose the closest starting type, then set material, normal size, print and finishing on one screen.</p>
+      <form action={createProductAction} style={{ display: "grid", gridTemplateColumns: "minmax(220px,2fr) minmax(150px,1fr) minmax(230px,1.2fr) auto", gap: 10, marginTop: 16 }}>
+        <input name="name" placeholder="eg Corflute yard sign" required style={input} />
         <input name="sku" placeholder="SKU (optional)" style={input} />
         <select name="starterType" defaultValue="sign_acm" style={input}>{starterTypes.map(([value,label]) => <option key={value} value={value}>{label}</option>)}</select>
         <button style={{ minHeight: 44, border: 0, borderRadius: 12, background: "#2563eb", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer" }}>Create product</button>
@@ -66,7 +67,7 @@ export default async function ProductsPage({ searchParams }: Props) {
       <form method="get" style={{ display: "flex", gap: 8, flex: "1 1 460px" }}>
         <input name="q" defaultValue={read(params,"q")} placeholder="Search products" style={{ ...input, flex: 1 }} />
         <select name="status" defaultValue={status} style={input}>
-          <option value="current">Current products</option><option value="website">Published to website</option><option value="draft">Drafts</option><option value="deleted">Deleted</option><option value="all">All products</option>
+          <option value="current">Current products</option><option value="website">Also published online</option><option value="draft">Drafts</option><option value="deleted">Deleted</option><option value="all">All products</option>
         </select>
         <button style={{ ...input, padding: "0 16px", fontWeight: 850, cursor: "pointer" }}>Filter</button>
       </form>
@@ -80,11 +81,11 @@ export default async function ProductsPage({ searchParams }: Props) {
           <span style={{ borderRadius: 999, padding: "6px 9px", fontSize: 11, fontWeight: 950, background: product.status === "active" ? "#dcfce7" : product.status === "draft" ? "#fef3c7" : "#e2e8f0", color: product.status === "active" ? "#166534" : "#475569" }}>{product.status}</span>
         </div>
         <div style={{ display: "grid", gap: 7, color: "#475569", fontSize: 14 }}>
-          <span>Build: <b>{product.productionRecipeName || "Not linked"}</b></span>
-          <span>Website: <b>{product.websiteEnabled ? (product.websiteMode === "live_checkout" ? "Live checkout" : "Quote only") : "Hidden"}</b></span>
-          <span>Category: <b>{product.websiteCategory || product.productFamily.replace(/_/g," ")}</b></span>
+          <span>Production: <b>{product.productionRecipeName || "Setup not finished"}</b></span>
+          <span>Quote template: <b>{product.templateName || "Automatic starter"}</b></span>
+          <span>Online: <b>{product.websiteEnabled ? "Published as a bonus" : "Not published"}</b></span>
         </div>
-        <div style={{ color: "#2563eb", fontWeight: 900 }}>Open product editor →</div>
+        <div style={{ color: "#2563eb", fontWeight: 900 }}>Open Build & quote →</div>
       </Link>)}
       {products.length === 0 ? <div style={{ ...card, padding: 28, color: "#64748b" }}>No products match this view.</div> : null}
     </section>

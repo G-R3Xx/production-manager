@@ -11,6 +11,7 @@ import {
   getProductById,
   touchProductWebsiteSync,
   updateProduct,
+  updateProductInternalDefaults,
   updateProductProductionRecipe,
   updateProductWebsitePublishing
 } from "@/server/products";
@@ -71,6 +72,206 @@ function parseProductionFlowSteps(value: string): ProductProductionFlowStepInput
       labourOperationId: String(row.labourOperationId ?? "").trim() || null
     }];
   });
+}
+
+
+function safePositiveNumber(value: string, fallback: number): number {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : fallback;
+}
+
+function internalChoice(label: string, value: string, widthMm: number | null = null, heightMm: number | null = null) {
+  return {
+    id: randomUUID(),
+    label,
+    value,
+    priceDelta: "0.00",
+    widthMm: widthMm == null ? null : String(widthMm),
+    heightMm: heightMm == null ? null : String(heightMm)
+  };
+}
+
+function mergeInternalQuoteFields(
+  definition: Record<string, any>,
+  input: { width: number; height: number; quantity: number; printMethod: string; deliveryMethod: string }
+) {
+  const existingFields = Array.isArray(definition.fields) ? [...definition.fields] : [];
+  const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
+  const sizeValue = `${Math.round(input.width)}x${Math.round(input.height)}`;
+
+  const upsert = (key: string, create: () => Record<string, any>, update: (field: Record<string, any>) => Record<string, any>) => {
+    const index = byKey.get(key);
+    if (index == null) {
+      byKey.set(key, existingFields.length);
+      existingFields.push(create());
+      return;
+    }
+    existingFields[index] = update(existingFields[index] as Record<string, any>);
+  };
+
+  upsert("finished_size", () => ({
+    id: randomUUID(),
+    key: "finished_size",
+    label: "Size",
+    type: "size_select",
+    required: true,
+    defaultValue: sizeValue,
+    helpText: "Finished size used for quoting and material calculations.",
+    quoteOnly: true,
+    showWhen: null,
+    options: [
+      internalChoice(`${Math.round(input.width)} × ${Math.round(input.height)} mm`, sizeValue, input.width, input.height),
+      internalChoice("Custom size", "custom")
+    ],
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => {
+    const options = Array.isArray(field.options) ? [...field.options] : [];
+    const withoutDefault = options.filter((option: any) => String(option?.value ?? "") !== sizeValue);
+    return {
+      ...field,
+      label: field.label || "Size",
+      type: "size_select",
+      required: true,
+      defaultValue: sizeValue,
+      options: [internalChoice(`${Math.round(input.width)} × ${Math.round(input.height)} mm`, sizeValue, input.width, input.height), ...withoutDefault]
+    };
+  });
+
+  upsert("quantity", () => ({
+    id: randomUUID(),
+    key: "quantity",
+    label: "Quantity",
+    type: "quantity",
+    required: true,
+    defaultValue: String(Math.round(input.quantity)),
+    helpText: "Number of finished items being quoted.",
+    quoteOnly: true,
+    showWhen: null,
+    options: [],
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => ({ ...field, label: field.label || "Quantity", type: "quantity", required: true, defaultValue: String(Math.round(input.quantity)) }));
+
+  const quotePrintMethod = input.printMethod === "roll_print" ? "roll_stock" : input.printMethod;
+  if (input.printMethod !== "none" || byKey.has("print_method")) {
+    upsert("print_method", () => ({
+      id: randomUUID(),
+      key: "print_method",
+      label: "Print type",
+      type: "select",
+      required: true,
+      defaultValue: quotePrintMethod,
+      helpText: "Normal print method for this product.",
+      quoteOnly: true,
+      showWhen: null,
+      options: [
+        internalChoice("No print", "none"),
+        internalChoice("Direct print", "direct_print"),
+        internalChoice("Roll stock applied", "roll_stock")
+      ],
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => {
+      const options = Array.isArray(field.options) ? [...field.options] : [];
+      const requiredOptions = [
+        internalChoice("No print", "none"),
+        internalChoice("Direct print", "direct_print"),
+        internalChoice("Roll stock applied", "roll_stock")
+      ];
+      const values = new Set(options.map((option: any) => String(option?.value ?? "")));
+      return { ...field, defaultValue: quotePrintMethod, options: [...options, ...requiredOptions.filter((option) => !values.has(option.value))] };
+    });
+  }
+
+  upsert("delivery_method", () => ({
+    id: randomUUID(),
+    key: "delivery_method",
+    label: "How will the order be supplied?",
+    type: "select",
+    required: true,
+    defaultValue: input.deliveryMethod,
+    helpText: "Pickup, delivery or installation.",
+    quoteOnly: true,
+    showWhen: null,
+    options: [
+      internalChoice("Pickup", "pickup"),
+      internalChoice("Delivery", "delivery"),
+      internalChoice("Install", "install")
+    ],
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => {
+    const options = Array.isArray(field.options) ? [...field.options] : [];
+    const requiredOptions = [
+      internalChoice("Pickup", "pickup"),
+      internalChoice("Delivery", "delivery"),
+      internalChoice("Install", "install")
+    ];
+    const values = new Set(options.map((option: any) => String(option?.value ?? "")));
+    return { ...field, defaultValue: input.deliveryMethod, options: [...options, ...requiredOptions.filter((option) => !values.has(option.value))] };
+  });
+
+  return { ...definition, fields: existingFields };
+}
+
+export async function saveInternalProductSetupAction(formData: FormData) {
+  const productId = read(formData, "productId");
+  const { tenant, product } = await context(productId);
+  const width = safePositiveNumber(read(formData, "width"), 600);
+  const height = safePositiveNumber(read(formData, "height"), 450);
+  const quantity = Math.max(1, Math.round(safePositiveNumber(read(formData, "quantity"), 1)));
+  const deliveryMethod = ["pickup", "delivery", "install"].includes(read(formData, "deliveryMethod")) ? read(formData, "deliveryMethod") : "pickup";
+  const printMethod = ["none", "direct_print", "roll_print"].includes(read(formData, "printMethod")) ? read(formData, "printMethod") : "none";
+
+  try {
+    const steps = parseProductionFlowSteps(read(formData, "flowJson"));
+    await saveProductProductionFlow({
+      tenantId: tenant.tenantId,
+      productId,
+      productName: product.name,
+      department: product.department,
+      materialId: read(formData, "materialId") || null,
+      steps
+    });
+
+    const template = await ensureProductEditorTemplate({
+      tenantId: tenant.tenantId,
+      productId,
+      currentTemplateId: product.defaultTemplateId,
+      productName: product.name,
+      department: product.department,
+      productFamily: product.productFamily
+    });
+    const definition = template.definitionJson && typeof template.definitionJson === "object" && !Array.isArray(template.definitionJson)
+      ? template.definitionJson as Record<string, any>
+      : {};
+    await updateConfiguratorDefinitionJson(
+      tenant.tenantId,
+      template.id,
+      mergeInternalQuoteFields(definition, { width, height, quantity, printMethod, deliveryMethod })
+    );
+    await updateProductInternalDefaults(tenant.tenantId, productId, { widthMm: width, heightMm: height, quantity, deliveryMethod, printMethod });
+    const nextStatus = formData.get("makeActive") === "on" ? "active" : (product.status === "archived" ? "archived" : "draft");
+    if (nextStatus !== product.status || product.defaultTemplateId !== template.id) {
+      await updateProduct(tenant.tenantId, productId, {
+        sku: product.sku,
+        name: product.name,
+        department: product.department,
+        productFamily: product.productFamily,
+        status: nextStatus,
+        defaultTemplateId: template.id,
+        taxCode: product.taxCode ?? "GST"
+      });
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The product setup could not be saved.";
+    redirect(`/products/${productId}?tab=build&error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/products");
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/quotes");
+  revalidatePath("/manufacturing-methods");
+  revalidatePath("/processes");
+  revalidatePath("/integrations/wordpress");
+  redirect(`/products/${productId}?tab=build&message=Product%20saved%20and%20ready%20to%20quote`);
 }
 
 export async function saveSimpleProductProductionFlowAction(formData: FormData) {

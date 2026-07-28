@@ -324,7 +324,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.28.11",
+    version: "V26.07.28.12",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised
