@@ -1,5 +1,218 @@
-import {redirect} from "next/navigation";import {getRequiredSessionUser} from "@/server/auth/session";import {resolveActiveTenantForAuthUserId} from "@/server/bootstrap/activeTenant";import {listRecipesForTenant,listProcessesForTenant,previewRecipeCost} from "@/server/productionResources";import {listMaterialsForTenant} from "@/server/materials";import {createRecipeAction,updateRecipeAction,setRecipeActiveAction} from "./actions";
-const input={width:"100%",minHeight:42,border:"1px solid #cbd5e1",borderRadius:9,padding:"0 10px"};const card={border:"1px solid #dbe4f0",borderRadius:16,background:"#fff",padding:18,boxShadow:"0 8px 24px rgba(15,23,42,.05)"};const departments=["general","signage","print","plans","vehicle","display"];
-function Checks({rows,selected=[]}:{rows:any[];selected?:string[]}){return <div style={{display:"flex",flexWrap:"wrap",gap:9}}>{rows.map(x=><label key={x.id} style={{padding:"9px 12px",border:"1px solid #dbe4f0",borderRadius:10,background:"#f8fafc"}}><input type="checkbox" name="processIds" value={x.id} defaultChecked={selected.includes(x.id)}/> {x.name}</label>)}</div>}
-type Props={searchParams?:Promise<Record<string,string|string[]|undefined>>};const read=(p:any,k:string)=>Array.isArray(p[k])?p[k][0]:String(p[k]??"");
-export default async function ManufacturingMethodsPage({searchParams}:Props){const u=await getRequiredSessionUser();const t=await resolveActiveTenantForAuthUserId(u.id);if(!t)redirect("/bootstrap");const params=await searchParams??{};const [materials,processes,recipes]=await Promise.all([listMaterialsForTenant(t.tenantId),listProcessesForTenant(t.tenantId),listRecipesForTenant(t.tenantId)]);const previewId=read(params,"preview"),width=Number(read(params,"width")||600),height=Number(read(params,"height")||450),qty=Number(read(params,"qty")||10);const preview=previewId?await previewRecipeCost(t.tenantId,previewId,width,height,qty):null;return <main style={{display:"grid",gap:20}}><header><div style={{fontSize:12,fontWeight:900,color:"#0f766e",textTransform:"uppercase"}}>Shared costing engine</div><h1 style={{margin:"6px 0",fontSize:36}}>Manufacturing methods</h1><p style={{color:"#64748b"}}>A manufacturing method combines a material with ordered processes. Compatible machines are selected from the capabilities defined in Settings.</p></header><section style={card}><h2 style={{marginTop:0}}>Create manufacturing method</h2><form action={createRecipeAction} style={{display:"grid",gap:14}}><div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1.5fr repeat(3,.7fr)",gap:10}}><label>Name<input name="name" style={input}/></label><label>Department<select name="department" style={input}>{departments.map(x=><option key={x}>{x}</option>)}</select></label><label>Primary material<select name="materialId" style={input}><option value="">None</option>{materials.filter(x=>x.active).map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Waste %<input name="wastePercent" type="number" defaultValue="5" style={input}/></label><label>Markup<input name="markupMultiplier" type="number" defaultValue="1.5" style={input}/></label><label>Profit<input name="profitMultiplier" type="number" defaultValue="1.2" style={input}/></label></div><div><b>Processes, in the order shown</b><div style={{marginTop:8}}><Checks rows={processes.filter(x=>x.active)}/></div></div><button style={{justifySelf:"start",minHeight:42,border:0,borderRadius:10,background:"#0f766e",color:"#fff",fontWeight:900,padding:"0 18px"}}>Create manufacturing method</button></form></section>{preview&&<section style={{...card,borderColor:"#99f6e4",background:"#f0fdfa"}}><h2 style={{marginTop:0}}>Cost preview · {width} × {height} mm · Qty {qty}</h2><div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:10}}>{[["Area",`${preview.areaSqm} m²`],["Material",`$${preview.materialCost.toFixed(2)}`],["Machines",`$${preview.machineCost.toFixed(2)}`],["Ink",`$${preview.inkCost.toFixed(2)}`],["Labour",`$${preview.labourCost.toFixed(2)}`],["Sell",`$${preview.sellPrice.toFixed(2)}`]].map(([a,b])=><div key={a} style={{padding:14,borderRadius:12,background:"#fff",border:"1px solid #ccfbf1"}}><div style={{fontSize:12,color:"#64748b"}}>{a}</div><div style={{marginTop:5,fontSize:21,fontWeight:950}}>{b}</div></div>)}</div><div style={{marginTop:14,display:"grid",gap:7}}>{preview.processBreakdown?.map((x:any)=><div key={x.processName} style={{display:"flex",justifyContent:"space-between",padding:"8px 10px",background:"#fff",borderRadius:9}}><span><b>{x.processName}</b> · {x.machineName??"No compatible machine"}</span><span>Machine ${x.machineCost.toFixed(2)} · Ink ${x.inkCost.toFixed(2)} · Labour ${x.labourCost.toFixed(2)}</span></div>)}</div></section>}<section style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(390px,1fr))",gap:14}}>{recipes.map(r=><article key={r.id} style={{...card,opacity:r.active?1:.62,position:"relative"}}><div style={{display:"flex",justifyContent:"space-between",gap:10}}><div><h3 style={{margin:"0 0 6px",fontSize:22}}>{r.name}</h3><div style={{color:"#64748b"}}>{r.department}</div></div><div style={{display:"flex",gap:8}}><details><summary style={{listStyle:"none",cursor:"pointer",border:"1px solid #94a3b8",borderRadius:9,padding:"8px 10px",fontWeight:800}}>Edit</summary><div style={{position:"absolute",zIndex:20,right:18,marginTop:8,width:"min(850px,calc(100vw - 48px))",...card,boxShadow:"0 20px 60px rgba(15,23,42,.22)"}}><form action={updateRecipeAction} style={{display:"grid",gap:14}}><input type="hidden" name="id" value={r.id}/><div style={{display:"grid",gridTemplateColumns:"2fr 1fr 1.5fr repeat(3,.7fr)",gap:10}}><label>Name<input name="name" defaultValue={r.name} style={input}/></label><label>Department<select name="department" defaultValue={r.department} style={input}>{departments.map(x=><option key={x}>{x}</option>)}</select></label><label>Material<select name="materialId" defaultValue={r.materialId??""} style={input}><option value="">None</option>{materials.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}</select></label><label>Waste %<input name="wastePercent" type="number" defaultValue={r.wastePercent} style={input}/></label><label>Markup<input name="markupMultiplier" type="number" defaultValue={r.markupMultiplier} style={input}/></label><label>Profit<input name="profitMultiplier" type="number" defaultValue={r.profitMultiplier} style={input}/></label></div><Checks rows={processes} selected={r.processIds}/><button style={{justifySelf:"start",minHeight:42,border:0,borderRadius:10,background:"#0f766e",color:"#fff",fontWeight:900,padding:"0 18px"}}>Save changes</button></form></div></details><form action={setRecipeActiveAction}><input type="hidden" name="id" value={r.id}/><input type="hidden" name="active" value={r.active?"false":"true"}/><button style={{border:"1px solid #cbd5e1",borderRadius:9,background:"#fff",padding:"8px 10px"}}>{r.active?"Archive":"Restore"}</button></form></div></div><div style={{marginTop:15,display:"grid",gap:7,fontSize:14}}><span>Material <b>{r.materialName??"None"}</b></span><span>Processes <b>{r.processNames.length}</b>: {r.processNames.join(" → ")||"None"}</span><span>Waste {r.wastePercent}% · Markup ×{r.markupMultiplier} · Profit ×{r.profitMultiplier}</span></div><form method="get" style={{marginTop:16,display:"grid",gridTemplateColumns:"repeat(3,1fr) auto",gap:8}}><input type="hidden" name="preview" value={r.id}/><input name="width" type="number" defaultValue="600" style={input}/><input name="height" type="number" defaultValue="450" style={input}/><input name="qty" type="number" defaultValue="10" style={input}/><button style={{border:0,borderRadius:10,background:"#0f172a",color:"#fff",fontWeight:900,padding:"0 13px"}}>Preview</button></form></article>)}</section></main>}
+import Link from "next/link";
+import { redirect } from "next/navigation";
+import type { CSSProperties } from "react";
+import { getRequiredSessionUser } from "@/server/auth/session";
+import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
+import {
+  listLabourForTenant,
+  listMachinesForTenant,
+  listProcessesForTenant,
+  listRecipesForTenant,
+  previewRecipeCost
+} from "@/server/productionResources";
+import { listMaterialsForTenant } from "@/server/materials";
+import { createRecipeAction, setRecipeActiveAction, updateRecipeAction } from "./actions";
+import { ManufacturingMethodBuilder } from "./ManufacturingMethodBuilder";
+
+type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
+
+const card: CSSProperties = {
+  border: "1px solid #dbe4f0",
+  borderRadius: 18,
+  background: "#fff",
+  padding: 20,
+  boxShadow: "0 8px 24px rgba(15,23,42,.05)"
+};
+
+const input: CSSProperties = {
+  width: "100%",
+  minHeight: 42,
+  border: "1px solid #cbd5e1",
+  borderRadius: 10,
+  padding: "0 11px",
+  boxSizing: "border-box",
+  background: "#fff"
+};
+
+function read(params: Record<string, string | string[] | undefined>, key: string): string {
+  const value = params[key];
+  return Array.isArray(value) ? value[0] ?? "" : String(value ?? "");
+}
+
+function money(value: number): string {
+  return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(value);
+}
+
+function ReadinessCard({ label, count, ready, href, action }: { label: string; count: number; ready: boolean; href: string; action: string }) {
+  return (
+    <Link href={href} style={{ textDecoration: "none", color: "inherit", border: ready ? "1px solid #a7f3d0" : "1px solid #fed7aa", borderRadius: 14, padding: 14, background: ready ? "#f0fdf4" : "#fff7ed" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+        <strong>{label}</strong>
+        <span style={{ display: "grid", placeItems: "center", minWidth: 28, height: 28, borderRadius: 999, background: ready ? "#047857" : "#c2410c", color: "#fff", fontWeight: 950, fontSize: 12 }}>{count}</span>
+      </div>
+      <div style={{ marginTop: 6, color: ready ? "#166534" : "#9a3412", fontSize: 12, fontWeight: 800 }}>{ready ? "Ready" : action}</div>
+    </Link>
+  );
+}
+
+export default async function ManufacturingMethodsPage({ searchParams }: Props) {
+  const user = await getRequiredSessionUser();
+  const tenant = await resolveActiveTenantForAuthUserId(user.id);
+  if (!tenant) redirect("/bootstrap");
+
+  const params = (await searchParams) ?? {};
+  const [materials, processes, recipes, machines, labour] = await Promise.all([
+    listMaterialsForTenant(tenant.tenantId),
+    listProcessesForTenant(tenant.tenantId),
+    listRecipesForTenant(tenant.tenantId),
+    listMachinesForTenant(tenant.tenantId),
+    listLabourForTenant(tenant.tenantId)
+  ]);
+
+  const previewId = read(params, "preview");
+  const width = Math.max(1, Number(read(params, "width") || 600));
+  const height = Math.max(1, Number(read(params, "height") || 450));
+  const qty = Math.max(1, Number(read(params, "qty") || 10));
+  const preview = previewId ? await previewRecipeCost(tenant.tenantId, previewId, width, height, qty) : null;
+  const message = read(params, "message");
+  const error = read(params, "error");
+
+  const activeMaterials = materials.filter((row) => row.active);
+  const activeProcesses = processes.filter((row) => row.active);
+  const activeMachines = machines.filter((row) => row.active);
+  const activeLabour = labour.filter((row) => row.active);
+  const activeRecipes = recipes.filter((row) => row.active);
+  const archivedRecipes = recipes.filter((row) => !row.active);
+
+  return (
+    <main style={{ display: "grid", gap: 20 }}>
+      <header>
+        <div style={{ fontSize: 12, fontWeight: 900, color: "#0f766e", textTransform: "uppercase" }}>Shared costing engine</div>
+        <h1 style={{ margin: "6px 0", fontSize: 36 }}>Manufacturing methods</h1>
+        <p style={{ color: "#64748b", maxWidth: 950, lineHeight: 1.6 }}>A method is the reusable recipe behind a product: its main material, the production steps in order, and the pricing rules. Create it once, then select it in the Product Build tab so internal quotes and WordPress use the same calculation.</p>
+      </header>
+
+      {message ? <div style={{ padding: 14, borderRadius: 13, border: "1px solid #a7f3d0", background: "#f0fdf4", color: "#166534", fontWeight: 850 }}>{message}</div> : null}
+      {error ? <div style={{ padding: 14, borderRadius: 13, border: "1px solid #fecaca", background: "#fef2f2", color: "#b91c1c", fontWeight: 850 }}>{error}</div> : null}
+
+      <section style={{ ...card, background: "linear-gradient(135deg,#f0fdfa,#ffffff)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div style={{ maxWidth: 720 }}>
+            <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Before creating methods</div>
+            <h2 style={{ margin: "6px 0 4px" }}>Production setup readiness</h2>
+            <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Materials provide stock cost. Production Steps describe what happens. Machines and labour provide the running cost. You can create a basic method without every resource, but missing resources will show as $0 in the preview.</p>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(135px,1fr))", gap: 9, flex: "1 1 620px" }}>
+            <ReadinessCard label="Materials" count={activeMaterials.length} ready={activeMaterials.length > 0} href="/materials" action="Add materials" />
+            <ReadinessCard label="Production steps" count={activeProcesses.length} ready={activeProcesses.length > 0} href="/processes" action="Add steps" />
+            <ReadinessCard label="Machines" count={activeMachines.length} ready={activeMachines.length > 0} href="/machines" action="Add machines" />
+            <ReadinessCard label="Labour rates" count={activeLabour.length} ready={activeLabour.length > 0} href="/labour" action="Add labour" />
+          </div>
+        </div>
+      </section>
+
+      <section style={card}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Guided setup</div>
+            <h2 style={{ margin: "5px 0" }}>Create a manufacturing method</h2>
+            <p style={{ margin: 0, color: "#64748b" }}>Example: Corflute 5mm → Direct print → Trim → Eyelets.</p>
+          </div>
+          <span style={{ borderRadius: 999, background: "#e0f2fe", color: "#075985", padding: "7px 11px", fontSize: 12, fontWeight: 900 }}>{activeRecipes.length} active methods</span>
+        </div>
+        <ManufacturingMethodBuilder action={createRecipeAction} materials={materials} processes={processes} />
+      </section>
+
+      {preview ? (
+        <section style={{ ...card, borderColor: "#99f6e4", background: "#f0fdfa" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Test calculation</div>
+              <h2 style={{ margin: "5px 0" }}>{width} × {height} mm · Qty {qty}</h2>
+            </div>
+            <Link href="/manufacturing-methods" style={{ color: "#0f766e", fontWeight: 900 }}>Close preview</Link>
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginTop: 14 }}>
+            {[
+              ["Area", `${preview.areaSqm} m²`],
+              ["Material", money(preview.materialCost)],
+              ["Machines", money(preview.machineCost)],
+              ["Ink", money(preview.inkCost)],
+              ["Labour", money(preview.labourCost)],
+              ["Sell price", money(preview.sellPrice)]
+            ].map(([label, value]) => <div key={label} style={{ padding: 14, borderRadius: 12, background: "#fff", border: "1px solid #ccfbf1" }}><div style={{ fontSize: 12, color: "#64748b" }}>{label}</div><div style={{ marginTop: 5, fontSize: 21, fontWeight: 950 }}>{value}</div></div>)}
+          </div>
+          <div style={{ marginTop: 14, display: "grid", gap: 7 }}>
+            {preview.processBreakdown?.map((row: { processName: string; machineName: string | null; machineCost: number; inkCost: number; labourCost: number }) => (
+              <div key={row.processName} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: "10px 12px", background: "#fff", borderRadius: 10, flexWrap: "wrap" }}>
+                <span><b>{row.processName}</b> · {row.machineName ?? "No compatible machine"}</span>
+                <span>Machine {money(row.machineCost)} · Ink {money(row.inkCost)} · Labour {money(row.labourCost)}</span>
+              </div>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      <section style={{ display: "grid", gap: 13 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <div>
+            <h2 style={{ margin: 0 }}>Existing methods</h2>
+            <p style={{ margin: "5px 0 0", color: "#64748b" }}>Test a price, edit the guided recipe, or archive methods no longer used.</p>
+          </div>
+        </div>
+
+        {activeRecipes.length ? activeRecipes.map((recipe) => (
+          <article key={recipe.id} style={card}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+              <div>
+                <h3 style={{ margin: "0 0 5px", fontSize: 22 }}>{recipe.name}</h3>
+                <div style={{ color: "#64748b", textTransform: "capitalize" }}>{recipe.department}</div>
+              </div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <details>
+                  <summary style={{ listStyle: "none", cursor: "pointer", border: "1px solid #94a3b8", borderRadius: 10, padding: "9px 12px", fontWeight: 900 }}>Edit method</summary>
+                  <div style={{ marginTop: 12, borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
+                    <ManufacturingMethodBuilder action={updateRecipeAction} materials={materials} processes={processes} recipe={recipe} mode="edit" />
+                  </div>
+                </details>
+                <form action={setRecipeActiveAction}>
+                  <input type="hidden" name="id" value={recipe.id} />
+                  <input type="hidden" name="active" value="false" />
+                  <button style={{ minHeight: 40, border: "1px solid #fecaca", borderRadius: 10, background: "#fff", color: "#b42318", padding: "0 12px", fontWeight: 850, cursor: "pointer" }}>Archive</button>
+                </form>
+              </div>
+            </div>
+
+            <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+              <div><span style={{ color: "#64748b" }}>Material:</span> <b>{recipe.materialName ?? "No physical material"}</b></div>
+              <div><span style={{ color: "#64748b" }}>Production sequence:</span> <b>{recipe.processNames.join(" → ") || "No steps added"}</b></div>
+              <div style={{ color: "#64748b", fontSize: 13 }}>Waste {recipe.wastePercent}% · Markup ×{recipe.markupMultiplier} · Profit ×{recipe.profitMultiplier}</div>
+            </div>
+
+            <form method="get" style={{ marginTop: 16, display: "grid", gridTemplateColumns: "repeat(3,minmax(120px,1fr)) auto", gap: 9, alignItems: "end" }}>
+              <input type="hidden" name="preview" value={recipe.id} />
+              <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Width mm<input name="width" type="number" min="1" defaultValue="600" style={input} /></label>
+              <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Height mm<input name="height" type="number" min="1" defaultValue="450" style={input} /></label>
+              <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Quantity<input name="qty" type="number" min="1" defaultValue="10" style={input} /></label>
+              <button style={{ minHeight: 42, border: 0, borderRadius: 10, background: "#0f172a", color: "#fff", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>Test price</button>
+            </form>
+          </article>
+        )) : <div style={{ ...card, color: "#64748b" }}>No manufacturing methods yet. Use the guided builder above to create the first one.</div>}
+
+        {archivedRecipes.length ? (
+          <details style={card}>
+            <summary style={{ cursor: "pointer", fontWeight: 900 }}>Archived methods ({archivedRecipes.length})</summary>
+            <div style={{ display: "grid", gap: 9, marginTop: 14 }}>
+              {archivedRecipes.map((recipe) => (
+                <div key={recipe.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", border: "1px solid #e2e8f0", borderRadius: 12, padding: 12 }}>
+                  <div><strong>{recipe.name}</strong><div style={{ marginTop: 3, color: "#64748b", fontSize: 13 }}>{recipe.materialName ?? "No material"} · {recipe.processNames.join(" → ") || "No steps"}</div></div>
+                  <form action={setRecipeActiveAction}><input type="hidden" name="id" value={recipe.id} /><input type="hidden" name="active" value="true" /><button style={{ minHeight: 38, border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", padding: "0 12px", fontWeight: 850, cursor: "pointer" }}>Restore</button></form>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
+      </section>
+    </main>
+  );
+}
