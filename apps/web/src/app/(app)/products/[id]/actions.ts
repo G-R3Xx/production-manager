@@ -374,7 +374,7 @@ function mergeInternalQuoteFields(
     label: "Finishing",
     type: "multi_select",
     required: false,
-    defaultValue: input.finishings.join(","),
+    defaultValue: input.finishings,
     helpText: "Tick all finishing processes required. Eyelets ask for placement and quantity.",
     quoteOnly: true,
     showWhen: null,
@@ -386,11 +386,63 @@ function mergeInternalQuoteFields(
     label: "Finishing",
     type: "multi_select",
     required: false,
-    defaultValue: input.finishings.join(","),
+    defaultValue: input.finishings,
     helpText: "Tick all finishing processes required. Eyelets ask for placement and quantity.",
     meta: standardMeta(field),
     options: input.finishings.map((value) => internalChoice(finishingLabels[value] ?? value.replace(/_/g, " "), value))
   }));
+
+  if (input.finishings.includes("eyelets")) {
+    const websiteEyeletPresets = eyeletQuantityPresets(input.eyeletPreset || "four_corners");
+    upsert("eyelet_placement", () => ({
+      id: randomUUID(),
+      key: "eyelet_placement",
+      label: "Eyelet placement",
+      type: "select",
+      required: true,
+      defaultValue: input.eyeletPreset || "four_corners",
+      helpText: "Choose the same eyelet placement used by the internal Quick Quote builder.",
+      quoteOnly: true,
+      showWhen: { optionKey: "finishing", optionValues: ["eyelets"] },
+      meta: { source: "internal_product_setup", websiteVisible: true },
+      options: websiteEyeletPresets.map((preset) => internalChoice(preset.label, preset.value)),
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => ({
+      ...field,
+      label: "Eyelet placement",
+      type: "select",
+      required: true,
+      defaultValue: input.eyeletPreset || "four_corners",
+      helpText: "Choose the same eyelet placement used by the internal Quick Quote builder.",
+      showWhen: { optionKey: "finishing", optionValues: ["eyelets"] },
+      meta: standardMeta(field),
+      options: websiteEyeletPresets.map((preset) => internalChoice(preset.label, preset.value))
+    }));
+    upsert("eyelet_custom_quantity", () => ({
+      id: randomUUID(),
+      key: "eyelet_custom_quantity",
+      label: "Custom eyelet quantity",
+      type: "quantity",
+      required: true,
+      defaultValue: "4",
+      helpText: "Enter the total number of eyelets only when Custom placement is selected.",
+      quoteOnly: true,
+      showWhen: { optionKey: "eyelet_placement", optionValues: ["__custom"] },
+      meta: { source: "internal_product_setup", websiteVisible: true, minimum: 1, step: 1 },
+      options: [],
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => ({
+      ...field,
+      label: "Custom eyelet quantity",
+      type: "quantity",
+      required: true,
+      defaultValue: String(field.defaultValue || "4"),
+      helpText: "Enter the total number of eyelets only when Custom placement is selected.",
+      showWhen: { optionKey: "eyelet_placement", optionValues: ["__custom"] },
+      meta: standardMeta(field, { minimum: 1, step: 1 }),
+      options: []
+    }));
+  }
 
   let components = Array.isArray(definition.components) ? [...definition.components] : [];
   components = components.filter((rawComponent: any) => {
@@ -555,10 +607,11 @@ function mergeInternalQuoteFields(
     }
   }
 
-  const standardOrder = ["finished_size", "quantity", "print_method", "ink", "laminate", "finishing", "delivery_method"];
+  const standardOrder = ["finished_size", "quantity", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
+    .filter((field: any) => input.finishings.includes("eyelets") || !["eyelet_placement", "eyelet_custom_quantity"].includes(String(field?.key ?? "")))
     .map((field: any, index: number) => ({ field, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex.get(String(left.field?.key ?? ""));

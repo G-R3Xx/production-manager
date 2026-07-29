@@ -1,4 +1,4 @@
-# Production Manager V26.07.29.03
+# Production Manager V26.07.29.04
 
 ## Default instant Guided Product Builder
 
@@ -12,6 +12,6 @@
 - Existing products and legacy roll-print values are normalised into the new builder.
 - Advanced product rules and uncommon production sequences remain available through Advanced setup.
 - Website publishing remains optional and uses the same saved quote fields.
-- Updated visible application and WordPress catalogue version to `V26.07.29.03`.
+- Updated visible application and WordPress catalogue version to `V26.07.29.04`.
 
 No database migration is required.
