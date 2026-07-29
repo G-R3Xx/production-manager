@@ -98,12 +98,20 @@ function parseStringArrayJson(value: string): string[] {
   }
 }
 
-function internalChoice(label: string, value: string, widthMm: number | null = null, heightMm: number | null = null) {
+function internalChoice(
+  label: string,
+  value: string,
+  widthMm: number | null = null,
+  heightMm: number | null = null,
+  priceDelta = 0,
+  quoteRequired = false
+) {
   return {
     id: randomUUID(),
     label,
     value,
-    priceDelta: "0.00",
+    priceDelta: Number.isFinite(priceDelta) ? priceDelta.toFixed(2) : "0.00",
+    quoteRequired,
     widthMm: widthMm == null ? null : String(widthMm),
     heightMm: heightMm == null ? null : String(heightMm)
   };
@@ -143,6 +151,9 @@ function mergeInternalQuoteFields(
     rollMediaName: string | null;
     inkChoices: string[];
     defaultInk: string;
+    artworkOptions: string[];
+    defaultArtwork: string;
+    artworkCheckPrice: number;
     deliveryMethod: string;
     finishings: string[];
     laminateMaterialIds: string[];
@@ -153,7 +164,10 @@ function mergeInternalQuoteFields(
     eyeletPreset: string;
   }
 ) {
-  const existingFields = Array.isArray(definition.fields) ? [...definition.fields] : [];
+  // Quantity is controlled by WooCommerce and by the quote line itself. Remove
+  // the old generated quantity question so it cannot appear twice.
+  const existingFields = (Array.isArray(definition.fields) ? [...definition.fields] : [])
+    .filter((field: any) => String(field?.key ?? "") !== "quantity");
   const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
   const sizeValue = `${Math.round(input.width)}x${Math.round(input.height)}`;
   const standardMeta = (field: Record<string, any>, extra: Record<string, unknown> = {}) => ({
@@ -211,29 +225,6 @@ function mergeInternalQuoteFields(
     };
   });
 
-  upsert("quantity", () => ({
-    id: randomUUID(),
-    key: "quantity",
-    label: "Quantity",
-    type: "quantity",
-    required: true,
-    defaultValue: String(Math.round(input.quantity)),
-    helpText: "Number of finished items required.",
-    quoteOnly: true,
-    showWhen: null,
-    meta: { source: "internal_product_setup", websiteVisible: true, minimum: 1, step: 1 },
-    options: [],
-    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-  }), (field) => ({
-    ...field,
-    label: "Quantity",
-    type: "quantity",
-    required: true,
-    defaultValue: String(Math.round(input.quantity)),
-    helpText: "Number of finished items required.",
-    meta: standardMeta(field, { minimum: 1, step: 1 })
-  }));
-
   const printLabels: Record<string, string> = { none: "No print", direct_print: "Direct print", roll_stock: "Roll print / applied media" };
   const quotePrintMethod = input.printMethod === "roll_print" ? "roll_stock" : input.printMethod;
   const allowedPrintMethods = uniqueStrings(input.printMethods.map((value) => value === "roll_print" ? "roll_stock" : value).filter((value) => ["none", "direct_print", "roll_stock"].includes(value)));
@@ -290,6 +281,50 @@ function mergeInternalQuoteFields(
     showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] },
     meta: standardMeta(field),
     options: inkOptions
+  }));
+
+  const artworkLabels: Record<string, string> = {
+    client_supplied: "Print-ready artwork supplied",
+    artwork_check: "Artwork check / minor changes",
+    artwork_required: "Artwork or design required"
+  };
+  const allowedArtworkOptions = uniqueStrings(input.artworkOptions)
+    .filter((value) => ["client_supplied", "artwork_check", "artwork_required"].includes(value));
+  if (!allowedArtworkOptions.length) allowedArtworkOptions.push("client_supplied");
+  if (!allowedArtworkOptions.includes(input.defaultArtwork)) {
+    allowedArtworkOptions.unshift(input.defaultArtwork || allowedArtworkOptions[0]);
+  }
+  const artworkOptions = allowedArtworkOptions.map((value) => internalChoice(
+    artworkLabels[value] ?? value.replace(/_/g, " "),
+    value,
+    null,
+    null,
+    value === "artwork_check" ? input.artworkCheckPrice : 0,
+    value === "artwork_required"
+  ));
+  upsert("artwork", () => ({
+    id: randomUUID(),
+    key: "artwork",
+    label: "Artwork",
+    type: "select",
+    required: true,
+    defaultValue: input.defaultArtwork || allowedArtworkOptions[0],
+    helpText: "Choose whether print-ready artwork is supplied, needs checking, or requires design work.",
+    quoteOnly: true,
+    showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true },
+    options: artworkOptions,
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => ({
+    ...field,
+    label: "Artwork",
+    type: "select",
+    required: true,
+    defaultValue: input.defaultArtwork || allowedArtworkOptions[0],
+    helpText: "Choose whether print-ready artwork is supplied, needs checking, or requires design work.",
+    meta: standardMeta(field),
+    options: artworkOptions,
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
   }));
 
   upsert("delivery_method", () => ({
@@ -607,7 +642,7 @@ function mergeInternalQuoteFields(
     }
   }
 
-  const standardOrder = ["finished_size", "quantity", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "delivery_method"];
+  const standardOrder = ["finished_size", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
@@ -641,6 +676,12 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const rollMediaName = read(formData, "rollMediaName") || null;
   const inkChoices = uniqueStrings(read(formData, "inkChoicesCsv").split(",")).filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value));
   const defaultInk = ["none", "cmyk", "white", "cmyk_white"].includes(read(formData, "defaultInk")) ? read(formData, "defaultInk") : (inkChoices[0] || "cmyk");
+  const artworkOptions = uniqueStrings(read(formData, "artworkOptionsCsv").split(","))
+    .filter((value) => ["client_supplied", "artwork_check", "artwork_required"].includes(value));
+  const defaultArtwork = artworkOptions.includes(read(formData, "defaultArtwork"))
+    ? read(formData, "defaultArtwork")
+    : (artworkOptions[0] || "client_supplied");
+  const artworkCheckPrice = Math.max(0, Number(read(formData, "artworkCheckPrice")) || 0);
   const finishings = read(formData, "finishingsCsv").split(",").map((value) => value.trim()).filter((value) => ["trim_cut", "mount_apply", "eyelets", "finishing", "pack"].includes(value));
   const laminateMaterialIds = uniqueStrings(read(formData, "laminateMaterialIdsCsv").split(","));
   const laminateMaterialNames = parseStringArrayJson(read(formData, "laminateMaterialNamesJson"));
@@ -681,6 +722,9 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       rollMediaName,
       inkChoices,
       defaultInk,
+      artworkOptions,
+      defaultArtwork,
+      artworkCheckPrice,
       deliveryMethod,
       finishings,
       laminateMaterialIds,

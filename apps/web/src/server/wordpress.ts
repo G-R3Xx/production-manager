@@ -36,6 +36,7 @@ export type WebsiteBuilderChoice = {
   label: string;
   value: string;
   priceDelta: number;
+  quoteRequired: boolean;
   widthMm: number | null;
   heightMm: number | null;
 };
@@ -199,6 +200,7 @@ function serialisedChoices(field: Record<string, unknown>): WebsiteBuilderChoice
       label: friendlyDisplayText(choice.label) || friendlyDisplayText(choice.value) || "Option",
       value: text(choice.value) || text(choice.label),
       priceDelta: numberValue(choice.priceDelta ?? choice.priceAdjustment),
+      quoteRequired: choice.quoteRequired === true || text(choice.effectType) === "quote",
       widthMm: choice.widthMm == null ? null : numberValue(choice.widthMm),
       heightMm: choice.heightMm == null ? null : numberValue(choice.heightMm)
     };
@@ -230,7 +232,7 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
 }
 
 function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
-  const standardOrder = new Map(["finished_size", "quantity", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "delivery_method"].map((key, index) => [key, index]));
+  const standardOrder = new Map(["finished_size", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
   asArray(definition.fields).forEach((rawField, sourceIndex) => {
@@ -239,6 +241,9 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
     if (meta.websiteHidden === true || meta.websiteVisible === false) return;
 
     const key = text(field.key) || safeSlug(text(field.label));
+    // WooCommerce owns order quantity. Never publish the old generated
+    // quantity question as a second customer-facing control.
+    if (key === "quantity") return;
     const type = normalisedFieldType(field);
     let options = serialisedChoices(field);
     let label = text(field.label) || "Option";
@@ -248,7 +253,7 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
       label = "Finished size";
       helpText = "Choose the finished size. Select Custom size to enter different dimensions.";
       if (!options.some((choice) => choice.value.toLowerCase() === "custom")) {
-        options = [...options, { id: null, label: "Custom size", value: "custom", priceDelta: 0, widthMm: null, heightMm: null }];
+        options = [...options, { id: null, label: "Custom size", value: "custom", priceDelta: 0, quoteRequired: false, widthMm: null, heightMm: null }];
       }
     } else if (key === "quantity") {
       label = "Quantity";
@@ -416,7 +421,7 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     answers: defaultAnswersForFields(fields)
   }).catch(() => null);
   if (defaultPrice && !defaultPrice.quoteRequired && defaultPrice.validationErrors.length === 0) {
-    startingPrice = defaultPrice.lineTotal;
+    startingPrice = defaultPrice.unitPrice;
   } else if (product.productionRecipeId) {
     const preview = await previewRecipeCost(product.tenantId, product.productionRecipeId, defaults.widthMm, defaults.heightMm, defaults.quantity).catch(() => null);
     startingPrice = preview?.sellPrice ?? null;
@@ -457,7 +462,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.29.07",
+    version: "V26.07.29.08",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised
@@ -723,7 +728,7 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     const values = selectedValues(answers[field.key]);
     if (field.required && !values.length) validationErrors.push(`${field.label} is required`);
     if (!values.length) continue;
-    if (field.type === "quantity" || field.key.toLowerCase().includes("quantity")) {
+    if (field.key === "quantity") {
       quantity = Math.max(1, Math.round(numberValue(values[0], quantity)));
     }
     for (const selected of values) {
@@ -736,6 +741,7 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
         continue;
       }
       optionDelta += choice.priceDelta;
+      if (choice.quoteRequired) quoteTriggered = true;
       if (choice.widthMm && choice.heightMm) {
         widthMm = choice.widthMm;
         heightMm = choice.heightMm;

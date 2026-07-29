@@ -61,6 +61,9 @@ type Props = {
   initialRollMediaId: string;
   initialInkOptions: string[];
   initialDefaultInk: string;
+  initialArtworkOptions: string[];
+  initialDefaultArtwork: string;
+  initialArtworkCheckPrice: number;
   initialLaminateMaterialIds: string[];
   initialDefaultLaminateMaterialId: string;
   initialFinishingOptions: string[];
@@ -72,7 +75,7 @@ type Props = {
   previewQuantity: number;
 };
 
-type BuilderStep = "material" | "size" | "print" | "media_ink" | "laminate" | "finishing" | "fulfilment" | "review";
+type BuilderStep = "material" | "size" | "print" | "media_ink" | "laminate" | "finishing" | "artwork" | "fulfilment" | "review";
 
 const builderSteps: Array<{ key: BuilderStep; number: number; label: string; hint: string }> = [
   { key: "material", number: 1, label: "Material", hint: "Main substrate" },
@@ -81,8 +84,9 @@ const builderSteps: Array<{ key: BuilderStep; number: number; label: string; hin
   { key: "media_ink", number: 4, label: "Media & ink", hint: "Roll stock and ink" },
   { key: "laminate", number: 5, label: "Laminate", hint: "Allowed laminates" },
   { key: "finishing", number: 6, label: "Finishing", hint: "Cut, mount, eyelets" },
-  { key: "fulfilment", number: 7, label: "Supply", hint: "Pickup, delivery, install" },
-  { key: "review", number: 8, label: "Review", hint: "Save once" }
+  { key: "artwork", number: 7, label: "Artwork", hint: "Supplied or required" },
+  { key: "fulfilment", number: 8, label: "Supply", hint: "Pickup, delivery, install" },
+  { key: "review", number: 9, label: "Review", hint: "Save once" }
 ];
 
 const eyeletPresets = [
@@ -104,6 +108,12 @@ const inkChoices = [
   { value: "cmyk", label: "CMYK", description: "Standard colour print" },
   { value: "white", label: "White", description: "White-only print" },
   { value: "cmyk_white", label: "CMYK + White", description: "Colour plus white ink" }
+];
+
+const artworkChoices = [
+  { value: "client_supplied", label: "Print-ready artwork supplied", description: "Customer supplies usable artwork with no artwork charge" },
+  { value: "artwork_check", label: "Artwork check / minor changes", description: "Add the fixed checking charge set below" },
+  { value: "artwork_required", label: "Artwork or design required", description: "Send this configuration through as a tailored quote" }
 ];
 
 const finishingChoices = [
@@ -237,6 +247,9 @@ export function ProductProductionFlowBuilder({
   initialRollMediaId,
   initialInkOptions,
   initialDefaultInk,
+  initialArtworkOptions,
+  initialDefaultArtwork,
+  initialArtworkCheckPrice,
   initialLaminateMaterialIds,
   initialDefaultLaminateMaterialId,
   initialFinishingOptions,
@@ -249,6 +262,7 @@ export function ProductProductionFlowBuilder({
 }: Props) {
   const startingPrintOptions = unique([...(initialPrintOptions.length ? initialPrintOptions : []), initialDefaultPrintMethod || "none"]);
   const startingInkOptions = unique([...(initialInkOptions.length ? initialInkOptions : []), initialDefaultInk || "cmyk"]);
+  const startingArtworkOptions = unique([...(initialArtworkOptions.length ? initialArtworkOptions : ["client_supplied", "artwork_required"]), initialDefaultArtwork || "client_supplied"]);
   const [activeStep, setActiveStep] = useState<BuilderStep>("material");
   const [materialSearch, setMaterialSearch] = useState("");
   const [materialId, setMaterialId] = useState(initialMaterialId);
@@ -261,6 +275,9 @@ export function ProductProductionFlowBuilder({
   const [rollMediaId, setRollMediaId] = useState(initialRollMediaId);
   const [inkOptions, setInkOptions] = useState<string[]>(startingInkOptions);
   const [defaultInk, setDefaultInk] = useState(initialDefaultInk || startingInkOptions[0] || "cmyk");
+  const [artworkOptions, setArtworkOptions] = useState<string[]>(startingArtworkOptions);
+  const [defaultArtwork, setDefaultArtwork] = useState(initialDefaultArtwork || startingArtworkOptions[0] || "client_supplied");
+  const [artworkCheckPrice, setArtworkCheckPrice] = useState(Math.max(0, initialArtworkCheckPrice || 0));
   const [laminateMaterialIds, setLaminateMaterialIds] = useState<string[]>(unique(initialLaminateMaterialIds));
   const [defaultLaminateMaterialId, setDefaultLaminateMaterialIdState] = useState(initialDefaultLaminateMaterialId || "none");
   const [finishingValues, setFinishingValues] = useState<string[]>(unique(initialFinishingOptions));
@@ -341,6 +358,23 @@ export function ProductProductionFlowBuilder({
   const setDefaultInkChoice = (value: string) => {
     setDefaultInk(value);
     if (!inkOptions.includes(value)) setInkOptions((current) => unique([...current, value]));
+    markChanged();
+  };
+
+  const toggleArtworkOption = (value: string) => {
+    setArtworkOptions((current) => {
+      const selected = current.includes(value);
+      const next = selected ? current.filter((item) => item !== value) : unique([...current, value]);
+      const safeNext = next.length ? next : ["client_supplied"];
+      if (selected && defaultArtwork === value) setDefaultArtwork(safeNext[0]);
+      return safeNext;
+    });
+    markChanged();
+  };
+
+  const setDefaultArtworkChoice = (value: string) => {
+    setDefaultArtwork(value);
+    if (!artworkOptions.includes(value)) setArtworkOptions((current) => unique([...current, value]));
     markChanged();
   };
 
@@ -428,13 +462,13 @@ export function ProductProductionFlowBuilder({
         <div>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: ".08em" }}>Default product builder</div>
           <h2 style={{ margin: "6px 0" }}>Guided product builder</h2>
-          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>Choose the substrate, available quote options and the answers staff should see first. Every tab is already loaded, so moving between Material, Print, Ink, Laminate and Finishing is instant. Save once from Review. This builder is using the <b>{department.replace(/_/g, " ")}</b> workflow.</p>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>Choose the substrate, available quote options and the answers staff should see first. Every tab is already loaded, so moving between Material, Print, Ink, Laminate, Finishing and Artwork is instant. Save once from Review. This builder is using the <b>{department.replace(/_/g, " ")}</b> workflow.</p>
         </div>
         <Link href={`/products/advanced?selected=${productId}`} style={{ textDecoration: "none", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", fontWeight: 900 }}>Advanced raw setup</Link>
       </div>
     </section>
 
-    <nav style={{ display: "grid", gridTemplateColumns: "repeat(8,minmax(110px,1fr))", gap: 7, padding: 8, borderRadius: 17, background: "#e9eef6", overflowX: "auto" }}>
+    <nav style={{ display: "grid", gridTemplateColumns: "repeat(9,minmax(110px,1fr))", gap: 7, padding: 8, borderRadius: 17, background: "#e9eef6", overflowX: "auto" }}>
       {builderSteps.map((step) => {
         const active = step.key === activeStep;
         const complete = builderSteps.findIndex((item) => item.key === step.key) < currentIndex;
@@ -456,6 +490,9 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="rollMediaName" value={selectedRollMedia?.name ?? ""} />
       <input type="hidden" name="inkChoicesCsv" value={inkOptions.join(",")} />
       <input type="hidden" name="defaultInk" value={defaultInk} />
+      <input type="hidden" name="artworkOptionsCsv" value={artworkOptions.join(",")} />
+      <input type="hidden" name="defaultArtwork" value={defaultArtwork} />
+      <input type="hidden" name="artworkCheckPrice" value={artworkCheckPrice} />
       <input type="hidden" name="finishingsCsv" value={finishingValues.join(",")} />
       <input type="hidden" name="laminateMaterialIdsCsv" value={laminateMaterialIds.join(",")} />
       <input type="hidden" name="laminateMaterialNamesJson" value={JSON.stringify(laminateNames)} />
@@ -559,8 +596,24 @@ export function ProductProductionFlowBuilder({
         {stepNavigation}
       </section> : null}
 
+      {activeStep === "artwork" ? <section style={panel}>
+        <h3 style={{ margin: 0 }}>7. Choose artwork options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Use the same artwork question staff see in Quick Quote. Tick the answers customers may choose, then set the normal default.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(190px,1fr))", gap: 10 }}>
+          {artworkChoices.map((choice) => {
+            const available = artworkOptions.includes(choice.value);
+            const isDefault = defaultArtwork === choice.value;
+            return <article key={choice.value} style={{ ...choiceCardStyle(available), cursor: "default", display: "grid", gap: 10 }}>
+              <button type="button" onClick={() => toggleArtworkOption(choice.value)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{available ? "✓ " : "+ "}{choice.label}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>{choice.description}</span></button>
+              <button type="button" disabled={!available} onClick={() => setDefaultArtworkChoice(choice.value)} style={{ minHeight: 35, border: isDefault ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: isDefault ? "#2563eb" : "#fff", color: isDefault ? "#fff" : available ? "#334155" : "#94a3b8", fontWeight: 900, cursor: available ? "pointer" : "not-allowed" }}>{isDefault ? "Default answer" : "Make default"}</button>
+            </article>;
+          })}
+        </div>
+        {artworkOptions.includes("artwork_check") ? <label style={{ display: "grid", gap: 6, fontWeight: 850, maxWidth: 360, marginTop: 15 }}>Artwork check charge (AUD)<input type="number" min="0" step="0.01" value={artworkCheckPrice} onChange={(event) => { setArtworkCheckPrice(Math.max(0, Number(event.target.value) || 0)); markChanged(); }} style={input} /><small style={{ color: "#64748b", fontWeight: 650 }}>Added once per configured order. Artwork or design required automatically switches the website customer to a tailored quote.</small></label> : null}
+        {stepNavigation}
+      </section> : null}
+
       {activeStep === "fulfilment" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>7. Choose the normal supply method</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Pickup, delivery and installation remain available; choose the answer shown first.</p>
+        <h3 style={{ margin: 0 }}>8. Choose the normal supply method</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Pickup, delivery and installation remain available; choose the answer shown first.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(170px,1fr))", gap: 10 }}>
           {[
             ["pickup", "Pickup", "Customer collects from your premises"],
@@ -572,13 +625,14 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "review" ? <section style={{ ...panel, background: "linear-gradient(180deg,#f0fdfa,#fff)" }}>
-        <h3 style={{ margin: 0 }}>8. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This single save updates the reusable quote product, production flow and website fields together.</p>
+        <h3 style={{ margin: 0 }}>9. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This single save updates the reusable quote product, production flow and website fields together.</p>
         <div style={{ display: "grid", gap: 9, padding: 16, borderRadius: 14, background: "#fff", border: "1px solid #ccfbf1" }}>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Product summary</div>
           <h3 style={{ margin: 0 }}>{selectedMaterial?.name ?? "No physical material"} · {width} × {height} mm · Qty {quantity}</h3>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Print choices:</b> {printOptions.map((value) => printChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {printChoices.find((choice) => choice.value === defaultPrintMethod)?.label ?? defaultPrintMethod}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Roll media:</b> {selectedRollMedia?.name ?? "Chosen while quoting"} · <b>Ink choices:</b> {inkOptions.map((value) => inkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {inkChoices.find((choice) => choice.value === defaultInk)?.label ?? defaultInk}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Laminate choices:</b> {laminateNames.length ? `None, ${laminateNames.join(", ")}` : "None"} · <b>Default:</b> {selectedDefaultLaminate?.name ?? "None"}</div>
+          <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Artwork choices:</b> {artworkOptions.map((value) => artworkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {artworkChoices.find((choice) => choice.value === defaultArtwork)?.label ?? defaultArtwork}{artworkOptions.includes("artwork_check") ? ` · Check charge ${currency.format(artworkCheckPrice)}` : ""}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Finishing defaults:</b> {finishingValues.length ? finishingValues.map((value) => finishingChoices.find((choice) => choice.value === value)?.label ?? value).join(", ") : "None"} · <b>Supply:</b> {deliveryMethod}</div>
           {finishingValues.includes("eyelets") ? <div style={{ color: "#9a3412" }}><b>Eyelets:</b> {eyeletPresets.find((preset) => preset.value === eyeletPreset)?.label ?? "4 corners"}{selectedEyeletMaterial ? ` · ${selectedEyeletMaterial.name}` : ""}</div> : null}
         </div>
