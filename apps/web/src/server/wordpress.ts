@@ -49,6 +49,9 @@ export type WebsiteBuilderField = {
   display: "buttons" | "cards" | "dropdown" | "swatches" | "number" | "text";
   options: WebsiteBuilderChoice[];
   showWhen: Record<string, unknown> | null;
+  customSize: boolean;
+  minimum: number | null;
+  step: number | null;
 };
 
 export type WebsiteCatalogProduct = {
@@ -145,13 +148,21 @@ function parseSize(value: unknown): { widthMm: number; heightMm: number } | null
   return { widthMm: numberValue(match[1]), heightMm: numberValue(match[2]) };
 }
 
+function normalisedFieldType(field: Record<string, unknown>): string {
+  const raw = text(field.type).toLowerCase();
+  if (["multiselect", "multi", "multiple", "checkbox", "checkboxes"].includes(raw)) return "multi_select";
+  if (["boolean", "bool"].includes(raw)) return "yes_no";
+  if (["dimensions", "dimension", "size"].includes(raw)) return "size_select";
+  return raw || "select";
+}
+
 function displayForField(field: Record<string, unknown>, config: Record<string, unknown>): WebsiteBuilderField["display"] {
   const fieldDisplays = asObject(config.fieldDisplays);
   const configured = text(fieldDisplays[text(field.key)]);
   if (["buttons", "cards", "dropdown", "swatches", "number", "text"].includes(configured)) {
     return configured as WebsiteBuilderField["display"];
   }
-  const type = text(field.type);
+  const type = normalisedFieldType(field);
   if (type === "color") return "swatches";
   if (["number", "quantity"].includes(type)) return "number";
   if (type === "text") return "text";
@@ -159,32 +170,88 @@ function displayForField(field: Record<string, unknown>, config: Record<string, 
   return type === "size_select" ? "cards" : "buttons";
 }
 
-function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
-  return asArray(definition.fields).map((rawField) => {
-    const field = asObject(rawField);
+function serialisedChoices(field: Record<string, unknown>): WebsiteBuilderChoice[] {
+  const type = normalisedFieldType(field);
+  const source = asArray(field.options);
+  const rawChoices = type === "yes_no" && source.length === 0
+    ? [{ id: null, label: "Yes", value: "yes", priceDelta: 0 }, { id: null, label: "No", value: "no", priceDelta: 0 }]
+    : source;
+  return rawChoices.map((rawChoice) => {
+    const choice = asObject(rawChoice);
     return {
-      id: text(field.id) || null,
-      key: text(field.key) || safeSlug(text(field.label)),
-      label: text(field.label) || "Option",
-      type: text(field.type) || "select",
-      required: Boolean(field.required),
-      defaultValue: field.defaultValue ?? null,
-      helpText: text(field.helpText) || null,
-      display: displayForField(field, websiteConfig),
-      options: asArray(field.options).map((rawChoice) => {
-        const choice = asObject(rawChoice);
-        return {
-          id: text(choice.id) || null,
-          label: text(choice.label) || text(choice.value) || "Option",
-          value: text(choice.value) || text(choice.label),
-          priceDelta: numberValue(choice.priceDelta),
-          widthMm: choice.widthMm == null ? null : numberValue(choice.widthMm),
-          heightMm: choice.heightMm == null ? null : numberValue(choice.heightMm)
-        };
-      }),
-      showWhen: Object.keys(asObject(field.showWhen)).length ? asObject(field.showWhen) : null
+      id: text(choice.id) || null,
+      label: text(choice.label) || text(choice.value) || "Option",
+      value: text(choice.value) || text(choice.label),
+      priceDelta: numberValue(choice.priceDelta ?? choice.priceAdjustment),
+      widthMm: choice.widthMm == null ? null : numberValue(choice.widthMm),
+      heightMm: choice.heightMm == null ? null : numberValue(choice.heightMm)
     };
+  }).filter((choice) => choice.value !== "");
+}
+
+function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
+  const standardOrder = new Map(["finished_size", "quantity", "print_method", "delivery_method"].map((key, index) => [key, index]));
+  const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
+
+  asArray(definition.fields).forEach((rawField, sourceIndex) => {
+    const field = asObject(rawField);
+    const meta = asObject(field.meta);
+    if (meta.websiteHidden === true || meta.websiteVisible === false) return;
+
+    const key = text(field.key) || safeSlug(text(field.label));
+    const type = normalisedFieldType(field);
+    let options = serialisedChoices(field);
+    let label = text(field.label) || "Option";
+    let helpText = text(field.helpText) || null;
+
+    if (key === "finished_size") {
+      label = "Finished size";
+      helpText = "Choose the finished size. Select Custom size to enter different dimensions.";
+      if (!options.some((choice) => choice.value.toLowerCase() === "custom")) {
+        options = [...options, { id: null, label: "Custom size", value: "custom", priceDelta: 0, widthMm: null, heightMm: null }];
+      }
+    } else if (key === "quantity") {
+      label = "Quantity";
+      helpText = "Number of finished items required.";
+    } else if (key === "print_method") {
+      label = "Print method";
+      helpText = "Choose how the product is normally printed.";
+      options = options.map((choice) => choice.value === "roll_stock" || choice.value === "roll_print"
+        ? { ...choice, label: "Roll print", value: "roll_stock" }
+        : choice);
+    } else if (key === "delivery_method") {
+      label = "How does the customer receive it?";
+      helpText = "Choose pickup, delivery or installation.";
+    }
+
+    const minimumValue = Number(meta.minimum);
+    const stepValue = Number(meta.step);
+    const serialisedField: WebsiteBuilderField = {
+      id: text(field.id) || null,
+      key,
+      label,
+      type,
+      required: field.required !== false,
+      defaultValue: field.defaultValue ?? null,
+      helpText,
+      display: displayForField({ ...field, type }, websiteConfig),
+      options,
+      showWhen: Object.keys(asObject(field.showWhen)).length ? asObject(field.showWhen) : null,
+      customSize: type === "size_select" && options.some((choice) => choice.value.toLowerCase() === "custom"),
+      minimum: Number.isFinite(minimumValue) ? minimumValue : (type === "quantity" ? 1 : null),
+      step: Number.isFinite(stepValue) ? stepValue : (type === "quantity" ? 1 : null)
+    };
+
+    entries.push({
+      sourceIndex,
+      order: standardOrder.get(key) ?? 1000 + sourceIndex,
+      field: serialisedField
+    });
   });
+
+  return entries
+    .sort((left, right) => left.order - right.order || left.sourceIndex - right.sourceIndex)
+    .map((entry) => entry.field);
 }
 
 export async function ensureWordPressBridgeSchema(): Promise<void> {
@@ -324,7 +391,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.28.12",
+    version: "V26.07.29.01",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised

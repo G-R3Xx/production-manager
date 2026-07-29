@@ -20,6 +20,10 @@ function read(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
 }
 
+function asObject(value: unknown): Record<string, any> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {};
+}
+
 async function context(productId: string) {
   const user = await getRequiredSessionUser();
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -98,6 +102,12 @@ function mergeInternalQuoteFields(
   const existingFields = Array.isArray(definition.fields) ? [...definition.fields] : [];
   const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
   const sizeValue = `${Math.round(input.width)}x${Math.round(input.height)}`;
+  const standardMeta = (field: Record<string, any>, extra: Record<string, unknown> = {}) => ({
+    ...asObject(field.meta),
+    source: "internal_product_setup",
+    websiteVisible: true,
+    ...extra
+  });
 
   const upsert = (key: string, create: () => Record<string, any>, update: (field: Record<string, any>) => Record<string, any>) => {
     const index = byKey.get(key);
@@ -112,13 +122,14 @@ function mergeInternalQuoteFields(
   upsert("finished_size", () => ({
     id: randomUUID(),
     key: "finished_size",
-    label: "Size",
+    label: "Finished size",
     type: "size_select",
     required: true,
     defaultValue: sizeValue,
-    helpText: "Finished size used for quoting and material calculations.",
+    helpText: "Choose the finished size. Select Custom size to enter different dimensions.",
     quoteOnly: true,
     showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true, customDimensions: true },
     options: [
       internalChoice(`${Math.round(input.width)} × ${Math.round(input.height)} mm`, sizeValue, input.width, input.height),
       internalChoice("Custom size", "custom")
@@ -126,14 +137,23 @@ function mergeInternalQuoteFields(
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
   }), (field) => {
     const options = Array.isArray(field.options) ? [...field.options] : [];
-    const withoutDefault = options.filter((option: any) => String(option?.value ?? "") !== sizeValue);
+    const otherOptions = options.filter((option: any) => {
+      const value = String(option?.value ?? "");
+      return value !== sizeValue && value !== "custom";
+    });
     return {
       ...field,
-      label: field.label || "Size",
+      label: "Finished size",
       type: "size_select",
       required: true,
       defaultValue: sizeValue,
-      options: [internalChoice(`${Math.round(input.width)} × ${Math.round(input.height)} mm`, sizeValue, input.width, input.height), ...withoutDefault]
+      helpText: "Choose the finished size. Select Custom size to enter different dimensions.",
+      meta: standardMeta(field, { customDimensions: true }),
+      options: [
+        internalChoice(`${Math.round(input.width)} × ${Math.round(input.height)} mm`, sizeValue, input.width, input.height),
+        ...otherOptions,
+        internalChoice("Custom size", "custom")
+      ]
     };
   });
 
@@ -144,53 +164,71 @@ function mergeInternalQuoteFields(
     type: "quantity",
     required: true,
     defaultValue: String(Math.round(input.quantity)),
-    helpText: "Number of finished items being quoted.",
+    helpText: "Number of finished items required.",
     quoteOnly: true,
     showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true, minimum: 1, step: 1 },
     options: [],
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-  }), (field) => ({ ...field, label: field.label || "Quantity", type: "quantity", required: true, defaultValue: String(Math.round(input.quantity)) }));
+  }), (field) => ({
+    ...field,
+    label: "Quantity",
+    type: "quantity",
+    required: true,
+    defaultValue: String(Math.round(input.quantity)),
+    helpText: "Number of finished items required.",
+    meta: standardMeta(field, { minimum: 1, step: 1 })
+  }));
 
   const quotePrintMethod = input.printMethod === "roll_print" ? "roll_stock" : input.printMethod;
-  if (input.printMethod !== "none" || byKey.has("print_method")) {
-    upsert("print_method", () => ({
-      id: randomUUID(),
-      key: "print_method",
-      label: "Print type",
+  upsert("print_method", () => ({
+    id: randomUUID(),
+    key: "print_method",
+    label: "Print method",
+    type: "select",
+    required: true,
+    defaultValue: quotePrintMethod,
+    helpText: "Choose how the product is normally printed.",
+    quoteOnly: true,
+    showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true },
+    options: [
+      internalChoice("No print", "none"),
+      internalChoice("Direct print", "direct_print"),
+      internalChoice("Roll print", "roll_stock")
+    ],
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => {
+    const options = Array.isArray(field.options) ? [...field.options] : [];
+    const extras = options.filter((option: any) => !["none", "direct_print", "roll_stock", "roll_print"].includes(String(option?.value ?? "")));
+    return {
+      ...field,
+      label: "Print method",
       type: "select",
       required: true,
       defaultValue: quotePrintMethod,
-      helpText: "Normal print method for this product.",
-      quoteOnly: true,
-      showWhen: null,
+      helpText: "Choose how the product is normally printed.",
+      meta: standardMeta(field),
       options: [
         internalChoice("No print", "none"),
         internalChoice("Direct print", "direct_print"),
-        internalChoice("Roll stock applied", "roll_stock")
-      ],
-      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-    }), (field) => {
-      const options = Array.isArray(field.options) ? [...field.options] : [];
-      const requiredOptions = [
-        internalChoice("No print", "none"),
-        internalChoice("Direct print", "direct_print"),
-        internalChoice("Roll stock applied", "roll_stock")
-      ];
-      const values = new Set(options.map((option: any) => String(option?.value ?? "")));
-      return { ...field, defaultValue: quotePrintMethod, options: [...options, ...requiredOptions.filter((option) => !values.has(option.value))] };
-    });
-  }
+        internalChoice("Roll print", "roll_stock"),
+        ...extras
+      ]
+    };
+  });
 
   upsert("delivery_method", () => ({
     id: randomUUID(),
     key: "delivery_method",
-    label: "How will the order be supplied?",
+    label: "How does the customer receive it?",
     type: "select",
     required: true,
     defaultValue: input.deliveryMethod,
-    helpText: "Pickup, delivery or installation.",
+    helpText: "Choose pickup, delivery or installation.",
     quoteOnly: true,
     showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true },
     options: [
       internalChoice("Pickup", "pickup"),
       internalChoice("Delivery", "delivery"),
@@ -199,16 +237,39 @@ function mergeInternalQuoteFields(
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
   }), (field) => {
     const options = Array.isArray(field.options) ? [...field.options] : [];
-    const requiredOptions = [
-      internalChoice("Pickup", "pickup"),
-      internalChoice("Delivery", "delivery"),
-      internalChoice("Install", "install")
-    ];
-    const values = new Set(options.map((option: any) => String(option?.value ?? "")));
-    return { ...field, defaultValue: input.deliveryMethod, options: [...options, ...requiredOptions.filter((option) => !values.has(option.value))] };
+    const extras = options.filter((option: any) => !["pickup", "delivery", "install"].includes(String(option?.value ?? "")));
+    return {
+      ...field,
+      label: "How does the customer receive it?",
+      type: "select",
+      required: true,
+      defaultValue: input.deliveryMethod,
+      helpText: "Choose pickup, delivery or installation.",
+      meta: standardMeta(field),
+      options: [
+        internalChoice("Pickup", "pickup"),
+        internalChoice("Delivery", "delivery"),
+        internalChoice("Install", "install"),
+        ...extras
+      ]
+    };
   });
 
-  return { ...definition, fields: existingFields };
+  const standardOrder = ["finished_size", "quantity", "print_method", "delivery_method"];
+  const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
+  const orderedFields = existingFields
+    .map((field: any, index: number) => ({ field, index }))
+    .sort((left, right) => {
+      const leftOrder = orderIndex.get(String(left.field?.key ?? ""));
+      const rightOrder = orderIndex.get(String(right.field?.key ?? ""));
+      if (leftOrder != null && rightOrder != null) return leftOrder - rightOrder;
+      if (leftOrder != null) return -1;
+      if (rightOrder != null) return 1;
+      return left.index - right.index;
+    })
+    .map(({ field }) => field);
+
+  return { ...definition, fields: orderedFields };
 }
 
 export async function saveInternalProductSetupAction(formData: FormData) {

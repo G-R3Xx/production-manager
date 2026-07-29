@@ -42,6 +42,37 @@ function fieldDisplay(field: Record<string, any>, config: Record<string, any>): 
   return asArray(field.options).length > 6 ? "dropdown" : "buttons";
 }
 
+
+function normaliseSharedField(field: Record<string, any>): Record<string, any> {
+  const key = String(field.key ?? "");
+  if (key === "finished_size") {
+    const options = asArray(field.options);
+    return {
+      ...field,
+      label: "Finished size",
+      helpText: "Choose the finished size. Select Custom size to enter different dimensions.",
+      options: options.some((option) => String(option?.value ?? "").toLowerCase() === "custom")
+        ? options
+        : [...options, { id: `custom-${field.id ?? "size"}`, label: "Custom size", value: "custom", priceDelta: 0, widthMm: null, heightMm: null }]
+    };
+  }
+  if (key === "quantity") return { ...field, label: "Quantity", helpText: "Number of finished items required." };
+  if (key === "print_method") return {
+    ...field,
+    label: "Print method",
+    helpText: "Choose how the product is normally printed.",
+    options: asArray(field.options).map((option) => ["roll_stock", "roll_print"].includes(String(option?.value ?? "")) ? { ...option, label: "Roll print", value: "roll_stock" } : option)
+  };
+  if (key === "delivery_method") return { ...field, label: "How does the customer receive it?", helpText: "Choose pickup, delivery or installation." };
+  return field;
+}
+
+function sharedFieldOrder(field: Record<string, any>, index: number): number {
+  const order = ["finished_size", "quantity", "print_method", "delivery_method"];
+  const standard = order.indexOf(String(field.key ?? ""));
+  return standard >= 0 ? standard : 1000 + index;
+}
+
 function questionOptionsText(field: Record<string, any>): string {
   return asArray(field.options).map((option) => {
     const label = String(option.label ?? option.value ?? "");
@@ -64,7 +95,11 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   const templateNeeded = ["build", "preview", "website"].includes(tab);
   const template = templateNeeded && product.defaultTemplateId ? await getConfiguratorTemplateById(tenant.tenantId, product.defaultTemplateId).catch(() => null) : null;
   const definition = asObject(template?.definitionJson);
-  const fields = asArray(definition.fields);
+  const fields = asArray(definition.fields)
+    .map((field) => normaliseSharedField(asObject(field)))
+    .map((field, index) => ({ field, order: sharedFieldOrder(field, index) }))
+    .sort((left, right) => left.order - right.order)
+    .map(({ field }) => field);
   const config = asObject(product.websiteConfigJson);
   const message = read(query, "message");
   const error = read(query, "error");
@@ -176,7 +211,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         previewQuantity={quantity}
       />
       <details style={{ ...card,padding:0,overflow:"hidden" }}>
-        <summary style={{ cursor:"pointer",padding:18,display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",listStyle:"none" }}><span><span style={{ display:"block",fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>Optional</span><strong style={{ display:"block",fontSize:20,marginTop:4 }}>Extra choices staff can change while quoting</strong><span style={{ display:"block",fontSize:13,color:"#64748b",marginTop:4 }}>Open only for products needing choices beyond size, quantity, print and fulfilment.</span></span><span style={{ color:"#475569",fontWeight:950 }}>Open options ↓</span></summary>
+        <summary style={{ cursor:"pointer",padding:18,display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",listStyle:"none" }}><span><span style={{ display:"block",fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>Optional</span><strong style={{ display:"block",fontSize:20,marginTop:4 }}>Customer choices used in quotes and on the website</strong><span style={{ display:"block",fontSize:13,color:"#64748b",marginTop:4 }}>These exact labels, choices, defaults and order are shared with WordPress when the product is published.</span></span><span style={{ color:"#475569",fontWeight:950 }}>Review shared choices ↓</span></summary>
         <div style={{ padding:21,borderTop:"1px solid #dbe4f0" }}>
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}><Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration:"none",border:"1px solid #cbd5e1",color:"#334155",borderRadius:11,padding:"10px 14px",fontWeight:900 }}>Advanced rules</Link></div>
         <div style={{ display:"grid",gap:11,marginTop:16 }}>
@@ -200,9 +235,9 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
             </div>
           </details>)}
         </div>
-        {fields.length === 0 ? <div style={{ marginTop:16,padding:18,borderRadius:14,background:"#fff7ed",border:"1px solid #fed7aa",color:"#9a3412" }}>No extra quote choices are needed unless this product has options beyond size, quantity, print and fulfilment.</div> : null}
+        {fields.length === 0 ? <div style={{ marginTop:16,padding:18,borderRadius:14,background:"#fff7ed",border:"1px solid #fed7aa",color:"#9a3412" }}>The standard size, quantity, print and fulfilment choices are created automatically. Add more choices only when customers or staff genuinely need them.</div> : null}
         <form action={addSimpleProductQuestionAction} style={{ display:"grid",gap:11,marginTop:16,padding:16,borderRadius:15,background:"#eff6ff",border:"1px solid #bfdbfe" }}>
-          <input type="hidden" name="productId" value={product.id}/><h3 style={{ margin:0 }}>+ Add another quote choice</h3>
+          <input type="hidden" name="productId" value={product.id}/><h3 style={{ margin:0 }}>+ Add another shared customer choice</h3>
           <div style={{ display:"grid",gridTemplateColumns:"minmax(220px,1.4fr) minmax(180px,.6fr)",gap:10 }}><label style={{ display:"grid",gap:6,fontWeight:850 }}>Question<input name="label" placeholder="eg Size, Material, Laminate" required style={input}/></label><label style={{ display:"grid",gap:6,fontWeight:850 }}>Answer type<select name="type" defaultValue="select" style={input}><option value="select">Single choice</option><option value="multi_select">Multiple choice</option><option value="size_select">Size cards</option><option value="yes_no">Yes / no</option><option value="quantity">Quantity</option><option value="color">Colour swatches</option><option value="number">Number</option><option value="text">Text</option></select></label></div>
           <label style={{ display:"grid",gap:6,fontWeight:850 }}>Choices<textarea name="options" rows={4} placeholder={"600 × 900 mm=600x900\n900 × 1200 mm=900x1200\nCustom size=custom"} style={{ ...input,padding:11,fontFamily:"inherit" }}/></label>
           <label style={{ display:"grid",gap:6,fontWeight:850 }}>Help text<input name="helpText" placeholder="Optional customer guidance" style={input}/></label>
