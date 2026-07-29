@@ -1,4 +1,4 @@
-# Default instant Guided Product Builder — V26.07.29.06
+# Default instant Guided Product Builder — V26.07.29.07
 
 The normal Product Create/Edit route now uses one client-side guided builder. Product setup is substrate-first and follows the same mental model as Build a Quick Quote.
 

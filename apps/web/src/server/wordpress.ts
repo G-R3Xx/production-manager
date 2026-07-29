@@ -133,6 +133,15 @@ function text(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function friendlyDisplayText(value: unknown): string {
+  return text(value)
+    .replace(/\\u00d7/gi, "×")
+    .replace(/\bu00d7\b/gi, "×")
+    .replace(/(\d)\s*[x×]\s*(\d)/gi, "$1 × $2")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function numberValue(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -149,7 +158,7 @@ function safeSlug(value: string): string {
 }
 
 function parseSize(value: unknown): { widthMm: number; heightMm: number } | null {
-  const source = text(value);
+  const source = friendlyDisplayText(value);
   const match = source.match(/(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)/i);
   if (!match) return null;
   return { widthMm: numberValue(match[1]), heightMm: numberValue(match[2]) };
@@ -187,7 +196,7 @@ function serialisedChoices(field: Record<string, unknown>): WebsiteBuilderChoice
     const choice = asObject(rawChoice);
     return {
       id: text(choice.id) || null,
-      label: text(choice.label) || text(choice.value) || "Option",
+      label: friendlyDisplayText(choice.label) || friendlyDisplayText(choice.value) || "Option",
       value: text(choice.value) || text(choice.label),
       priceDelta: numberValue(choice.priceDelta ?? choice.priceAdjustment),
       widthMm: choice.widthMm == null ? null : numberValue(choice.widthMm),
@@ -254,6 +263,9 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
       label = "How does the customer receive it?";
       helpText = "Choose pickup, delivery or installation.";
     }
+
+    const choiceDriven = ["select", "multi_select", "size_select", "color", "yes_no"].includes(type);
+    if (choiceDriven && options.length === 0) return;
 
     const minimumValue = Number(meta.minimum);
     const stepValue = Number(meta.step);
@@ -394,8 +406,18 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     heightMm: Math.max(1, numberValue(config.defaultHeightMm, 450)),
     quantity: Math.max(1, Math.round(numberValue(config.defaultQuantity, 1)))
   };
+  const fields = serializeFields(definition, config);
   let startingPrice: number | null = null;
-  if (product.productionRecipeId) {
+  const defaultPrice = await priceWordPressProductForTenant(product.tenantId, {
+    productId: product.id,
+    widthMm: defaults.widthMm,
+    heightMm: defaults.heightMm,
+    quantity: defaults.quantity,
+    answers: defaultAnswersForFields(fields)
+  }).catch(() => null);
+  if (defaultPrice && !defaultPrice.quoteRequired && defaultPrice.validationErrors.length === 0) {
+    startingPrice = defaultPrice.lineTotal;
+  } else if (product.productionRecipeId) {
     const preview = await previewRecipeCost(product.tenantId, product.productionRecipeId, defaults.widthMm, defaults.heightMm, defaults.quantity).catch(() => null);
     startingPrice = preview?.sellPrice ?? null;
   } else if (config.basePrice != null) {
@@ -417,7 +439,7 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     manufacturingMethod: product.productionRecipeId
       ? { id: product.productionRecipeId, name: product.productionRecipeName ?? "Manufacturing method" }
       : null,
-    fields: serializeFields(definition, config),
+    fields,
     defaults,
     startingPrice,
     syncVersion: Number(product.websiteSyncVersion || 1),
@@ -435,7 +457,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.29.06",
+    version: "V26.07.29.07",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised
