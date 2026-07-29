@@ -343,8 +343,16 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
   const template = product.defaultTemplateId
     ? await getConfiguratorTemplateById(product.tenantId, product.defaultTemplateId).catch(() => null)
     : null;
-  const definition = asObject(template?.definitionJson);
+  const templateDefinition = asObject(template?.definitionJson);
   const config = asObject(product.websiteConfigJson);
+  const templateFields = asArray(templateDefinition.fields);
+  const guidedFields = asArray(config.guidedFields);
+  // Guided Builder fields are mirrored onto the product record when saved. The
+  // normal template remains the primary source, while this copy prevents a
+  // missing/stale template relation from publishing an empty WordPress builder.
+  const definition = templateFields.length
+    ? templateDefinition
+    : { ...templateDefinition, fields: guidedFields };
   const defaults = {
     widthMm: Math.max(1, numberValue(config.defaultWidthMm, 600)),
     heightMm: Math.max(1, numberValue(config.defaultHeightMm, 450)),
@@ -391,7 +399,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.29.04",
+    version: "V26.07.29.05",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised

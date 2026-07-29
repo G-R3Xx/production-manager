@@ -671,30 +671,38 @@ export async function saveInternalProductSetupAction(formData: FormData) {
     const definition = template.definitionJson && typeof template.definitionJson === "object" && !Array.isArray(template.definitionJson)
       ? template.definitionJson as Record<string, any>
       : {};
+    const nextDefinition = mergeInternalQuoteFields(definition, {
+      width,
+      height,
+      quantity,
+      printMethod,
+      printMethods,
+      rollMediaId,
+      rollMediaName,
+      inkChoices,
+      defaultInk,
+      deliveryMethod,
+      finishings,
+      laminateMaterialIds,
+      laminateMaterialNames,
+      defaultLaminateMaterialId,
+      eyeletMaterialId,
+      eyeletMaterialName,
+      eyeletPreset
+    });
     await updateConfiguratorDefinitionJson(
       tenant.tenantId,
       template.id,
-      mergeInternalQuoteFields(definition, {
-        width,
-        height,
-        quantity,
-        printMethod,
-        printMethods,
-        rollMediaId,
-        rollMediaName,
-        inkChoices,
-        defaultInk,
-        deliveryMethod,
-        finishings,
-        laminateMaterialIds,
-        laminateMaterialNames,
-        defaultLaminateMaterialId,
-        eyeletMaterialId,
-        eyeletMaterialName,
-        eyeletPreset
-      })
+      nextDefinition
     );
-    await updateProductInternalDefaults(tenant.tenantId, productId, { widthMm: width, heightMm: height, quantity, deliveryMethod, printMethod });
+    await updateProductInternalDefaults(tenant.tenantId, productId, {
+      widthMm: width,
+      heightMm: height,
+      quantity,
+      deliveryMethod,
+      printMethod,
+      guidedFields: Array.isArray(nextDefinition.fields) ? nextDefinition.fields : []
+    });
     const nextStatus = formData.get("makeActive") === "on" ? "active" : (product.status === "archived" ? "archived" : "draft");
     if (nextStatus !== product.status || product.defaultTemplateId !== template.id) {
       await updateProduct(tenant.tenantId, productId, {
