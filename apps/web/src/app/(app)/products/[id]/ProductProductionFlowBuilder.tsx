@@ -64,6 +64,8 @@ type Props = {
   initialArtworkOptions: string[];
   initialDefaultArtwork: string;
   initialArtworkCheckPrice: number;
+  initialArtworkDesignPrice: number;
+  initialDeliveryFee: number;
   initialLaminateMaterialIds: string[];
   initialDefaultLaminateMaterialId: string;
   initialFinishingOptions: string[];
@@ -113,7 +115,7 @@ const inkChoices = [
 const artworkChoices = [
   { value: "client_supplied", label: "Print-ready artwork supplied", description: "Customer supplies usable artwork with no artwork charge" },
   { value: "artwork_check", label: "Artwork check / minor changes", description: "Add the fixed checking charge set below" },
-  { value: "artwork_required", label: "Artwork or design required", description: "Send this configuration through as a tailored quote" }
+  { value: "artwork_required", label: "Artwork or design required", description: "Add the fixed artwork or design charge set below" }
 ];
 
 const finishingChoices = [
@@ -250,6 +252,8 @@ export function ProductProductionFlowBuilder({
   initialArtworkOptions,
   initialDefaultArtwork,
   initialArtworkCheckPrice,
+  initialArtworkDesignPrice,
+  initialDeliveryFee,
   initialLaminateMaterialIds,
   initialDefaultLaminateMaterialId,
   initialFinishingOptions,
@@ -278,6 +282,8 @@ export function ProductProductionFlowBuilder({
   const [artworkOptions, setArtworkOptions] = useState<string[]>(startingArtworkOptions);
   const [defaultArtwork, setDefaultArtwork] = useState(initialDefaultArtwork || startingArtworkOptions[0] || "client_supplied");
   const [artworkCheckPrice, setArtworkCheckPrice] = useState(Math.max(0, initialArtworkCheckPrice || 0));
+  const [artworkDesignPrice, setArtworkDesignPrice] = useState(Math.max(0, initialArtworkDesignPrice || 0));
+  const [deliveryFee, setDeliveryFee] = useState(Math.max(0, initialDeliveryFee || 0));
   const [laminateMaterialIds, setLaminateMaterialIds] = useState<string[]>(unique(initialLaminateMaterialIds));
   const [defaultLaminateMaterialId, setDefaultLaminateMaterialIdState] = useState(initialDefaultLaminateMaterialId || "none");
   const [finishingValues, setFinishingValues] = useState<string[]>(unique(initialFinishingOptions));
@@ -493,6 +499,8 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="artworkOptionsCsv" value={artworkOptions.join(",")} />
       <input type="hidden" name="defaultArtwork" value={defaultArtwork} />
       <input type="hidden" name="artworkCheckPrice" value={artworkCheckPrice} />
+      <input type="hidden" name="artworkDesignPrice" value={artworkDesignPrice} />
+      <input type="hidden" name="deliveryFee" value={deliveryFee} />
       <input type="hidden" name="finishingsCsv" value={finishingValues.join(",")} />
       <input type="hidden" name="laminateMaterialIdsCsv" value={laminateMaterialIds.join(",")} />
       <input type="hidden" name="laminateMaterialNamesJson" value={JSON.stringify(laminateNames)} />
@@ -608,19 +616,23 @@ export function ProductProductionFlowBuilder({
             </article>;
           })}
         </div>
-        {artworkOptions.includes("artwork_check") ? <label style={{ display: "grid", gap: 6, fontWeight: 850, maxWidth: 360, marginTop: 15 }}>Artwork check charge (AUD)<input type="number" min="0" step="0.01" value={artworkCheckPrice} onChange={(event) => { setArtworkCheckPrice(Math.max(0, Number(event.target.value) || 0)); markChanged(); }} style={input} /><small style={{ color: "#64748b", fontWeight: 650 }}>Added once per configured order. Artwork or design required automatically switches the website customer to a tailored quote.</small></label> : null}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,360px))", gap: 12, marginTop: 15 }}>
+          {artworkOptions.includes("artwork_check") ? <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Artwork check charge (AUD)<input type="number" min="0" step="0.01" value={artworkCheckPrice} onChange={(event) => { setArtworkCheckPrice(Math.max(0, Number(event.target.value) || 0)); markChanged(); }} style={input} /><small style={{ color: "#64748b", fontWeight: 650 }}>Added once per configured order.</small></label> : null}
+          {artworkOptions.includes("artwork_required") ? <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Artwork / design charge (AUD)<input type="number" min="0" step="0.01" value={artworkDesignPrice} onChange={(event) => { setArtworkDesignPrice(Math.max(0, Number(event.target.value) || 0)); markChanged(); }} style={input} /><small style={{ color: "#64748b", fontWeight: 650 }}>Added once. It remains purchasable online; only installation requires a tailored quote.</small></label> : null}
+        </div>
         {stepNavigation}
       </section> : null}
 
       {activeStep === "fulfilment" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>8. Choose the normal supply method</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Pickup, delivery and installation remain available; choose the answer shown first.</p>
+        <h3 style={{ margin: 0 }}>8. Choose the normal supply method</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Pickup remains free, Delivery adds the fixed fee below, and Install sends the configured product through for a tailored quote.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(170px,1fr))", gap: 10 }}>
           {[
-            ["pickup", "Pickup", "Customer collects from your premises"],
-            ["delivery", "Delivery", "Deliver the finished order"],
-            ["install", "Install", "Include installation in the production flow"]
+            ["pickup", "Pickup", "No price change. Customer collects the finished order."],
+            ["delivery", "Delivery", `Adds ${currency.format(deliveryFee)}. Delivery address is collected during WooCommerce checkout.`],
+            ["install", "Install", "Request this configuration. Add to Cart is hidden for installation."]
           ].map(([value, label, description]) => <button key={value} type="button" onClick={() => setFulfilment(value)} style={choiceCardStyle(deliveryMethod === value)}><strong>{label}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>{description}</span></button>)}
         </div>
+        <label style={{ display: "grid", gap: 6, fontWeight: 850, maxWidth: 360, marginTop: 15 }}>Delivery fee (AUD)<input type="number" min="0" step="0.01" value={deliveryFee} onChange={(event) => { setDeliveryFee(Math.max(0, Number(event.target.value) || 0)); markChanged(); }} style={input} /><small style={{ color: "#64748b", fontWeight: 650 }}>Added once when Delivery is selected. The customer enters their address during normal WooCommerce checkout.</small></label>
         {stepNavigation}
       </section> : null}
 
@@ -632,8 +644,8 @@ export function ProductProductionFlowBuilder({
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Print choices:</b> {printOptions.map((value) => printChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {printChoices.find((choice) => choice.value === defaultPrintMethod)?.label ?? defaultPrintMethod}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Roll media:</b> {selectedRollMedia?.name ?? "Chosen while quoting"} · <b>Ink choices:</b> {inkOptions.map((value) => inkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {inkChoices.find((choice) => choice.value === defaultInk)?.label ?? defaultInk}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Laminate choices:</b> {laminateNames.length ? `None, ${laminateNames.join(", ")}` : "None"} · <b>Default:</b> {selectedDefaultLaminate?.name ?? "None"}</div>
-          <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Artwork choices:</b> {artworkOptions.map((value) => artworkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {artworkChoices.find((choice) => choice.value === defaultArtwork)?.label ?? defaultArtwork}{artworkOptions.includes("artwork_check") ? ` · Check charge ${currency.format(artworkCheckPrice)}` : ""}</div>
-          <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Finishing defaults:</b> {finishingValues.length ? finishingValues.map((value) => finishingChoices.find((choice) => choice.value === value)?.label ?? value).join(", ") : "None"} · <b>Supply:</b> {deliveryMethod}</div>
+          <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Artwork choices:</b> {artworkOptions.map((value) => artworkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {artworkChoices.find((choice) => choice.value === defaultArtwork)?.label ?? defaultArtwork}{artworkOptions.includes("artwork_check") ? ` · Check ${currency.format(artworkCheckPrice)}` : ""}{artworkOptions.includes("artwork_required") ? ` · Design ${currency.format(artworkDesignPrice)}` : ""}</div>
+          <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Finishing defaults:</b> {finishingValues.length ? finishingValues.map((value) => finishingChoices.find((choice) => choice.value === value)?.label ?? value).join(", ") : "None"} · <b>Supply:</b> {deliveryMethod}{deliveryMethod === "delivery" ? ` (${currency.format(deliveryFee)})` : deliveryMethod === "install" ? " (tailored quote)" : " (no charge)"}</div>
           {finishingValues.includes("eyelets") ? <div style={{ color: "#9a3412" }}><b>Eyelets:</b> {eyeletPresets.find((preset) => preset.value === eyeletPreset)?.label ?? "4 corners"}{selectedEyeletMaterial ? ` · ${selectedEyeletMaterial.name}` : ""}</div> : null}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>

@@ -132,7 +132,12 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     : ["client_supplied", "artwork_required"];
   const initialDefaultArtwork = String(artworkField?.defaultValue ?? "client_supplied");
   const artworkCheckChoice = asArray(artworkField?.options).find((option) => String(option?.value ?? "") === "artwork_check");
+  const artworkDesignChoice = asArray(artworkField?.options).find((option) => String(option?.value ?? "") === "artwork_required");
   const initialArtworkCheckPrice = Math.max(0, Number(artworkCheckChoice?.priceDelta ?? 25) || 0);
+  const initialArtworkDesignPrice = Math.max(0, Number(artworkDesignChoice?.priceDelta ?? 120) || 0);
+  const deliveryField = fieldByKey("delivery_method");
+  const deliveryChoice = asArray(deliveryField?.options).find((option) => String(option?.value ?? "") === "delivery");
+  const initialDeliveryFee = Math.max(0, Number(deliveryChoice?.priceDelta ?? 0) || 0);
   const laminateField = fieldByKey("laminate");
   const laminateComponents = definitionComponents.filter((component) => {
     const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
@@ -261,6 +266,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialArtworkOptions={initialArtworkOptions}
         initialDefaultArtwork={initialDefaultArtwork}
         initialArtworkCheckPrice={initialArtworkCheckPrice}
+        initialArtworkDesignPrice={initialArtworkDesignPrice}
+        initialDeliveryFee={initialDeliveryFee}
         initialLaminateMaterialIds={initialLaminateMaterialIds}
         initialDefaultLaminateMaterialId={initialDefaultLaminateMaterialId}
         initialFinishingOptions={initialFinishingOptions}

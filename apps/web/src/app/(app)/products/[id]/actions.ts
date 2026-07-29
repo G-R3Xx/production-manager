@@ -154,7 +154,9 @@ function mergeInternalQuoteFields(
     artworkOptions: string[];
     defaultArtwork: string;
     artworkCheckPrice: number;
+    artworkDesignPrice: number;
     deliveryMethod: string;
+    deliveryFee: number;
     finishings: string[];
     laminateMaterialIds: string[];
     laminateMaterialNames: string[];
@@ -299,8 +301,8 @@ function mergeInternalQuoteFields(
     value,
     null,
     null,
-    value === "artwork_check" ? input.artworkCheckPrice : 0,
-    value === "artwork_required"
+    value === "artwork_check" ? input.artworkCheckPrice : value === "artwork_required" ? input.artworkDesignPrice : 0,
+    false
   ));
   upsert("artwork", () => ({
     id: randomUUID(),
@@ -340,8 +342,8 @@ function mergeInternalQuoteFields(
     meta: { source: "internal_product_setup", websiteVisible: true },
     options: [
       internalChoice("Pickup", "pickup"),
-      internalChoice("Delivery", "delivery"),
-      internalChoice("Install", "install")
+      internalChoice("Delivery", "delivery", null, null, input.deliveryFee),
+      internalChoice("Install", "install", null, null, 0, true)
     ],
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
   }), (field) => {
@@ -357,8 +359,8 @@ function mergeInternalQuoteFields(
       meta: standardMeta(field),
       options: [
         internalChoice("Pickup", "pickup"),
-        internalChoice("Delivery", "delivery"),
-        internalChoice("Install", "install"),
+        internalChoice("Delivery", "delivery", null, null, input.deliveryFee),
+        internalChoice("Install", "install", null, null, 0, true),
         ...extras
       ]
     };
@@ -682,6 +684,8 @@ export async function saveInternalProductSetupAction(formData: FormData) {
     ? read(formData, "defaultArtwork")
     : (artworkOptions[0] || "client_supplied");
   const artworkCheckPrice = Math.max(0, Number(read(formData, "artworkCheckPrice")) || 0);
+  const artworkDesignPrice = Math.max(0, Number(read(formData, "artworkDesignPrice")) || 0);
+  const deliveryFee = Math.max(0, Number(read(formData, "deliveryFee")) || 0);
   const finishings = read(formData, "finishingsCsv").split(",").map((value) => value.trim()).filter((value) => ["trim_cut", "mount_apply", "eyelets", "finishing", "pack"].includes(value));
   const laminateMaterialIds = uniqueStrings(read(formData, "laminateMaterialIdsCsv").split(","));
   const laminateMaterialNames = parseStringArrayJson(read(formData, "laminateMaterialNamesJson"));
@@ -725,7 +729,9 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       artworkOptions,
       defaultArtwork,
       artworkCheckPrice,
+      artworkDesignPrice,
       deliveryMethod,
+      deliveryFee,
       finishings,
       laminateMaterialIds,
       laminateMaterialNames,
