@@ -29,7 +29,7 @@ const card = { border: "1px solid #dbe4f0", borderRadius: 20, padding: 21, backg
 const input = { width: "100%", minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", boxSizing: "border-box" as const, background: "#fff" };
 const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" });
 const tabs = [
-  ["build", "Build & quote"], ["pricing", "Price check"], ["preview", "Summary"], ["general", "Product details"]
+  ["build", "Guided builder"], ["pricing", "Price check"], ["preview", "Summary"], ["general", "Product details"]
 ] as const;
 
 function fieldDisplay(field: Record<string, any>, config: Record<string, any>): string {
@@ -68,7 +68,7 @@ function normaliseSharedField(field: Record<string, any>): Record<string, any> {
 }
 
 function sharedFieldOrder(field: Record<string, any>, index: number): number {
-  const order = ["finished_size", "quantity", "print_method", "laminate", "finishing", "delivery_method"];
+  const order = ["finished_size", "quantity", "print_method", "ink", "laminate", "finishing", "delivery_method"];
   const standard = order.indexOf(String(field.key ?? ""));
   return standard >= 0 ? standard : 1000 + index;
 }
@@ -101,12 +101,6 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     .sort((left, right) => left.order - right.order)
     .map(({ field }) => field);
   const definitionComponents = asArray(definition.components).map(asObject);
-  const laminateComponent = definitionComponents.find((component) => {
-    const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
-    const label = String(component.label ?? "").toLowerCase();
-    const role = String(component.role ?? "");
-    return Boolean(component.materialId) && (triggerKey === "laminate" || (role === "quote_selected_material" && (label.includes("laminate") || label.includes("cello"))));
-  });
   const eyeletStockComponent = definitionComponents.find((component) => Boolean(component.materialId) && /eyelet|grommet/i.test(String(component.label ?? "")));
   const eyeletFollowUpComponent = definitionComponents.find((component) => {
     const usage = asObject(component.stockUsage);
@@ -114,6 +108,44 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   });
   const initialEyeletPreset = String(asObject(asArray(asObject(eyeletFollowUpComponent?.stockUsage).quantityPresets)[0]).value ?? "four_corners");
   const config = asObject(product.websiteConfigJson);
+  const fieldByKey = (key: string) => fields.find((field) => String(field.key ?? "") === key) ?? null;
+  const optionValues = (field: Record<string, any> | null) => asArray(field?.options).map((option) => String(option?.value ?? option?.label ?? "")).filter(Boolean);
+  const printField = fieldByKey("print_method") ?? fieldByKey("print_type");
+  const normalisePrintMethod = (value: string) => ["roll_print", "roll_stock_applied"].includes(value) ? "roll_stock" : value;
+  const initialPrintOptions = Array.from(new Set(optionValues(printField).map(normalisePrintMethod)));
+  const initialDefaultPrintMethod = normalisePrintMethod(String(printField?.defaultValue ?? config?.internalPrintMethod ?? "none"));
+  const rollMediaComponent = definitionComponents.find((component) => {
+    const trigger = asObject(component.trigger);
+    const usage = asObject(component.stockUsage);
+    const key = String(trigger.optionKey ?? usage.optionKey ?? "");
+    const values = asArray(trigger.optionValues).concat(asArray(usage.optionValues)).map(String);
+    return Boolean(component.materialId) && key === "print_method" && values.some((value) => ["roll_stock", "roll_print", "roll_stock_applied"].includes(value));
+  });
+  const inkField = fieldByKey("ink") ?? fieldByKey("white_ink");
+  const initialInkOptions = optionValues(inkField);
+  const initialDefaultInk = String(inkField?.defaultValue ?? initialInkOptions[0] ?? "cmyk");
+  const laminateField = fieldByKey("laminate");
+  const laminateComponents = definitionComponents.filter((component) => {
+    const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
+    const label = String(component.label ?? "").toLowerCase();
+    return Boolean(component.materialId) && (triggerKey === "laminate" || label.includes("laminate") || label.includes("cello"));
+  });
+  const initialLaminateMaterialIds = Array.from(new Set(laminateComponents.map((component) => String(component.materialId ?? "")).filter(Boolean)));
+  const laminateDefaultRaw = String(laminateField?.defaultValue ?? "none");
+  const initialDefaultLaminateMaterialId = initialLaminateMaterialIds.includes(laminateDefaultRaw)
+    ? laminateDefaultRaw
+    : laminateComponents.find((component) => {
+        const values = asArray(asObject(component.trigger).optionValues).concat(asArray(asObject(component.stockUsage).optionValues)).map(String);
+        return values.includes(laminateDefaultRaw);
+      })?.materialId
+      ? String(laminateComponents.find((component) => {
+          const values = asArray(asObject(component.trigger).optionValues).concat(asArray(asObject(component.stockUsage).optionValues)).map(String);
+          return values.includes(laminateDefaultRaw);
+        })?.materialId)
+      : "none";
+  const finishingField = fieldByKey("finishing");
+  const finishingDefaults = String(finishingField?.defaultValue ?? "").split(",").map((value) => value.trim()).filter(Boolean);
+  const initialFinishingOptions = finishingDefaults.length ? finishingDefaults : optionValues(finishingField);
   const message = read(query, "message");
   const error = read(query, "error");
   const width = Math.max(1, Number(read(query, "width") || config.defaultWidthMm || 600));
@@ -212,7 +244,14 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialMaterialId={currentRecipe?.materialId ?? ""}
         initialSteps={initialProductionSteps}
         initialDeliveryMethod={String(config.internalDeliveryMethod ?? (initialProductionSteps.some((step) => normalizeProductionFlowName(step.name) === "install") ? "install" : "pickup"))}
-        initialLaminateMaterialId={String(laminateComponent?.materialId ?? "")}
+        initialPrintOptions={initialPrintOptions}
+        initialDefaultPrintMethod={initialDefaultPrintMethod}
+        initialRollMediaId={String(rollMediaComponent?.materialId ?? "")}
+        initialInkOptions={initialInkOptions}
+        initialDefaultInk={initialDefaultInk}
+        initialLaminateMaterialIds={initialLaminateMaterialIds}
+        initialDefaultLaminateMaterialId={initialDefaultLaminateMaterialId}
+        initialFinishingOptions={initialFinishingOptions}
         initialEyeletMaterialId={String(eyeletStockComponent?.materialId ?? "")}
         initialEyeletPreset={initialEyeletPreset}
         preview={pricingPreview ? {
@@ -303,7 +342,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
             <div style={{ padding:13,border:"1px solid #dbe4f0",borderRadius:12,background:"#f8fafc" }}><div style={{ fontSize:12,color:"#64748b" }}>Default supply</div><strong style={{ display:"block",marginTop:4 }}>{String(config.internalDeliveryMethod ?? "pickup").replace(/_/g," ")}</strong></div>
           </div>
           <h3 style={{ margin:"20px 0 10px" }}>Choices available while quoting</h3>
-          {fields.length ? <div style={{ display:"grid",gap:9 }}>{fields.map((field,index)=><div key={field.id ?? index} style={{ display:"grid",gridTemplateColumns:"30px minmax(0,1fr) auto",gap:10,alignItems:"center",padding:11,border:"1px solid #e2e8f0",borderRadius:12 }}><span style={{ width:27,height:27,borderRadius:999,display:"grid",placeItems:"center",background:"#dbeafe",color:"#1d4ed8",fontSize:12,fontWeight:950 }}>{index+1}</span><div><b>{field.label}</b><div style={{ color:"#64748b",fontSize:12,marginTop:2 }}>{field.helpText || String(field.type ?? "choice").replace(/_/g," ")}</div></div><span style={{ color:"#475569",fontSize:12,fontWeight:850 }}>{asArray(field.options).length ? `${asArray(field.options).length} choices` : field.defaultValue || "Entered on quote"}</span></div>)}</div> : <div style={{ color:"#64748b" }}>Save the Build & quote setup to create the standard quote fields.</div>}
+          {fields.length ? <div style={{ display:"grid",gap:9 }}>{fields.map((field,index)=><div key={field.id ?? index} style={{ display:"grid",gridTemplateColumns:"30px minmax(0,1fr) auto",gap:10,alignItems:"center",padding:11,border:"1px solid #e2e8f0",borderRadius:12 }}><span style={{ width:27,height:27,borderRadius:999,display:"grid",placeItems:"center",background:"#dbeafe",color:"#1d4ed8",fontSize:12,fontWeight:950 }}>{index+1}</span><div><b>{field.label}</b><div style={{ color:"#64748b",fontSize:12,marginTop:2 }}>{field.helpText || String(field.type ?? "choice").replace(/_/g," ")}</div></div><span style={{ color:"#475569",fontSize:12,fontWeight:850 }}>{asArray(field.options).length ? `${asArray(field.options).length} choices` : field.defaultValue || "Entered on quote"}</span></div>)}</div> : <div style={{ color:"#64748b" }}>Save the Guided builder setup to create the standard quote fields.</div>}
         </section>
 
         <section style={card}>
@@ -324,7 +363,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Quote choices</span><b>{fields.length ? "Ready" : "Not saved"}</b></div>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Website</span><b>{product.websiteEnabled ? "Published" : "Optional / off"}</b></div>
           </div>
-          <Link href={`/products/${product.id}?tab=build`} style={{ display:"block",marginTop:16,textAlign:"center",textDecoration:"none",borderRadius:11,background:"#2563eb",color:"#fff",padding:"12px 14px",fontWeight:950 }}>Edit Build & quote</Link>
+          <Link href={`/products/${product.id}?tab=build`} style={{ display:"block",marginTop:16,textAlign:"center",textDecoration:"none",borderRadius:11,background:"#2563eb",color:"#fff",padding:"12px 14px",fontWeight:950 }}>Edit guided builder</Link>
         </section>
         {pricingPreview ? <section style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase" }}>Typical price check</div><h3 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h3><div style={{ display:"grid",gap:8,marginTop:13 }}>{[["Material",pricingPreview.materialCost],["Ink",pricingPreview.inkCost],["Labour + machine",pricingPreview.labourCost+pricingPreview.machineCost],["Total cost",pricingPreview.totalCost],["Sell price",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ display:"flex",justifyContent:"space-between",gap:10,paddingBottom:7,borderBottom:"1px solid #dbe4f0" }}><span>{label}</span><b>{aud.format(Number(value))}</b></div>)}</div></section> : null}
       </aside>

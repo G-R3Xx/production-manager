@@ -84,6 +84,20 @@ function safePositiveNumber(value: string, fallback: number): number {
   return Number.isFinite(number) && number > 0 ? number : fallback;
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => String(value).trim()).filter(Boolean)));
+}
+
+function parseStringArrayJson(value: string): string[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((item) => String(item).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
 function internalChoice(label: string, value: string, widthMm: number | null = null, heightMm: number | null = null) {
   return {
     id: randomUUID(),
@@ -124,10 +138,16 @@ function mergeInternalQuoteFields(
     height: number;
     quantity: number;
     printMethod: string;
+    printMethods: string[];
+    rollMediaId: string | null;
+    rollMediaName: string | null;
+    inkChoices: string[];
+    defaultInk: string;
     deliveryMethod: string;
     finishings: string[];
-    laminateMaterialId: string | null;
-    laminateMaterialName: string | null;
+    laminateMaterialIds: string[];
+    laminateMaterialNames: string[];
+    defaultLaminateMaterialId: string | null;
     eyeletMaterialId: string | null;
     eyeletMaterialName: string | null;
     eyeletPreset: string;
@@ -214,7 +234,11 @@ function mergeInternalQuoteFields(
     meta: standardMeta(field, { minimum: 1, step: 1 })
   }));
 
+  const printLabels: Record<string, string> = { none: "No print", direct_print: "Direct print", roll_stock: "Roll print / applied media" };
   const quotePrintMethod = input.printMethod === "roll_print" ? "roll_stock" : input.printMethod;
+  const allowedPrintMethods = uniqueStrings(input.printMethods.map((value) => value === "roll_print" ? "roll_stock" : value).filter((value) => ["none", "direct_print", "roll_stock"].includes(value)));
+  if (!allowedPrintMethods.includes(quotePrintMethod)) allowedPrintMethods.unshift(quotePrintMethod || "none");
+  const printOptions = allowedPrintMethods.map((value) => internalChoice(printLabels[value] ?? value.replace(/_/g, " "), value));
   upsert("print_method", () => ({
     id: randomUUID(),
     key: "print_method",
@@ -222,35 +246,51 @@ function mergeInternalQuoteFields(
     type: "select",
     required: true,
     defaultValue: quotePrintMethod,
-    helpText: "Choose how the product is normally printed.",
+    helpText: "Choose one of the print methods enabled in the guided product builder.",
     quoteOnly: true,
     showWhen: null,
     meta: { source: "internal_product_setup", websiteVisible: true },
-    options: [
-      internalChoice("No print", "none"),
-      internalChoice("Direct print", "direct_print"),
-      internalChoice("Roll print", "roll_stock")
-    ],
+    options: printOptions,
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-  }), (field) => {
-    const options = Array.isArray(field.options) ? [...field.options] : [];
-    const extras = options.filter((option: any) => !["none", "direct_print", "roll_stock", "roll_print"].includes(String(option?.value ?? "")));
-    return {
-      ...field,
-      label: "Print method",
-      type: "select",
-      required: true,
-      defaultValue: quotePrintMethod,
-      helpText: "Choose how the product is normally printed.",
-      meta: standardMeta(field),
-      options: [
-        internalChoice("No print", "none"),
-        internalChoice("Direct print", "direct_print"),
-        internalChoice("Roll print", "roll_stock"),
-        ...extras
-      ]
-    };
-  });
+  }), (field) => ({
+    ...field,
+    label: "Print method",
+    type: "select",
+    required: true,
+    defaultValue: quotePrintMethod,
+    helpText: "Choose one of the print methods enabled in the guided product builder.",
+    meta: standardMeta(field),
+    options: printOptions
+  }));
+
+  const inkLabels: Record<string, string> = { none: "No ink", cmyk: "CMYK", white: "White", cmyk_white: "CMYK + White" };
+  const allowedInkChoices = uniqueStrings(input.inkChoices.filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value)));
+  if (!allowedInkChoices.includes(input.defaultInk)) allowedInkChoices.unshift(input.defaultInk || "cmyk");
+  const inkOptions = allowedInkChoices.map((value) => internalChoice(inkLabels[value] ?? value.replace(/_/g, " "), value));
+  upsert("ink", () => ({
+    id: randomUUID(),
+    key: "ink",
+    label: "Ink",
+    type: "select",
+    required: true,
+    defaultValue: input.defaultInk || allowedInkChoices[0] || "cmyk",
+    helpText: "Choose the ink mode available for this product.",
+    quoteOnly: true,
+    showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] },
+    meta: { source: "internal_product_setup", websiteVisible: true },
+    options: inkOptions,
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => ({
+    ...field,
+    label: "Ink",
+    type: "select",
+    required: true,
+    defaultValue: input.defaultInk || allowedInkChoices[0] || "cmyk",
+    helpText: "Choose the ink mode available for this product.",
+    showWhen: { optionKey: "print_method", optionValues: ["direct_print", "roll_stock"] },
+    meta: standardMeta(field),
+    options: inkOptions
+  }));
 
   upsert("delivery_method", () => ({
     id: randomUUID(),
@@ -289,7 +329,14 @@ function mergeInternalQuoteFields(
     };
   });
 
-  const laminateValue = input.laminateMaterialId ?? "none";
+  const laminatePairs = uniqueStrings(input.laminateMaterialIds).map((materialId, index) => ({
+    materialId,
+    name: input.laminateMaterialNames[index] || `Laminate ${index + 1}`
+  }));
+  const laminateValue = input.defaultLaminateMaterialId && laminatePairs.some((item) => item.materialId === input.defaultLaminateMaterialId)
+    ? input.defaultLaminateMaterialId
+    : "none";
+  const laminateOptions = [internalChoice("No laminate", "none"), ...laminatePairs.map((item) => internalChoice(item.name, item.materialId))];
   upsert("laminate", () => ({
     id: randomUUID(),
     key: "laminate",
@@ -297,33 +344,22 @@ function mergeInternalQuoteFields(
     type: "select",
     required: false,
     defaultValue: laminateValue,
-    helpText: "Choose no laminate or the saved default laminate.",
+    helpText: "Choose none or one of the laminate materials enabled in the guided product builder.",
     quoteOnly: true,
     showWhen: null,
     meta: { source: "internal_product_setup", websiteVisible: true },
-    options: [
-      internalChoice("No laminate", "none"),
-      ...(input.laminateMaterialId ? [internalChoice(input.laminateMaterialName || "Laminate", input.laminateMaterialId)] : [])
-    ],
+    options: laminateOptions,
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-  }), (field) => {
-    const options = Array.isArray(field.options) ? [...field.options] : [];
-    const extras = options.filter((option: any) => !["none", input.laminateMaterialId].filter(Boolean).includes(String(option?.value ?? "")));
-    return {
-      ...field,
-      label: "Laminate",
-      type: "select",
-      required: false,
-      defaultValue: laminateValue,
-      helpText: "Choose no laminate or the saved default laminate.",
-      meta: standardMeta(field),
-      options: [
-        internalChoice("No laminate", "none"),
-        ...(input.laminateMaterialId ? [internalChoice(input.laminateMaterialName || "Laminate", input.laminateMaterialId)] : []),
-        ...extras
-      ]
-    };
-  });
+  }), (field) => ({
+    ...field,
+    label: "Laminate",
+    type: "select",
+    required: false,
+    defaultValue: laminateValue,
+    helpText: "Choose none or one of the laminate materials enabled in the guided product builder.",
+    meta: standardMeta(field),
+    options: laminateOptions
+  }));
 
   const finishingLabels: Record<string, string> = {
     trim_cut: "Trim / cut",
@@ -345,48 +381,106 @@ function mergeInternalQuoteFields(
     meta: { source: "internal_product_setup", websiteVisible: true },
     options: input.finishings.map((value) => internalChoice(finishingLabels[value] ?? value.replace(/_/g, " "), value)),
     rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-  }), (field) => {
-    const options = Array.isArray(field.options) ? [...field.options] : [];
-    const selected = new Set(input.finishings);
-    const extras = options.filter((option: any) => !selected.has(String(option?.value ?? "")));
-    return {
-      ...field,
-      label: "Finishing",
-      type: "multi_select",
-      required: false,
-      defaultValue: input.finishings.join(","),
-      helpText: "Tick all finishing processes required. Eyelets ask for placement and quantity.",
-      meta: standardMeta(field),
-      options: [
-        ...input.finishings.map((value) => internalChoice(finishingLabels[value] ?? value.replace(/_/g, " "), value)),
-        ...extras
-      ]
-    };
-  });
+  }), (field) => ({
+    ...field,
+    label: "Finishing",
+    type: "multi_select",
+    required: false,
+    defaultValue: input.finishings.join(","),
+    helpText: "Tick all finishing processes required. Eyelets ask for placement and quantity.",
+    meta: standardMeta(field),
+    options: input.finishings.map((value) => internalChoice(finishingLabels[value] ?? value.replace(/_/g, " "), value))
+  }));
 
   let components = Array.isArray(definition.components) ? [...definition.components] : [];
-  if (input.laminateMaterialId && !components.some((component: any) => triggerKeyFor(asObject(component)) === "laminate" && String(component?.materialId ?? "") === input.laminateMaterialId)) {
+  components = components.filter((rawComponent: any) => {
+    const component = asObject(rawComponent);
+    const triggerKey = triggerKeyFor(component);
+    const role = String(component.role ?? "");
+    const notes = String(component.notes ?? "").toLowerCase();
+    const managedNote = notes.includes("quick product builder") || notes.includes("guided product builder") || notes.includes("guided workflow") || notes.includes("internal product setup");
+    if (managedNote && ["print_method", "ink", "laminate"].includes(triggerKey)) return false;
+    if (managedNote && isEyeletComponent(component)) return false;
+    if (triggerKey === "ink" && role === "quote_sell_charge") return false;
+    return true;
+  });
+
+  if (input.rollMediaId && allowedPrintMethods.includes("roll_stock")) {
     components.push({
       id: randomUUID(),
       kind: "material",
       role: "quote_selected_material",
-      materialId: input.laminateMaterialId,
+      materialId: input.rollMediaId,
       supplierId: null,
       labourRateName: null,
-      label: input.laminateMaterialName || "Laminate",
+      label: input.rollMediaName || "Roll print media",
       quantity: "1",
       unit: "lm",
-      notes: "Laminate linked by the quick product builder.",
+      notes: "Roll media linked by the guided product builder.",
+      ruleType: "per_linear_metre",
+      wastePercent: "10",
+      stockUsage: {
+        usageBasis: "per_linear_metre",
+        dimensionSource: "finished_size",
+        optionKey: "print_method",
+        optionValues: ["roll_stock"],
+        widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
+      },
+      trigger: { optionKey: "print_method", optionValue: null, optionValues: ["roll_stock"] }
+    });
+  }
+
+  const inkRates: Record<string, string> = { cmyk: "10", white: "10", cmyk_white: "20" };
+  const inkChargeNames: Record<string, string> = { cmyk: "CMYK Ink", white: "White Ink", cmyk_white: "CMYK + White Ink" };
+  for (const value of allowedInkChoices.filter((choice) => choice !== "none")) {
+    components.push({
+      id: randomUUID(),
+      kind: "material",
+      role: "quote_sell_charge",
+      materialId: null,
+      supplierId: null,
+      labourRateName: null,
+      label: inkChargeNames[value] || `${inkLabels[value] || value} Ink`,
+      quantity: "1",
+      unit: "sqm",
+      notes: "Ink charge linked by the guided product builder.",
+      ruleType: "sell_sqm",
+      wastePercent: "0",
+      stockUsage: {
+        usageBasis: "sell_sqm",
+        dimensionSource: "finished_size",
+        optionKey: "ink",
+        optionValues: [value],
+        widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null,
+        sellRate: inkRates[value] || "10",
+        chargeName: inkChargeNames[value] || `${inkLabels[value] || value} Ink`
+      },
+      trigger: { optionKey: "ink", optionValue: null, optionValues: [value] }
+    });
+  }
+
+  for (const item of laminatePairs) {
+    components.push({
+      id: randomUUID(),
+      kind: "material",
+      role: "quote_selected_material",
+      materialId: item.materialId,
+      supplierId: null,
+      labourRateName: null,
+      label: item.name,
+      quantity: "1",
+      unit: "lm",
+      notes: "Laminate linked by the guided product builder.",
       ruleType: "per_linear_metre",
       wastePercent: "10",
       stockUsage: {
         usageBasis: "per_linear_metre",
         dimensionSource: "finished_size",
         optionKey: "laminate",
-        optionValues: [input.laminateMaterialId],
+        optionValues: [item.materialId],
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
-      trigger: { optionKey: "laminate", optionValue: null, optionValues: [input.laminateMaterialId] }
+      trigger: { optionKey: "laminate", optionValue: null, optionValues: [item.materialId] }
     });
   }
 
@@ -461,9 +555,10 @@ function mergeInternalQuoteFields(
     }
   }
 
-  const standardOrder = ["finished_size", "quantity", "print_method", "laminate", "finishing", "delivery_method"];
+  const standardOrder = ["finished_size", "quantity", "print_method", "ink", "laminate", "finishing", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
+    .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
     .map((field: any, index: number) => ({ field, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex.get(String(left.field?.key ?? ""));
@@ -485,10 +580,18 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const height = safePositiveNumber(read(formData, "height"), 450);
   const quantity = Math.max(1, Math.round(safePositiveNumber(read(formData, "quantity"), 1)));
   const deliveryMethod = ["pickup", "delivery", "install"].includes(read(formData, "deliveryMethod")) ? read(formData, "deliveryMethod") : "pickup";
-  const printMethod = ["none", "direct_print", "roll_print"].includes(read(formData, "printMethod")) ? read(formData, "printMethod") : "none";
+  const printMethod = ["none", "direct_print", "roll_stock", "roll_print", "roll_stock_applied"].includes(read(formData, "printMethod"))
+    ? (["roll_print", "roll_stock_applied"].includes(read(formData, "printMethod")) ? "roll_stock" : read(formData, "printMethod"))
+    : "none";
+  const printMethods = uniqueStrings(read(formData, "printMethodsCsv").split(",")).filter((value) => ["none", "direct_print", "roll_stock", "roll_print", "roll_stock_applied"].includes(value)).map((value) => ["roll_print", "roll_stock_applied"].includes(value) ? "roll_stock" : value);
+  const rollMediaId = read(formData, "rollMediaId") || null;
+  const rollMediaName = read(formData, "rollMediaName") || null;
+  const inkChoices = uniqueStrings(read(formData, "inkChoicesCsv").split(",")).filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value));
+  const defaultInk = ["none", "cmyk", "white", "cmyk_white"].includes(read(formData, "defaultInk")) ? read(formData, "defaultInk") : (inkChoices[0] || "cmyk");
   const finishings = read(formData, "finishingsCsv").split(",").map((value) => value.trim()).filter((value) => ["trim_cut", "mount_apply", "eyelets", "finishing", "pack"].includes(value));
-  const laminateMaterialId = read(formData, "laminateMaterialId") || null;
-  const laminateMaterialName = read(formData, "laminateMaterialName") || null;
+  const laminateMaterialIds = uniqueStrings(read(formData, "laminateMaterialIdsCsv").split(","));
+  const laminateMaterialNames = parseStringArrayJson(read(formData, "laminateMaterialNamesJson"));
+  const defaultLaminateMaterialId = read(formData, "laminateMaterialId") || null;
   const eyeletMaterialId = read(formData, "eyeletMaterialId") || null;
   const eyeletMaterialName = read(formData, "eyeletMaterialName") || null;
   const eyeletPreset = ["four_corners", "top_corners_only", "centre_top_bottom", "pole_fixing", "__custom"].includes(read(formData, "eyeletPreset")) ? read(formData, "eyeletPreset") : "four_corners";
@@ -523,10 +626,16 @@ export async function saveInternalProductSetupAction(formData: FormData) {
         height,
         quantity,
         printMethod,
+        printMethods,
+        rollMediaId,
+        rollMediaName,
+        inkChoices,
+        defaultInk,
         deliveryMethod,
         finishings,
-        laminateMaterialId,
-        laminateMaterialName,
+        laminateMaterialIds,
+        laminateMaterialNames,
+        defaultLaminateMaterialId,
         eyeletMaterialId,
         eyeletMaterialName,
         eyeletPreset

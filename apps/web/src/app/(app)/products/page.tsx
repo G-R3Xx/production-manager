@@ -54,7 +54,7 @@ export default async function ProductsPage({ searchParams }: Props) {
     {error ? <div style={{ padding: 13, borderRadius: 13, background: "#fff1f2", border: "1px solid #fecdd3", color: "#be123c", fontWeight: 850 }}>{error}</div> : null}
 
     <section style={{ ...card, padding: 18 }}>
-      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 900, textTransform: "uppercase" }}>Quick product creation</div><h2 style={{ margin: "5px 0 0" }}>What do you quote repeatedly?</h2><p style={{ margin: "6px 0 0", color: "#64748b" }}>Name it, choose the closest starting type, then set material, normal size, print and finishing on one screen.</p>
+      <div style={{ fontSize: 12, color: "#64748b", fontWeight: 900, textTransform: "uppercase" }}>Quick product creation</div><h2 style={{ margin: "5px 0 0" }}>What do you quote repeatedly?</h2><p style={{ margin: "6px 0 0", color: "#64748b" }}>Name it, choose the closest starting type, then work through the guided material, print, ink, laminate and finishing tabs.</p>
       <form action={createProductAction} style={{ display: "grid", gridTemplateColumns: "minmax(220px,2fr) minmax(150px,1fr) minmax(230px,1.2fr) auto", gap: 10, marginTop: 16 }}>
         <input name="name" placeholder="eg Corflute yard sign" required style={input} />
         <input name="sku" placeholder="SKU (optional)" style={input} />
@@ -85,7 +85,7 @@ export default async function ProductsPage({ searchParams }: Props) {
           <span>Quote template: <b>{product.templateName || "Automatic starter"}</b></span>
           <span>Online: <b>{product.websiteEnabled ? "Published as a bonus" : "Not published"}</b></span>
         </div>
-        <div style={{ color: "#2563eb", fontWeight: 900 }}>Open Build & quote →</div>
+        <div style={{ color: "#2563eb", fontWeight: 900 }}>Open guided builder →</div>
       </Link>)}
       {products.length === 0 ? <div style={{ ...card, padding: 28, color: "#64748b" }}>No products match this view.</div> : null}
     </section>
