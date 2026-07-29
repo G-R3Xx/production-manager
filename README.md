@@ -13,7 +13,7 @@ The main app workflow is intentionally focused on:
 - Quotes
 - Integrations
 
-Materials are purchased stock from suppliers. Products are reusable internal quote and production templates. Normal product setup starts on **Build & quote**, where staff choose the material, normal size and quantity, print method, finishing and fulfilment. Production Manager creates the technical recipe and standard quote fields in the background. Machine, labour, Production Step and Manufacturing Method maintenance remains under Settings for advanced use. WordPress publishing is optional and is not required for quoting or production.
+Materials are purchased stock from suppliers. Products are reusable internal quote and production templates. Normal product setup starts on **Build & quote**, where staff move through a Quick Quote-style client-side builder for substrate, normal size and quantity, print method, finishing and fulfilment without a page reload between steps. Production Manager creates the technical recipe and standard quote fields in the background. Machine, labour, Production Step and Manufacturing Method maintenance remains under Settings for advanced use. WordPress publishing is optional and is not required for quoting or production.
 
 Tax code defaults to `GST` for products and is not shown on product creation.
 

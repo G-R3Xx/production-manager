@@ -68,7 +68,7 @@ function normaliseSharedField(field: Record<string, any>): Record<string, any> {
 }
 
 function sharedFieldOrder(field: Record<string, any>, index: number): number {
-  const order = ["finished_size", "quantity", "print_method", "delivery_method"];
+  const order = ["finished_size", "quantity", "print_method", "laminate", "finishing", "delivery_method"];
   const standard = order.indexOf(String(field.key ?? ""));
   return standard >= 0 ? standard : 1000 + index;
 }
@@ -100,6 +100,19 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     .map((field, index) => ({ field, order: sharedFieldOrder(field, index) }))
     .sort((left, right) => left.order - right.order)
     .map(({ field }) => field);
+  const definitionComponents = asArray(definition.components).map(asObject);
+  const laminateComponent = definitionComponents.find((component) => {
+    const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
+    const label = String(component.label ?? "").toLowerCase();
+    const role = String(component.role ?? "");
+    return Boolean(component.materialId) && (triggerKey === "laminate" || (role === "quote_selected_material" && (label.includes("laminate") || label.includes("cello"))));
+  });
+  const eyeletStockComponent = definitionComponents.find((component) => Boolean(component.materialId) && /eyelet|grommet/i.test(String(component.label ?? "")));
+  const eyeletFollowUpComponent = definitionComponents.find((component) => {
+    const usage = asObject(component.stockUsage);
+    return /eyelet|grommet/i.test(`${String(component.label ?? "")} ${String(usage.quantityPrompt ?? "")}`) && asArray(usage.quantityPresets).length > 0;
+  });
+  const initialEyeletPreset = String(asObject(asArray(asObject(eyeletFollowUpComponent?.stockUsage).quantityPresets)[0]).value ?? "four_corners");
   const config = asObject(product.websiteConfigJson);
   const message = read(query, "message");
   const error = read(query, "error");
@@ -180,6 +193,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId).map((material) => ({
           id: material.id,
           name: material.name,
+          sku: material.sku,
+          notes: material.notes,
           materialType: material.materialType,
           materialGroup: material.materialGroup,
           widthMm: material.widthMm,
@@ -197,6 +212,9 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialMaterialId={currentRecipe?.materialId ?? ""}
         initialSteps={initialProductionSteps}
         initialDeliveryMethod={String(config.internalDeliveryMethod ?? (initialProductionSteps.some((step) => normalizeProductionFlowName(step.name) === "install") ? "install" : "pickup"))}
+        initialLaminateMaterialId={String(laminateComponent?.materialId ?? "")}
+        initialEyeletMaterialId={String(eyeletStockComponent?.materialId ?? "")}
+        initialEyeletPreset={initialEyeletPreset}
         preview={pricingPreview ? {
           materialCost: pricingPreview.materialCost,
           machineCost: pricingPreview.machineCost,

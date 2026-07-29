@@ -95,9 +95,43 @@ function internalChoice(label: string, value: string, widthMm: number | null = n
   };
 }
 
+function eyeletQuantityPresets(defaultValue: string) {
+  const presets = [
+    { id: randomUUID(), label: "4 corners", value: "four_corners", qty: "4" },
+    { id: randomUUID(), label: "Top corners only", value: "top_corners_only", qty: "2" },
+    { id: randomUUID(), label: "Centre top + bottom", value: "centre_top_bottom", qty: "2" },
+    { id: randomUUID(), label: "2 top + 2 bottom for pole fixing", value: "pole_fixing", qty: "4" },
+    { id: randomUUID(), label: "Custom", value: "__custom", qty: "custom" }
+  ];
+  const selectedIndex = presets.findIndex((preset) => preset.value === defaultValue);
+  if (selectedIndex <= 0) return presets;
+  return [presets[selectedIndex], ...presets.slice(0, selectedIndex), ...presets.slice(selectedIndex + 1)];
+}
+
+function triggerKeyFor(component: Record<string, any>): string {
+  return String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
+}
+
+function isEyeletComponent(component: Record<string, any>): boolean {
+  const usage = asObject(component.stockUsage);
+  return /eyelet|grommet/i.test(`${String(component.label ?? "")} ${String(usage.quantityPrompt ?? "")}`);
+}
+
 function mergeInternalQuoteFields(
   definition: Record<string, any>,
-  input: { width: number; height: number; quantity: number; printMethod: string; deliveryMethod: string }
+  input: {
+    width: number;
+    height: number;
+    quantity: number;
+    printMethod: string;
+    deliveryMethod: string;
+    finishings: string[];
+    laminateMaterialId: string | null;
+    laminateMaterialName: string | null;
+    eyeletMaterialId: string | null;
+    eyeletMaterialName: string | null;
+    eyeletPreset: string;
+  }
 ) {
   const existingFields = Array.isArray(definition.fields) ? [...definition.fields] : [];
   const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
@@ -255,7 +289,179 @@ function mergeInternalQuoteFields(
     };
   });
 
-  const standardOrder = ["finished_size", "quantity", "print_method", "delivery_method"];
+  const laminateValue = input.laminateMaterialId ?? "none";
+  upsert("laminate", () => ({
+    id: randomUUID(),
+    key: "laminate",
+    label: "Laminate",
+    type: "select",
+    required: false,
+    defaultValue: laminateValue,
+    helpText: "Choose no laminate or the saved default laminate.",
+    quoteOnly: true,
+    showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true },
+    options: [
+      internalChoice("No laminate", "none"),
+      ...(input.laminateMaterialId ? [internalChoice(input.laminateMaterialName || "Laminate", input.laminateMaterialId)] : [])
+    ],
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => {
+    const options = Array.isArray(field.options) ? [...field.options] : [];
+    const extras = options.filter((option: any) => !["none", input.laminateMaterialId].filter(Boolean).includes(String(option?.value ?? "")));
+    return {
+      ...field,
+      label: "Laminate",
+      type: "select",
+      required: false,
+      defaultValue: laminateValue,
+      helpText: "Choose no laminate or the saved default laminate.",
+      meta: standardMeta(field),
+      options: [
+        internalChoice("No laminate", "none"),
+        ...(input.laminateMaterialId ? [internalChoice(input.laminateMaterialName || "Laminate", input.laminateMaterialId)] : []),
+        ...extras
+      ]
+    };
+  });
+
+  const finishingLabels: Record<string, string> = {
+    trim_cut: "Trim / cut",
+    mount_apply: "Mount / apply",
+    eyelets: "Eyelets",
+    finishing: "Other finishing",
+    pack: "Pack"
+  };
+  upsert("finishing", () => ({
+    id: randomUUID(),
+    key: "finishing",
+    label: "Finishing",
+    type: "multi_select",
+    required: false,
+    defaultValue: input.finishings.join(","),
+    helpText: "Tick all finishing processes required. Eyelets ask for placement and quantity.",
+    quoteOnly: true,
+    showWhen: null,
+    meta: { source: "internal_product_setup", websiteVisible: true },
+    options: input.finishings.map((value) => internalChoice(finishingLabels[value] ?? value.replace(/_/g, " "), value)),
+    rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+  }), (field) => {
+    const options = Array.isArray(field.options) ? [...field.options] : [];
+    const selected = new Set(input.finishings);
+    const extras = options.filter((option: any) => !selected.has(String(option?.value ?? "")));
+    return {
+      ...field,
+      label: "Finishing",
+      type: "multi_select",
+      required: false,
+      defaultValue: input.finishings.join(","),
+      helpText: "Tick all finishing processes required. Eyelets ask for placement and quantity.",
+      meta: standardMeta(field),
+      options: [
+        ...input.finishings.map((value) => internalChoice(finishingLabels[value] ?? value.replace(/_/g, " "), value)),
+        ...extras
+      ]
+    };
+  });
+
+  let components = Array.isArray(definition.components) ? [...definition.components] : [];
+  if (input.laminateMaterialId && !components.some((component: any) => triggerKeyFor(asObject(component)) === "laminate" && String(component?.materialId ?? "") === input.laminateMaterialId)) {
+    components.push({
+      id: randomUUID(),
+      kind: "material",
+      role: "quote_selected_material",
+      materialId: input.laminateMaterialId,
+      supplierId: null,
+      labourRateName: null,
+      label: input.laminateMaterialName || "Laminate",
+      quantity: "1",
+      unit: "lm",
+      notes: "Laminate linked by the quick product builder.",
+      ruleType: "per_linear_metre",
+      wastePercent: "10",
+      stockUsage: {
+        usageBasis: "per_linear_metre",
+        dimensionSource: "finished_size",
+        optionKey: "laminate",
+        optionValues: [input.laminateMaterialId],
+        widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
+      },
+      trigger: { optionKey: "laminate", optionValue: null, optionValues: [input.laminateMaterialId] }
+    });
+  }
+
+  if (input.finishings.includes("eyelets")) {
+    const presets = eyeletQuantityPresets(input.eyeletPreset || "four_corners");
+    components = components.map((rawComponent: any) => {
+      const component = asObject(rawComponent);
+      if (!isEyeletComponent(component)) return rawComponent;
+      return {
+        ...component,
+        stockUsage: {
+          ...asObject(component.stockUsage),
+          quantitySource: "follow_up",
+          quantityPrompt: "Eyelet placement",
+          quantityPresets: presets.map((preset) => ({ ...preset, id: randomUUID() })),
+          allowCustomQuantity: true,
+          customQuantityLabel: "Custom eyelet quantity"
+        }
+      };
+    });
+
+    if (input.eyeletMaterialId && !components.some((component: any) => isEyeletComponent(asObject(component)) && String(component?.materialId ?? "") === input.eyeletMaterialId)) {
+      components.push({
+        id: randomUUID(),
+        kind: "material",
+        role: "quote_finishing",
+        materialId: input.eyeletMaterialId,
+        supplierId: null,
+        labourRateName: null,
+        label: input.eyeletMaterialName || "Eyelets",
+        quantity: "1",
+        unit: "each",
+        notes: "Eyelet hardware linked by the quick product builder.",
+        ruleType: "per_unit",
+        wastePercent: "0",
+        stockUsage: {
+          usageBasis: "per_unit",
+          dimensionSource: "quantity_only",
+          optionKey: "finishing",
+          optionValues: ["eyelets"],
+          widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null,
+          quantitySource: "follow_up", quantityPrompt: "Eyelet placement", quantityPresets: presets, allowCustomQuantity: true, customQuantityLabel: "Custom eyelet quantity"
+        },
+        trigger: { optionKey: "finishing", optionValue: null, optionValues: ["eyelets"] }
+      });
+    }
+
+    if (!components.some((component: any) => isEyeletComponent(asObject(component)) && String(component?.kind ?? "") === "labour")) {
+      components.push({
+        id: randomUUID(),
+        kind: "labour",
+        role: "factory_labour",
+        materialId: null,
+        supplierId: null,
+        labourRateName: "Factory",
+        label: "Eyelet install labour",
+        quantity: "0.03",
+        unit: "hr",
+        notes: "Labour per eyelet. Quote placement and quantity multiplies this row.",
+        ruleType: "labour_hours",
+        wastePercent: "0",
+        stockUsage: {
+          usageBasis: "labour_hours",
+          dimensionSource: "quantity_only",
+          optionKey: "finishing",
+          optionValues: ["eyelets"],
+          widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null,
+          sellRate: "66", chargeName: "Eyelet install labour", quantitySource: "follow_up", quantityPrompt: "Eyelet placement", quantityPresets: presets.map((preset) => ({ ...preset, id: randomUUID() })), allowCustomQuantity: true, customQuantityLabel: "Custom eyelet quantity"
+        },
+        trigger: { optionKey: "finishing", optionValue: null, optionValues: ["eyelets"] }
+      });
+    }
+  }
+
+  const standardOrder = ["finished_size", "quantity", "print_method", "laminate", "finishing", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .map((field: any, index: number) => ({ field, index }))
@@ -269,7 +475,7 @@ function mergeInternalQuoteFields(
     })
     .map(({ field }) => field);
 
-  return { ...definition, fields: orderedFields };
+  return { ...definition, fields: orderedFields, components };
 }
 
 export async function saveInternalProductSetupAction(formData: FormData) {
@@ -280,6 +486,12 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const quantity = Math.max(1, Math.round(safePositiveNumber(read(formData, "quantity"), 1)));
   const deliveryMethod = ["pickup", "delivery", "install"].includes(read(formData, "deliveryMethod")) ? read(formData, "deliveryMethod") : "pickup";
   const printMethod = ["none", "direct_print", "roll_print"].includes(read(formData, "printMethod")) ? read(formData, "printMethod") : "none";
+  const finishings = read(formData, "finishingsCsv").split(",").map((value) => value.trim()).filter((value) => ["trim_cut", "mount_apply", "eyelets", "finishing", "pack"].includes(value));
+  const laminateMaterialId = read(formData, "laminateMaterialId") || null;
+  const laminateMaterialName = read(formData, "laminateMaterialName") || null;
+  const eyeletMaterialId = read(formData, "eyeletMaterialId") || null;
+  const eyeletMaterialName = read(formData, "eyeletMaterialName") || null;
+  const eyeletPreset = ["four_corners", "top_corners_only", "centre_top_bottom", "pole_fixing", "__custom"].includes(read(formData, "eyeletPreset")) ? read(formData, "eyeletPreset") : "four_corners";
 
   try {
     const steps = parseProductionFlowSteps(read(formData, "flowJson"));
@@ -306,7 +518,19 @@ export async function saveInternalProductSetupAction(formData: FormData) {
     await updateConfiguratorDefinitionJson(
       tenant.tenantId,
       template.id,
-      mergeInternalQuoteFields(definition, { width, height, quantity, printMethod, deliveryMethod })
+      mergeInternalQuoteFields(definition, {
+        width,
+        height,
+        quantity,
+        printMethod,
+        deliveryMethod,
+        finishings,
+        laminateMaterialId,
+        laminateMaterialName,
+        eyeletMaterialId,
+        eyeletMaterialName,
+        eyeletPreset
+      })
     );
     await updateProductInternalDefaults(tenant.tenantId, productId, { widthMm: width, heightMm: height, quantity, deliveryMethod, printMethod });
     const nextStatus = formData.get("makeActive") === "on" ? "active" : (product.status === "archived" ? "archived" : "draft");

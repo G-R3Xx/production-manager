@@ -190,7 +190,7 @@ function serialisedChoices(field: Record<string, unknown>): WebsiteBuilderChoice
 }
 
 function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
-  const standardOrder = new Map(["finished_size", "quantity", "print_method", "delivery_method"].map((key, index) => [key, index]));
+  const standardOrder = new Map(["finished_size", "quantity", "print_method", "laminate", "finishing", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
   asArray(definition.fields).forEach((rawField, sourceIndex) => {
@@ -391,7 +391,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.29.01",
+    version: "V26.07.29.02",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised
