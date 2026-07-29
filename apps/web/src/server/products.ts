@@ -437,6 +437,7 @@ export async function updateProductInternalDefaults(
     deliveryMethod: string;
     printMethod: string;
     guidedFields?: unknown[];
+    guidedComponents?: unknown[];
   }
 ): Promise<void> {
   await ensureWordPressProductPublishingSchema();
@@ -455,7 +456,8 @@ export async function updateProductInternalDefaults(
       defaultQuantity: Math.max(1, Math.round(defaults.quantity)),
       internalDeliveryMethod: defaults.deliveryMethod || "pickup",
       internalPrintMethod: defaults.printMethod || "none",
-      ...(Array.isArray(defaults.guidedFields) ? { guidedFields: defaults.guidedFields } : {})
+      ...(Array.isArray(defaults.guidedFields) ? { guidedFields: defaults.guidedFields } : {}),
+      ...(Array.isArray(defaults.guidedComponents) ? { guidedComponents: defaults.guidedComponents } : {})
     })
   ]);
 }

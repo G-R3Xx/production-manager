@@ -701,7 +701,8 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       quantity,
       deliveryMethod,
       printMethod,
-      guidedFields: Array.isArray(nextDefinition.fields) ? nextDefinition.fields : []
+      guidedFields: Array.isArray(nextDefinition.fields) ? nextDefinition.fields : [],
+      guidedComponents: Array.isArray(nextDefinition.components) ? nextDefinition.components : []
     });
     const nextStatus = formData.get("makeActive") === "on" ? "active" : (product.status === "archived" ? "archived" : "draft");
     if (nextStatus !== product.status || product.defaultTemplateId !== template.id) {
