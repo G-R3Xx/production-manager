@@ -412,6 +412,7 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     quantity: Math.max(1, Math.round(numberValue(config.defaultQuantity, 1)))
   };
   const fields = serializeFields(definition, config);
+  const websiteProductName = text(config.websiteProductName) || product.name;
   let startingPrice: number | null = null;
   const defaultPrice = await priceWordPressProductForTenant(product.tenantId, {
     productId: product.id,
@@ -431,8 +432,8 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
   return {
     id: product.id,
     sku: product.sku,
-    name: product.name,
-    slug: product.websiteSlug || safeSlug(product.name),
+    name: websiteProductName,
+    slug: product.websiteSlug || safeSlug(websiteProductName),
     category: product.websiteCategory,
     status: product.status,
     mode: product.websiteMode === "live_checkout" ? "live_checkout" : "quote_only",
@@ -462,7 +463,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.30.03",
+    version: "V26.07.30.04",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised

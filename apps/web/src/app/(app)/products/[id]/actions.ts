@@ -870,6 +870,7 @@ export async function saveProductWebsiteAction(formData: FormData) {
   };
   const configJson = {
     ...existing,
+    websiteProductName: read(formData, "websiteProductName") || null,
     defaultWidthMm: numberOr("defaultWidthMm", existing.defaultWidthMm ?? 600),
     defaultHeightMm: numberOr("defaultHeightMm", existing.defaultHeightMm ?? 450),
     defaultQuantity: Math.max(1, Math.round(Number(numberOr("defaultQuantity", existing.defaultQuantity ?? 1)))),

@@ -340,7 +340,19 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           <label style={{ display:"flex",alignItems:"center",gap:10,padding:15,border:"1px solid #dbe4f0",borderRadius:14,fontWeight:900 }}><input type="checkbox" name="websiteEnabled" defaultChecked={product.websiteEnabled}/> Publish this product to WordPress</label>
           <label style={{ display:"grid",gap:7,fontWeight:850 }}>Selling mode<select name="websiteMode" defaultValue={product.websiteMode || "quote_only"} style={input}><option value="live_checkout">Live price + WooCommerce checkout</option><option value="quote_only">Request a quote only</option></select></label>
         </div>
-        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}><label style={{ display:"grid",gap:7,fontWeight:850 }}>Website URL slug<input name="websiteSlug" defaultValue={product.websiteSlug ?? ""} placeholder="Generated from product name" style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Website category<input name="websiteCategory" defaultValue={product.websiteCategory ?? ""} placeholder="Signs, Plans, Stickers…" style={input}/></label></div>
+        <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
+          <label style={{ display:"grid",gap:7,fontWeight:850 }}>
+            Website product name
+            <input name="websiteProductName" defaultValue={String(config.websiteProductName ?? "")} placeholder={product.name} style={input}/>
+            <span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Optional. Leave blank to use the internal name “{product.name}”.</span>
+          </label>
+          <label style={{ display:"grid",gap:7,fontWeight:850 }}>Website category<input name="websiteCategory" defaultValue={product.websiteCategory ?? ""} placeholder="Signs, Plans, Stickers…" style={input}/></label>
+        </div>
+        <label style={{ display:"grid",gap:7,fontWeight:850 }}>
+          Website URL slug
+          <input name="websiteSlug" defaultValue={product.websiteSlug ?? ""} placeholder="Generated from the website product name" style={input}/>
+          <span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Leave blank to generate the URL from the website product name.</span>
+        </label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Short description<textarea name="websiteShortDescription" defaultValue={product.websiteShortDescription ?? ""} rows={3} style={{ ...input,padding:12 }}/></label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Full description<textarea name="websiteDescription" defaultValue={product.websiteDescription ?? ""} rows={6} style={{ ...input,padding:12 }}/></label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Product image URL<input name="websiteImageUrl" defaultValue={product.websiteImageUrl ?? ""} placeholder="https://…" style={input}/></label>
