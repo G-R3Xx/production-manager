@@ -803,7 +803,10 @@ export async function previewRecipeCost(
         length_mm: string | null;
         roll_width_mm: string | null;
         minimum_billable_sheet_fraction: string | null;
-        unit_cost: string;
+        purchase_uom: string | null;
+        stock_uom: string | null;
+        stock_quantity: string | null;
+        purchase_cost: string;
       }>(`
         SELECT
           type::text,
@@ -811,13 +814,33 @@ export async function previewRecipeCost(
           length_mm,
           roll_width_mm,
           minimum_billable_sheet_fraction,
-          COALESCE((cost_json ->> 'purchaseCost')::numeric, purchase_cost, 0)::text AS unit_cost
+          purchase_uom,
+          stock_uom,
+          stock_quantity::text,
+          COALESCE((cost_json ->> 'purchaseCost')::numeric, purchase_cost, 0)::text AS purchase_cost
         FROM catalog.materials
         WHERE tenant_id = $1::uuid AND id = $2::uuid
       `, [tenantId, recipe.materialId])
     : { rows: [] };
 
   const material = materialResult.rows[0];
+  const materialType = String(material?.type ?? "").toLowerCase();
+  const purchaseUom = String(material?.purchase_uom ?? "").toLowerCase();
+  const stockUom = String(material?.stock_uom ?? "").toLowerCase();
+  const stockQuantity = Number(material?.stock_quantity || 0);
+  const purchaseCost = Number(material?.purchase_cost || 0);
+  const linearUnits = ["lm", "m", "metre", "meter", "linear metre", "linear meter"];
+  const looksLikeRoll = materialType.includes("roll") || materialType.includes("laminate") || materialType.includes("cello") || Number(material?.roll_width_mm || 0) > 0;
+  const looksLikeSheet = materialType.includes("sheet") || materialType.includes("paper") || materialType.includes("card");
+  let normalizedUnitCost = purchaseCost;
+  if (looksLikeRoll) {
+    if (linearUnits.includes(purchaseUom)) normalizedUnitCost = purchaseCost;
+    else if (purchaseUom.includes("roll") && stockQuantity > 0) normalizedUnitCost = purchaseCost / stockQuantity;
+    else if (stockQuantity > 0 && linearUnits.includes(stockUom)) normalizedUnitCost = purchaseCost / stockQuantity;
+  } else if (looksLikeSheet && (purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box")) && stockQuantity > 0) {
+    normalizedUnitCost = purchaseCost / stockQuantity;
+  }
+
   const base = calculateProductionRecipeCost({
     finishedWidthMm: widthMm,
     finishedHeightMm: heightMm,
@@ -831,7 +854,7 @@ export async function previewRecipeCost(
           widthMm: Number(material.width_mm || 0),
           heightMm: Number(material.length_mm || 0),
           rollWidthMm: Number(material.roll_width_mm || 0),
-          unitCost: Number(material.unit_cost || 0),
+          unitCost: normalizedUnitCost,
           minimumBillableSheetFraction: Number(material.minimum_billable_sheet_fraction || 0),
           allowRotation: true
         }

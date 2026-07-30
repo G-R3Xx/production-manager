@@ -1,3 +1,5 @@
+# Production Manager V26.07.30.02
+
 # Production Manager
 
 Production Manager is a multi-tenant production workflow app for print/signage operations.

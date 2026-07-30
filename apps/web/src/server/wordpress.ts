@@ -462,7 +462,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.29.09",
+    version: "V26.07.30.02",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised
@@ -565,7 +565,10 @@ function materialRate(material: WebsitePricingMaterial, basis: "lm" | "sqm" | "s
 
   if (basis === "lm") {
     if (linearUnits.includes(purchaseUom)) return purchaseCost;
-    if ((purchaseUom.includes("roll") || materialLooksLikeRoll(material)) && stockQuantity > 0 && linearUnits.includes(stockUom)) {
+    if (purchaseUom.includes("roll") && stockQuantity > 0 && materialLooksLikeRoll(material)) {
+      return purchaseCost / stockQuantity;
+    }
+    if (materialLooksLikeRoll(material) && stockQuantity > 0 && linearUnits.includes(stockUom)) {
       return purchaseCost / stockQuantity;
     }
     return purchaseCost;
@@ -574,7 +577,7 @@ function materialRate(material: WebsitePricingMaterial, basis: "lm" | "sqm" | "s
     if (["sqm", "m2", "m²", "square metre", "square meter"].includes(purchaseUom)) return purchaseCost;
     if (purchaseUom.includes("sheet") && sheetArea > 0) return purchaseCost / sheetArea;
     if (linearUnits.includes(purchaseUom) && rollWidthM > 0) return purchaseCost / rollWidthM;
-    if (purchaseUom.includes("roll") && rollWidthM > 0 && stockQuantity > 0 && linearUnits.includes(stockUom)) {
+    if (purchaseUom.includes("roll") && rollWidthM > 0 && stockQuantity > 0 && materialLooksLikeRoll(material)) {
       return purchaseCost / (rollWidthM * stockQuantity);
     }
     return purchaseCost;

@@ -145,6 +145,10 @@ function mergeInternalQuoteFields(
     width: number;
     height: number;
     quantity: number;
+    wastePercent: number;
+    mainMaterialId: string | null;
+    mainMaterialName: string | null;
+    mainMaterialIsRoll: boolean;
     printMethod: string;
     printMethods: string[];
     rollMediaId: string | null;
@@ -168,8 +172,10 @@ function mergeInternalQuoteFields(
 ) {
   // Quantity is controlled by WooCommerce and by the quote line itself. Remove
   // the old generated quantity question so it cannot appear twice.
+  const removeSeparateRollStockQuestion = input.mainMaterialIsRoll || Boolean(input.rollMediaId);
   const existingFields = (Array.isArray(definition.fields) ? [...definition.fields] : [])
-    .filter((field: any) => String(field?.key ?? "") !== "quantity");
+    .filter((field: any) => String(field?.key ?? "") !== "quantity")
+    .filter((field: any) => !(removeSeparateRollStockQuestion && String(field?.key ?? "") === "roll_stock_type"));
   const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
   const sizeValue = `${Math.round(input.width)}x${Math.round(input.height)}`;
   const standardMeta = (field: Record<string, any>, extra: Record<string, unknown> = {}) => ({
@@ -482,19 +488,49 @@ function mergeInternalQuoteFields(
   }
 
   let components = Array.isArray(definition.components) ? [...definition.components] : [];
+  const baseWastePercent = String(Math.max(0, input.wastePercent));
   components = components.filter((rawComponent: any) => {
     const component = asObject(rawComponent);
     const triggerKey = triggerKeyFor(component);
     const role = String(component.role ?? "");
+    const label = String(component.label ?? "").toLowerCase();
     const notes = String(component.notes ?? "").toLowerCase();
     const managedNote = notes.includes("quick product builder") || notes.includes("guided product builder") || notes.includes("guided workflow") || notes.includes("internal product setup");
+    if (role === "base_material") return false;
     if (managedNote && ["print_method", "ink", "laminate"].includes(triggerKey)) return false;
     if (managedNote && isEyeletComponent(component)) return false;
-    if (triggerKey === "ink" && role === "quote_sell_charge") return false;
+    if (role === "quote_sell_charge" && (triggerKey === "ink" || (label.includes("ink") && (triggerKey === "print_method" || notes.includes("simple print charge"))))) return false;
+    if (role === "quote_selected_material" && !component.materialId && (label.includes("roll stock") || label.includes("print media"))) return false;
     return true;
   });
 
-  if (input.rollMediaId && allowedPrintMethods.includes("roll_stock")) {
+  if (input.mainMaterialId) {
+    const isRoll = input.mainMaterialIsRoll;
+    components.push({
+      id: randomUUID(),
+      kind: "material",
+      role: "base_material",
+      materialId: input.mainMaterialId,
+      supplierId: null,
+      labourRateName: null,
+      label: input.mainMaterialName || (isRoll ? "Base roll material" : "Base sheet material"),
+      quantity: "1",
+      unit: isRoll ? "lm" : "sheet",
+      notes: "Main material linked by the guided product builder. Quote dimensions drive the material usage.",
+      ruleType: isRoll ? "per_linear_metre" : "yield_based",
+      wastePercent: baseWastePercent,
+      stockUsage: {
+        usageBasis: isRoll ? "per_linear_metre" : "yield_based",
+        dimensionSource: "finished_size",
+        optionKey: "finished_size",
+        optionValues: [],
+        widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
+      },
+      trigger: { optionKey: null, optionValue: null, optionValues: [] }
+    });
+  }
+
+  if (input.rollMediaId && input.rollMediaId !== input.mainMaterialId && allowedPrintMethods.includes("roll_stock")) {
     components.push({
       id: randomUUID(),
       kind: "material",
@@ -648,6 +684,7 @@ function mergeInternalQuoteFields(
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
+    .filter((field: any) => !(removeSeparateRollStockQuestion && String(field?.key ?? "") === "roll_stock_type"))
     .filter((field: any) => input.finishings.includes("eyelets") || !["eyelet_placement", "eyelet_custom_quantity"].includes(String(field?.key ?? "")))
     .map((field: any, index: number) => ({ field, index }))
     .sort((left, right) => {
@@ -669,11 +706,15 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const width = safePositiveNumber(read(formData, "width"), 600);
   const height = safePositiveNumber(read(formData, "height"), 450);
   const quantity = Math.max(1, Math.round(safePositiveNumber(read(formData, "quantity"), 1)));
+  const wastePercent = Math.max(0, Number(read(formData, "recipeWastePercent")) || 0);
   const deliveryMethod = ["pickup", "delivery", "install"].includes(read(formData, "deliveryMethod")) ? read(formData, "deliveryMethod") : "pickup";
   const printMethod = ["none", "direct_print", "roll_stock", "roll_print", "roll_stock_applied"].includes(read(formData, "printMethod"))
     ? (["roll_print", "roll_stock_applied"].includes(read(formData, "printMethod")) ? "roll_stock" : read(formData, "printMethod"))
     : "none";
   const printMethods = uniqueStrings(read(formData, "printMethodsCsv").split(",")).filter((value) => ["none", "direct_print", "roll_stock", "roll_print", "roll_stock_applied"].includes(value)).map((value) => ["roll_print", "roll_stock_applied"].includes(value) ? "roll_stock" : value);
+  const mainMaterialId = read(formData, "materialId") || null;
+  const mainMaterialName = read(formData, "mainMaterialName") || null;
+  const mainMaterialIsRoll = read(formData, "mainMaterialIsRoll") === "1";
   const rollMediaId = read(formData, "rollMediaId") || null;
   const rollMediaName = read(formData, "rollMediaName") || null;
   const inkChoices = uniqueStrings(read(formData, "inkChoicesCsv").split(",")).filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value));
@@ -701,7 +742,7 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       productId,
       productName: product.name,
       department: product.department,
-      materialId: read(formData, "materialId") || null,
+      materialId: mainMaterialId,
       steps
     });
 
@@ -720,6 +761,10 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       width,
       height,
       quantity,
+      wastePercent,
+      mainMaterialId,
+      mainMaterialName,
+      mainMaterialIsRoll,
       printMethod,
       printMethods,
       rollMediaId,
@@ -783,6 +828,7 @@ export async function saveInternalProductSetupAction(formData: FormData) {
 export async function saveSimpleProductProductionFlowAction(formData: FormData) {
   const productId = read(formData, "productId");
   const { tenant, product } = await context(productId);
+  const mainMaterialId = read(formData, "materialId") || null;
 
   try {
     const steps = parseProductionFlowSteps(read(formData, "flowJson"));
@@ -791,7 +837,7 @@ export async function saveSimpleProductProductionFlowAction(formData: FormData) 
       productId,
       productName: product.name,
       department: product.department,
-      materialId: read(formData, "materialId") || null,
+      materialId: mainMaterialId,
       steps
     });
   } catch (error) {

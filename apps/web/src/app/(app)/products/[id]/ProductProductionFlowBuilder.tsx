@@ -75,6 +75,7 @@ type Props = {
   previewWidth: number;
   previewHeight: number;
   previewQuantity: number;
+  initialWastePercent: number;
 };
 
 type BuilderStep = "material" | "size" | "print" | "media_ink" | "laminate" | "finishing" | "artwork" | "fulfilment" | "review";
@@ -262,7 +263,8 @@ export function ProductProductionFlowBuilder({
   preview,
   previewWidth,
   previewHeight,
-  previewQuantity
+  previewQuantity,
+  initialWastePercent
 }: Props) {
   const startingPrintOptions = unique([...(initialPrintOptions.length ? initialPrintOptions : []), initialDefaultPrintMethod || "none"]);
   const startingInkOptions = unique([...(initialInkOptions.length ? initialInkOptions : []), initialDefaultInk || "cmyk"]);
@@ -295,6 +297,7 @@ export function ProductProductionFlowBuilder({
   const selectedPresetKeys = useMemo(() => new Set(steps.map(presetKeyForStep).filter(Boolean)), [steps]);
   const selectedTokens = useMemo(() => new Set(steps.map((step) => step.processToken)), [steps]);
   const selectedMaterial = materials.find((material) => material.id === materialId);
+  const selectedMainMaterialIsRoll = Boolean(selectedMaterial && isRollPrintMaterial(selectedMaterial));
   const selectedRollMedia = materials.find((material) => material.id === rollMediaId);
   const selectedDefaultLaminate = materials.find((material) => material.id === defaultLaminateMaterialId);
   const selectedEyeletMaterial = materials.find((material) => material.id === eyeletMaterialId);
@@ -485,9 +488,12 @@ export function ProductProductionFlowBuilder({
     <form action={saveInternalProductSetupAction} style={{ display: "grid", gap: 16 }}>
       <input type="hidden" name="productId" value={productId} />
       <input type="hidden" name="materialId" value={materialId} />
+      <input type="hidden" name="mainMaterialName" value={selectedMaterial?.name ?? ""} />
+      <input type="hidden" name="mainMaterialIsRoll" value={selectedMainMaterialIsRoll ? "1" : "0"} />
       <input type="hidden" name="width" value={width} />
       <input type="hidden" name="height" value={height} />
       <input type="hidden" name="quantity" value={quantity} />
+      <input type="hidden" name="recipeWastePercent" value={initialWastePercent} />
       <input type="hidden" name="flowJson" value={flowJson} />
       <input type="hidden" name="deliveryMethod" value={deliveryMethod} />
       <input type="hidden" name="printMethod" value={defaultPrintMethod} />
@@ -549,7 +555,7 @@ export function ProductProductionFlowBuilder({
       {activeStep === "media_ink" ? <section style={panel}>
         <h3 style={{ margin: 0 }}>4. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
         <div style={{ display: "grid", gap: 18 }}>
-          {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaMaterials.map((material) => <option key={material.id} value={material.id}>{material.name} — {materialDescription(material)}</option>)}</select></label> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no roll media is required.</div>}
+          {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaMaterials.map((material) => <option key={material.id} value={material.id}>{material.name} — {materialDescription(material)}</option>)}</select></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
           <div>
             <strong>Available ink answers</strong>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(150px,1fr))", gap: 9, marginTop: 9 }}>

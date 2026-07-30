@@ -285,6 +285,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         previewWidth={width}
         previewHeight={height}
         previewQuantity={quantity}
+        initialWastePercent={Number(currentRecipe?.wastePercent ?? 5)}
       />
       <details style={{ ...card,padding:0,overflow:"hidden" }}>
         <summary style={{ cursor:"pointer",padding:18,display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",listStyle:"none" }}><span><span style={{ display:"block",fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>Optional</span><strong style={{ display:"block",fontSize:20,marginTop:4 }}>Customer choices used in quotes and on the website</strong><span style={{ display:"block",fontSize:13,color:"#64748b",marginTop:4 }}>These exact labels, choices, defaults and order are shared with WordPress when the product is published.</span></span><span style={{ color:"#475569",fontWeight:950 }}>Review shared choices ↓</span></summary>

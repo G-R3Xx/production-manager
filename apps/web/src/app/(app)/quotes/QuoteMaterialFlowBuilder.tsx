@@ -665,7 +665,7 @@ function rollRate(material: QuoteMaterial): { rate: number; note?: string } {
   const stockUom = String(material.stockUom ?? "").toLowerCase();
   const stockQty = numberValue(material.stockQuantity, 0);
   if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom)) return { rate: purchaseCost };
-  if (purchaseUom.includes("roll") && stockQty > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) return { rate: purchaseCost / stockQty, note: `${usage(stockQty)}lm roll` };
+  if (purchaseUom.includes("roll") && stockQty > 0) return { rate: purchaseCost / stockQty, note: `${usage(stockQty)}lm saved roll length` };
   if (stockQty > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) return { rate: purchaseCost / stockQty, note: `${usage(stockQty)}lm stock length` };
   return { rate: purchaseCost, note: "check roll length" };
 }

@@ -1743,8 +1743,8 @@ function materialPickerCost(material: any): { primary: string; secondary: string
     if (isLinearMetreUnit(purchaseUom)) {
       return { primary: `${moneyText(purchaseCost)}/lm`, secondary: "purchase cost already entered per linear metre" };
     }
-    if ((purchaseUom.includes("roll") || materialTypeText(material).includes("roll")) && stockQuantity > 0 && isLinearMetreUnit(stockUom)) {
-      return { primary: `${moneyText(purchaseCost / stockQuantity)}/lm`, secondary: `${moneyText(purchaseCost)} per ${stockQuantity}lm roll` };
+    if (purchaseUom.includes("roll") && stockQuantity > 0) {
+      return { primary: `${moneyText(purchaseCost / stockQuantity)}/lm`, secondary: `${moneyText(purchaseCost)} per ${stockQuantity}lm saved roll length` };
     }
     if (stockQuantity > 0 && isLinearMetreUnit(stockUom)) {
       return { primary: `${moneyText(purchaseCost / stockQuantity)}/lm`, secondary: `derived from ${stockQuantity}lm stock quantity` };

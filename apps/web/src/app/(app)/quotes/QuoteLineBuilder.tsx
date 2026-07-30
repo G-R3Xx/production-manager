@@ -43,6 +43,7 @@ export type QuoteComponent = {
   id?: string | null;
   label?: string | null;
   kind?: string | null;
+  role?: string | null;
   materialId?: string | null;
   quantity?: string | null;
   unit?: string | null;
@@ -640,8 +641,11 @@ function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "e
     if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom)) {
       return { rate: purchaseCost, unit: "lm" };
     }
-    if (purchaseUom.includes("roll") && stockQuantity > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) {
-      return { rate: purchaseCost / stockQuantity, unit: "lm", note: `using ${formatUsage(stockQuantity)} lm per roll from material stock quantity` };
+    if (purchaseUom.includes("roll") && stockQuantity > 0 && materialLooksLikeRoll(material)) {
+      const note = ["lm", "m", "metre", "meter"].includes(stockUom)
+        ? `using ${formatUsage(stockQuantity)} lm per roll from material stock quantity`
+        : `using ${formatUsage(stockQuantity)} as the saved roll length`;
+      return { rate: purchaseCost / stockQuantity, unit: "lm", note };
     }
     if (materialLooksLikeRoll(material) && stockQuantity > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) {
       return { rate: purchaseCost / stockQuantity, unit: "lm", note: `roll stock detected; using ${formatUsage(stockQuantity)} lm from material stock quantity` };
@@ -660,8 +664,8 @@ function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "e
     if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom) && rollWidthM > 0) {
       return { rate: purchaseCost / rollWidthM, unit: "sqm", note: `derived from ${numberValue(material.rollWidthMm)} mm roll width` };
     }
-    if (purchaseUom.includes("roll") && rollWidthM > 0 && stockQuantity > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) {
-      return { rate: purchaseCost / (rollWidthM * stockQuantity), unit: "sqm", note: `using ${formatUsage(stockQuantity)} lm per roll from material stock quantity` };
+    if (purchaseUom.includes("roll") && rollWidthM > 0 && stockQuantity > 0 && materialLooksLikeRoll(material)) {
+      return { rate: purchaseCost / (rollWidthM * stockQuantity), unit: "sqm", note: `using ${formatUsage(stockQuantity)} as the saved roll length` };
     }
     return { rate: purchaseCost, unit: "sqm", note: "set material purchase cost per sqm for exact area pricing" };
   }
@@ -1000,15 +1004,26 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
   const [standaloneQuantity, setStandaloneQuantity] = useState("1");
 
+  const selectedProductHasFixedBaseRoll = useMemo(() => {
+    if (!selectedProduct) return false;
+    return selectedProduct.components.some((component) => {
+      if (String(component.role ?? "") !== "base_material") return false;
+      const material = materialFor(materials, component.materialId);
+      return Boolean(material && materialLooksLikeRoll(material));
+    });
+  }, [selectedProduct, materials]);
+
   const visibleFields = useMemo(
-    () => (selectedProduct?.fields ?? []).filter((field) => isVisible(field, answers)),
-    [selectedProduct, answers]
+    () => (selectedProduct?.fields ?? [])
+      .filter((field) => isVisible(field, answers))
+      .filter((field) => !(selectedProductHasFixedBaseRoll && field.key === "roll_stock_type")),
+    [selectedProduct, answers, selectedProductHasFixedBaseRoll]
   );
 
   const quantityField = visibleFields.find((field) => field.key === "quantity");
   const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : standaloneQuantity;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
-  const autoSummary = selectedProduct && selectedProduct.fields.length > 0 ? summaryFor(selectedProduct, selectedProduct.fields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
+  const autoSummary = selectedProduct && visibleFields.length > 0 ? summaryFor(selectedProduct, visibleFields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
   const autoPricing = useMemo(
     () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber),
     [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber]
