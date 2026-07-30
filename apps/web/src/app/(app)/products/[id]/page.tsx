@@ -12,6 +12,7 @@ import {
 } from "@/server/productionResources";
 import { normalizeProductionFlowName } from "@/lib/productionFlowPresets";
 import { ProductProductionFlowBuilder } from "./ProductProductionFlowBuilder";
+import { WebsiteImageManager, type WebsiteImageItem } from "./WebsiteImageManager";
 import {
   addSimpleProductQuestionAction,
   deleteSimpleProductQuestionAction,
@@ -110,6 +111,23 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   });
   const initialEyeletPreset = String(asObject(asArray(asObject(eyeletFollowUpComponent?.stockUsage).quantityPresets)[0]).value ?? "four_corners");
   const config = asObject(product.websiteConfigJson);
+  const configuredWebsiteImages = asArray(config.websiteImages).flatMap((value, index): WebsiteImageItem[] => {
+    const image = asObject(value);
+    const url = String(image.url ?? "").trim();
+    if (!url) return [];
+    return [{
+      id: String(image.id ?? `website-image-${index + 1}`),
+      url,
+      alt: String(image.alt ?? product.name),
+      storagePath: image.storagePath ? String(image.storagePath) : null
+    }];
+  });
+  const initialWebsiteImages: WebsiteImageItem[] = configuredWebsiteImages.length
+    ? configuredWebsiteImages
+    : product.websiteImageUrl
+      ? [{ id: "legacy-featured-image", url: product.websiteImageUrl, alt: product.name, storagePath: null }]
+      : [];
+  const initialFeaturedWebsiteImageId = String(config.websiteFeaturedImageId ?? initialWebsiteImages[0]?.id ?? "") || null;
   const fieldByKey = (key: string) => fields.find((field) => String(field.key ?? "") === key) ?? null;
   const optionValues = (field: Record<string, any> | null) => asArray(field?.options).map((option) => String(option?.value ?? option?.label ?? "")).filter(Boolean);
   const printField = fieldByKey("print_method") ?? fieldByKey("print_type");
@@ -334,7 +352,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
 
     {tab === "website" ? <section style={card}>
       <div style={{ display:"flex",justifyContent:"space-between",gap:16 }}><div><h2 style={{ margin:0 }}>Website</h2><p style={{ color:"#64748b",lineHeight:1.6 }}>Optional only. Your internal product and quote workflow works without publishing anything to WordPress.</p></div><Link href="/integrations/wordpress" style={{ color:"#6d28d9",fontWeight:900 }}>Connection settings →</Link></div>
-      <form action={saveProductWebsiteAction} style={{ display:"grid",gap:16 }}>
+      <form action={saveProductWebsiteAction} encType="multipart/form-data" style={{ display:"grid",gap:16 }}>
         <input type="hidden" name="productId" value={product.id}/>
         <div style={{ display:"grid",gridTemplateColumns:"1fr 1fr",gap:12 }}>
           <label style={{ display:"flex",alignItems:"center",gap:10,padding:15,border:"1px solid #dbe4f0",borderRadius:14,fontWeight:900 }}><input type="checkbox" name="websiteEnabled" defaultChecked={product.websiteEnabled}/> Publish this product to WordPress</label>
@@ -355,7 +373,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         </label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Short description<textarea name="websiteShortDescription" defaultValue={product.websiteShortDescription ?? ""} rows={3} style={{ ...input,padding:12 }}/></label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Full description<textarea name="websiteDescription" defaultValue={product.websiteDescription ?? ""} rows={6} style={{ ...input,padding:12 }}/></label>
-        <label style={{ display:"grid",gap:7,fontWeight:850 }}>Product image URL<input name="websiteImageUrl" defaultValue={product.websiteImageUrl ?? ""} placeholder="https://…" style={input}/></label>
+        <WebsiteImageManager productName={String(config.websiteProductName ?? product.name)} initialImages={initialWebsiteImages} featuredImageId={initialFeaturedWebsiteImageId}/>
         <div><h3 style={{ marginBottom:8 }}>Default price preview</h3><div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10 }}><label style={{ display:"grid",gap:7,fontWeight:850 }}>Width mm<input name="defaultWidthMm" type="number" defaultValue={config.defaultWidthMm ?? 600} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Height mm<input name="defaultHeightMm" type="number" defaultValue={config.defaultHeightMm ?? 450} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Quantity<input name="defaultQuantity" type="number" defaultValue={config.defaultQuantity ?? 1} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Fallback base price<input name="basePrice" type="number" step="0.01" defaultValue={config.basePrice ?? 0} style={input}/></label></div></div>
         {fields.length ? <div><h3 style={{ marginBottom:8 }}>Website question style</h3><div style={{ display:"grid",gap:9 }}>{fields.map((field,index)=><div key={field.id ?? index} style={{ display:"grid",gridTemplateColumns:"1fr 220px",gap:12,alignItems:"center",padding:12,border:"1px solid #e2e8f0",borderRadius:13,background:"#f8fafc" }}><div><b>{field.label}</b><div style={{ color:"#64748b",fontSize:13,marginTop:3 }}>{field.type?.replace(/_/g," ")} · {asArray(field.options).length} options</div></div><select name={`display:${field.key}`} defaultValue={fieldDisplay(field,config)} style={input}><option value="buttons">Buttons</option><option value="cards">Cards</option><option value="dropdown">Dropdown</option><option value="swatches">Swatches</option><option value="number">Number field</option><option value="text">Text field</option></select></div>)}</div></div> : null}
         <button style={{ justifySelf:"start",minHeight:44,border:0,borderRadius:11,background:"#7c3aed",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Save website settings</button>

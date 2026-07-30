@@ -57,6 +57,14 @@ export type WebsiteBuilderField = {
   step: number | null;
 };
 
+export type WebsiteCatalogImage = {
+  id: string;
+  url: string;
+  alt: string;
+  position: number;
+  featured: boolean;
+};
+
 export type WebsiteCatalogProduct = {
   id: string;
   sku: string | null;
@@ -68,6 +76,7 @@ export type WebsiteCatalogProduct = {
   shortDescription: string | null;
   description: string | null;
   imageUrl: string | null;
+  images: WebsiteCatalogImage[];
   department: string;
   productFamily: string;
   manufacturingMethod: { id: string; name: string } | null;
@@ -146,6 +155,37 @@ function friendlyDisplayText(value: unknown): string {
 function numberValue(value: unknown, fallback = 0): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function serialisedWebsiteImages(product: ProductRecord, config: Record<string, unknown>, productName: string): WebsiteCatalogImage[] {
+  const configured = asArray(config.websiteImages).flatMap((rawImage, index): WebsiteCatalogImage[] => {
+    const image = asObject(rawImage);
+    const url = text(image.url);
+    if (!/^https?:\/\//i.test(url)) return [];
+    return [{
+      id: text(image.id) || `website-image-${index + 1}`,
+      url,
+      alt: text(image.alt) || productName,
+      position: index,
+      featured: false
+    }];
+  });
+
+  const images = configured.length
+    ? configured
+    : product.websiteImageUrl
+      ? [{
+          id: "legacy-featured-image",
+          url: product.websiteImageUrl,
+          alt: productName,
+          position: 0,
+          featured: false
+        }]
+      : [];
+
+  const configuredFeaturedId = text(config.websiteFeaturedImageId);
+  const featuredIndex = Math.max(0, images.findIndex((image) => image.id === configuredFeaturedId));
+  return images.map((image, index) => ({ ...image, featured: index === featuredIndex }));
 }
 
 function safeSlug(value: string): string {
@@ -413,6 +453,8 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
   };
   const fields = serializeFields(definition, config);
   const websiteProductName = text(config.websiteProductName) || product.name;
+  const images = serialisedWebsiteImages(product, config, websiteProductName);
+  const featuredImageUrl = images.find((image) => image.featured)?.url ?? images[0]?.url ?? null;
   let startingPrice: number | null = null;
   const defaultPrice = await priceWordPressProductForTenant(product.tenantId, {
     productId: product.id,
@@ -439,7 +481,8 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     mode: product.websiteMode === "live_checkout" ? "live_checkout" : "quote_only",
     shortDescription: product.websiteShortDescription,
     description: product.websiteDescription,
-    imageUrl: product.websiteImageUrl,
+    imageUrl: featuredImageUrl,
+    images,
     department: product.department,
     productFamily: product.productFamily,
     manufacturingMethod: product.productionRecipeId
@@ -463,7 +506,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.30.04",
+    version: "V26.07.30.05",
     tenantId: connection.tenantId,
     generatedAt: new Date().toISOString(),
     products: serialised

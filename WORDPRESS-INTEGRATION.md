@@ -47,3 +47,8 @@ WordPress owns:
 - WordPress never receives internal database access.
 - Browser price requests are proxied through WordPress; the PM API key is never exposed to the customer.
 - Add-to-cart pricing is revalidated server-side.
+
+
+## Product images
+
+Production Manager V26.07.30.05 and Tender Edge Website Platform V3.3.0 support one featured image plus an ordered WooCommerce product gallery. Manage images under Product → Website, save, then run Sync Products Now in WordPress. WordPress imports and reuses Media Library attachments by source URL.
