@@ -1,11 +1,11 @@
 # Production Manager V26.07.30.02
 
-Typecheck correction release based on V26.07.30.01.
+## Saved-product custom size quoting
 
-## Fixes
-
-- Restored the main material ID inside the legacy/simple production-flow save action.
-- Added the optional component `role` field to the saved-product quote component type so base roll materials can be identified safely.
-- Visible application and WordPress catalogue version updated to `V26.07.30.02`.
-
-No database migration is required.
+- Selecting `Custom size` in the saved-product quote builder now reveals required `Width mm` and `Height mm` fields directly below the size selector.
+- Custom dimensions immediately drive material, roll length, ink, laminate and labour calculations.
+- The quote-line summary records the actual custom finished size instead of only saying `Custom size`.
+- Required dimension fields prevent a custom-size line from being added before both measurements are entered.
+- Strengthens removal of the redundant Roll stock question when the saved product already has a fixed roll material as its main substrate, including older guided-product recipes without a role marker.
+- No database migration is required.
+- Visible application/catalogue version: `V26.07.30.02`.

@@ -209,6 +209,11 @@ function formatUsage(value: number): string {
   return value.toFixed(2);
 }
 
+function formatDimensionMm(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? value.toFixed(0) : value.toFixed(1).replace(/\.0$/, "");
+}
+
 function normalizedQuestionType(field: Pick<QuoteQuestion, "type" | "key" | "label" | "options">): string {
   const rawType = String(field.type ?? "text").trim().toLowerCase();
   const keyLabel = `${field.key ?? ""} ${field.label ?? ""}`.toLowerCase();
@@ -369,6 +374,29 @@ function answerLabel(field: QuoteQuestion, value: string): string {
   return label.replace(/_/g, " ");
 }
 
+function customWidthKey(fieldKey: string): string {
+  return `${fieldKey}__width_mm`;
+}
+
+function customHeightKey(fieldKey: string): string {
+  return `${fieldKey}__height_mm`;
+}
+
+function isCustomSizeSelection(field: QuoteQuestion, value: string): boolean {
+  const fieldType = normalizedQuestionType(field);
+  if (fieldType !== "size_select" && !String(field.key ?? "").toLowerCase().includes("size")) return false;
+  const choice = selectedChoice(field, value);
+  const combined = `${value} ${choice?.value ?? ""} ${choice?.label ?? ""}`.trim().toLowerCase();
+  return combined === "custom" || combined.includes("custom size") || combined.includes("custom_size");
+}
+
+function customDimensionsForField(field: QuoteQuestion, answers: Record<string, string>): { widthMm: number; heightMm: number } | null {
+  const widthMm = numberValue(answers[customWidthKey(field.key)], 0);
+  const heightMm = numberValue(answers[customHeightKey(field.key)], 0);
+  if (widthMm <= 0 || heightMm <= 0) return null;
+  return { widthMm, heightMm };
+}
+
 function isVisible(field: QuoteQuestion, answers: Record<string, string>): boolean {
   const showWhen = field.showWhen;
   const optionKey = String(showWhen?.optionKey ?? "");
@@ -387,6 +415,12 @@ function summaryFor(product: QuoteProduct | undefined, fields: QuoteQuestion[], 
     .map((field) => {
       const value = answers[field.key] ?? "";
       if (!value) return "";
+      if (isCustomSizeSelection(field, value)) {
+        const customDimensions = customDimensionsForField(field, answers);
+        return customDimensions
+          ? `${field.label}: ${formatDimensionMm(customDimensions.widthMm)} × ${formatDimensionMm(customDimensions.heightMm)} mm`
+          : `${field.label}: Custom size`;
+      }
       const followUps = followUpsForField(product, field, answers);
       const values = isMultiSelectField(field) ? selectedValues(value) : [value];
       const followUpText = values
@@ -439,6 +473,9 @@ function parseDimensionsFromText(value: string | null | undefined): { widthMm: n
 function dimensionsForField(field: QuoteQuestion | undefined, answers: Record<string, string>): { widthMm: number; heightMm: number } | null {
   if (!field) return null;
   const value = answers[field.key] ?? String(field.defaultValue ?? "");
+  if (isCustomSizeSelection(field, value)) {
+    return customDimensionsForField(field, answers);
+  }
   const choice = selectedChoice(field, value);
   const optionWidth = numberValue(choice?.widthMm, 0);
   const optionHeight = numberValue(choice?.heightMm, 0);
@@ -1007,16 +1044,39 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const selectedProductHasFixedBaseRoll = useMemo(() => {
     if (!selectedProduct) return false;
     return selectedProduct.components.some((component) => {
-      if (String(component.role ?? "") !== "base_material") return false;
       const material = materialFor(materials, component.materialId);
-      return Boolean(material && materialLooksLikeRoll(material));
+      if (!material || !materialLooksLikeRoll(material)) return false;
+
+      const role = String(component.role ?? "").trim();
+      if (role === "base_material") return true;
+
+      // Older guided products may not have the role marker, but their main material row is
+      // still unconditional and driven directly by finished size. Treat that as fixed base stock.
+      const triggerKey = String(component.trigger?.optionKey ?? "").trim();
+      const stockOptionKey = String(component.stockUsage?.optionKey ?? "").trim();
+      const triggerValues = Array.isArray(component.trigger?.optionValues) ? component.trigger?.optionValues ?? [] : [];
+      const stockValues = Array.isArray(component.stockUsage?.optionValues) ? component.stockUsage?.optionValues ?? [] : [];
+      const dimensionSource = String(component.stockUsage?.dimensionSource ?? "").trim();
+      const label = String(component.label ?? "").toLowerCase();
+      const unconditionalFinishedSizeRow =
+        !triggerKey &&
+        (stockOptionKey === "" || stockOptionKey === "finished_size") &&
+        triggerValues.length === 0 &&
+        stockValues.length === 0 &&
+        dimensionSource === "finished_size";
+
+      return unconditionalFinishedSizeRow && !label.includes("laminat");
     });
   }, [selectedProduct, materials]);
 
   const visibleFields = useMemo(
     () => (selectedProduct?.fields ?? [])
       .filter((field) => isVisible(field, answers))
-      .filter((field) => !(selectedProductHasFixedBaseRoll && field.key === "roll_stock_type")),
+      .filter((field) => {
+        const fieldKey = String(field.key ?? "").toLowerCase();
+        const redundantRollQuestion = ["roll_stock_type", "roll_stock", "roll_media_type"].includes(fieldKey);
+        return !(selectedProductHasFixedBaseRoll && redundantRollQuestion);
+      }),
     [selectedProduct, answers, selectedProductHasFixedBaseRoll]
   );
 
@@ -1057,7 +1117,20 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   }
 
   function updateAnswer(key: string, value: string) {
-    setAnswers((current) => sanitiseAnswersForAvailableChoices(selectedProduct, { ...current, [key]: value }));
+    setAnswers((current) => {
+      const field = selectedProduct?.fields.find((item) => item.key === key);
+      const next = { ...current, [key]: value };
+      if (field && !isCustomSizeSelection(field, value)) {
+        delete next[customWidthKey(key)];
+        delete next[customHeightKey(key)];
+      }
+      return sanitiseAnswersForAvailableChoices(selectedProduct, next);
+    });
+  }
+
+  function updateCustomDimension(fieldKey: string, axis: "width" | "height", value: string) {
+    const answerKey = axis === "width" ? customWidthKey(fieldKey) : customHeightKey(fieldKey);
+    setAnswers((current) => ({ ...current, [answerKey]: value }));
   }
 
   function toggleMultiAnswer(key: string, value: string, checked: boolean) {
@@ -1228,6 +1301,44 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                         return <option key={choice.id ?? choiceValue} value={choiceValue}>{label}</option>;
                       })}
                     </select>
+                    {isCustomSizeSelection(field, value) ? (
+                      <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, padding: 12, background: "#eff6ff", display: "grid", gap: 10 }}>
+                        <strong style={{ fontSize: 13, color: "#1e3a8a" }}>Enter custom finished dimensions</strong>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                          <div style={labelStyle}>
+                            <span style={labelTextStyle}>Width mm *</span>
+                            <input
+                              name={`option_${field.key}_width_mm`}
+                              type="number"
+                              min="1"
+                              step="1"
+                              inputMode="numeric"
+                              value={answers[customWidthKey(field.key)] ?? ""}
+                              required
+                              placeholder="eg 4800"
+                              onChange={(event) => updateCustomDimension(field.key, "width", event.target.value)}
+                              style={inputStyle}
+                            />
+                          </div>
+                          <div style={labelStyle}>
+                            <span style={labelTextStyle}>Height mm *</span>
+                            <input
+                              name={`option_${field.key}_height_mm`}
+                              type="number"
+                              min="1"
+                              step="1"
+                              inputMode="numeric"
+                              value={answers[customHeightKey(field.key)] ?? ""}
+                              required
+                              placeholder="eg 1200"
+                              onChange={(event) => updateCustomDimension(field.key, "height", event.target.value)}
+                              style={inputStyle}
+                            />
+                          </div>
+                        </div>
+                        <small style={{ color: "#475569" }}>Material, ink, laminate and labour recalculate from these finished dimensions.</small>
+                      </div>
+                    ) : null}
                     {renderFollowUps(field)}
                     {field.helpText ? <small style={{ color: "#667085" }}>{field.helpText}</small> : null}
                   </label>
