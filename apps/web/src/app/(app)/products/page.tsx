@@ -74,18 +74,18 @@ export default async function ProductsPage({ searchParams }: Props) {
       <div style={{ color: "#64748b", fontWeight: 800 }}>{products.length} product{products.length === 1 ? "" : "s"}</div>
     </section>
 
-    <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(290px,1fr))", gap: 14 }}>
-      {products.map(product => <Link key={product.id} href={`/products/${product.id}`} style={{ ...card, padding: 18, textDecoration: "none", color: "inherit", display: "grid", gap: 13 }}>
+    <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
+      {products.map(product => <Link key={product.id} href={`/products/${product.id}`} style={{ ...card, padding: 14, textDecoration: "none", color: "inherit", display: "grid", gap: 9, minWidth: 0 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-          <div><div style={{ fontSize: 12, color: "#64748b", fontWeight: 850 }}>{product.sku || "No SKU"}</div><h2 style={{ margin: "5px 0 0", fontSize: 22 }}>{product.name}</h2></div>
-          <span style={{ borderRadius: 999, padding: "6px 9px", fontSize: 11, fontWeight: 950, background: product.status === "active" ? "#dcfce7" : product.status === "draft" ? "#fef3c7" : "#e2e8f0", color: product.status === "active" ? "#166534" : "#475569" }}>{product.status}</span>
+          <div style={{ minWidth: 0 }}><div style={{ fontSize: 11, color: "#64748b", fontWeight: 850 }}>{product.sku || "No SKU"}</div><h2 style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.2, overflowWrap: "anywhere" }}>{product.name}</h2></div>
+          <span style={{ borderRadius: 999, padding: "5px 8px", fontSize: 10, fontWeight: 950, background: product.status === "active" ? "#dcfce7" : product.status === "draft" ? "#fef3c7" : "#e2e8f0", color: product.status === "active" ? "#166534" : "#475569" }}>{product.status}</span>
         </div>
-        <div style={{ display: "grid", gap: 7, color: "#475569", fontSize: 14 }}>
+        <div style={{ display: "grid", gap: 5, color: "#475569", fontSize: 12.5, lineHeight: 1.4 }}>
           <span>Production: <b>{product.productionRecipeName || "Setup not finished"}</b></span>
           <span>Quote template: <b>{product.templateName || "Automatic starter"}</b></span>
           <span>Online: <b>{product.websiteEnabled ? "Published as a bonus" : "Not published"}</b></span>
         </div>
-        <div style={{ color: "#2563eb", fontWeight: 900 }}>Open guided builder →</div>
+        <div style={{ color: "#2563eb", fontWeight: 900, fontSize: 13 }}>Open guided builder →</div>
       </Link>)}
       {products.length === 0 ? <div style={{ ...card, padding: 28, color: "#64748b" }}>No products match this view.</div> : null}
     </section>
