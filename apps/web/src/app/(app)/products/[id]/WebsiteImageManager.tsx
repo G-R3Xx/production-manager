@@ -33,6 +33,85 @@ type SignedImageUpload = {
 
 const MAX_IMAGES = 12;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
+const RASTER_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+const RASTER_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif", "avif"]);
+
+function extensionOf(fileName: string): string {
+  const match = fileName.toLowerCase().match(/\.([a-z0-9]+)$/);
+  return match?.[1] ?? "";
+}
+
+function isSvgFile(file: File): boolean {
+  return file.type === "image/svg+xml" || extensionOf(file.name) === "svg";
+}
+
+function isSupportedRasterFile(file: File): boolean {
+  return RASTER_IMAGE_TYPES.has(file.type) || RASTER_IMAGE_EXTENSIONS.has(extensionOf(file.name));
+}
+
+function parseSvgLength(value: string | null): number | null {
+  if (!value || /%$/.test(value.trim())) return null;
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+async function convertSvgToPng(file: File): Promise<File> {
+  const svgText = await file.text();
+  const svgDocument = new DOMParser().parseFromString(svgText, "image/svg+xml");
+  if (svgDocument.querySelector("parsererror") || svgDocument.documentElement.localName.toLowerCase() !== "svg") {
+    throw new Error(`${file.name} is not a valid SVG image.`);
+  }
+
+  const svg = svgDocument.documentElement;
+  const viewBox = (svg.getAttribute("viewBox") ?? "")
+    .trim()
+    .split(/[\s,]+/)
+    .map((value) => Number(value));
+  const viewBoxWidth = viewBox.length === 4 && Number.isFinite(viewBox[2]) && viewBox[2]! > 0 ? viewBox[2]! : null;
+  const viewBoxHeight = viewBox.length === 4 && Number.isFinite(viewBox[3]) && viewBox[3]! > 0 ? viewBox[3]! : null;
+  const sourceWidth = parseSvgLength(svg.getAttribute("width")) ?? viewBoxWidth ?? 1200;
+  const sourceHeight = parseSvgLength(svg.getAttribute("height")) ?? viewBoxHeight ?? 1200;
+  const longestSide = Math.max(sourceWidth, sourceHeight);
+  const targetLongestSide = Math.min(2400, Math.max(1200, longestSide));
+  const scale = targetLongestSide / longestSide;
+  const width = Math.max(1, Math.round(sourceWidth * scale));
+  const height = Math.max(1, Math.round(sourceHeight * scale));
+
+  const sourceBlob = new Blob([svgText], { type: "image/svg+xml" });
+  const sourceUrl = URL.createObjectURL(sourceBlob);
+  try {
+    const image = new Image();
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error(`${file.name} could not be rendered as an image.`));
+      image.src = sourceUrl;
+    });
+
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("This browser could not prepare the SVG image.");
+    context.drawImage(image, 0, 0, width, height);
+
+    const pngBlob = await new Promise<Blob>((resolve, reject) => {
+      canvas.toBlob((blob) => blob ? resolve(blob) : reject(new Error("The SVG could not be converted to PNG.")), "image/png");
+    });
+    const pngName = file.name.replace(/\.svg$/i, "") + ".png";
+    return new File([pngBlob], pngName, { type: "image/png", lastModified: file.lastModified });
+  } finally {
+    URL.revokeObjectURL(sourceUrl);
+  }
+}
+
+async function prepareWebsiteImageFile(file: File): Promise<{ file: File; convertedFromSvg: boolean }> {
+  if (file.size > MAX_FILE_BYTES) throw new Error(`${file.name} is larger than 12 MB.`);
+  if (isSvgFile(file)) return { file: await convertSvgToPng(file), convertedFromSvg: true };
+  if (!isSupportedRasterFile(file)) {
+    throw new Error(`${file.name} is not a supported website image. Use JPG, PNG, WebP, GIF, AVIF or SVG.`);
+  }
+  return { file, convertedFromSvg: false };
+}
 
 function token(prefix: string): string {
   const id = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -140,27 +219,20 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
     if (!selected.length || uploading) return;
 
     const room = Math.max(0, MAX_IMAGES - images.length);
-    const accepted = selected.slice(0, room).filter((file) => {
-      if (!file.type.startsWith("image/")) {
-        setMessage(`${file.name} is not an image.`);
-        return false;
-      }
-      if (file.size > MAX_FILE_BYTES) {
-        setMessage(`${file.name} is larger than 12 MB.`);
-        return false;
-      }
-      return true;
-    });
-    if (!accepted.length) return;
+    const candidates = selected.slice(0, room);
+    if (!candidates.length) return;
 
-    setUploadingCount(accepted.length);
-    setMessage(`Uploading ${accepted.length} website image${accepted.length === 1 ? "" : "s"}…`);
+    setUploadingCount(candidates.length);
+    setMessage(`Preparing ${candidates.length} website image${candidates.length === 1 ? "" : "s"}…`);
 
     const uploaded: ManagedImage[] = [];
     const failures: string[] = [];
-    for (const file of accepted) {
+    let convertedSvgCount = 0;
+    for (const originalFile of candidates) {
       try {
-        const result = await uploadProductImageDirectly(productId, file);
+        const prepared = await prepareWebsiteImageFile(originalFile);
+        if (prepared.convertedFromSvg) convertedSvgCount += 1;
+        const result = await uploadProductImageDirectly(productId, prepared.file);
         uploaded.push({
           id: result.imageId,
           token: `existing:${result.imageId}`,
@@ -171,7 +243,7 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
           storagePath: result.storagePath
         });
       } catch (error) {
-        failures.push(`${file.name}: ${error instanceof Error ? error.message : "upload failed"}`);
+        failures.push(`${originalFile.name}: ${error instanceof Error ? error.message : "upload failed"}`);
       } finally {
         setUploadingCount((count) => Math.max(0, count - 1));
       }
@@ -188,7 +260,8 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
     } else if (selected.length > room) {
       setMessage(`Images uploaded. Only ${MAX_IMAGES} website images can be saved.`);
     } else {
-      setMessage(`${uploaded.length} image${uploaded.length === 1 ? "" : "s"} uploaded. Save website settings to keep the gallery.`);
+      const conversionNote = convertedSvgCount ? ` ${convertedSvgCount} SVG image${convertedSvgCount === 1 ? " was" : "s were"} converted to PNG for WooCommerce.` : "";
+      setMessage(`${uploaded.length} image${uploaded.length === 1 ? "" : "s"} uploaded.${conversionNote} Save website settings to keep the gallery.`);
     }
   }
 
@@ -196,6 +269,16 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
     const value = urlInput.trim();
     if (!/^https?:\/\//i.test(value)) {
       setMessage("Enter a complete image URL beginning with http:// or https://.");
+      return;
+    }
+    try {
+      const pathname = new URL(value).pathname.toLowerCase();
+      if (pathname.endsWith(".svg")) {
+        setMessage("SVG image URLs cannot be imported safely by WordPress. Download the SVG and use Add image files; Production Manager will convert it to PNG automatically.");
+        return;
+      }
+    } catch {
+      setMessage("Enter a valid image URL.");
       return;
     }
     if (images.length >= MAX_IMAGES) {
@@ -261,7 +344,7 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
       </div>
       <label style={{ minHeight: 40, display: "inline-flex", alignItems: "center", gap: 8, padding: "0 13px", borderRadius: 10, background: uploading ? "#64748b" : "#0f172a", color: "#fff", fontWeight: 900, cursor: uploading ? "wait" : "pointer" }}>
         {uploading ? `Uploading ${uploadingCount}…` : "Add image files"}
-        <input ref={fileInputRef} type="file" accept="image/*" multiple disabled={uploading} onChange={addFiles} style={{ display: "none" }}/>
+        <input ref={fileInputRef} type="file" accept=".jpg,.jpeg,.png,.webp,.gif,.avif,.svg,image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml" multiple disabled={uploading} onChange={addFiles} style={{ display: "none" }}/>
       </label>
     </div>
 
@@ -305,10 +388,10 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
       })}
     </div> : <div style={{ padding: 18, border: "1px dashed #94a3b8", borderRadius: 13, background: "#fff", color: "#64748b", textAlign: "center" }}>No website images yet. Add a featured image and optional gallery images.</div>}
 
-    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. Images upload directly before the website settings are saved, avoiding large Vercel form submissions.</div>
+    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. JPG, PNG, WebP, GIF and AVIF are uploaded directly. SVG files are automatically converted to high-resolution PNG for WooCommerce.</div>
   </section>;
 }
 
 function failuresColour(message: string): string {
-  return /failed|could not|larger|not an image|wait/i.test(message) ? "#b45309" : "#047857";
+  return /failed|could not|larger|not an image|not a supported|cannot|wait/i.test(message) ? "#b45309" : "#047857";
 }

@@ -7,6 +7,7 @@ import { getProductById } from "@/server/products";
 
 const BUCKET = "product-assets";
 const MAX_IMAGE_SIZE_BYTES = 12 * 1024 * 1024;
+const ALLOWED_IMAGE_CONTENT_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 
 type SignWebsiteImageBody = {
   productId?: unknown;
@@ -62,8 +63,8 @@ export async function POST(request: Request) {
   if (!productId) {
     return NextResponse.json({ error: "Product not found." }, { status: 400 });
   }
-  if (!contentType.startsWith("image/")) {
-    return NextResponse.json({ error: "The selected file is not an image." }, { status: 415 });
+  if (!ALLOWED_IMAGE_CONTENT_TYPES.has(contentType)) {
+    return NextResponse.json({ error: "Use a JPG, PNG, WebP, GIF or AVIF image. SVG uploads are converted to PNG in the browser before upload." }, { status: 415 });
   }
   if (!Number.isFinite(fileSize) || fileSize <= 0) {
     return NextResponse.json({ error: "Choose an image first." }, { status: 400 });
