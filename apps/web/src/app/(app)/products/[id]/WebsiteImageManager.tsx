@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type DragEvent } from "react";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 export type WebsiteImageItem = {
   id: string;
@@ -11,15 +12,23 @@ export type WebsiteImageItem = {
 
 type ManagedImage = WebsiteImageItem & {
   token: string;
-  kind: "existing" | "new";
-  file?: File;
+  kind: "existing";
   previewUrl: string;
 };
 
 type Props = {
+  productId: string;
   productName: string;
   initialImages: WebsiteImageItem[];
   featuredImageId: string | null;
+};
+
+type SignedImageUpload = {
+  bucket: string;
+  storagePath: string;
+  token: string;
+  publicUrl: string;
+  imageId: string;
 };
 
 const MAX_IMAGES = 12;
@@ -37,16 +46,55 @@ function serialisable(images: ManagedImage[], featuredToken: string | null) {
     featuredToken,
     items: images.map((image) => ({
       token: image.token,
-      kind: image.kind,
+      kind: "existing",
       id: image.id,
-      url: image.kind === "existing" ? image.url : null,
+      url: image.url,
       alt: image.alt,
-      storagePath: image.kind === "existing" ? image.storagePath ?? null : null
+      storagePath: image.storagePath ?? null
     }))
   });
 }
 
-export function WebsiteImageManager({ productName, initialImages, featuredImageId }: Props) {
+async function uploadProductImageDirectly(productId: string, file: File): Promise<SignedImageUpload> {
+  const response = await fetch("/api/products/website-image-upload-sign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      productId,
+      fileName: file.name,
+      contentType: file.type,
+      fileSize: file.size
+    })
+  });
+
+  const payload = (await response.json().catch(() => ({}))) as Partial<SignedImageUpload> & { error?: string };
+  if (!response.ok || !payload.bucket || !payload.storagePath || !payload.token || !payload.publicUrl || !payload.imageId) {
+    throw new Error(payload.error || "Could not prepare the website image upload.");
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase.storage.from(payload.bucket).uploadToSignedUrl(
+    payload.storagePath,
+    payload.token,
+    file,
+    {
+      contentType: file.type || "application/octet-stream",
+      upsert: true
+    }
+  );
+
+  if (error) throw new Error(error.message);
+
+  return {
+    bucket: payload.bucket,
+    storagePath: payload.storagePath,
+    token: payload.token,
+    publicUrl: payload.publicUrl,
+    imageId: payload.imageId
+  };
+}
+
+export function WebsiteImageManager({ productId, productName, initialImages, featuredImageId }: Props) {
   const [images, setImages] = useState<ManagedImage[]>(() => initialImages.map((image) => ({
     ...image,
     token: `existing:${image.id}`,
@@ -58,23 +106,27 @@ export function WebsiteImageManager({ productName, initialImages, featuredImageI
   const [draggedToken, setDraggedToken] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState("");
   const [message, setMessage] = useState("");
+  const [uploadingCount, setUploadingCount] = useState(0);
+  const sectionRef = useRef<HTMLElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const stateJson = useMemo(() => serialisable(images, featuredToken), [images, featuredToken]);
+  const uploading = uploadingCount > 0;
 
-  function syncFileInput(next: ManagedImage[]) {
-    const input = fileInputRef.current;
-    if (!input || typeof DataTransfer === "undefined") return;
-    const transfer = new DataTransfer();
-    next.forEach((image) => {
-      if (image.kind === "new" && image.file) transfer.items.add(image.file);
-    });
-    input.files = transfer.files;
-  }
+  useEffect(() => {
+    const form = sectionRef.current?.closest("form");
+    if (!form) return;
+    const stopSubmitWhileUploading = (event: Event) => {
+      if (!uploading) return;
+      event.preventDefault();
+      setMessage("Please wait for the website images to finish uploading before saving.");
+    };
+    form.addEventListener("submit", stopSubmitWhileUploading);
+    return () => form.removeEventListener("submit", stopSubmitWhileUploading);
+  }, [uploading]);
 
   function commit(next: ManagedImage[]) {
     setImages(next);
-    syncFileInput(next);
     if (next.length === 0) {
       setFeaturedToken(null);
     } else if (!next.some((image) => image.token === featuredToken)) {
@@ -82,9 +134,10 @@ export function WebsiteImageManager({ productName, initialImages, featuredImageI
     }
   }
 
-  function addFiles(event: ChangeEvent<HTMLInputElement>) {
+  async function addFiles(event: ChangeEvent<HTMLInputElement>) {
     const selected: File[] = Array.from(event.target.files ?? []);
-    if (!selected.length) return;
+    event.target.value = "";
+    if (!selected.length || uploading) return;
 
     const room = Math.max(0, MAX_IMAGES - images.length);
     const accepted = selected.slice(0, room).filter((file) => {
@@ -98,24 +151,45 @@ export function WebsiteImageManager({ productName, initialImages, featuredImageI
       }
       return true;
     });
+    if (!accepted.length) return;
 
-    const nextItems = accepted.map<ManagedImage>((file) => {
-      const newToken = token("new");
-      return {
-        id: newToken.replace("new:", ""),
-        token: newToken,
-        kind: "new",
-        file,
-        url: "",
-        previewUrl: URL.createObjectURL(file),
-        alt: productName,
-        storagePath: null
-      };
-    });
-    const next = [...images, ...nextItems];
-    commit(next);
-    if (!featuredToken && next[0]) setFeaturedToken(next[0].token);
-    setMessage(selected.length > room ? `Only ${MAX_IMAGES} website images can be saved.` : "");
+    setUploadingCount(accepted.length);
+    setMessage(`Uploading ${accepted.length} website image${accepted.length === 1 ? "" : "s"}…`);
+
+    const uploaded: ManagedImage[] = [];
+    const failures: string[] = [];
+    for (const file of accepted) {
+      try {
+        const result = await uploadProductImageDirectly(productId, file);
+        uploaded.push({
+          id: result.imageId,
+          token: `existing:${result.imageId}`,
+          kind: "existing",
+          url: result.publicUrl,
+          previewUrl: result.publicUrl,
+          alt: productName,
+          storagePath: result.storagePath
+        });
+      } catch (error) {
+        failures.push(`${file.name}: ${error instanceof Error ? error.message : "upload failed"}`);
+      } finally {
+        setUploadingCount((count) => Math.max(0, count - 1));
+      }
+    }
+
+    if (uploaded.length) {
+      const next = [...images, ...uploaded];
+      commit(next);
+      if (!featuredToken && next[0]) setFeaturedToken(next[0].token);
+    }
+
+    if (failures.length) {
+      setMessage(failures.join(" · "));
+    } else if (selected.length > room) {
+      setMessage(`Images uploaded. Only ${MAX_IMAGES} website images can be saved.`);
+    } else {
+      setMessage(`${uploaded.length} image${uploaded.length === 1 ? "" : "s"} uploaded. Save website settings to keep the gallery.`);
+    }
   }
 
   function addUrl() {
@@ -146,8 +220,6 @@ export function WebsiteImageManager({ productName, initialImages, featuredImageI
   }
 
   function removeImage(imageToken: string) {
-    const target = images.find((image) => image.token === imageToken);
-    if (target?.kind === "new" && target.previewUrl.startsWith("blob:")) URL.revokeObjectURL(target.previewUrl);
     commit(images.filter((image) => image.token !== imageToken));
   }
 
@@ -180,36 +252,36 @@ export function WebsiteImageManager({ productName, initialImages, featuredImageI
     setDraggedToken(null);
   }
 
-  return <section style={{ display: "grid", gap: 13, padding: 16, border: "1px solid #dbe4f0", borderRadius: 16, background: "#f8fafc" }}>
+  return <section ref={sectionRef} style={{ display: "grid", gap: 13, padding: 16, border: "1px solid #dbe4f0", borderRadius: 16, background: "#f8fafc" }}>
     <input type="hidden" name="websiteImagesState" value={stateJson}/>
     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
       <div>
         <h3 style={{ margin: 0 }}>Website images</h3>
         <p style={{ margin: "5px 0 0", color: "#64748b", lineHeight: 1.5 }}>Choose the featured image, add gallery images, then drag them into the order customers should see.</p>
       </div>
-      <label style={{ minHeight: 40, display: "inline-flex", alignItems: "center", gap: 8, padding: "0 13px", borderRadius: 10, background: "#0f172a", color: "#fff", fontWeight: 900, cursor: "pointer" }}>
-        Add image files
-        <input ref={fileInputRef} name="websiteImageFiles" type="file" accept="image/*" multiple onChange={addFiles} style={{ display: "none" }}/>
+      <label style={{ minHeight: 40, display: "inline-flex", alignItems: "center", gap: 8, padding: "0 13px", borderRadius: 10, background: uploading ? "#64748b" : "#0f172a", color: "#fff", fontWeight: 900, cursor: uploading ? "wait" : "pointer" }}>
+        {uploading ? `Uploading ${uploadingCount}…` : "Add image files"}
+        <input ref={fileInputRef} type="file" accept="image/*" multiple disabled={uploading} onChange={addFiles} style={{ display: "none" }}/>
       </label>
     </div>
 
     <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 8 }}>
-      <input value={urlInput} onChange={(event) => setUrlInput(event.target.value)} placeholder="Or add an image URL" style={{ minHeight: 42, border: "1px solid #cbd5e1", borderRadius: 10, padding: "0 11px", background: "#fff" }}/>
-      <button type="button" onClick={addUrl} style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: "0 13px", fontWeight: 850, cursor: "pointer" }}>Add URL</button>
+      <input value={urlInput} onChange={(event) => setUrlInput(event.target.value)} placeholder="Or add an image URL" disabled={uploading} style={{ minHeight: 42, border: "1px solid #cbd5e1", borderRadius: 10, padding: "0 11px", background: "#fff" }}/>
+      <button type="button" onClick={addUrl} disabled={uploading} style={{ border: "1px solid #cbd5e1", borderRadius: 10, background: "#fff", padding: "0 13px", fontWeight: 850, cursor: uploading ? "wait" : "pointer" }}>Add URL</button>
     </div>
 
-    {message ? <div style={{ color: "#b45309", fontSize: 13, fontWeight: 750 }}>{message}</div> : null}
+    {message ? <div style={{ color: failuresColour(message), fontSize: 13, fontWeight: 750 }}>{message}</div> : null}
 
     {images.length ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(210px,1fr))", gap: 12 }}>
       {images.map((image, index) => {
         const featured = featuredToken === image.token;
         return <div
           key={image.token}
-          draggable
+          draggable={!uploading}
           onDragStart={() => setDraggedToken(image.token)}
           onDragOver={(event) => event.preventDefault()}
           onDrop={(event) => dropOn(event, image.token)}
-          style={{ display: "grid", gap: 9, padding: 10, border: featured ? "2px solid #7c3aed" : "1px solid #dbe4f0", borderRadius: 14, background: "#fff", cursor: "grab" }}
+          style={{ display: "grid", gap: 9, padding: 10, border: featured ? "2px solid #7c3aed" : "1px solid #dbe4f0", borderRadius: 14, background: "#fff", cursor: uploading ? "default" : "grab" }}
         >
           <div style={{ position: "relative", aspectRatio: "4 / 3", overflow: "hidden", borderRadius: 10, background: "#e2e8f0" }}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -225,14 +297,18 @@ export function WebsiteImageManager({ productName, initialImages, featuredImageI
             <input value={image.alt} onChange={(event) => changeAlt(image.token, event.target.value)} placeholder={productName} style={{ minHeight: 38, border: "1px solid #cbd5e1", borderRadius: 9, padding: "0 9px" }}/>
           </label>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-            <button type="button" onClick={() => move(image.token, -1)} disabled={index === 0} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: index === 0 ? "not-allowed" : "pointer" }}>← Earlier</button>
-            <button type="button" onClick={() => move(image.token, 1)} disabled={index === images.length - 1} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: index === images.length - 1 ? "not-allowed" : "pointer" }}>Later →</button>
-            <button type="button" onClick={() => removeImage(image.token)} style={{ marginLeft: "auto", border: "1px solid #fecaca", borderRadius: 8, background: "#fff", color: "#b91c1c", padding: "6px 9px", fontWeight: 850, cursor: "pointer" }}>Remove</button>
+            <button type="button" onClick={() => move(image.token, -1)} disabled={uploading || index === 0} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: uploading || index === 0 ? "not-allowed" : "pointer" }}>← Earlier</button>
+            <button type="button" onClick={() => move(image.token, 1)} disabled={uploading || index === images.length - 1} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: uploading || index === images.length - 1 ? "not-allowed" : "pointer" }}>Later →</button>
+            <button type="button" onClick={() => removeImage(image.token)} disabled={uploading} style={{ marginLeft: "auto", border: "1px solid #fecaca", borderRadius: 8, background: "#fff", color: "#b91c1c", padding: "6px 9px", fontWeight: 850, cursor: uploading ? "not-allowed" : "pointer" }}>Remove</button>
           </div>
         </div>;
       })}
     </div> : <div style={{ padding: 18, border: "1px dashed #94a3b8", borderRadius: 13, background: "#fff", color: "#64748b", textAlign: "center" }}>No website images yet. Add a featured image and optional gallery images.</div>}
 
-    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. WordPress stores its own Media Library copy during catalogue sync.</div>
+    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. Images upload directly before the website settings are saved, avoiding large Vercel form submissions.</div>
   </section>;
+}
+
+function failuresColour(message: string): string {
+  return /failed|could not|larger|not an image|wait/i.test(message) ? "#b45309" : "#047857";
 }

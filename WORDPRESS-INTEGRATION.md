@@ -52,3 +52,5 @@ WordPress owns:
 ## Product images
 
 Production Manager V26.07.30.05 and Tender Edge Website Platform V3.3.0 support one featured image plus an ordered WooCommerce product gallery. Manage images under Product → Website, save, then run Sync Products Now in WordPress. WordPress imports and reuses Media Library attachments by source URL.
+
+Production Manager V26.07.30.06 changes gallery file uploads to direct signed Supabase uploads before the Website settings form is saved. This avoids Vercel request-size/server-action failures. Tender Edge Website Platform V3.3.0 remains compatible and does not need to be replaced.

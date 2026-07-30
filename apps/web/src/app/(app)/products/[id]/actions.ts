@@ -1,11 +1,9 @@
 "use server";
 
 import { randomUUID } from "crypto";
-import { Buffer } from "node:buffer";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
-import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
 import { saveProductProductionFlow, type ProductProductionFlowStepInput } from "@/server/productionResources";
@@ -901,17 +899,7 @@ function parseWebsiteImageState(value: string): { featuredToken: string | null; 
   };
 }
 
-function uploadFile(value: FormDataEntryValue): value is File {
-  return typeof value === "object"
-    && value !== null
-    && "size" in value
-    && "arrayBuffer" in value
-    && Number((value as File).size) > 0;
-}
-
 async function saveWebsiteImages(
-  tenantId: string,
-  productId: string,
   productName: string,
   formData: FormData,
   fallbackImageUrl: string | null
@@ -929,58 +917,16 @@ async function saveWebsiteImages(
   }
 
   const state = parseWebsiteImageState(stateRaw);
-  const files = formData.getAll("websiteImageFiles").filter(uploadFile);
-  let fileIndex = 0;
-  let supabase: ReturnType<typeof getSupabaseServiceRoleClient> | null = null;
-  let bucketReady = false;
-  const bucket = "product-assets";
   const images: Array<SavedWebsiteImage & { token: string }> = [];
 
   for (const item of state.items) {
-    if (item.kind === "existing") {
-      if (!item.url || !/^https?:\/\//i.test(item.url)) continue;
-      images.push({
-        token: item.token,
-        id: item.id || randomUUID(),
-        url: item.url,
-        alt: item.alt || productName,
-        storagePath: item.storagePath
-      });
-      continue;
-    }
-
-    const file = files[fileIndex++];
-    if (!file) continue;
-    if (file.size > 12 * 1024 * 1024) {
-      throw new Error(`${file.name || "An image"} is larger than 12 MB.`);
-    }
-    const contentType = file.type || "application/octet-stream";
-    if (!contentType.startsWith("image/")) {
-      throw new Error(`${file.name || "A selected file"} is not an image.`);
-    }
-
-    supabase ??= getSupabaseServiceRoleClient();
-    if (!bucketReady) {
-      await supabase.storage.createBucket(bucket, { public: true }).catch(() => undefined);
-      bucketReady = true;
-    }
-    const safeName = String(file.name || "product-image").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 120);
-    const extension = safeName.includes(".") ? "" : ".jpg";
-    const id = item.id || randomUUID();
-    const storagePath = `${tenantId}/products/${productId}/website/${Date.now()}-${id}-${safeName}${extension}`;
-    const bytes = Buffer.from(await file.arrayBuffer());
-    const { error } = await supabase.storage.from(bucket).upload(storagePath, bytes, {
-      contentType,
-      upsert: true
-    });
-    if (error) throw new Error(`Website image upload failed: ${error.message}`);
-    const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+    if (!item.url || !/^https?:\/\//i.test(item.url)) continue;
     images.push({
       token: item.token,
-      id,
-      url: data.publicUrl,
+      id: item.id || randomUUID(),
+      url: item.url,
       alt: item.alt || productName,
-      storagePath
+      storagePath: item.storagePath
     });
   }
 
@@ -1014,8 +960,6 @@ export async function saveProductWebsiteAction(formData: FormData) {
   };
   try {
     websiteImages = await saveWebsiteImages(
-      tenant.tenantId,
-      productId,
       read(formData, "websiteProductName") || product.name,
       formData,
       product.websiteImageUrl
@@ -1036,16 +980,21 @@ export async function saveProductWebsiteAction(formData: FormData) {
     basePrice: read(formData, "basePrice") ? Number(read(formData, "basePrice")) : existing.basePrice ?? 0,
     fieldDisplays
   };
-  await updateProductWebsitePublishing(tenant.tenantId, productId, {
-    enabled: formData.get("websiteEnabled") === "on",
-    mode: read(formData, "websiteMode") === "live_checkout" ? "live_checkout" : "quote_only",
-    slug: read(formData, "websiteSlug") || null,
-    category: read(formData, "websiteCategory") || null,
-    shortDescription: read(formData, "websiteShortDescription") || null,
-    description: read(formData, "websiteDescription") || null,
-    imageUrl: websiteImages.featuredImageUrl,
-    configJson
-  });
+  try {
+    await updateProductWebsitePublishing(tenant.tenantId, productId, {
+      enabled: formData.get("websiteEnabled") === "on",
+      mode: read(formData, "websiteMode") === "live_checkout" ? "live_checkout" : "quote_only",
+      slug: read(formData, "websiteSlug") || null,
+      category: read(formData, "websiteCategory") || null,
+      shortDescription: read(formData, "websiteShortDescription") || null,
+      description: read(formData, "websiteDescription") || null,
+      imageUrl: websiteImages.featuredImageUrl,
+      configJson
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Website settings could not be saved.";
+    redirect(`/products/${productId}?tab=website&error=${encodeURIComponent(message.slice(0, 500))}`);
+  }
   revalidatePath("/products");
   revalidatePath(`/products/${productId}`);
   revalidatePath("/integrations/wordpress");
