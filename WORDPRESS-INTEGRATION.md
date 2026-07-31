@@ -54,3 +54,9 @@ WordPress owns:
 Production Manager V26.07.30.05 and Tender Edge Website Platform V3.3.0 support one featured image plus an ordered WooCommerce product gallery. Manage images under Product → Website, save, then run Sync Products Now in WordPress. WordPress imports and reuses Media Library attachments by source URL.
 
 Production Manager V26.07.30.06 changes gallery file uploads to direct signed Supabase uploads before the Website settings form is saved. This avoids Vercel request-size/server-action failures. Tender Edge Website Platform V3.3.0 remains compatible and does not need to be replaced.
+
+## Direct live pricing (V26.07.31.01 / plugin V3.3.6)
+
+The catalogue response includes the WordPress connection ID. The plugin uses that ID and its private API key to create a short-lived HMAC token tied to one product and the WordPress origin. Product-page calculations call `/api/wordpress/direct-price` directly with that signed token. The API key is never exposed to the browser. WooCommerce still repeats the calculation server-to-server during Add to Cart, so browser results are never trusted as the final cart price.
+
+Pickup and delivery are handled by WooCommerce shipping methods at cart/checkout. The published product schema only retains an Installation required choice when installation is available.

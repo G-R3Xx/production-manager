@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes } from "crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 import { pool } from "@production-manager/db";
 import { calculateProductionRecipeCost } from "@production-manager/domain";
 import { getConfiguratorTemplateById } from "@/server/configurators";
@@ -98,6 +98,14 @@ type PriceBody = {
   heightMm?: number;
   quantity?: number;
   answers?: Record<string, unknown>;
+};
+
+export type WordPressPublicPricingTokenPayload = {
+  version: 1;
+  connectionId: string;
+  productId: string;
+  origin: string;
+  expiresAt: number;
 };
 
 export type WordPressOrderPayload = {
@@ -288,6 +296,7 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
     let options = serialisedChoices(field);
     let label = text(field.label) || "Option";
     let helpText = text(field.helpText) || null;
+    let defaultValue = field.defaultValue ?? null;
 
     if (key === "finished_size") {
       label = "Finished size";
@@ -305,8 +314,36 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
         ? { ...choice, label: "Roll print", value: "roll_stock" }
         : choice);
     } else if (key === "delivery_method") {
-      label = "How does the customer receive it?";
-      helpText = "Choose pickup, delivery or installation.";
+      // Pickup and delivery belong to WooCommerce cart/checkout. The only
+      // product-level fulfilment decision is whether a site-specific install
+      // quote is required. Keep the original key so existing recipe triggers
+      // for the install answer continue to work.
+      const installation = options.find((choice) =>
+        /install/i.test(choice.value) || /install/i.test(choice.label)
+      );
+      if (!installation) return;
+      const configuredDefault = selectedValues(defaultValue).some((value) => /install/i.test(value));
+      options = [
+        {
+          id: null,
+          label: "No installation",
+          value: "no_install",
+          priceDelta: 0,
+          quoteRequired: false,
+          widthMm: null,
+          heightMm: null
+        },
+        {
+          ...installation,
+          label: "Installation required",
+          value: "install",
+          priceDelta: 0,
+          quoteRequired: true
+        }
+      ];
+      defaultValue = configuredDefault ? "install" : "no_install";
+      label = "Installation required?";
+      helpText = "Select Installation required only when this product needs a site-specific installation quote.";
     }
 
     const choiceDriven = ["select", "multi_select", "size_select", "color", "yes_no"].includes(type);
@@ -320,9 +357,9 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
       label,
       type,
       required: field.required !== false,
-      defaultValue: field.defaultValue ?? null,
+      defaultValue,
       helpText,
-      display: displayForField({ ...field, type }, websiteConfig),
+      display: key === "delivery_method" ? "buttons" : displayForField({ ...field, type }, websiteConfig),
       options,
       showWhen: normalizedShowWhen(field, key),
       customSize: type === "size_select" && options.some((choice) => choice.value.toLowerCase() === "custom"),
@@ -421,6 +458,59 @@ export async function resolveWordPressConnectionByApiKey(apiKey: string): Promis
   return result.rows[0] ?? null;
 }
 
+export async function resolveWordPressConnectionById(connectionId: string): Promise<WordPressConnectionRecord | null> {
+  await ensureWordPressBridgeSchema();
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(connectionId)) return null;
+  const result = await pool.query<WordPressConnectionRecord>(`
+    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",status,
+      last_catalog_pull_at AS "lastCatalogPullAt",last_order_received_at AS "lastOrderReceivedAt",
+      created_at AS "createdAt",updated_at AS "updatedAt"
+    FROM integration.wordpress_connections WHERE id=$1::uuid AND status='connected' LIMIT 1
+  `, [connectionId]);
+  return result.rows[0] ?? null;
+}
+
+function normalisedOrigin(value: unknown): string {
+  try {
+    return new URL(text(value)).origin.toLowerCase();
+  } catch {
+    return "";
+  }
+}
+
+export async function verifyWordPressPublicPricingToken(
+  token: string,
+  requestedProductId: string,
+  requestOrigin: string
+): Promise<{ connection: WordPressConnectionRecord; payload: WordPressPublicPricingTokenPayload } | null> {
+  const [encodedPayload, encodedSignature, extra] = text(token).split(".");
+  if (!encodedPayload || !encodedSignature || extra) return null;
+
+  let payload: WordPressPublicPricingTokenPayload;
+  try {
+    payload = JSON.parse(Buffer.from(encodedPayload, "base64url").toString("utf8")) as WordPressPublicPricingTokenPayload;
+  } catch {
+    return null;
+  }
+
+  if (payload.version !== 1 || !payload.connectionId || !payload.productId || !payload.origin) return null;
+  if (payload.productId !== requestedProductId) return null;
+  if (!Number.isFinite(payload.expiresAt) || payload.expiresAt < Math.floor(Date.now() / 1000)) return null;
+
+  const expectedOrigin = normalisedOrigin(payload.origin);
+  const suppliedOrigin = normalisedOrigin(requestOrigin);
+  if (!expectedOrigin || (suppliedOrigin && suppliedOrigin !== expectedOrigin)) return null;
+
+  const connection = await resolveWordPressConnectionById(payload.connectionId);
+  if (!connection) return null;
+  const expected = createHmac("sha256", connection.apiKey).update(encodedPayload).digest();
+  let supplied: Buffer;
+  try { supplied = Buffer.from(encodedSignature, "base64url"); } catch { return null; }
+  if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return null;
+
+  return { connection, payload: { ...payload, origin: expectedOrigin } };
+}
+
 export function apiKeyFromRequest(request: Request): string {
   const authorization = request.headers.get("authorization") ?? "";
   if (authorization.toLowerCase().startsWith("bearer ")) return authorization.slice(7).trim();
@@ -499,6 +589,7 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
 export async function getWordPressCatalogForConnection(connection: WordPressConnectionRecord): Promise<{
   version: string;
   tenantId: string;
+  connectionId: string;
   generatedAt: string;
   products: WebsiteCatalogProduct[];
 }> {
@@ -506,8 +597,9 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.07.30.08",
+    version: "V26.07.31.01",
     tenantId: connection.tenantId,
+    connectionId: connection.id,
     generatedAt: new Date().toISOString(),
     products: serialised
   };
@@ -798,7 +890,9 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
       }
       const rawField = asArray(definition.fields).map(asObject).find((item) => text(item.key) === field.key);
       const rule = asObject(rawField?.rule);
-      if (text(rule.effectType) === "quote") quoteTriggered = true;
+      if (text(rule.effectType) === "quote" && (field.key !== "delivery_method" || selected === "install")) {
+        quoteTriggered = true;
+      }
     }
   }
 
