@@ -28,6 +28,11 @@ export type MaterialRecord = {
   updatedAt: string;
 };
 
+export type DashboardMaterialRecord = Pick<
+  MaterialRecord,
+  "id" | "name" | "stockQuantity" | "stockUom" | "updatedAt"
+>;
+
 export type CreateMaterialInput = {
   tenantId: string;
   supplierId: string | null;
@@ -120,8 +125,6 @@ function presentMaterialType(value: string): string {
 }
 
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
-  await ensureMaterialPricingColumns();
-
   const result = await pool.query<MaterialRecord>(`
     SELECT
       m.id,
@@ -158,6 +161,39 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
   `, [tenantId]);
 
   return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType) }));
+}
+
+export async function getDashboardMaterialSummary(tenantId: string): Promise<{
+  activeCount: number;
+  lowStock: DashboardMaterialRecord[];
+}> {
+  const [countResult, lowStockResult] = await Promise.all([
+    pool.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM catalog.materials
+      WHERE tenant_id = $1::uuid AND active = true
+    `, [tenantId]),
+    pool.query<DashboardMaterialRecord>(`
+      SELECT
+        id,
+        name,
+        stock_quantity::text AS "stockQuantity",
+        stock_uom AS "stockUom",
+        updated_at AS "updatedAt"
+      FROM catalog.materials
+      WHERE tenant_id = $1::uuid
+        AND active = true
+        AND stock_quantity > 0
+        AND stock_quantity <= 2
+      ORDER BY stock_quantity ASC, updated_at DESC
+      LIMIT 8
+    `, [tenantId])
+  ]);
+
+  return {
+    activeCount: Number(countResult.rows[0]?.count ?? 0),
+    lowStock: lowStockResult.rows
+  };
 }
 
 export async function createMaterial(input: CreateMaterialInput): Promise<void> {

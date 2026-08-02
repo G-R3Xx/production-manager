@@ -103,6 +103,21 @@ export async function listCustomersForTenant(tenantId: string, options?: { inclu
   return options?.includeDeleted ? rows : rows.filter((row) => !isDeletedCustomer(row));
 }
 
+export async function listCustomerLogoSummariesForTenant(
+  tenantId: string
+): Promise<Array<Pick<CustomerRecord, "id" | "payloadJson">>> {
+  const result = await pool.query<{ id: string; payloadJson: CustomerPayload }>(`
+    SELECT
+      id,
+      jsonb_build_object('logoUrl', NULLIF(payload_json ->> 'logoUrl', '')) AS "payloadJson"
+    FROM app.customers
+    WHERE tenant_id = $1::uuid
+      AND COALESCE(payload_json ->> 'deletedAt', '') = ''
+  `, [tenantId]);
+
+  return result.rows;
+}
+
 export async function getCustomerById(tenantId: string, customerId: string | null | undefined): Promise<CustomerRecord | null> {
   if (!customerId) return null;
   const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`

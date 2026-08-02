@@ -1,4 +1,5 @@
 import { pool } from "@production-manager/db";
+import { cache } from "react";
 import { calculateProductionRecipeCost } from "@production-manager/domain";
 import { normalizeProductionFlowName, productionFlowPresets } from "@/lib/productionFlowPresets";
 
@@ -89,7 +90,7 @@ export type ProductProductionFlowStepInput = {
   labourOperationId: string | null;
 };
 
-export async function listProcessesForTenant(tenantId: string): Promise<ProcessRecord[]> {
+async function loadProcessesForTenant(tenantId: string): Promise<ProcessRecord[]> {
   const result = await pool.query<ProcessRecord>(`
     SELECT
       p.id::text,
@@ -106,6 +107,8 @@ export async function listProcessesForTenant(tenantId: string): Promise<ProcessR
   `, [tenantId]);
   return result.rows;
 }
+
+export const listProcessesForTenant = cache(loadProcessesForTenant);
 
 export async function createProcess(input: ProcessInput): Promise<{ id: string }> {
   const result = await pool.query<{ id: string }>(`
@@ -141,7 +144,7 @@ export async function setProcessActive(tenantId: string, id: string, active: boo
   `, [tenantId, id, active]);
 }
 
-export async function listMachinesForTenant(tenantId: string): Promise<MachineRecord[]> {
+async function loadMachinesForTenant(tenantId: string): Promise<MachineRecord[]> {
   const result = await pool.query<MachineRecord>(`
     SELECT
       m.id::text,
@@ -169,6 +172,8 @@ export async function listMachinesForTenant(tenantId: string): Promise<MachineRe
     processIds: Array.isArray(row.processIds) ? row.processIds : []
   }));
 }
+
+export const listMachinesForTenant = cache(loadMachinesForTenant);
 
 async function replaceMachineProcesses(
   client: DbClient,
@@ -273,7 +278,7 @@ export async function setMachineActive(tenantId: string, id: string, active: boo
   `, [tenantId, id, active]);
 }
 
-export async function listLabourForTenant(tenantId: string): Promise<LabourRecord[]> {
+async function loadLabourForTenant(tenantId: string): Promise<LabourRecord[]> {
   const result = await pool.query<LabourRecord>(`
     SELECT
       id::text,
@@ -290,6 +295,8 @@ export async function listLabourForTenant(tenantId: string): Promise<LabourRecor
   `, [tenantId]);
   return result.rows;
 }
+
+export const listLabourForTenant = cache(loadLabourForTenant);
 
 export async function createLabour(input: LabourInput): Promise<void> {
   await pool.query(`
@@ -359,7 +366,7 @@ function normalizeRecipeProcessSteps(value: unknown): RecipeProcessStep[] {
   });
 }
 
-export async function listRecipesForTenant(tenantId: string): Promise<RecipeRecord[]> {
+async function loadRecipesForTenant(tenantId: string): Promise<RecipeRecord[]> {
   const result = await pool.query<RecipeRecord>(`
     SELECT
       r.id::text,
@@ -405,6 +412,8 @@ export async function listRecipesForTenant(tenantId: string): Promise<RecipeReco
     processSteps: normalizeRecipeProcessSteps(row.processSteps)
   }));
 }
+
+export const listRecipesForTenant = cache(loadRecipesForTenant);
 
 async function replaceRecipeProcesses(
   client: DbClient,

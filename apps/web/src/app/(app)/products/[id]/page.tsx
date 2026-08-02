@@ -95,7 +95,32 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   const requestedTab = read(query, "tab") || "build";
   const tab = requestedTab === "website" || tabs.some(([value]) => value === requestedTab) ? requestedTab : "build";
   const templateNeeded = ["build", "preview", "website"].includes(tab);
-  const template = templateNeeded && product.defaultTemplateId ? await getConfiguratorTemplateById(tenant.tenantId, product.defaultTemplateId).catch(() => null) : null;
+  const config = asObject(product.websiteConfigJson);
+  const width = Math.max(1, Number(read(query, "width") || config.defaultWidthMm || 600));
+  const height = Math.max(1, Number(read(query, "height") || config.defaultHeightMm || 450));
+  const quantity = Math.max(1, Number(read(query, "quantity") || config.defaultQuantity || 1));
+  const templatePromise = templateNeeded && product.defaultTemplateId
+    ? getConfiguratorTemplateById(tenant.tenantId, product.defaultTemplateId).catch(() => null)
+    : Promise.resolve(null);
+  const productionResourcesPromise = tab === "build" || tab === "preview"
+    ? Promise.all([
+        listRecipesForTenant(tenant.tenantId),
+        listMaterialsForTenant(tenant.tenantId),
+        listProcessesForTenant(tenant.tenantId)
+      ])
+    : Promise.resolve([[], [], []] as [
+        Awaited<ReturnType<typeof listRecipesForTenant>>,
+        Awaited<ReturnType<typeof listMaterialsForTenant>>,
+        Awaited<ReturnType<typeof listProcessesForTenant>>
+      ]);
+  const pricingPreviewPromise = (["pricing", "build", "preview"].includes(tab)) && product.productionRecipeId
+    ? previewRecipeCost(tenant.tenantId, product.productionRecipeId, width, height, quantity).catch(() => null)
+    : Promise.resolve(null);
+  const [template, [recipes, materials, processes], pricingPreview] = await Promise.all([
+    templatePromise,
+    productionResourcesPromise,
+    pricingPreviewPromise
+  ]);
   const definition = asObject(template?.definitionJson);
   const fields = asArray(definition.fields)
     .map((field) => normaliseSharedField(asObject(field)))
@@ -110,7 +135,6 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     return /eyelet|grommet/i.test(`${String(component.label ?? "")} ${String(usage.quantityPrompt ?? "")}`) && asArray(usage.quantityPresets).length > 0;
   });
   const initialEyeletPreset = String(asObject(asArray(asObject(eyeletFollowUpComponent?.stockUsage).quantityPresets)[0]).value ?? "four_corners");
-  const config = asObject(product.websiteConfigJson);
   const configuredWebsiteImages = asArray(config.websiteImages).flatMap((value, index): WebsiteImageItem[] => {
     const image = asObject(value);
     const url = String(image.url ?? "").trim();
@@ -180,20 +204,6 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   const initialFinishingOptions = finishingDefaults.length ? finishingDefaults : optionValues(finishingField);
   const message = read(query, "message");
   const error = read(query, "error");
-  const width = Math.max(1, Number(read(query, "width") || config.defaultWidthMm || 600));
-  const height = Math.max(1, Number(read(query, "height") || config.defaultHeightMm || 450));
-  const quantity = Math.max(1, Number(read(query, "quantity") || config.defaultQuantity || 1));
-
-  let recipes: Awaited<ReturnType<typeof listRecipesForTenant>> = [];
-  let materials: Awaited<ReturnType<typeof listMaterialsForTenant>> = [];
-  let processes: Awaited<ReturnType<typeof listProcessesForTenant>> = [];
-  if (tab === "build" || tab === "preview") {
-    [recipes, materials, processes] = await Promise.all([
-      listRecipesForTenant(tenant.tenantId),
-      listMaterialsForTenant(tenant.tenantId),
-      listProcessesForTenant(tenant.tenantId)
-    ]);
-  }
   const currentRecipe = recipes.find((recipe) => recipe.id === product.productionRecipeId) ?? null;
   const currentProcessSteps = currentRecipe?.processSteps.length
     ? currentRecipe.processSteps
@@ -209,10 +219,6 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
       labourOperationId: step.labourOperationId
     }];
   });
-  const pricingPreview = (["pricing", "build", "preview"].includes(tab)) && product.productionRecipeId
-    ? await previewRecipeCost(tenant.tenantId, product.productionRecipeId, width, height, quantity).catch(() => null)
-    : null;
-
   return <main style={{ display: "grid", gap: 18 }}>
     <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start" }}>
       <div>

@@ -5,9 +5,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
-import { listProductsForTenant } from "@/server/products";
-import { listConfiguratorTemplatesForTenant } from "@/server/configurators";
-import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
+import { listQuoteProductsForTenant } from "@/server/products";
+import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
@@ -193,17 +192,17 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const editLineId = readParam(params, "editLine");
   const editStepParam = readParam(params, "editStep");
 
-  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, products, configuratorTemplates] = await Promise.all([
+  const builderDataNeeded = Boolean(selected);
+  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, quoteProducts] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listMaterialsForTenant(activeTenant.tenantId),
+    builderDataNeeded ? listMaterialsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
-    getCompanySettingsByTenantId(activeTenant.tenantId),
+    builderDataNeeded ? getCompanySettingsByTenantId(activeTenant.tenantId) : Promise.resolve(null),
     listCustomersForTenant(activeTenant.tenantId),
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listProductsForTenant(activeTenant.tenantId),
-    listConfiguratorTemplatesForTenant(activeTenant.tenantId)
+    builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([])
   ]);
 
   const deletedQuoteCount = allQuoteDrafts.filter((quote) => quote.status === "deleted").length;
@@ -212,12 +211,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     : allQuoteDrafts.filter((quote) => quote.status !== "deleted");
 
   const activeMaterials = materials.filter((material) => material.active);
-  const templateById = new Map(configuratorTemplates.map((template) => [template.id, template]));
-  const savedQuoteProducts = products
-    .filter((product) => product.status !== "deleted")
+  const savedQuoteProducts = quoteProducts
     .map((product) => {
-      const template = product.defaultTemplateId ? templateById.get(product.defaultTemplateId) : null;
-      const definition = template?.definitionJson ?? {};
+      const definition = product.definitionJson ?? {};
       const fields = Array.isArray(definition.fields) ? definition.fields : [];
       const components = Array.isArray(definition.components) ? definition.components : [];
       return {
@@ -242,11 +238,11 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourceEmail = sourceEnquiry?.email ?? "";
   const sourceLinkedCustomerId = survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
 
-  const [quoteLines, selectedArtworkApproval, linkedClient] = await Promise.all([
+  const [quoteLines, selectedArtworkApproval] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
-    selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null),
-    sourceLinkedCustomerId ? getCustomerById(activeTenant.tenantId, sourceLinkedCustomerId) : Promise.resolve(null)
+    selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
   ]);
+  const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
 
   const editingQuoteLineRecord = editLineId ? quoteLines.find((line) => line.id === editLineId) ?? null : null;
   const editingSnapshot = editingQuoteLineRecord

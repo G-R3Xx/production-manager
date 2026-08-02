@@ -94,8 +94,6 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
     return null;
   }
 
-  await ensurePricingSettingsColumns();
-
   const result = await pool.query<CompanySettingsRecord>(
     `
       SELECT

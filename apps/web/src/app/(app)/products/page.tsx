@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listProductsForTenant } from "@/server/products";
+import { listProductSummariesForTenant } from "@/server/products";
 import { createProductAction } from "./actions";
 
 type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -29,7 +29,7 @@ export default async function ProductsPage({ searchParams }: Props) {
   const status = read(params, "status") || "current";
   const message = read(params, "message");
   const error = read(params, "error");
-  const all = await listProductsForTenant(tenant.tenantId, { includeDeleted: true });
+  const all = await listProductSummariesForTenant(tenant.tenantId, { includeDeleted: true });
   const products = all.filter((product) => {
     if (status === "deleted" && product.status !== "deleted") return false;
     if (status === "website" && !product.websiteEnabled) return false;

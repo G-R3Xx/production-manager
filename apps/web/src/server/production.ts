@@ -663,7 +663,6 @@ function productionJobSelectSql(): string {
 }
 
 export async function listProductionJobsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<ProductionJobRecord[]> {
-  await ensureProductionTables();
   const result = await pool.query<ProductionJobRecord>(`
     SELECT ${productionJobSelectSql()}
     FROM production.production_jobs
@@ -686,7 +685,6 @@ export async function listProductionJobsForTenant(tenantId: string, options?: { 
 }
 
 export async function getProductionJobById(tenantId: string, jobId: string): Promise<ProductionJobRecord | null> {
-  await ensureProductionTables();
   const result = await pool.query<ProductionJobRecord>(`
     SELECT ${productionJobSelectSql()}
     FROM production.production_jobs
@@ -697,7 +695,6 @@ export async function getProductionJobById(tenantId: string, jobId: string): Pro
 }
 
 export async function getProductionJobForArtworkApproval(tenantId: string, approvalId: string): Promise<ProductionJobRecord | null> {
-  await ensureProductionTables();
   const result = await pool.query<ProductionJobRecord>(`
     SELECT ${productionJobSelectSql()}
     FROM production.production_jobs
@@ -708,7 +705,6 @@ export async function getProductionJobForArtworkApproval(tenantId: string, appro
 }
 
 export async function listProductionItemsForJob(jobId: string): Promise<ProductionItemRecord[]> {
-  await ensureProductionTables();
   const result = await pool.query<ProductionItemRecord>(`
     SELECT
       pi.id,
@@ -748,7 +744,6 @@ export async function listProductionItemsForJob(jobId: string): Promise<Producti
   return result.rows;
 }
 export async function listProductionStepsForJob(jobId: string): Promise<ProductionStepRecord[]> {
-  await ensureProductionTables();
   const result = await pool.query<ProductionStepRecord>(`
     SELECT
       id,
@@ -833,7 +828,6 @@ function productionBoardCardFromRow(row: Omit<ProductionBoardCardRecord, "id" | 
 }
 
 export async function listProductionBoardCardsForTenant(tenantId: string): Promise<ProductionBoardCardRecord[]> {
-  await ensureProductionTables();
   const result = await pool.query<Omit<ProductionBoardCardRecord, "id" | "column">>(`
     SELECT
       pj.id as "jobId",
@@ -960,7 +954,6 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
 }
 
 export async function listApprovedArtworkReadyForProduction(tenantId: string): Promise<ApprovedArtworkOptionRecord[]> {
-  await ensureProductionTables();
   const result = await pool.query<ApprovedArtworkOptionRecord>(`
     SELECT
       aa.id as "approvalId",
@@ -1725,7 +1718,6 @@ export async function restoreProductionJobForTenant(tenantId: string, jobId: str
 }
 
 export async function getProductionItemByIdForTenant(tenantId: string, itemId: string): Promise<ProductionItemRecord | null> {
-  await ensureProductionTables();
   const result = await pool.query<ProductionItemRecord>(`
     SELECT
       pi.id,

@@ -31,6 +31,29 @@ export type ProductRecord = {
   websitePublishedAt: string | null;
 };
 
+export type ProductSummaryRecord = Pick<
+  ProductRecord,
+  | "id"
+  | "sku"
+  | "name"
+  | "department"
+  | "productFamily"
+  | "status"
+  | "defaultTemplateId"
+  | "templateName"
+  | "productionRecipeId"
+  | "productionRecipeName"
+  | "websiteEnabled"
+  | "websiteCategory"
+>;
+
+export type QuoteProductRecord = Pick<
+  ProductRecord,
+  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId"
+> & {
+  definitionJson: Record<string, unknown>;
+};
+
 export type ProductCreateInput = {
   tenantId: string;
   sku: string | null;
@@ -76,7 +99,6 @@ export async function listProductsForTenant(tenantId: string, options?: { includ
     return [];
   }
 
-  await ensureWordPressProductPublishingSchema();
   const result = await pool.query<ProductRecord>(
     `
       SELECT
@@ -114,6 +136,77 @@ export async function listProductsForTenant(tenantId: string, options?: { includ
       ORDER BY p.name ASC, p.created_at DESC
     `,
     [tenantId, Boolean(options?.includeDeleted)]
+  );
+
+  return result.rows;
+}
+
+/**
+ * Lightweight product list for the Product Library. The full product record
+ * includes website descriptions and gallery/configuration JSON which can be
+ * large and are not rendered by the library cards.
+ */
+export async function listProductSummariesForTenant(
+  tenantId: string,
+  options?: { includeDeleted?: boolean }
+): Promise<ProductSummaryRecord[]> {
+  if (!process.env.DATABASE_URL) return [];
+
+  const result = await pool.query<ProductSummaryRecord>(
+    `
+      SELECT
+        p.id,
+        p.sku,
+        p.name,
+        p.department,
+        p.product_family AS "productFamily",
+        p.status::text AS status,
+        p.default_template_id AS "defaultTemplateId",
+        ct.name AS "templateName",
+        p.production_recipe_id AS "productionRecipeId",
+        pr.name AS "productionRecipeName",
+        p.website_enabled AS "websiteEnabled",
+        p.website_category AS "websiteCategory"
+      FROM catalog.products p
+      LEFT JOIN catalog.configurator_templates ct ON ct.id = p.default_template_id
+      LEFT JOIN catalog.production_recipes pr ON pr.id = p.production_recipe_id
+      WHERE p.tenant_id = $1
+        AND ($2::boolean OR p.status::text <> 'deleted')
+      ORDER BY p.name ASC, p.created_at DESC
+    `,
+    [tenantId, Boolean(options?.includeDeleted)]
+  );
+
+  return result.rows;
+}
+
+/**
+ * Quote builder product payload. Joining the template here avoids loading all
+ * product website metadata plus a second complete template catalogue.
+ */
+export async function listQuoteProductsForTenant(tenantId: string): Promise<QuoteProductRecord[]> {
+  if (!process.env.DATABASE_URL) return [];
+
+  const result = await pool.query<QuoteProductRecord>(
+    `
+      SELECT
+        p.id,
+        p.sku,
+        p.name,
+        p.department,
+        p.product_family AS "productFamily",
+        p.status::text AS status,
+        p.default_template_id AS "defaultTemplateId",
+        COALESCE(ct.definition_json, '{}'::jsonb) AS "definitionJson"
+      FROM catalog.products p
+      LEFT JOIN catalog.configurator_templates ct
+        ON ct.id = p.default_template_id
+       AND ct.tenant_id = p.tenant_id
+      WHERE p.tenant_id = $1
+        AND p.status::text <> 'deleted'
+      ORDER BY p.name ASC, p.created_at DESC
+    `,
+    [tenantId]
   );
 
   return result.rows;
@@ -239,7 +332,6 @@ export async function getProductById(tenantId: string, productId: string): Promi
     return null;
   }
 
-  await ensureWordPressProductPublishingSchema();
   const result = await pool.query<ProductRecord>(
     `
       SELECT

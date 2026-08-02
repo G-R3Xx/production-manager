@@ -57,7 +57,6 @@ async function ensureEnquiryExtraColumns(): Promise<void> {
 }
 
 export async function listEnquiriesForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<EnquiryRecord[]> {
-  await ensureEnquiryExtraColumns();
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,
@@ -87,7 +86,6 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
 }
 
 export async function getEnquiryById(tenantId: string, enquiryId: string): Promise<EnquiryRecord | null> {
-  await ensureEnquiryExtraColumns();
   const result = await pool.query<EnquiryRecord>(`
     SELECT
       id,

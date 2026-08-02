@@ -317,7 +317,6 @@ function quoteSelectSql(): string {
 }
 
 export async function listQuoteDraftsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<QuoteDraftRecord[]> {
-  await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
@@ -329,7 +328,6 @@ export async function listQuoteDraftsForTenant(tenantId: string, options?: { inc
 }
 
 export async function getQuoteDraftById(tenantId: string, quoteId: string): Promise<QuoteDraftRecord | null> {
-  await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
@@ -340,7 +338,6 @@ export async function getQuoteDraftById(tenantId: string, quoteId: string): Prom
 }
 
 export async function getQuoteDraftByPublicToken(token: string): Promise<QuoteDraftRecord | null> {
-  await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
@@ -369,7 +366,6 @@ export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<strin
 }
 
 export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]> {
-  await ensureQuoteLineConfigurationColumn();
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       id,
@@ -505,7 +501,6 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
 }
 
 export async function getQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<QuoteLineRecord | null> {
-  await ensureQuoteLineConfigurationColumn();
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       ql.id,
@@ -968,7 +963,6 @@ function artworkApprovalSelectSql(): string {
 }
 
 export async function listArtworkApprovalsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<ArtworkApprovalRecord[]> {
-  await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalRecord>(`
     SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
@@ -980,7 +974,6 @@ export async function listArtworkApprovalsForTenant(tenantId: string, options?: 
 }
 
 export async function getArtworkApprovalById(tenantId: string, approvalId: string): Promise<ArtworkApprovalRecord | null> {
-  await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalRecord>(`
     SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
@@ -991,7 +984,6 @@ export async function getArtworkApprovalById(tenantId: string, approvalId: strin
 }
 
 export async function getArtworkApprovalForQuote(tenantId: string, quoteId: string): Promise<ArtworkApprovalRecord | null> {
-  await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalRecord>(`
     SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
@@ -1002,7 +994,6 @@ export async function getArtworkApprovalForQuote(tenantId: string, quoteId: stri
 }
 
 export async function getArtworkApprovalByPublicToken(token: string): Promise<ArtworkApprovalRecord | null> {
-  await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalRecord>(`
     SELECT ${artworkApprovalSelectSql()}
     FROM sales.artwork_approvals
@@ -1014,7 +1005,6 @@ export async function getArtworkApprovalByPublicToken(token: string): Promise<Ar
 }
 
 export async function listArtworkApprovalPages(approvalId: string): Promise<ArtworkApprovalPageRecord[]> {
-  await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalPageRecord>(`
     SELECT
       id,

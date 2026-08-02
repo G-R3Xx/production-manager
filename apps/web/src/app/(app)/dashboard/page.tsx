@@ -4,8 +4,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
 import { listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
 import { listQuoteDraftsForTenant, listQuoteLineTotals, type QuoteDraftRecord } from "@/server/quotes";
-import { listMaterialsForTenant, type MaterialRecord } from "@/server/materials";
-import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { getDashboardMaterialSummary } from "@/server/materials";
+import { customerLogoUrl, listCustomerLogoSummariesForTenant } from "@/server/customers";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 const pageStyle = { maxWidth: 1420, margin: "0 auto", display: "grid", gap: 18 } as const;
@@ -64,11 +64,6 @@ const tones = {
 
 function normalise(value: string | null | undefined): string {
   return String(value ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-}
-
-function asMoney(value: string | number | null | undefined): number {
-  const parsed = typeof value === "number" ? value : Number(String(value ?? "0").replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 function formatMoney(value: number): string {
@@ -211,10 +206,6 @@ function surveyStageItems(surveys: SurveyRequestRecord[], quotedSurveyIds: Set<s
   ];
 }
 
-function lowStockMaterials(materials: MaterialRecord[]): MaterialRecord[] {
-  return materials.filter((material) => material.active && asMoney(material.stockQuantity) > 0 && asMoney(material.stockQuantity) <= 2).slice(0, 8);
-}
-
 export default async function DashboardPage() {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -228,12 +219,12 @@ export default async function DashboardPage() {
     );
   }
 
-  const [enquiries, surveys, quotes, materials, customers] = await Promise.all([
+  const [enquiries, surveys, quotes, materialSummary, customers] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId),
     listSurveyRequestsForTenant(activeTenant.tenantId),
     listQuoteDraftsForTenant(activeTenant.tenantId),
-    listMaterialsForTenant(activeTenant.tenantId),
-    listCustomersForTenant(activeTenant.tenantId)
+    getDashboardMaterialSummary(activeTenant.tenantId),
+    listCustomerLogoSummariesForTenant(activeTenant.tenantId)
   ]);
 
   const customerById = new Map(customers.map((customer) => [customer.id, customer]));
@@ -258,7 +249,7 @@ export default async function DashboardPage() {
   const draftQuotes = quotes.filter((quote) => quoteStatusLabel(quote.status) === "Draft");
   const sentQuotes = quotes.filter((quote) => quoteStatusLabel(quote.status) === "Sent");
   const syncIssues = surveys.filter(isSurveySyncIssue);
-  const lowStock = lowStockMaterials(materials);
+  const lowStock = materialSummary.lowStock;
 
   const urgentCards: MetricCard[] = [
     { label: "New enquiries", value: newEnquiries.length, note: "Need triage, survey or quote decision", href: "/enquiries", tone: newEnquiries.length ? "orange" : "green" },
@@ -362,7 +353,7 @@ export default async function DashboardPage() {
           <div style={{ ...smallPanelStyle, boxShadow: "none" }}><strong>{plural(enquiries.length, "enquiry")}</strong><p style={{ ...mutedStyle, marginTop: 4, fontSize: 13 }}>Total enquiries</p></div>
           <div style={{ ...smallPanelStyle, boxShadow: "none" }}><strong>{plural(surveys.length, "survey")}</strong><p style={{ ...mutedStyle, marginTop: 4, fontSize: 13 }}>Survey requests</p></div>
           <div style={{ ...smallPanelStyle, boxShadow: "none" }}><strong>{plural(quotes.length, "quote")}</strong><p style={{ ...mutedStyle, marginTop: 4, fontSize: 13 }}>Quote drafts</p></div>
-          <div style={{ ...smallPanelStyle, boxShadow: "none" }}><strong>{plural(materials.filter((material) => material.active).length, "material")}</strong><p style={{ ...mutedStyle, marginTop: 4, fontSize: 13 }}>Active stock records</p></div>
+          <div style={{ ...smallPanelStyle, boxShadow: "none" }}><strong>{plural(materialSummary.activeCount, "material")}</strong><p style={{ ...mutedStyle, marginTop: 4, fontSize: 13 }}>Active stock records</p></div>
         </div>
       </section>
 
