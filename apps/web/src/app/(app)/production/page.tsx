@@ -20,12 +20,12 @@ import {
   restoreProductionJobAction,
   setProductionJobStatusAction,
   syncProductionJobAction,
-  toggleProductionStepAction,
   updateProductionJobDetailsAction,
   pushProductionQuoteToMyobOrderAction
 } from "./actions";
 import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
 import { OpenFullscreenBoardButton } from "./OpenFullscreenBoardButton";
+import { ProductionStepToggle } from "./ProductionStepToggle";
 import { getQuoteDraftById, listQuoteDraftsForTenant } from "@/server/quotes";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { listEnquiriesForTenant } from "@/server/enquiries";
@@ -923,16 +923,10 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                         <strong>Procedure checkoff</strong>
                         <div style={{ display: "grid", gap: 8 }}>
                           {itemSteps.map((step) => (
-                            <form key={step.id} action={toggleProductionStepAction} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", border: "1px solid #e4e7ec", borderRadius: 14, padding: 10, background: step.status === "done" ? "#ecfdf3" : "#fff" }}>
-                              <input type="hidden" name="stepId" value={step.id} />
-                              <input type="hidden" name="currentStatus" value={step.status} />
-                              <button type="submit" aria-label={step.status === "done" ? "Reopen step" : "Check off step"} style={{ width: 30, height: 30, borderRadius: 999, border: step.status === "done" ? "1px solid #12b76a" : "1px solid #cfd9e8", background: step.status === "done" ? "#12b76a" : "#fff", color: "#fff", cursor: "pointer", fontWeight: 950 }}>{step.status === "done" ? "✓" : ""}</button>
-                              <div style={{ display: "grid", gap: 2 }}>
-                                <strong style={{ fontSize: 14 }}>{step.label}</strong>
-                                {step.status === "done" ? <span style={{ color: "#067647", fontSize: 12 }}>Checked by {step.checkedBy || "staff"} · {formatDateTime(step.checkedAt)}</span> : <span style={{ color: "#667085", fontSize: 12 }}>Pending</span>}
-                              </div>
+                            <div key={step.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", border: "1px solid #e4e7ec", borderRadius: 14, padding: 10, background: step.status === "done" ? "#ecfdf3" : "#fff" }}>
+                              <ProductionStepToggle stepId={step.id} label={step.label} initialStatus={step.status} initialCheckedAt={step.checkedAt} initialCheckedBy={step.checkedBy} />
                               <span style={{ color: "#667085", fontSize: 11, fontWeight: 850 }}>{step.stepType.replace(/_/g, " ")}</span>
-                            </form>
+                            </div>
                           ))}
                         </div>
                         <form action={addProductionStepAction} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8 }}>

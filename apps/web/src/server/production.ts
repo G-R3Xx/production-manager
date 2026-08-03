@@ -1566,9 +1566,13 @@ export async function setProductionJobStatusForTenant(tenantId: string, jobId: s
   `, [tenantId, jobId, status]);
 }
 
-export async function setProductionStepStatusForTenant(tenantId: string, stepId: string, status: "pending" | "done", checkedBy?: string | null): Promise<{ jobId: string | null }> {
-  await ensureProductionTables();
-  const result = await pool.query<{ jobId: string }>(`
+export async function setProductionStepStatusForTenant(tenantId: string, stepId: string, status: "pending" | "done", checkedBy?: string | null): Promise<{
+  jobId: string | null;
+  checkedAt: string | null;
+  checkedBy: string | null;
+  isInstallHandoff: boolean;
+}> {
+  const result = await pool.query<{ jobId: string; checkedAt: string | null; checkedBy: string | null; stepType: string; label: string }>(`
     WITH updated_step AS (
       UPDATE production.production_steps ps
       SET status = $3::varchar,
@@ -1579,7 +1583,7 @@ export async function setProductionStepStatusForTenant(tenantId: string, stepId:
       WHERE ps.job_id = pj.id
         AND pj.tenant_id = $1::uuid
         AND ps.id = $2::uuid
-      RETURNING ps.job_id, ps.item_id
+      RETURNING ps.job_id, ps.item_id, ps.checked_at, ps.checked_by, ps.step_type, ps.label
     ), updated_item AS (
       UPDATE production.production_items pi
       SET updated_at = now()
@@ -1593,9 +1597,17 @@ export async function setProductionStepStatusForTenant(tenantId: string, stepId:
       WHERE pj.id = us.job_id
       RETURNING pj.id
     )
-    SELECT job_id as "jobId" FROM updated_step
+    SELECT job_id as "jobId",checked_at as "checkedAt",checked_by as "checkedBy",step_type as "stepType",label
+    FROM updated_step
   `, [tenantId, stepId, status, checkedBy ?? null]);
-  return { jobId: result.rows[0]?.jobId ?? null };
+  const row = result.rows[0];
+  const handoffText = `${row?.stepType ?? ""} ${row?.label ?? ""}`.toLowerCase();
+  return {
+    jobId: row?.jobId ?? null,
+    checkedAt: row?.checkedAt ?? null,
+    checkedBy: row?.checkedBy ?? null,
+    isInstallHandoff: /ready[_ ]for[_ ]install|ready[_ ]to[_ ]install/.test(handoffText)
+  };
 }
 
 

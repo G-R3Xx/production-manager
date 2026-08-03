@@ -5,7 +5,7 @@ import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listProductionBoardCardsForTenant, type ProductionBoardCardRecord, type ProductionBoardColumnKey } from "@/server/production";
-import { toggleProductionBoardStepAction } from "../actions";
+import { ProductionStepToggle } from "../ProductionStepToggle";
 import { AutoRefreshBoard } from "./AutoRefreshBoard";
 import { FullscreenBoardMode } from "./FullscreenBoardMode";
 
@@ -468,11 +468,7 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                         <a href={`/production?selected=${card.jobId}`} style={{ color: "#93c5fd", fontWeight: 950, textDecoration: "none", fontSize: 12 }}>Open job</a>
                         <span style={{ color: "#64748b", fontSize: 11 }}>Updated {formatUpdated(card.updatedAt)}</span>
                         {card.nextStepId ? (
-                          <form action={toggleProductionBoardStepAction}>
-                            <input type="hidden" name="stepId" value={card.nextStepId} />
-                            <input type="hidden" name="currentStatus" value="pending" />
-                            <button type="submit" style={{ border: "1px solid rgba(147,197,253,0.42)", borderRadius: 999, background: "rgba(37,99,235,0.22)", color: "#dbeafe", cursor: "pointer", padding: "7px 10px", fontSize: 12, fontWeight: 950 }}>Mark done</button>
-                          </form>
+                          <ProductionStepToggle stepId={card.nextStepId} initialStatus="pending" board />
                         ) : null}
                       </div>
                     </article>

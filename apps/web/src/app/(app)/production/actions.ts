@@ -157,7 +157,7 @@ export async function toggleProductionStepAction(formData: FormData): Promise<vo
   if (!stepId) redirectToProduction("/production?error=Missing%20procedure%20step");
   const nextStatus = currentStatus === "done" ? "pending" : "done";
   const result = await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
-  const bridgeMessage = nextStatus === "done" ? await maybeCreateInstallSchedulerInstallJob(activeTenant.tenantId, stepId) : null;
+  const bridgeMessage = nextStatus === "done" && result.isInstallHandoff ? await maybeCreateInstallSchedulerInstallJob(activeTenant.tenantId, stepId) : null;
   const message = [nextStatus === "done" ? "Step checked off" : "Step reopened", bridgeMessage].filter(Boolean).join("; ");
   productionRedirect(result.jobId, message);
 }
@@ -168,8 +168,8 @@ export async function toggleProductionBoardStepAction(formData: FormData): Promi
   const currentStatus = String(formData.get("currentStatus") ?? "pending").trim();
   if (!stepId) redirectToProduction("/production/board?error=Missing%20procedure%20step");
   const nextStatus = currentStatus === "done" ? "pending" : "done";
-  await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
-  const bridgeMessage = nextStatus === "done" ? await maybeCreateInstallSchedulerInstallJob(activeTenant.tenantId, stepId) : null;
+  const result = await setProductionStepStatusForTenant(activeTenant.tenantId, stepId, nextStatus, user.email ?? null);
+  const bridgeMessage = nextStatus === "done" && result.isInstallHandoff ? await maybeCreateInstallSchedulerInstallJob(activeTenant.tenantId, stepId) : null;
   const message = [nextStatus === "done" ? "Board step checked off" : "Board step reopened", bridgeMessage].filter(Boolean).join("; ");
   productionBoardRedirect(message);
 }
