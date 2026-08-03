@@ -465,7 +465,7 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
                       </div>
 
                       <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                        <a href={`/production?selected=${card.jobId}`} style={{ color: "#93c5fd", fontWeight: 950, textDecoration: "none", fontSize: 12 }}>Open job</a>
+                        <a href={`/production/${card.jobId}`} style={{ color: "#93c5fd", fontWeight: 950, textDecoration: "none", fontSize: 12 }}>Open job</a>
                         <span style={{ color: "#64748b", fontSize: 11 }}>Updated {formatUpdated(card.updatedAt)}</span>
                         {card.nextStepId ? (
                           <ProductionStepToggle stepId={card.nextStepId} initialStatus="pending" board />

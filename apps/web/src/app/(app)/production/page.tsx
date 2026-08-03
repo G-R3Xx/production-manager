@@ -6,6 +6,7 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import {
   listApprovedArtworkReadyForProduction,
   listProductionItemsForJob,
+  listProductionJobStepSummariesForTenant,
   listProductionJobsForTenant,
   listProductionStepsForJob,
   type ProductionItemRecord,
@@ -616,7 +617,7 @@ function statusButton(job: ProductionJobRecord, status: string, label: string, t
   );
 }
 
-export default async function ProductionPage({ searchParams }: PageProps) {
+export async function ProductionPageContent({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!activeTenant) {
@@ -630,16 +631,23 @@ export default async function ProductionPage({ searchParams }: PageProps) {
   const error = readParam(params, "error");
   const selectedParam = readParam(params, "selected");
   const filter = readParam(params, "filter");
+  const detailOnly = readParam(params, "detail") === "1";
 
-  const [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries] = await Promise.all([
+  const [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries, stepSummaries] = await Promise.all([
     listProductionJobsForTenant(tenantId, { includeDeleted: true }),
     listApprovedArtworkReadyForProduction(tenantId),
     listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
     listCustomersForTenant(tenantId),
-    listEnquiriesForTenant(tenantId, { includeDeleted: true })
+    listEnquiriesForTenant(tenantId, { includeDeleted: true }),
+    listProductionJobStepSummariesForTenant(tenantId)
   ]);
   const deletedJobCount = allJobs.filter((job) => job.status === "deleted").length;
-  const jobs = filter === "deleted" ? allJobs.filter((job) => job.status === "deleted") : allJobs.filter((job) => job.status !== "deleted");
+  const completedJobCount = allJobs.filter((job) => job.status === "completed").length;
+  const jobs = filter === "deleted"
+    ? allJobs.filter((job) => job.status === "deleted")
+    : filter === "completed"
+      ? allJobs.filter((job) => job.status === "completed")
+      : allJobs.filter((job) => job.status !== "deleted" && job.status !== "completed");
   const selectedJob = selectedParam ? allJobs.find((job) => job.id === selectedParam) ?? null : null;
   const selectedJobMissing = Boolean(selectedParam && !selectedJob);
   let items: ProductionItemRecord[] = [];
@@ -657,6 +665,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
   };
   const selectedJobLogoUrl = logoForQuoteId(selectedJob?.quoteId);
+  const stepSummaryByJobId = new Map(stepSummaries.map((summary) => [summary.jobId, summary]));
   const complete = pageCompletion(selectedJob ? items.flatMap((item) => visibleStepsForItem(item, steps)) : steps);
   const readyCount = allJobs.filter((job) => job.status === "ready_to_start").length;
   const inProductionCount = allJobs.filter((job) => job.status === "in_production").length;
@@ -668,89 +677,74 @@ export default async function ProductionPage({ searchParams }: PageProps) {
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
-      <section style={{ ...cardStyle, display: "grid", gap: 12, background: "linear-gradient(135deg, #ffffff 0%, #f7fbff 55%, #eef4ff 100%)" }}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Production</p>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "start" }}>
-          <div style={{ display: "grid", gap: 8, minWidth: 280 }}>
-            <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Production chain</h1>
-            <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Approved artwork turns into a production job with print-ready files, item-level procedures and staff checkoff. Client proof stays separate from the actual file used to print, cut, route or finish.</p>
-          </div>
-          <div style={{ display: "grid", gap: 10, minWidth: 460 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(110px, 1fr))", gap: 10 }}>
-              {[
-                ["Ready", readyCount],
-                ["Waiting", waitingCount],
-                ["In production", inProductionCount],
-                ["Ready out", readyDispatchCount]
-              ].map(([label, count]) => (
-                <div key={String(label)} style={{ border: "1px solid #dbe4f0", borderRadius: 18, padding: 12, background: "rgba(255,255,255,0.78)" }}>
-                  <strong style={{ fontSize: 24 }}>{count}</strong>
-                  <div style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>{label}</div>
-                </div>
-              ))}
+      {!detailOnly ? <>
+        <section style={{ ...cardStyle, display: "grid", gap: 12, background: "linear-gradient(135deg, #ffffff 0%, #f7fbff 55%, #eef4ff 100%)" }}>
+          <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Production</p>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "start" }}>
+            <div style={{ display: "grid", gap: 8, minWidth: 280 }}>
+              <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Current jobs</h1>
+              <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>See what every job is waiting on. Open a job for its artwork, production breakdown and step-by-step checkoff.</p>
             </div>
-            <OpenFullscreenBoardButton />
-          </div>
-        </div>
-      </section>
-
-      <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div>
-            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted production jobs" : "Production jobs"}</h2>
-            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Select a production job. The job detail and procedure below use the full page width.</p>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <a href="/production" style={{ color: filter === "deleted" ? "#667085" : "#2563eb", fontWeight: 900, textDecoration: "none" }}>Active</a>
-            <a href="/production?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedJobCount})</a>
-            <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
-          </div>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 12 }}>
-          {jobs.map((job) => {
-            const tone = statusTone(job.status);
-            const isSelected = selectedJob?.id === job.id;
-            const jobLogoUrl = logoForQuoteId(job.quoteId);
-            return (
-              <a key={job.id} href={`/production?selected=${job.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ border: isSelected ? "2px solid #2563eb" : "1px solid #dbe4f0", borderRadius: 20, padding: 16, background: isSelected ? "#eff6ff" : "#fff", textDecoration: "none", color: "inherit", display: "grid", gap: 10, boxShadow: isSelected ? "0 16px 34px rgba(37,99,235,0.14)" : "0 10px 24px rgba(15,23,42,0.04)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "start" }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-                    <ClientLogoBadge logoUrl={jobLogoUrl} name={job.clientName} size={44} radius={12} padding={4} />
-                    <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.clientName}</strong>
+            <div style={{ display: "grid", gap: 10, minWidth: 460 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(110px, 1fr))", gap: 10 }}>
+                {[["Ready", readyCount], ["Waiting", waitingCount], ["In production", inProductionCount], ["Ready out", readyDispatchCount]].map(([label, count]) => (
+                  <div key={String(label)} style={{ border: "1px solid #dbe4f0", borderRadius: 18, padding: 12, background: "rgba(255,255,255,0.78)" }}>
+                    <strong style={{ fontSize: 24 }}>{count}</strong>
+                    <div style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>{label}</div>
                   </div>
-                  <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950 }}>{statusLabel(job.status)}</span>
-                </div>
-                <span style={{ color: "#475467", fontSize: 13 }}>{job.quoteNumber ?? "No quote number"}{job.projectName ? ` · ${job.projectName}` : ""}</span>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 8, color: "#667085", fontSize: 12, flexWrap: "wrap" }}>
-                  <span>Due {formatDate(job.dueDate)}</span>
-                  <span>{job.assignedTo || "Unassigned"}</span>
-                </div>
-                <span style={{ marginTop: 2, color: isSelected ? "#1d4ed8" : "#2563eb", fontWeight: 950, fontSize: 12 }}>{isSelected ? "Open below" : "Click to open details"}</span>
-              </a>
-            );
-          })}
-          {jobs.length === 0 ? <div style={{ color: "#667085", padding: 8 }}>No production jobs yet.</div> : null}
-        </div>
-      </section>
-
-      {selectedJobMissing ? (
-        <section style={{ ...cardStyle, borderColor: "#fed7aa", background: "#fff7ed", color: "#9a3412" }}>
-          That production job could not be found. Pick a current job above to open its details.
-        </section>
-      ) : null}
-
-      {!selectedJob && !selectedJobMissing ? (
-        <section style={{ ...cardStyle, display: "grid", placeItems: "center", textAlign: "center", gap: 10, minHeight: 180, background: "#fbfdff" }}>
-          <div style={{ width: 54, height: 54, borderRadius: 18, display: "grid", placeItems: "center", background: "#eef4ff", color: "#3538cd", fontSize: 24, fontWeight: 950 }}>→</div>
-          <div style={{ display: "grid", gap: 4 }}>
-            <h2 style={{ margin: 0 }}>Select a production job to open it</h2>
-            <p style={{ margin: 0, color: "#667085" }}>This page now starts as a current production job list. Details, print-ready files and checkoff steps only load after you click a job.</p>
+                ))}
+              </div>
+              <OpenFullscreenBoardButton />
+            </div>
           </div>
         </section>
-      ) : null}
 
-      {approvedArtwork.length > 0 ? (
+        <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <div>
+              <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted jobs" : filter === "completed" ? "Completed jobs" : "Active production jobs"}</h2>
+              <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Current step and due date at a glance. Click any row for the complete job.</p>
+            </div>
+            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <a href="/production" style={{ color: !filter ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Active</a>
+              <a href="/production?filter=completed" style={{ color: filter === "completed" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Completed ({completedJobCount})</a>
+              <a href="/production?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedJobCount})</a>
+              <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: 7 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.45fr) minmax(220px, 1fr) 160px 150px 28px", gap: 14, padding: "0 16px", color: "#667085", fontSize: 11, fontWeight: 950, letterSpacing: "0.06em", textTransform: "uppercase" }}>
+              <span>Job</span><span>Current step</span><span>Status</span><span>Due date</span><span />
+            </div>
+            {jobs.map((job) => {
+              const tone = statusTone(job.status);
+              const jobLogoUrl = logoForQuoteId(job.quoteId);
+              const summary = stepSummaryByJobId.get(job.id);
+              return (
+                <a key={job.id} href={`/production/${job.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.45fr) minmax(220px, 1fr) 160px 150px 28px", gap: 14, alignItems: "center", border: "1px solid #dbe4f0", borderRadius: 16, padding: "13px 16px", background: "#fff", textDecoration: "none", color: "inherit", boxShadow: "0 6px 18px rgba(15,23,42,0.035)" }}>
+                  <span style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={jobLogoUrl} name={job.clientName} size={42} radius={11} padding={4} />
+                    <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.clientName}</strong>
+                      <span style={{ color: "#667085", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.quoteNumber ?? "No quote number"}{job.projectName ? ` · ${job.projectName}` : ""}</span>
+                    </span>
+                  </span>
+                  <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                    <strong style={{ color: summary?.currentStep === "All steps complete" ? "#067647" : "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary?.currentStep ?? "No production steps"}</strong>
+                    <span style={{ color: "#667085", fontSize: 12 }}>{summary?.stepsDone ?? 0}/{summary?.stepsTotal ?? 0} steps complete</span>
+                  </span>
+                  <span><span style={{ display: "inline-block", borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{statusLabel(job.status)}</span></span>
+                  <span style={{ color: job.dueDate ? "#344054" : "#98a2b3", fontWeight: job.dueDate ? 850 : 650 }}>{job.dueDate ? formatDate(job.dueDate) : "No due date"}</span>
+                  <span style={{ color: "#2563eb", fontSize: 20, fontWeight: 950 }}>›</span>
+                </a>
+              );
+            })}
+            {jobs.length === 0 ? <div style={{ color: "#667085", padding: 16, border: "1px dashed #cfd9e8", borderRadius: 14 }}>No jobs in this view.</div> : null}
+          </div>
+        </section>
+
+        {approvedArtwork.length > 0 ? (
         <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
           <div>
             <h2 style={{ margin: 0 }}>Approved artwork ready to start</h2>
@@ -774,10 +768,27 @@ export default async function ProductionPage({ searchParams }: PageProps) {
             })}
           </div>
         </section>
+        ) : null}
+      </> : null}
+
+      {detailOnly && selectedJobMissing ? (
+        <section style={{ ...cardStyle, borderColor: "#fed7aa", background: "#fff7ed", color: "#9a3412", display: "grid", gap: 10 }}>
+          <strong>That production job could not be found.</strong>
+          <a href="/production" style={{ color: "#9a3412", fontWeight: 950 }}>Return to current jobs</a>
+        </section>
       ) : null}
 
       {selectedJob ? (
         <section style={{ display: "grid", gap: 18 }}>
+          {detailOnly ? (
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <a href="/production" style={{ color: "#2563eb", fontWeight: 950, textDecoration: "none" }}>← All production jobs</a>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <span style={{ borderRadius: 999, background: "#f8fafc", border: "1px solid #dbe4f0", padding: "7px 11px", color: "#344054", fontSize: 12, fontWeight: 900 }}>Current: {stepSummaryByJobId.get(selectedJob.id)?.currentStep ?? "No production steps"}</span>
+                <span style={{ borderRadius: 999, background: selectedJob.dueDate ? "#fff7ed" : "#f8fafc", border: `1px solid ${selectedJob.dueDate ? "#fed7aa" : "#dbe4f0"}`, padding: "7px 11px", color: selectedJob.dueDate ? "#9a3412" : "#667085", fontSize: 12, fontWeight: 900 }}>{selectedJob.dueDate ? `Due ${formatDate(selectedJob.dueDate)}` : "No due date set"}</span>
+              </div>
+            </div>
+          ) : null}
           <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 14, flexWrap: "wrap", alignItems: "start" }}>
               <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
@@ -979,3 +990,5 @@ export default async function ProductionPage({ searchParams }: PageProps) {
     </div>
   );
 }
+
+export default ProductionPageContent;

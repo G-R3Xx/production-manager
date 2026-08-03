@@ -69,6 +69,13 @@ export type ProductionStepRecord = {
   updatedAt: string;
 };
 
+export type ProductionJobStepSummary = {
+  jobId: string;
+  currentStep: string;
+  stepsDone: number;
+  stepsTotal: number;
+};
+
 export type ApprovedArtworkOptionRecord = {
   approvalId: string;
   quoteId: string;
@@ -700,6 +707,42 @@ export async function listProductionJobsForTenant(tenantId: string, options?: { 
       created_at DESC
   `, [tenantId, Boolean(options?.includeDeleted)]);
   return result.rows;
+}
+
+export async function listProductionJobStepSummariesForTenant(tenantId: string): Promise<ProductionJobStepSummary[]> {
+  const result = await pool.query<{
+    jobId: string;
+    currentStep: string | null;
+    stepsDone: string;
+    stepsTotal: string;
+  }>(`
+    SELECT
+      pj.id as "jobId",
+      COALESCE(
+        (
+          SELECT ps.label
+          FROM production.production_steps ps
+          WHERE ps.job_id = pj.id AND ps.status <> 'done'
+          ORDER BY ps.sort_order ASC, ps.created_at ASC
+          LIMIT 1
+        ),
+        CASE
+          WHEN EXISTS (SELECT 1 FROM production.production_steps ps WHERE ps.job_id = pj.id) THEN 'All steps complete'
+          ELSE 'No production steps'
+        END
+      ) as "currentStep",
+      (SELECT count(*) FROM production.production_steps ps WHERE ps.job_id = pj.id AND ps.status = 'done')::text as "stepsDone",
+      (SELECT count(*) FROM production.production_steps ps WHERE ps.job_id = pj.id)::text as "stepsTotal"
+    FROM production.production_jobs pj
+    WHERE pj.tenant_id = $1::uuid
+  `, [tenantId]);
+
+  return result.rows.map((row) => ({
+    jobId: row.jobId,
+    currentStep: row.currentStep || "No production steps",
+    stepsDone: Number(row.stepsDone) || 0,
+    stepsTotal: Number(row.stepsTotal) || 0
+  }));
 }
 
 export async function getProductionJobById(tenantId: string, jobId: string): Promise<ProductionJobRecord | null> {

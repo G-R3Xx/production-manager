@@ -43,8 +43,8 @@ function text(value: FormDataEntryValue | null): string | null {
 }
 
 function productionRedirect(jobId: string | null | undefined, message: string): never {
-  const suffix = jobId ? `?selected=${encodeURIComponent(jobId)}&message=${encodeURIComponent(message)}` : `?message=${encodeURIComponent(message)}`;
-  redirectToProduction(`/production${suffix}`);
+  if (jobId) redirectToProduction(`/production/${encodeURIComponent(jobId)}?message=${encodeURIComponent(message)}`);
+  redirectToProduction(`/production?message=${encodeURIComponent(message)}`);
 }
 
 function productionBoardRedirect(message: string): never {
@@ -212,6 +212,6 @@ export async function pushProductionQuoteToMyobOrderAction(formData: FormData): 
     productionRedirect(jobId, "Accepted quote sent to MYOB Order");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    redirectToProduction(`/production?selected=${jobId}&error=${encodeURIComponent(message)}`);
+    redirectToProduction(`/production/${encodeURIComponent(jobId)}?error=${encodeURIComponent(message)}`);
   }
 }

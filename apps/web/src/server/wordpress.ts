@@ -1052,7 +1052,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
           await createNotificationForTenant(connection.tenantId, {
             eventType: "new_job", title: `New website job #${text(payload.orderNumber) || externalOrderId}`,
             message: `${resolved.displayName} · ${job.artworkFileCount} artwork file${job.artworkFileCount === 1 ? "" : "s"}`,
-            href: `/production?selected=${job.id}`, payloadJson: { jobId: job.id, externalOrderId }
+            href: `/production/${job.id}`, payloadJson: { jobId: job.id, externalOrderId }
           });
         }
       }
@@ -1150,7 +1150,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
       eventType: "new_job",
       title: `New website job #${text(payload.orderNumber) || externalOrderId}`,
       message: `${resolvedCustomer.displayName} · ${job.artworkFileCount} artwork file${job.artworkFileCount === 1 ? "" : "s"}`,
-      href: `/production?selected=${job.id}`,
+      href: `/production/${job.id}`,
       payloadJson: { jobId: job.id, externalOrderId }
     });
   }
