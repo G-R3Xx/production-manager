@@ -907,7 +907,7 @@ export default async function ProductionPage({ searchParams }: PageProps) {
                         </div>
                         {item.printReadyUrl ? (
                           <div style={{ display: "grid", gap: 4, color: "#475467", fontSize: 13 }}>
-                            <a href={item.printReadyUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{item.printReadyFileName || "Open print-ready file"}</a>
+                            {item.artworkFiles?.length ? item.artworkFiles.map((file, fileIndex) => <a key={`${file.downloadUrl}-${fileIndex}`} href={file.downloadUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{file.name || `Artwork file ${fileIndex + 1}`}</a>) : <a href={item.printReadyUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{item.printReadyFileName || "Open print-ready file"}</a>}
                             <span>{item.printReadyFileType || "File"}{item.printReadyUploadedBy ? ` · uploaded by ${item.printReadyUploadedBy}` : ""}</span>
                             {item.printReadyNotes ? <span style={{ whiteSpace: "pre-wrap" }}>{item.printReadyNotes}</span> : null}
                           </div>

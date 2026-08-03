@@ -12,6 +12,8 @@ import {
 } from "@/server/products";
 import type { MaterialRecord } from "@/server/materials";
 import { listRecipesForTenant, previewRecipeCost } from "@/server/productionResources";
+import { createProductionJobFromWebsiteOrderForTenant, ensureProductionTables } from "@/server/production";
+import { createNotificationForTenant } from "@/server/notifications";
 import {
   addQuoteLine,
   createQuoteDraftForTenant,
@@ -24,6 +26,7 @@ export type WordPressConnectionRecord = {
   tenantId: string;
   siteUrl: string | null;
   apiKey: string;
+  cashSaleCustomerId: string | null;
   status: string;
   lastCatalogPullAt: string | null;
   lastOrderReceivedAt: string | null;
@@ -115,6 +118,7 @@ export type WordPressOrderPayload = {
   currency?: string;
   total?: number | string;
   customer?: {
+    customerId?: string | number;
     company?: string;
     firstName?: string;
     lastName?: string;
@@ -382,12 +386,14 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
 export async function ensureWordPressBridgeSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || wordPressBridgeSchemaReady) return;
   await ensureWordPressProductPublishingSchema();
+  await ensureProductionTables();
   await pool.query(`
     CREATE TABLE IF NOT EXISTS integration.wordpress_connections (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       tenant_id uuid NOT NULL UNIQUE REFERENCES app.tenants(id) ON DELETE CASCADE,
       site_url text,
       api_key text NOT NULL,
+      cash_sale_customer_id uuid REFERENCES app.customers(id) ON DELETE SET NULL,
       status varchar(30) NOT NULL DEFAULT 'connected',
       last_catalog_pull_at timestamptz,
       last_order_received_at timestamptz,
@@ -395,6 +401,7 @@ export async function ensureWordPressBridgeSchema(): Promise<void> {
       updated_at timestamptz NOT NULL DEFAULT now()
     )
   `);
+  await pool.query(`ALTER TABLE integration.wordpress_connections ADD COLUMN IF NOT EXISTS cash_sale_customer_id uuid REFERENCES app.customers(id) ON DELETE SET NULL`);
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS wordpress_connections_api_key_idx ON integration.wordpress_connections(api_key)`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS integration.wordpress_orders (
@@ -402,6 +409,7 @@ export async function ensureWordPressBridgeSchema(): Promise<void> {
       tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
       external_order_id varchar(160) NOT NULL,
       quote_id uuid REFERENCES sales.quote_drafts(id) ON DELETE SET NULL,
+      production_job_id uuid REFERENCES production.production_jobs(id) ON DELETE SET NULL,
       order_status varchar(60),
       order_total numeric(14,2),
       payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -410,6 +418,7 @@ export async function ensureWordPressBridgeSchema(): Promise<void> {
       UNIQUE(tenant_id, external_order_id)
     )
   `);
+  await pool.query(`ALTER TABLE integration.wordpress_orders ADD COLUMN IF NOT EXISTS production_job_id uuid REFERENCES production.production_jobs(id) ON DELETE SET NULL`);
   wordPressBridgeSchemaReady = true;
 }
 
@@ -420,7 +429,7 @@ export function createWordPressApiKey(): string {
 export async function getWordPressConnectionForTenant(tenantId: string): Promise<WordPressConnectionRecord | null> {
   await ensureWordPressBridgeSchema();
   const result = await pool.query<WordPressConnectionRecord>(`
-    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",status,
+    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",cash_sale_customer_id::text AS "cashSaleCustomerId",status,
       last_catalog_pull_at AS "lastCatalogPullAt",last_order_received_at AS "lastOrderReceivedAt",
       created_at AS "createdAt",updated_at AS "updatedAt"
     FROM integration.wordpress_connections WHERE tenant_id=$1::uuid LIMIT 1
@@ -431,18 +440,19 @@ export async function getWordPressConnectionForTenant(tenantId: string): Promise
 export async function saveWordPressConnectionForTenant(tenantId: string, input: {
   siteUrl: string | null;
   apiKey?: string | null;
+  cashSaleCustomerId?: string | null;
   status?: string;
 }): Promise<WordPressConnectionRecord> {
   await ensureWordPressBridgeSchema();
   const apiKey = text(input.apiKey) || createWordPressApiKey();
   const result = await pool.query<WordPressConnectionRecord>(`
-    INSERT INTO integration.wordpress_connections(tenant_id,site_url,api_key,status,created_at,updated_at)
-    VALUES($1::uuid,$2::text,$3::text,$4::varchar,now(),now())
-    ON CONFLICT(tenant_id) DO UPDATE SET site_url=EXCLUDED.site_url,api_key=EXCLUDED.api_key,status=EXCLUDED.status,updated_at=now()
-    RETURNING id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",status,
+    INSERT INTO integration.wordpress_connections(tenant_id,site_url,api_key,cash_sale_customer_id,status,created_at,updated_at)
+    VALUES($1::uuid,$2::text,$3::text,$4::uuid,$5::varchar,now(),now())
+    ON CONFLICT(tenant_id) DO UPDATE SET site_url=EXCLUDED.site_url,api_key=EXCLUDED.api_key,cash_sale_customer_id=EXCLUDED.cash_sale_customer_id,status=EXCLUDED.status,updated_at=now()
+    RETURNING id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",cash_sale_customer_id::text AS "cashSaleCustomerId",status,
       last_catalog_pull_at AS "lastCatalogPullAt",last_order_received_at AS "lastOrderReceivedAt",
       created_at AS "createdAt",updated_at AS "updatedAt"
-  `, [tenantId, input.siteUrl, apiKey, input.status ?? "connected"]);
+  `, [tenantId, input.siteUrl, apiKey, input.cashSaleCustomerId ?? null, input.status ?? "connected"]);
   return result.rows[0];
 }
 
@@ -450,7 +460,7 @@ export async function resolveWordPressConnectionByApiKey(apiKey: string): Promis
   await ensureWordPressBridgeSchema();
   if (!apiKey) return null;
   const result = await pool.query<WordPressConnectionRecord>(`
-    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",status,
+    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",cash_sale_customer_id::text AS "cashSaleCustomerId",status,
       last_catalog_pull_at AS "lastCatalogPullAt",last_order_received_at AS "lastOrderReceivedAt",
       created_at AS "createdAt",updated_at AS "updatedAt"
     FROM integration.wordpress_connections WHERE api_key=$1::text AND status='connected' LIMIT 1
@@ -462,7 +472,7 @@ export async function resolveWordPressConnectionById(connectionId: string): Prom
   await ensureWordPressBridgeSchema();
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(connectionId)) return null;
   const result = await pool.query<WordPressConnectionRecord>(`
-    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",status,
+    SELECT id::text,tenant_id::text AS "tenantId",site_url AS "siteUrl",api_key AS "apiKey",cash_sale_customer_id::text AS "cashSaleCustomerId",status,
       last_catalog_pull_at AS "lastCatalogPullAt",last_order_received_at AS "lastOrderReceivedAt",
       created_at AS "createdAt",updated_at AS "updatedAt"
     FROM integration.wordpress_connections WHERE id=$1::uuid AND status='connected' LIMIT 1
@@ -968,19 +978,56 @@ function answerSummary(answers: Record<string, unknown>): string {
     .join(" · ");
 }
 
+type ResolvedWebsiteCustomer = { id: string | null; displayName: string; match: string };
+
+async function resolveWebsiteCustomer(connection: WordPressConnectionRecord, customer: WordPressOrderPayload["customer"]): Promise<ResolvedWebsiteCustomer> {
+  const email = text(customer?.email).toLowerCase();
+  const company = text(customer?.company).toLowerCase();
+  if (email || company) {
+    const matched = await pool.query<{ id: string; displayName: string; match: string }>(`
+      SELECT id::text,display_name AS "displayName",
+        CASE WHEN lower(COALESCE(email,''))=$2::text THEN 'email' ELSE 'company' END AS match
+      FROM app.customers
+      WHERE tenant_id=$1::uuid
+        AND is_active=true
+        AND COALESCE(payload_json->>'deletedAt','')=''
+        AND (($2::text<>'' AND lower(COALESCE(email,''))=$2::text)
+          OR ($3::text<>'' AND lower(COALESCE(company_name,display_name,''))=$3::text))
+      ORDER BY CASE WHEN lower(COALESCE(email,''))=$2::text THEN 0 ELSE 1 END,
+        CASE WHEN COALESCE(myob_uid,'')<>'' THEN 0 ELSE 1 END
+      LIMIT 1
+    `, [connection.tenantId, email, company]);
+    if (matched.rows[0]) return matched.rows[0];
+  }
+
+  const fallback = await pool.query<{ id: string; displayName: string }>(`
+    SELECT id::text,display_name AS "displayName"
+    FROM app.customers
+    WHERE tenant_id=$1::uuid AND is_active=true AND COALESCE(payload_json->>'deletedAt','')=''
+      AND (id=$2::uuid OR lower(display_name)='cash sale' OR lower(COALESCE(company_name,''))='cash sale')
+    ORDER BY CASE WHEN id=$2::uuid THEN 0 ELSE 1 END,
+      CASE WHEN COALESCE(myob_uid,'')<>'' THEN 0 ELSE 1 END
+    LIMIT 1
+  `, [connection.tenantId, connection.cashSaleCustomerId]);
+  return fallback.rows[0]
+    ? { ...fallback.rows[0], match: connection.cashSaleCustomerId ? "configured_cash_sale" : "automatic_cash_sale" }
+    : { id: null, displayName: "Cash Sale", match: "cash_sale_not_configured" };
+}
+
 export async function ingestWordPressOrder(connection: WordPressConnectionRecord, payload: WordPressOrderPayload) {
   await ensureWordPressBridgeSchema();
   const externalOrderId = text(payload.orderId || payload.orderNumber);
   if (!externalOrderId) throw new Error("WooCommerce order ID is required");
 
-  const existing = await pool.query<{ quoteId: string | null }>(`
-    SELECT quote_id::text AS "quoteId" FROM integration.wordpress_orders
+  const existing = await pool.query<{ quoteId: string | null; productionJobId: string | null }>(`
+    SELECT quote_id::text AS "quoteId",production_job_id::text AS "productionJobId" FROM integration.wordpress_orders
     WHERE tenant_id=$1::uuid AND external_order_id=$2::varchar LIMIT 1
   `, [connection.tenantId, externalOrderId]);
   const paidStatuses = new Set(["processing", "completed", "on-hold"]);
   const quoteStatus = paidStatuses.has(text(payload.status)) ? "accepted" : "draft";
   if (existing.rows[0]) {
     const quoteId = existing.rows[0].quoteId;
+    let productionJobId = existing.rows[0].productionJobId;
     if (quoteId) {
       await setQuoteDraftStatusForTenant(connection.tenantId, quoteId, quoteStatus);
       if (quoteStatus === "accepted") {
@@ -988,24 +1035,46 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
           status: "ready_to_sync",
           payloadJson: { source: "wordpress", externalOrderId, websiteStatus: payload.status ?? null }
         });
+        if (!productionJobId) {
+          const customer = payload.customer ?? {};
+          const resolved = await resolveWebsiteCustomer(connection, customer);
+          const job = await createProductionJobFromWebsiteOrderForTenant(connection.tenantId, {
+            quoteId,
+            externalOrderId,
+            orderNumber: text(payload.orderNumber) || externalOrderId,
+            linkedCustomerId: resolved.id,
+            clientName: resolved.displayName,
+            contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
+            address: text(customer.address) || null,
+            payloadJson: { customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null }
+          });
+          productionJobId = job.id;
+          await createNotificationForTenant(connection.tenantId, {
+            eventType: "new_job", title: `New website job #${text(payload.orderNumber) || externalOrderId}`,
+            message: `${resolved.displayName} · ${job.artworkFileCount} artwork file${job.artworkFileCount === 1 ? "" : "s"}`,
+            href: `/production?selected=${job.id}`, payloadJson: { jobId: job.id, externalOrderId }
+          });
+        }
       }
     }
     await pool.query(`
       UPDATE integration.wordpress_orders
-      SET order_status=$3::varchar,order_total=$4::numeric,payload_json=$5::jsonb,updated_at=now()
+      SET order_status=$3::varchar,order_total=$4::numeric,payload_json=$5::jsonb,production_job_id=$6::uuid,updated_at=now()
       WHERE tenant_id=$1::uuid AND external_order_id=$2::varchar
-    `, [connection.tenantId, externalOrderId, text(payload.status) || null, numberValue(payload.total), JSON.stringify(payload)]);
+    `, [connection.tenantId, externalOrderId, text(payload.status) || null, numberValue(payload.total), JSON.stringify(payload), productionJobId]);
     await pool.query(`UPDATE integration.wordpress_connections SET last_order_received_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
-    return { created: false, updated: true, quoteId, status: quoteStatus };
+    return { created: false, updated: true, quoteId, productionJobId, status: quoteStatus };
   }
 
   const customer = payload.customer ?? {};
+  const resolvedCustomer = await resolveWebsiteCustomer(connection, customer);
   const quote = await createQuoteDraftForTenant(connection.tenantId, {
-    clientName: orderCustomerName(customer),
+    linkedCustomerId: resolvedCustomer.id,
+    clientName: resolvedCustomer.displayName,
     contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
     email: text(customer.email) || null,
     phone: text(customer.phone) || null,
-    notes: `WooCommerce order ${text(payload.orderNumber) || externalOrderId} · ${text(payload.status) || "received"}`
+    notes: `WooCommerce order ${text(payload.orderNumber) || externalOrderId} · ${text(payload.status) || "received"}\nWebsite buyer: ${orderCustomerName(customer)}\nCustomer match: ${resolvedCustomer.match}${text(customer.address) ? `\nAddress: ${text(customer.address)}` : ""}`
   });
 
   let addedLines = 0;
@@ -1064,18 +1133,41 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
     });
   }
 
+  let productionJobId: string | null = null;
+  if (quoteStatus === "accepted") {
+    const job = await createProductionJobFromWebsiteOrderForTenant(connection.tenantId, {
+      quoteId: quote.id,
+      externalOrderId,
+      orderNumber: text(payload.orderNumber) || externalOrderId,
+      linkedCustomerId: resolvedCustomer.id,
+      clientName: resolvedCustomer.displayName,
+      contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
+      address: text(customer.address) || null,
+      payloadJson: { customer, customerMatch: resolvedCustomer.match, websiteStatus: payload.status ?? null }
+    });
+    productionJobId = job.id;
+    await createNotificationForTenant(connection.tenantId, {
+      eventType: "new_job",
+      title: `New website job #${text(payload.orderNumber) || externalOrderId}`,
+      message: `${resolvedCustomer.displayName} · ${job.artworkFileCount} artwork file${job.artworkFileCount === 1 ? "" : "s"}`,
+      href: `/production?selected=${job.id}`,
+      payloadJson: { jobId: job.id, externalOrderId }
+    });
+  }
+
   await pool.query(`
-    INSERT INTO integration.wordpress_orders(tenant_id,external_order_id,quote_id,order_status,order_total,payload_json,received_at,updated_at)
-    VALUES($1::uuid,$2::varchar,$3::uuid,$4::varchar,$5::numeric,$6::jsonb,now(),now())
+    INSERT INTO integration.wordpress_orders(tenant_id,external_order_id,quote_id,production_job_id,order_status,order_total,payload_json,received_at,updated_at)
+    VALUES($1::uuid,$2::varchar,$3::uuid,$4::uuid,$5::varchar,$6::numeric,$7::jsonb,now(),now())
     ON CONFLICT(tenant_id,external_order_id) DO NOTHING
   `, [
     connection.tenantId,
     externalOrderId,
     quote.id,
+    productionJobId,
     text(payload.status) || null,
     numberValue(payload.total),
     JSON.stringify(payload)
   ]);
   await pool.query(`UPDATE integration.wordpress_connections SET last_order_received_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
-  return { created: true, quoteId: quote.id, status: quoteStatus };
+  return { created: true, quoteId: quote.id, productionJobId, status: quoteStatus };
 }

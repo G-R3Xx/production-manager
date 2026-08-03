@@ -22,7 +22,8 @@ export async function saveWordPressConnectionAction(formData: FormData) {
   const existing = await getWordPressConnectionForTenant(id);
   const siteUrl = String(formData.get("siteUrl") ?? "").trim() || null;
   const apiKey = String(formData.get("apiKey") ?? "").trim() || existing?.apiKey || createWordPressApiKey();
-  await saveWordPressConnectionForTenant(id, { siteUrl, apiKey, status: "connected" });
+  const cashSaleCustomerId = String(formData.get("cashSaleCustomerId") ?? "").trim() || null;
+  await saveWordPressConnectionForTenant(id, { siteUrl, apiKey, cashSaleCustomerId, status: "connected" });
   revalidatePath("/integrations/wordpress");
   redirect("/integrations/wordpress?message=WordPress%20connection%20saved");
 }
@@ -33,6 +34,7 @@ export async function rotateWordPressApiKeyAction() {
   await saveWordPressConnectionForTenant(id, {
     siteUrl: existing?.siteUrl ?? null,
     apiKey: createWordPressApiKey(),
+    cashSaleCustomerId: existing?.cashSaleCustomerId ?? null,
     status: "connected"
   });
   revalidatePath("/integrations/wordpress");

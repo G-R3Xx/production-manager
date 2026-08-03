@@ -3,6 +3,7 @@ import "server-only";
 import { randomBytes } from "crypto";
 import { pool } from "@production-manager/db";
 import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
+import { createNotificationForTenant } from "@/server/notifications";
 
 export type QuoteDraftRecord = {
   id: string;
@@ -316,14 +317,15 @@ function quoteSelectSql(): string {
   `;
 }
 
-export async function listQuoteDraftsForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<QuoteDraftRecord[]> {
+export async function listQuoteDraftsForTenant(tenantId: string, options?: { includeDeleted?: boolean; includeWebsiteOrders?: boolean }): Promise<QuoteDraftRecord[]> {
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
     WHERE tenant_id = $1::uuid
       AND ($2::boolean OR status <> 'deleted')
+      AND ($3::boolean OR COALESCE(notes,'') NOT LIKE 'WooCommerce order %')
     ORDER BY created_at DESC
-  `,[tenantId, Boolean(options?.includeDeleted)]);
+  `,[tenantId, Boolean(options?.includeDeleted), Boolean(options?.includeWebsiteOrders)]);
   return result.rows;
 }
 
@@ -1240,5 +1242,15 @@ export async function respondToArtworkApprovalByToken(token: string, response: "
     if (approvedApproval) {
       await createProductionJobFromArtworkApprovalForTenant(approvedApproval.tenantId, approvedApproval.id, signatoryName ?? "client approval");
     }
+  }
+  const respondedApproval = result.rows[0];
+  if (respondedApproval) {
+    await createNotificationForTenant(respondedApproval.tenantId, {
+      eventType: response === "approved" ? "artwork_approved" : "artwork_changes_requested",
+      title: response === "approved" ? "Artwork approved" : "Artwork changes requested",
+      message: notes,
+      href: `/artwork-approvals?selected=${respondedApproval.id}`,
+      payloadJson: { artworkApprovalId: respondedApproval.id, response }
+    });
   }
 }

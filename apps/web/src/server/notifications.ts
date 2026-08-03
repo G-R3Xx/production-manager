@@ -1,0 +1,82 @@
+import "server-only";
+
+import { pool } from "@production-manager/db";
+
+export type AppNotificationRecord = {
+  id: string;
+  tenantId: string;
+  eventType: "new_job" | "new_enquiry" | "artwork_approved" | "artwork_changes_requested" | string;
+  title: string;
+  message: string | null;
+  href: string | null;
+  isRead: boolean;
+  createdAt: string;
+};
+
+let notificationSchemaReady = false;
+
+export async function ensureNotificationSchema(): Promise<void> {
+  if (!process.env.DATABASE_URL || notificationSchemaReady) return;
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS app.notifications (
+      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
+      event_type varchar(80) NOT NULL,
+      title varchar(255) NOT NULL,
+      message text,
+      href text,
+      is_read boolean NOT NULL DEFAULT false,
+      payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+      created_at timestamptz NOT NULL DEFAULT now(),
+      read_at timestamptz
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS notifications_tenant_unread_created_idx
+      ON app.notifications (tenant_id, is_read, created_at DESC)
+  `);
+  notificationSchemaReady = true;
+}
+
+export async function createNotificationForTenant(tenantId: string, input: {
+  eventType: AppNotificationRecord["eventType"];
+  title: string;
+  message?: string | null;
+  href?: string | null;
+  payloadJson?: Record<string, unknown>;
+}): Promise<void> {
+  await ensureNotificationSchema();
+  await pool.query(`
+    INSERT INTO app.notifications (tenant_id,event_type,title,message,href,payload_json,created_at)
+    VALUES ($1::uuid,$2::varchar,$3::varchar,$4::text,$5::text,$6::jsonb,now())
+  `, [tenantId, input.eventType, input.title, input.message ?? null, input.href ?? null, JSON.stringify(input.payloadJson ?? {})]);
+}
+
+export async function listNotificationsForTenant(tenantId: string, limit = 12): Promise<AppNotificationRecord[]> {
+  await ensureNotificationSchema();
+  const result = await pool.query<AppNotificationRecord>(`
+    SELECT id,tenant_id::text AS "tenantId",event_type AS "eventType",title,message,href,
+      is_read AS "isRead",created_at AS "createdAt"
+    FROM app.notifications
+    WHERE tenant_id=$1::uuid
+    ORDER BY is_read ASC,created_at DESC
+    LIMIT $2::int
+  `, [tenantId, Math.max(1, Math.min(50, limit))]);
+  return result.rows;
+}
+
+export async function countUnreadNotificationsForTenant(tenantId: string): Promise<number> {
+  await ensureNotificationSchema();
+  const result = await pool.query<{ count: string }>(`
+    SELECT count(*)::text AS count FROM app.notifications WHERE tenant_id=$1::uuid AND is_read=false
+  `, [tenantId]);
+  return Number(result.rows[0]?.count ?? 0);
+}
+
+export async function markAllNotificationsReadForTenant(tenantId: string): Promise<void> {
+  await ensureNotificationSchema();
+  await pool.query(`
+    UPDATE app.notifications SET is_read=true,read_at=COALESCE(read_at,now())
+    WHERE tenant_id=$1::uuid AND is_read=false
+  `, [tenantId]);
+}

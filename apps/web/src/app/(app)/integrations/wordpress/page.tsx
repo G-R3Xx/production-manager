@@ -5,6 +5,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listPublishedWebsiteProductsForTenant } from "@/server/products";
 import { getWordPressConnectionForTenant } from "@/server/wordpress";
+import { listCustomersForTenant } from "@/server/customers";
 import { rotateWordPressApiKeyAction, saveWordPressConnectionAction } from "./actions";
 
 type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -16,9 +17,10 @@ export default async function WordPressIntegrationPage({ searchParams }: Props) 
   const user = await getRequiredSessionUser();
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!tenant) redirect("/bootstrap");
-  const [connection, products, requestHeaders, params] = await Promise.all([
+  const [connection, products, customers, requestHeaders, params] = await Promise.all([
     getWordPressConnectionForTenant(tenant.tenantId),
     listPublishedWebsiteProductsForTenant(tenant.tenantId),
+    listCustomersForTenant(tenant.tenantId),
     headers(),
     searchParams ?? Promise.resolve({})
   ]);
@@ -48,6 +50,15 @@ export default async function WordPressIntegrationPage({ searchParams }: Props) 
           </label>
           <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Production Manager API key
             <input name="apiKey" defaultValue={connection?.apiKey ?? ""} placeholder="Created automatically when saved" style={{ ...input, fontFamily: "monospace" }} />
+          </label>
+          <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Unmatched website customer
+            <select name="cashSaleCustomerId" defaultValue={connection?.cashSaleCustomerId ?? ""} style={input} required>
+              <option value="">Choose the MYOB Cash Sale customer</option>
+              {customers.map((customer) => <option key={customer.id} value={customer.id}>
+                {customer.displayName}{customer.myobUid ? " · linked to MYOB" : " · not linked to MYOB"}
+              </option>)}
+            </select>
+            <span style={{ color: "#64748b", fontSize: 12, fontWeight: 600 }}>Used only when the checkout email or company cannot be matched to an existing client. Select the imported MYOB Cash Sale customer.</span>
           </label>
           <button style={{ justifySelf: "start", minHeight: 44, border: 0, borderRadius: 12, background: "#7c3aed", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer" }}>Save connection</button>
         </form>

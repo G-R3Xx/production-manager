@@ -2,6 +2,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { createNotificationForTenant } from "@/server/notifications";
 
 
 export type EnquiryCorrespondenceRecord = {
@@ -151,6 +152,13 @@ export async function createEnquiryForTenant(tenantId: string, input: {
     input.notes ?? null,
     input.linkedCustomerId ?? null
   ]);
+  await createNotificationForTenant(tenantId, {
+    eventType: "new_enquiry",
+    title: "New enquiry",
+    message: `${input.clientName}: ${input.requestSummary}`,
+    href: "/enquiries",
+    payloadJson: { enquiryId: result.rows[0].id }
+  });
   return result.rows[0];
 }
 

@@ -5,7 +5,7 @@ import { pool } from "@production-manager/db";
 export type ProductionJobRecord = {
   id: string;
   tenantId: string;
-  artworkApprovalId: string;
+  artworkApprovalId: string | null;
   quoteId: string;
   quoteNumber: string | null;
   clientName: string;
@@ -43,6 +43,7 @@ export type ProductionItemRecord = {
   printReadyNotes: string | null;
   printReadyUploadedAt: string | null;
   printReadyUploadedBy: string | null;
+  artworkFiles: Array<{ name: string; downloadUrl: string; mime?: string | null; size?: number | null }>;
   quoteProductName: string | null;
   quoteOptionSummary: string | null;
   quoteLineNotes: string | null;
@@ -530,12 +531,24 @@ export async function ensureProductionTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS due_date date,
       ADD COLUMN IF NOT EXISTS assigned_to varchar(255),
       ADD COLUMN IF NOT EXISTS internal_notes text,
+      ADD COLUMN IF NOT EXISTS source_type varchar(60),
+      ADD COLUMN IF NOT EXISTS external_order_id varchar(160),
+      ADD COLUMN IF NOT EXISTS linked_customer_id uuid REFERENCES app.customers(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
+
+  await pool.query(`ALTER TABLE production.production_jobs ALTER COLUMN artwork_approval_id DROP NOT NULL`);
 
   await pool.query(`
     CREATE UNIQUE INDEX IF NOT EXISTS production_jobs_artwork_approval_unique_idx
       ON production.production_jobs (artwork_approval_id)
+      WHERE artwork_approval_id IS NOT NULL
+  `);
+
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS production_jobs_external_order_unique_idx
+      ON production.production_jobs (tenant_id, source_type, external_order_id)
+      WHERE external_order_id IS NOT NULL
   `);
 
   await pool.query(`
@@ -600,6 +613,11 @@ export async function ensureProductionTables(): Promise<void> {
     CREATE UNIQUE INDEX IF NOT EXISTS production_items_artwork_page_unique_idx
       ON production.production_items (job_id, artwork_page_id)
       WHERE artwork_page_id IS NOT NULL
+  `);
+  await pool.query(`
+    CREATE UNIQUE INDEX IF NOT EXISTS production_items_quote_line_unique_idx
+      ON production.production_items (job_id, source_quote_line_id)
+      WHERE source_quote_line_id IS NOT NULL
   `);
 
   await pool.query(`
@@ -728,6 +746,7 @@ export async function listProductionItemsForJob(jobId: string): Promise<Producti
       pi.print_ready_notes as "printReadyNotes",
       pi.print_ready_uploaded_at as "printReadyUploadedAt",
       pi.print_ready_uploaded_by as "printReadyUploadedBy",
+      COALESCE(pi.payload_json -> 'artworkFiles', '[]'::jsonb) as "artworkFiles",
       ql.product_name as "quoteProductName",
       ql.option_summary as "quoteOptionSummary",
       ql.notes as "quoteLineNotes",
@@ -1206,6 +1225,132 @@ export async function createProductionJobFromArtworkApprovalForTenant(tenantId: 
   if (!jobId) return null;
   await syncProductionItemsAndSteps(jobId);
   return { id: jobId };
+}
+
+type WebsiteArtworkFile = {
+  name: string;
+  size: number | null;
+  mime: string | null;
+  downloadUrl: string;
+  storagePath: string | null;
+};
+
+function websiteArtworkFiles(value: unknown): WebsiteArtworkFile[] {
+  return asJsonArray(value).flatMap((entry): WebsiteArtworkFile[] => {
+    const file = asJsonRecord(entry);
+    const downloadUrl = jsonText(file.downloadUrl) || jsonText(file.url);
+    if (!downloadUrl) return [];
+    const parsedSize = Number(file.size);
+    return [{
+      name: jsonText(file.name) || "Website artwork",
+      size: Number.isFinite(parsedSize) ? parsedSize : null,
+      mime: jsonText(file.mime) || jsonText(file.type),
+      downloadUrl,
+      storagePath: jsonText(file.storagePath)
+    }];
+  });
+}
+
+export async function createProductionJobFromWebsiteOrderForTenant(tenantId: string, input: {
+  quoteId: string;
+  externalOrderId: string;
+  orderNumber: string;
+  linkedCustomerId?: string | null;
+  clientName: string;
+  contactName?: string | null;
+  address?: string | null;
+  payloadJson?: Record<string, unknown>;
+}): Promise<{ id: string; artworkFileCount: number }> {
+  await ensureProductionTables();
+  const jobResult = await pool.query<{ id: string }>(`
+    INSERT INTO production.production_jobs (
+      tenant_id,artwork_approval_id,quote_id,quote_number,client_name,contact_name,project_name,
+      status,dispatch_type,priority,internal_notes,source_type,external_order_id,linked_customer_id,payload_json,created_at,updated_at
+    )
+    SELECT
+      qd.tenant_id,NULL,qd.id,qd.quote_number,$4::varchar,$5::varchar,
+      ('WooCommerce order ' || $3::text),'ready_to_start',NULL,'normal',
+      concat_ws(E'\n','Created automatically from paid WooCommerce order ' || $3::text,
+        CASE WHEN $6::text IS NOT NULL THEN 'Delivery address: ' || $6::text ELSE NULL END),
+      'wordpress_woocommerce',$2::varchar,$7::uuid,$8::jsonb,now(),now()
+    FROM sales.quote_drafts qd
+    WHERE qd.tenant_id=$1::uuid AND qd.id=$9::uuid
+    ON CONFLICT (tenant_id,source_type,external_order_id)
+    WHERE external_order_id IS NOT NULL
+    DO UPDATE SET linked_customer_id=EXCLUDED.linked_customer_id,client_name=EXCLUDED.client_name,
+      contact_name=EXCLUDED.contact_name,payload_json=EXCLUDED.payload_json,updated_at=now()
+    RETURNING id
+  `, [tenantId, input.externalOrderId, input.orderNumber, input.clientName, input.contactName ?? null,
+    input.address ?? null, input.linkedCustomerId ?? null, JSON.stringify(input.payloadJson ?? {}), input.quoteId]);
+  const jobId = jobResult.rows[0]?.id;
+  if (!jobId) throw new Error("Could not create a production job for the website order");
+
+  const lines = await pool.query<{
+    id: string; productName: string; optionSummary: string | null; quantity: string;
+    configurationSnapshot: Record<string, unknown>;
+  }>(`
+    SELECT id,product_name AS "productName",option_summary AS "optionSummary",quantity::text AS quantity,
+      configuration_snapshot AS "configurationSnapshot"
+    FROM sales.quote_lines WHERE quote_id=$1::uuid ORDER BY created_at ASC
+  `, [input.quoteId]);
+  let artworkFileCount = 0;
+  for (let index = 0; index < lines.rows.length; index += 1) {
+    const line = lines.rows[index];
+    const snapshot = asJsonRecord(line.configurationSnapshot);
+    const rawConfiguration = asJsonRecord(snapshot.rawConfiguration);
+    const answers = asJsonRecord(snapshot.answers);
+    const files = websiteArtworkFiles(rawConfiguration.artworkFiles ?? snapshot.artworkFiles);
+    artworkFileCount += files.length;
+    const firstFile = files[0];
+    const width = Number(snapshot.widthMm);
+    const height = Number(snapshot.heightMm);
+    const sizeSummary = Number.isFinite(width) && Number.isFinite(height) ? `${width} × ${height} mm` : null;
+    const itemResult = await pool.query<{ id: string }>(`
+      INSERT INTO production.production_items (
+        job_id,source_quote_line_id,title,production_type,quantity,size_summary,substrate_summary,
+        finishing_summary,print_ready_url,print_ready_storage_path,print_ready_file_name,print_ready_file_type,
+        print_ready_notes,print_ready_uploaded_at,print_ready_uploaded_by,status,sort_order,payload_json,created_at,updated_at
+      ) VALUES (
+        $1::uuid,$2::uuid,$3::varchar,'signage',$4::numeric,$5::text,$6::text,$7::text,
+        $8::text,$9::text,$10::varchar,$11::varchar,$12::text,
+        CASE WHEN $8::text IS NULL THEN NULL ELSE now() END,
+        CASE WHEN $8::text IS NULL THEN NULL ELSE 'WooCommerce customer upload' END,
+        CASE WHEN $8::text IS NULL THEN 'waiting_on_file' ELSE 'ready_to_start' END,$13::int,$14::jsonb,now(),now()
+      )
+      ON CONFLICT (job_id,source_quote_line_id) WHERE source_quote_line_id IS NOT NULL
+      DO UPDATE SET title=EXCLUDED.title,quantity=EXCLUDED.quantity,size_summary=EXCLUDED.size_summary,
+        substrate_summary=EXCLUDED.substrate_summary,finishing_summary=EXCLUDED.finishing_summary,
+        print_ready_url=EXCLUDED.print_ready_url,print_ready_storage_path=EXCLUDED.print_ready_storage_path,
+        print_ready_file_name=EXCLUDED.print_ready_file_name,print_ready_file_type=EXCLUDED.print_ready_file_type,
+        print_ready_notes=EXCLUDED.print_ready_notes,print_ready_uploaded_at=EXCLUDED.print_ready_uploaded_at,
+        print_ready_uploaded_by=EXCLUDED.print_ready_uploaded_by,status=EXCLUDED.status,payload_json=EXCLUDED.payload_json,updated_at=now()
+      RETURNING id
+    `, [jobId, line.id, line.productName, normaliseMoney(line.quantity, "1"), sizeSummary,
+      jsonText(answers.material) || jsonText(answers.substrate), line.optionSummary,
+      firstFile?.downloadUrl ?? null, firstFile?.storagePath ?? null, firstFile?.name ?? null,
+      firstFile?.mime ?? null, files.length > 1 ? `${files.length} artwork files supplied; all links are stored on this item.` : null,
+      index, JSON.stringify({ source: "wordpress_woocommerce", answers, artworkFiles: files, rawConfiguration })]);
+    const itemId = itemResult.rows[0]?.id;
+    if (!itemId) continue;
+    const steps = stepPlanForItem({
+      productionType: "signage", title: line.productName, substrateSummary: jsonText(answers.material) || jsonText(answers.substrate),
+      colourSummary: jsonText(answers.ink), finishingSummary: line.optionSummary, sizeSummary, quoteProductName: line.productName,
+      quoteOptionSummary: line.optionSummary
+    });
+    for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {
+      const label = steps[stepIndex];
+      await pool.query(`
+        INSERT INTO production.production_steps(job_id,item_id,label,step_type,status,sort_order,created_at,updated_at)
+        VALUES($1::uuid,$2::uuid,$3::varchar,$4::varchar,'pending',$5::int,now(),now())
+        ON CONFLICT (job_id,item_id,(lower(label))) WHERE item_id IS NOT NULL
+        DO UPDATE SET sort_order=EXCLUDED.sort_order,updated_at=now()
+      `, [jobId, itemId, label, cleanSearchText(label).replace(/\s+/g, "_"), index * 100 + stepIndex + 1]);
+    }
+  }
+  await pool.query(`UPDATE production.production_jobs SET status=$2::varchar,updated_at=now() WHERE id=$1::uuid`, [
+    jobId, artworkFileCount > 0 ? "ready_to_start" : "waiting_on_files"
+  ]);
+  return { id: jobId, artworkFileCount };
 }
 
 export async function syncProductionJobForTenant(tenantId: string, jobId: string): Promise<void> {
