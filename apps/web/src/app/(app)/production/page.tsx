@@ -838,15 +838,15 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
             </div>
           </section>
 
-          <section style={{ ...cardStyle, display: "grid", gap: 14, borderColor: "#bfdbfe", background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "start" }}>
+          <details style={{ ...cardStyle, order: 4, borderColor: "#bfdbfe", background: "linear-gradient(135deg, #ffffff 0%, #f8fbff 100%)" }}>
+            <summary style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center", cursor: "pointer", listStyle: "none" }}>
               <div>
-                <h2 style={{ margin: 0 }}>Edit workflow / variation</h2>
-                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Use this when a client changes pickup to install/delivery, or when production needs a quick admin update.</p>
+                <h2 style={{ margin: 0, fontSize: 20 }}>Job settings, due date and variations</h2>
+                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Open only when the job assignment, delivery workflow or quoted work needs changing.</p>
               </div>
-              <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", border: "1px solid #c7d7fe", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>Original accepted quote stays preserved</span>
-            </div>
-            <form action={updateProductionJobDetailsAction} style={{ display: "grid", gap: 14 }}>
+              <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", border: "1px solid #c7d7fe", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>Open settings ↓</span>
+            </summary>
+            <form action={updateProductionJobDetailsAction} style={{ display: "grid", gap: 14, marginTop: 18, paddingTop: 18, borderTop: "1px solid #dbe4f0" }}>
               <input type="hidden" name="jobId" value={selectedJob.id} />
               <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12 }}>
                 <label style={labelStyle}>Dispatch type
@@ -895,12 +895,12 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                 <button type="submit" style={buttonStyle}>Save workflow changes</button>
               </div>
             </form>
-          </section>
+          </details>
 
-          <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
+          <section style={{ ...cardStyle, order: 2, display: "grid", gap: 16 }}>
             <div>
-              <h2 style={{ margin: 0 }}>Production items</h2>
-              <p style={{ margin: "4px 0 0", color: "#667085" }}>Each approved artwork page becomes one production item. Attach the print-ready file used for print/cut/router/RIP, then check off the procedure.</p>
+              <h2 style={{ margin: 0 }}>Production work</h2>
+              <p style={{ margin: "4px 0 0", color: "#667085" }}>Follow the production instruction, complete the procedure in order, and use the attached print-ready artwork.</p>
             </div>
             {items.map((item) => {
               const itemSteps = visibleStepsForItem(item, steps);
@@ -908,6 +908,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
               const productionDetails = quotedDetailsForItem(item);
               return (
                 <article key={item.id} style={{ border: "1px solid #dbe4f0", borderRadius: 22, padding: 16, background: "#fbfdff", display: "grid", gap: 14 }}>
+                  <div style={{ order: -1 }}><QuotedDetailsCard item={item} /></div>
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.8fr) minmax(0, 1.2fr)", gap: 16, alignItems: "start" }}>
                     <div style={{ display: "grid", gap: 10 }}>
                       {proofPreview(item)}
@@ -938,7 +939,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                         </form>
                       </section>
 
-                      <section style={{ display: "grid", gap: 8 }}>
+                      <section style={{ display: "grid", gap: 8, order: -1 }}>
                         <strong>Procedure checkoff</strong>
                         <div style={{ display: "grid", gap: 8 }}>
                           {itemSteps.map((step) => (
@@ -957,7 +958,6 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                       </section>
                     </div>
                   </div>
-                  <QuotedDetailsCard item={item} />
                 </article>
               );
             })}
@@ -968,7 +968,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
             const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
             const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
             return (
-              <section style={{ ...cardStyle, borderColor: myobTone.border, background: myobTone.bg, color: myobTone.fg, display: "grid", gap: 10 }}>
+              <section style={{ ...cardStyle, order: 5, borderColor: myobTone.border, background: myobTone.bg, color: myobTone.fg, display: "grid", gap: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                   <div style={{ display: "grid", gap: 5 }}>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>MYOB open job / order</p>
