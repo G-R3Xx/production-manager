@@ -633,6 +633,14 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
   const filter = readParam(params, "filter");
   const detailOnly = readParam(params, "detail") === "1";
 
+  if (selectedParam && !detailOnly) {
+    const redirectParams = new URLSearchParams();
+    if (message) redirectParams.set("message", message);
+    if (error) redirectParams.set("error", error);
+    const suffix = redirectParams.size ? `?${redirectParams.toString()}` : "";
+    redirect(`/production/${encodeURIComponent(selectedParam)}${suffix}`);
+  }
+
   const [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries, stepSummaries] = await Promise.all([
     listProductionJobsForTenant(tenantId, { includeDeleted: true }),
     listApprovedArtworkReadyForProduction(tenantId),
