@@ -117,6 +117,7 @@ export type WordPressOrderPayload = {
   status?: string;
   currency?: string;
   total?: number | string;
+  purchaseOrderNumber?: string;
   customer?: {
     customerId?: string | number;
     websiteUserId?: string | number;
@@ -133,6 +134,12 @@ export type WordPressOrderPayload = {
     method?: string;
     title?: string;
     accountTerms?: string;
+  };
+  fulfilment?: {
+    type?: string;
+    methodId?: string;
+    label?: string;
+    address?: string;
   };
   lines?: Array<{
     productId?: string;
@@ -396,6 +403,7 @@ export async function ensureWordPressBridgeSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || wordPressBridgeSchemaReady) return;
   await ensureWordPressProductPublishingSchema();
   await ensureProductionTables();
+  await pool.query(`ALTER TABLE sales.quote_drafts ADD COLUMN IF NOT EXISTS client_purchase_order_number varchar(120)`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS integration.wordpress_connections (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1059,6 +1067,18 @@ function websitePaymentSnapshot(payload: WordPressOrderPayload): Record<string, 
   };
 }
 
+function websiteFulfilmentSnapshot(payload: WordPressOrderPayload): { type: "pickup" | "delivery" | "install"; methodId: string; label: string; address: string } {
+  const fulfilment = payload.fulfilment ?? {};
+  const rawType = text(fulfilment.type).toLowerCase();
+  const type = rawType === "delivery" || rawType === "install" ? rawType : "pickup";
+  return {
+    type,
+    methodId: text(fulfilment.methodId),
+    label: text(fulfilment.label),
+    address: type === "delivery" ? text(fulfilment.address) : ""
+  };
+}
+
 async function refreshExistingWebsiteQuoteLines(
   connection: WordPressConnectionRecord,
   quoteId: string,
@@ -1102,6 +1122,8 @@ async function refreshExistingWebsiteQuoteLines(
       answers,
       displayAnswers,
       payment: websitePaymentSnapshot(payload),
+      fulfilment: websiteFulfilmentSnapshot(payload),
+      purchaseOrderNumber: text(payload.purchaseOrderNumber) || null,
       productionCost: calculated.cost,
       calculatedWebsiteLineTotal: calculated.lineTotal,
       chargedWebsiteLineTotal: lineTotal,
@@ -1150,12 +1172,15 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
     let productionJobId = existing.rows[0].productionJobId;
     const customer = payload.customer ?? {};
     const resolved = await resolveWebsiteCustomer(connection, customer);
+    const fulfilment = websiteFulfilmentSnapshot(payload);
+    const purchaseOrderNumber = text(payload.purchaseOrderNumber) || null;
     if (quoteId) {
       await refreshExistingWebsiteQuoteLines(connection, quoteId, externalOrderId, payload);
       await pool.query(`
         UPDATE sales.quote_drafts
         SET linked_customer_id=$3::uuid,client_name=$4::varchar,
-          contact_name=$5::varchar,email=$6::varchar,phone=$7::varchar,updated_at=now()
+          contact_name=$5::varchar,email=$6::varchar,phone=$7::varchar,
+          client_purchase_order_number=$8::varchar,updated_at=now()
         WHERE tenant_id=$1::uuid AND id=$2::uuid
       `, [
         connection.tenantId,
@@ -1164,13 +1189,18 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
         resolved.displayName,
         [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
         text(customer.email) || null,
-        text(customer.phone) || null
+        text(customer.phone) || null,
+        purchaseOrderNumber
       ]);
       if (productionJobId) {
         await pool.query(`
           UPDATE production.production_jobs
           SET linked_customer_id=$3::uuid,client_name=$4::varchar,contact_name=$5::varchar,
-            payload_json=COALESCE(payload_json,'{}'::jsonb) || $6::jsonb,updated_at=now()
+            dispatch_type=$6::varchar,
+            internal_notes=concat_ws(E'\n',
+              NULLIF(btrim(regexp_replace(COALESCE(internal_notes,''), E'(^|\\n)Delivery address:[^\\n]*', '', 'g')), ''),
+              CASE WHEN $6::text='delivery' AND NULLIF($7::text,'') IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
+            payload_json=COALESCE(payload_json,'{}'::jsonb) || $8::jsonb,updated_at=now()
           WHERE tenant_id=$1::uuid AND id=$2::uuid
         `, [
           connection.tenantId,
@@ -1178,7 +1208,9 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
           resolved.id,
           resolved.displayName,
           [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
-          JSON.stringify({ customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload) })
+          fulfilment.type,
+          fulfilment.address || null,
+          JSON.stringify({ customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload), fulfilment, purchaseOrderNumber })
         ]);
       }
       await setQuoteDraftStatusForTenant(connection.tenantId, quoteId, quoteStatus);
@@ -1195,8 +1227,9 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
             linkedCustomerId: resolved.id,
             clientName: resolved.displayName,
             contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
-            address: text(customer.address) || null,
-            payloadJson: { customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload) }
+            dispatchType: fulfilment.type,
+            address: fulfilment.address || null,
+            payloadJson: { customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload), fulfilment, purchaseOrderNumber }
           });
           productionJobId = job.id;
           await createNotificationForTenant(connection.tenantId, {
@@ -1218,13 +1251,16 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
 
   const customer = payload.customer ?? {};
   const resolvedCustomer = await resolveWebsiteCustomer(connection, customer);
+  const fulfilment = websiteFulfilmentSnapshot(payload);
+  const purchaseOrderNumber = text(payload.purchaseOrderNumber) || null;
   const quote = await createQuoteDraftForTenant(connection.tenantId, {
     linkedCustomerId: resolvedCustomer.id,
+    clientPurchaseOrderNumber: purchaseOrderNumber,
     clientName: resolvedCustomer.displayName,
     contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
     email: text(customer.email) || null,
     phone: text(customer.phone) || null,
-    notes: `WooCommerce order ${text(payload.orderNumber) || externalOrderId} · ${text(payload.status) || "received"}\nWebsite buyer: ${orderCustomerName(customer)}\nCustomer match: ${resolvedCustomer.match}${text(customer.address) ? `\nAddress: ${text(customer.address)}` : ""}`
+    notes: `WooCommerce order ${text(payload.orderNumber) || externalOrderId} · ${text(payload.status) || "received"}\nWebsite buyer: ${orderCustomerName(customer)}\nCustomer match: ${resolvedCustomer.match}\nFulfilment: ${fulfilment.label || fulfilment.type}${purchaseOrderNumber ? `\nClient PO: ${purchaseOrderNumber}` : ""}${text(customer.address) ? `\nBilling address: ${text(customer.address)}` : ""}`
   });
 
   let addedLines = 0;
@@ -1261,6 +1297,8 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
         answers,
         displayAnswers: calculated.displayAnswers,
         payment: websitePaymentSnapshot(payload),
+        fulfilment,
+        purchaseOrderNumber,
         productionCost: calculated.cost,
         calculatedWebsiteLineTotal: calculated.lineTotal,
         chargedWebsiteLineTotal: lineTotal,
@@ -1294,8 +1332,9 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
       linkedCustomerId: resolvedCustomer.id,
       clientName: resolvedCustomer.displayName,
       contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
-      address: text(customer.address) || null,
-      payloadJson: { customer, customerMatch: resolvedCustomer.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload) }
+      dispatchType: fulfilment.type,
+      address: fulfilment.address || null,
+      payloadJson: { customer, customerMatch: resolvedCustomer.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload), fulfilment, purchaseOrderNumber }
     });
     productionJobId = job.id;
     await createNotificationForTenant(connection.tenantId, {

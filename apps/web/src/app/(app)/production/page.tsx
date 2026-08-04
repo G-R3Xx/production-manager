@@ -447,7 +447,7 @@ function quotedDetailsForItem(item: ProductionItemRecord) {
   };
 }
 
-function QuotedDetailsCard({ item }: { item: ProductionItemRecord }) {
+function QuotedDetailsCard({ item, purchaseOrderNumber }: { item: ProductionItemRecord; purchaseOrderNumber?: string | null }) {
   const details = quotedDetailsForItem(item);
   const paymentLabel = websitePaymentLabel(item);
   const fields = [
@@ -469,6 +469,7 @@ function QuotedDetailsCard({ item }: { item: ProductionItemRecord }) {
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           {paymentLabel ? <span style={{ borderRadius: 999, background: "#ecfdf3", border: "1px solid #86efac", color: "#067647", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{paymentLabel}</span> : null}
+          {purchaseOrderNumber ? <span style={{ borderRadius: 999, background: "#fff7ed", border: "1px solid #fdba74", color: "#9a3412", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>Client PO: {purchaseOrderNumber}</span> : null}
           {details.lineTotal ? <span style={{ borderRadius: 999, background: "#fff", border: "1px solid #bfdbfe", color: "#1d4ed8", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>Quoted total ${details.lineTotal}</span> : null}
         </div>
       </div>
@@ -972,7 +973,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                       </section>
                     </div>
                   </div>
-                  <QuotedDetailsCard item={item} />
+                  <QuotedDetailsCard item={item} purchaseOrderNumber={selectedQuote?.clientPurchaseOrderNumber} />
                 </article>
               );
             })}

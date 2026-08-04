@@ -11,6 +11,7 @@ export type QuoteDraftRecord = {
   enquiryId: string | null;
   surveyRequestId: string | null;
   linkedCustomerId: string | null;
+  clientPurchaseOrderNumber: string | null;
   quoteNumber: string | null;
   publicToken: string | null;
   clientName: string;
@@ -166,6 +167,7 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS declined_at timestamptz,
       ADD COLUMN IF NOT EXISTS changes_requested_at timestamptz,
       ADD COLUMN IF NOT EXISTS client_response_notes text,
+      ADD COLUMN IF NOT EXISTS client_purchase_order_number varchar(120),
       ADD COLUMN IF NOT EXISTS myob_order_uid varchar(120),
       ADD COLUMN IF NOT EXISTS myob_order_number varchar(120),
       ADD COLUMN IF NOT EXISTS myob_order_status varchar(50) NOT NULL DEFAULT 'not_synced',
@@ -291,6 +293,7 @@ function quoteSelectSql(): string {
       enquiry_id as "enquiryId",
       survey_request_id as "surveyRequestId",
       linked_customer_id as "linkedCustomerId",
+      client_purchase_order_number as "clientPurchaseOrderNumber",
       quote_number as "quoteNumber",
       public_token as "publicToken",
       client_name as "clientName",
@@ -318,6 +321,7 @@ function quoteSelectSql(): string {
 }
 
 export async function listQuoteDraftsForTenant(tenantId: string, options?: { includeDeleted?: boolean; includeWebsiteOrders?: boolean }): Promise<QuoteDraftRecord[]> {
+  await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
@@ -330,6 +334,7 @@ export async function listQuoteDraftsForTenant(tenantId: string, options?: { inc
 }
 
 export async function getQuoteDraftById(tenantId: string, quoteId: string): Promise<QuoteDraftRecord | null> {
+  await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
@@ -340,6 +345,7 @@ export async function getQuoteDraftById(tenantId: string, quoteId: string): Prom
 }
 
 export async function getQuoteDraftByPublicToken(token: string): Promise<QuoteDraftRecord | null> {
+  await ensureQuoteLifecycleColumns();
   const result = await pool.query<QuoteDraftRecord>(`
     SELECT ${quoteSelectSql()}
     FROM sales.quote_drafts
@@ -392,6 +398,7 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
   enquiryId?: string | null;
   surveyRequestId?: string | null;
   linkedCustomerId?: string | null;
+  clientPurchaseOrderNumber?: string | null;
   clientName: string;
   contactName?: string | null;
   email?: string | null;
@@ -403,15 +410,16 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
   const token = makePublicToken();
   const result = await pool.query<{ id: string }>(`
     INSERT INTO sales.quote_drafts (
-      tenant_id, enquiry_id, survey_request_id, linked_customer_id, quote_number, public_token, client_name, contact_name, email, phone, status, discount_percent, notes, created_at, updated_at
+      tenant_id, enquiry_id, survey_request_id, linked_customer_id, client_purchase_order_number, quote_number, public_token, client_name, contact_name, email, phone, status, discount_percent, notes, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::uuid,$3::uuid,$4::uuid,('Q-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5))),$5,$6::varchar,$7::varchar,$8::varchar,$9::varchar,'draft',$10::numeric,$11::text,now(),now()
+      $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::varchar,('Q-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5))),$6,$7::varchar,$8::varchar,$9::varchar,$10::varchar,'draft',$11::numeric,$12::text,now(),now()
     ) RETURNING id
   `, [
     tenantId,
     input.enquiryId ?? null,
     input.surveyRequestId ?? null,
     input.linkedCustomerId ?? null,
+    input.clientPurchaseOrderNumber ?? null,
     token,
     input.clientName,
     input.contactName ?? null,

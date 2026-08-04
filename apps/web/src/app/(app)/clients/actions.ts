@@ -105,6 +105,20 @@ function payloadFromParsed(parsed: z.infer<typeof clientSchema>, extra?: { logoU
   };
 }
 
+async function requestedMyobMapping(tenantId: string, formData: FormData): Promise<CustomerPayload> {
+  const selectedId = String(formData.get("myobCustomerId") || "").trim();
+  if (!selectedId) return {};
+  const selected = await getCustomerById(tenantId, selectedId);
+  if (!selected || !selected.myobUid || selected.myobUid.startsWith("manual-")) {
+    throw new Error("Please select a valid customer imported from MYOB.");
+  }
+  return {
+    myobUid: selected.myobUid,
+    myobDisplayName: selected.displayName,
+    myobMatch: "manual_selection"
+  };
+}
+
 export async function createClientAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const parsed = clientSchema.safeParse({
@@ -128,6 +142,14 @@ export async function createClientAction(formData: FormData): Promise<void> {
     redirect(`/clients?error=${encodeURIComponent(message)}`);
   }
 
+  let myobMapping: CustomerPayload = {};
+  try {
+    myobMapping = await requestedMyobMapping(activeTenant.tenantId, formData);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(`/clients?error=${encodeURIComponent(message)}`);
+  }
+
   const created = await upsertImportedCustomer(activeTenant.tenantId, {
     myobUid: `manual-${crypto.randomUUID()}`,
     displayName: parsed.data.displayName.trim(),
@@ -137,7 +159,7 @@ export async function createClientAction(formData: FormData): Promise<void> {
     email: nullable(parsed.data.email),
     phone: nullable(parsed.data.phone),
     isActive: true,
-    payloadJson: { source: "manual" }
+    payloadJson: { source: "manual", ...myobMapping }
   });
 
   let uploadedLogo: { logoUrl?: string; logoStoragePath?: string } = {};
@@ -148,7 +170,7 @@ export async function createClientAction(formData: FormData): Promise<void> {
     redirect(`/clients?error=${encodeURIComponent(message)}`);
   }
 
-  await updateCustomerPayloadForTenant(activeTenant.tenantId, created.id, payloadFromParsed(parsed.data, uploadedLogo), true);
+  await updateCustomerPayloadForTenant(activeTenant.tenantId, created.id, { ...payloadFromParsed(parsed.data, uploadedLogo), ...myobMapping }, true);
 
   redirect(`/clients?selected=${created.id}&message=Client%20created`);
 }
@@ -180,6 +202,14 @@ export async function updateClientAction(formData: FormData): Promise<void> {
   const existing = await getCustomerById(activeTenant.tenantId, customerId);
   if (!existing) redirect("/clients?error=Client%20was%20not%20found");
 
+  let myobMapping: CustomerPayload = {};
+  try {
+    myobMapping = await requestedMyobMapping(activeTenant.tenantId, formData);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(message)}`);
+  }
+
   let uploadedLogo: { logoUrl?: string; logoStoragePath?: string } = {};
   try {
     uploadedLogo = await uploadLogoIfPresent(activeTenant.tenantId, customerId, formData);
@@ -197,6 +227,7 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     phone: nullable(parsed.data.phone),
     payloadJson: {
       ...payloadFromParsed(parsed.data, uploadedLogo.logoUrl ? uploadedLogo : { logoUrl: nullable(parsed.data.logoUrl) ?? existing.payloadJson.logoUrl, logoStoragePath: existing.payloadJson.logoStoragePath }),
+      ...myobMapping,
       deletedAt: undefined,
       archivedAt: existing.isActive ? undefined : existing.payloadJson.archivedAt
     },

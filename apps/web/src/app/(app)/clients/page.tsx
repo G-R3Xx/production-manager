@@ -88,12 +88,16 @@ function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; sel
   );
 }
 
-function ClientEditor({ client }: { client: CustomerRecord | null }) {
+function ClientEditor({ client, myobCustomers }: { client: CustomerRecord | null; myobCustomers: CustomerRecord[] }) {
   const isNew = !client;
   const active = client?.isActive ?? true;
   const deleted = client ? isDeletedCustomer(client) : false;
   const logoUrl = client ? customerLogoUrl(client) : "";
   const payload = client?.payloadJson ?? {};
+  const currentMyobUid = client && !client.myobUid.startsWith("manual-")
+    ? client.myobUid
+    : typeof payload.myobUid === "string" ? payload.myobUid : "";
+  const mappedCustomer = myobCustomers.find((candidate) => candidate.myobUid === currentMyobUid) ?? null;
 
   return (
     <section style={{ ...panelStyle(), display: "grid", gap: 18 }}>
@@ -117,6 +121,23 @@ function ClientEditor({ client }: { client: CustomerRecord | null }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}><b>First name</b><input name="firstName" defaultValue={client?.firstName ?? ""} style={inputStyle} /></label>
           <label style={{ display: "grid", gap: 6 }}><b>Last name</b><input name="lastName" defaultValue={client?.lastName ?? ""} style={inputStyle} /></label>
+        </div>
+
+        <div style={{ border: `1px solid ${currentMyobUid ? "#86efac" : "#fed7aa"}`, borderRadius: 20, padding: 14, background: currentMyobUid ? "#ecfdf3" : "#fff7ed", display: "grid", gap: 9 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+            <strong>MYOB customer mapping</strong>
+            <span style={{ borderRadius: 999, padding: "5px 10px", fontSize: 11, fontWeight: 950, background: currentMyobUid ? "#dcfae6" : "#ffedd5", color: currentMyobUid ? "#067647" : "#9a3412" }}>
+              {currentMyobUid ? "Linked to MYOB" : "Not linked to MYOB"}
+            </span>
+          </div>
+          <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Choose the matching imported MYOB customer. Accepted quotes and website orders use this link when creating the MYOB Order.</p>
+          <select name="myobCustomerId" defaultValue={mappedCustomer?.id ?? ""} style={inputStyle}>
+            <option value="">Automatic matching / not linked</option>
+            {myobCustomers.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.companyName && candidate.companyName !== candidate.displayName ? ` — ${candidate.companyName}` : ""}</option>
+            ))}
+          </select>
+          {mappedCustomer ? <span style={{ color: "#067647", fontSize: 12, fontWeight: 800 }}>Current MYOB customer: {mappedCustomer.displayName}</span> : null}
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
@@ -179,6 +200,7 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
   const selectedId = readParam(params, "selected");
   const filter = readParam(params, "filter") || "active";
   const clients = await listCustomersForTenant(activeTenant.tenantId, { includeDeleted: true });
+  const myobCustomers = clients.filter((client) => Boolean(client.myobUid) && !client.myobUid.startsWith("manual-") && client.isActive && !isDeletedCustomer(client));
 
   const visibleClients = clients.filter((client) => {
     if (filter === "archived") return !client.isActive && !isDeletedCustomer(client);
@@ -227,7 +249,7 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
           </div>
         </section>
 
-        <ClientEditor client={selectedClient} />
+        <ClientEditor client={selectedClient} myobCustomers={myobCustomers} />
       </div>
     </div>
   );

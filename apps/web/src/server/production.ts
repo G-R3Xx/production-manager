@@ -1234,7 +1234,7 @@ export async function createProductionJobFromArtworkApprovalForTenant(tenantId: 
   await ensureProductionTables();
 
   const result = await pool.query<{ id: string }>(`
-    INSERT INTO production.production_jobs (
+    INSERT INTO production.production_jobs AS existing_job (
       tenant_id,
       artwork_approval_id,
       quote_id,
@@ -1318,10 +1318,13 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
   linkedCustomerId?: string | null;
   clientName: string;
   contactName?: string | null;
+  dispatchType?: string | null;
   address?: string | null;
   payloadJson?: Record<string, unknown>;
 }): Promise<{ id: string; artworkFileCount: number }> {
   await ensureProductionTables();
+  const dispatchType = normaliseDispatchType(input.dispatchType) ?? "pickup";
+  const deliveryAddress = dispatchType === "delivery" ? nullableText(input.address) : null;
   const jobResult = await pool.query<{ id: string }>(`
     INSERT INTO production.production_jobs (
       tenant_id,artwork_approval_id,quote_id,quote_number,client_name,contact_name,project_name,
@@ -1329,19 +1332,23 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
     )
     SELECT
       qd.tenant_id,NULL,qd.id,qd.quote_number,$4::varchar,$5::varchar,
-      ('WooCommerce order ' || $3::text),'ready_to_start',NULL,'normal',
+      ('WooCommerce order ' || $3::text),'ready_to_start',$6::varchar,'normal',
       concat_ws(E'\n','Created automatically from paid WooCommerce order ' || $3::text,
-        CASE WHEN $6::text IS NOT NULL THEN 'Delivery address: ' || $6::text ELSE NULL END),
-      'wordpress_woocommerce',$2::varchar,$7::uuid,$8::jsonb,now(),now()
+        CASE WHEN $6::text='delivery' AND $7::text IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
+      'wordpress_woocommerce',$2::varchar,$8::uuid,$9::jsonb,now(),now()
     FROM sales.quote_drafts qd
-    WHERE qd.tenant_id=$1::uuid AND qd.id=$9::uuid
+    WHERE qd.tenant_id=$1::uuid AND qd.id=$10::uuid
     ON CONFLICT (tenant_id,source_type,external_order_id)
     WHERE external_order_id IS NOT NULL
     DO UPDATE SET linked_customer_id=EXCLUDED.linked_customer_id,client_name=EXCLUDED.client_name,
-      contact_name=EXCLUDED.contact_name,payload_json=EXCLUDED.payload_json,updated_at=now()
+      contact_name=EXCLUDED.contact_name,dispatch_type=EXCLUDED.dispatch_type,
+      internal_notes=concat_ws(E'\n',
+        NULLIF(btrim(regexp_replace(COALESCE(existing_job.internal_notes,''), E'(^|\\n)Delivery address:[^\\n]*', '', 'g')), ''),
+        CASE WHEN EXCLUDED.dispatch_type='delivery' AND $7::text IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
+      payload_json=EXCLUDED.payload_json,updated_at=now()
     RETURNING id
   `, [tenantId, input.externalOrderId, input.orderNumber, input.clientName, input.contactName ?? null,
-    input.address ?? null, input.linkedCustomerId ?? null, JSON.stringify(input.payloadJson ?? {}), input.quoteId]);
+    dispatchType, deliveryAddress, input.linkedCustomerId ?? null, JSON.stringify(input.payloadJson ?? {}), input.quoteId]);
   const jobId = jobResult.rows[0]?.id;
   if (!jobId) throw new Error("Could not create a production job for the website order");
 

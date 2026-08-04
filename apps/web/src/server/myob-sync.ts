@@ -1,5 +1,7 @@
 import "server-only";
 
+import { pool } from "@production-manager/db";
+
 import {
   createSyncRunForTenant,
   getMyobConnectionByTenantId,
@@ -526,6 +528,38 @@ async function resolveMyobCustomerUid(tenantId: string, quote: import("@/server/
     return { uid: mappedUid, source: "linked-client-payload-myob-uid", customerPayload: customer.payloadJson };
   }
 
+  const exactCandidates = async (mode: "email" | "company") => {
+    const email = String(customer.email ?? "").trim().toLowerCase();
+    const company = String(customer.companyName || customer.displayName || "").trim().toLowerCase();
+    if ((mode === "email" && !email) || (mode === "company" && !company)) return [] as Array<{ uid: string }>;
+    const result = await pool.query<{ uid: string }>(`
+      SELECT myob_uid AS uid
+      FROM app.customers
+      WHERE tenant_id=$1::uuid AND id<>$2::uuid AND is_active=true
+        AND myob_uid IS NOT NULL AND myob_uid NOT LIKE 'manual-%'
+        AND COALESCE(payload_json->>'deletedAt','')=''
+        AND CASE WHEN $3::text='email'
+          THEN lower(COALESCE(email,''))=$4::text
+          ELSE lower(COALESCE(company_name,display_name,''))=$5::text
+        END
+      ORDER BY updated_at DESC
+      LIMIT 2
+    `, [tenantId, customer.id, mode, email, company]);
+    return result.rows;
+  };
+
+  for (const mode of ["email", "company"] as const) {
+    const candidates = await exactCandidates(mode);
+    if (candidates.length !== 1) continue;
+    const uid = candidates[0].uid;
+    await pool.query(`
+      UPDATE app.customers
+      SET payload_json=COALESCE(payload_json,'{}'::jsonb) || jsonb_build_object('myobUid',$3::text,'myobMatch',$4::text),updated_at=now()
+      WHERE tenant_id=$1::uuid AND id=$2::uuid
+    `, [tenantId, customer.id, uid, `automatic_exact_${mode}`]);
+    return { uid, source: `automatic-exact-${mode}-match`, customerPayload: { ...customer.payloadJson, myobUid: uid, myobMatch: `automatic_exact_${mode}` } };
+  }
+
   return { uid: null, source: "client-is-manual-not-linked-to-myob", customerPayload: customer.payloadJson };
 }
 
@@ -548,7 +582,7 @@ function buildMyobServiceOrderPayload(input: {
     Customer: { UID: input.customerUid },
     Date: today,
     Number: input.quote.quoteNumber ?? undefined,
-    CustomerPurchaseOrderNumber: input.quote.quoteNumber ?? undefined,
+    CustomerPurchaseOrderNumber: input.quote.clientPurchaseOrderNumber ?? undefined,
     JournalMemo: `Production Manager accepted quote ${input.quote.quoteNumber ?? input.quote.id}`,
     Comment: input.quote.notes ?? undefined,
     Lines: lines,
