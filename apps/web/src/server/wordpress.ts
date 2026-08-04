@@ -114,17 +114,26 @@ export type WordPressPublicPricingTokenPayload = {
 export type WordPressOrderPayload = {
   orderId?: string | number;
   orderNumber?: string | number;
+  createdAt?: string;
   status?: string;
   currency?: string;
   total?: number | string;
   customer?: {
     customerId?: string | number;
+    pmClientId?: string;
+    websiteUserId?: string | number;
+    accountTerms?: string;
     company?: string;
     firstName?: string;
     lastName?: string;
     email?: string;
     phone?: string;
     address?: string;
+  };
+  payment?: {
+    method?: string;
+    title?: string;
+    accountTerms?: string;
   };
   lines?: Array<{
     productId?: string;
@@ -981,6 +990,17 @@ function answerSummary(answers: Record<string, unknown>): string {
 type ResolvedWebsiteCustomer = { id: string | null; displayName: string; match: string };
 
 async function resolveWebsiteCustomer(connection: WordPressConnectionRecord, customer: WordPressOrderPayload["customer"]): Promise<ResolvedWebsiteCustomer> {
+  const linkedClientId = text(customer?.pmClientId);
+  if (linkedClientId) {
+    const linked = await pool.query<{ id: string; displayName: string }>(`
+      SELECT id::text,display_name AS "displayName"
+      FROM app.customers
+      WHERE tenant_id=$1::uuid AND id=$2::uuid AND is_active=true
+        AND COALESCE(payload_json->>'deletedAt','')=''
+      LIMIT 1
+    `, [connection.tenantId, linkedClientId]);
+    if (linked.rows[0]) return { ...linked.rows[0], match: "wordpress_client_link" };
+  }
   const email = text(customer?.email).toLowerCase();
   const company = text(customer?.company).toLowerCase();
   if (email || company) {
@@ -1014,10 +1034,33 @@ async function resolveWebsiteCustomer(connection: WordPressConnectionRecord, cus
     : { id: null, displayName: "Cash Sale", match: "cash_sale_not_configured" };
 }
 
+function websitePaymentDetails(payload: WordPressOrderPayload): {
+  method: string;
+  title: string;
+  accountTerms: string | null;
+  dueDate: string | null;
+} {
+  const method = text(payload.payment?.method);
+  const title = text(payload.payment?.title);
+  const rawTerms = text(payload.payment?.accountTerms || payload.customer?.accountTerms);
+  const accountTerms = ["cod", "account_7", "account_14", "account_30"].includes(rawTerms) ? rawTerms : null;
+  const days = accountTerms === "account_30" ? 30 : accountTerms === "account_14" ? 14 : accountTerms === "account_7" ? 7 : accountTerms === "cod" ? 0 : null;
+  let dueDate: string | null = null;
+  if (days != null) {
+    const createdAt = new Date(text(payload.createdAt) || Date.now());
+    if (!Number.isNaN(createdAt.getTime())) {
+      createdAt.setUTCDate(createdAt.getUTCDate() + days);
+      dueDate = createdAt.toISOString().slice(0, 10);
+    }
+  }
+  return { method, title, accountTerms, dueDate };
+}
+
 export async function ingestWordPressOrder(connection: WordPressConnectionRecord, payload: WordPressOrderPayload) {
   await ensureWordPressBridgeSchema();
   const externalOrderId = text(payload.orderId || payload.orderNumber);
   if (!externalOrderId) throw new Error("WooCommerce order ID is required");
+  const payment = websitePaymentDetails(payload);
 
   const existing = await pool.query<{ quoteId: string | null; productionJobId: string | null }>(`
     SELECT quote_id::text AS "quoteId",production_job_id::text AS "productionJobId" FROM integration.wordpress_orders
@@ -1033,7 +1076,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
       if (quoteStatus === "accepted") {
         await updateQuoteMyobOrderSyncForTenant(connection.tenantId, quoteId, {
           status: "ready_to_sync",
-          payloadJson: { source: "wordpress", externalOrderId, websiteStatus: payload.status ?? null }
+          payloadJson: { source: "wordpress", externalOrderId, websiteStatus: payload.status ?? null, payment }
         });
         if (!productionJobId) {
           const customer = payload.customer ?? {};
@@ -1046,7 +1089,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
             clientName: resolved.displayName,
             contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
             address: text(customer.address) || null,
-            payloadJson: { customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null }
+            payloadJson: { customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null, payment }
           });
           productionJobId = job.id;
           await createNotificationForTenant(connection.tenantId, {
@@ -1074,7 +1117,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
     contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
     email: text(customer.email) || null,
     phone: text(customer.phone) || null,
-    notes: `WooCommerce order ${text(payload.orderNumber) || externalOrderId} · ${text(payload.status) || "received"}\nWebsite buyer: ${orderCustomerName(customer)}\nCustomer match: ${resolvedCustomer.match}${text(customer.address) ? `\nAddress: ${text(customer.address)}` : ""}`
+    notes: `WooCommerce order ${text(payload.orderNumber) || externalOrderId} · ${text(payload.status) || "received"}\nWebsite buyer: ${orderCustomerName(customer)}\nCustomer match: ${resolvedCustomer.match}${payment.title ? `\nPayment: ${payment.title}` : ""}${payment.accountTerms ? `\nInternal terms: ${payment.accountTerms.replace("account_", "").replace("cod", "COD")}${payment.dueDate ? ` · due ${payment.dueDate}` : ""}` : ""}${text(customer.address) ? `\nAddress: ${text(customer.address)}` : ""}`
   });
 
   let addedLines = 0;
@@ -1114,7 +1157,8 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
         chargedWebsiteLineTotal: lineTotal,
         materialUsage: calculated.materialUsage,
         manufacturingMethodId: calculated.manufacturingMethodId,
-        rawConfiguration: line.configuration ?? {}
+        rawConfiguration: line.configuration ?? {},
+        payment
       }
     });
     addedLines += 1;
@@ -1129,7 +1173,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
   if (quoteStatus === "accepted") {
     await updateQuoteMyobOrderSyncForTenant(connection.tenantId, quote.id, {
       status: "ready_to_sync",
-      payloadJson: { source: "wordpress", externalOrderId }
+      payloadJson: { source: "wordpress", externalOrderId, payment }
     });
   }
 
@@ -1143,7 +1187,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
       clientName: resolvedCustomer.displayName,
       contactName: [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
       address: text(customer.address) || null,
-      payloadJson: { customer, customerMatch: resolvedCustomer.match, websiteStatus: payload.status ?? null }
+      payloadJson: { customer, customerMatch: resolvedCustomer.match, websiteStatus: payload.status ?? null, payment }
     });
     productionJobId = job.id;
     await createNotificationForTenant(connection.tenantId, {

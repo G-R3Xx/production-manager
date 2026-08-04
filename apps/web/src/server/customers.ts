@@ -10,6 +10,18 @@ export type ClientDiscountRule = {
   note?: string;
 };
 
+export type CustomerAccountTerms = "cod" | "account_7" | "account_14" | "account_30";
+
+export type CustomerWebsiteUser = {
+  wordpressUserId: number;
+  username: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  invitedAt?: string;
+  status?: "invited" | "connected" | "disabled";
+};
+
 export type CustomerPayload = {
   source?: string;
   abn?: string;
@@ -20,11 +32,38 @@ export type CustomerPayload = {
   logoStoragePath?: string;
   defaultDiscountPercent?: number;
   discountRules?: ClientDiscountRule[];
+  accountTerms?: CustomerAccountTerms;
+  websiteAccessEnabled?: boolean;
+  websiteUsername?: string;
+  websiteUsers?: CustomerWebsiteUser[];
+  websiteAccessUpdatedAt?: string;
+  websiteLoginUrl?: string;
   archivedAt?: string;
   deletedAt?: string;
   deletedReason?: string;
   [key: string]: unknown;
 };
+
+export function customerAccountTerms(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): CustomerAccountTerms {
+  const value = customer?.payloadJson?.accountTerms;
+  return value === "account_7" || value === "account_14" || value === "account_30" ? value : "cod";
+}
+
+export function customerAccountTermsLabel(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): string {
+  const value = customerAccountTerms(customer);
+  if (value === "account_7") return "7 Day Account";
+  if (value === "account_14") return "14 Day Account";
+  if (value === "account_30") return "30 Day Account";
+  return "COD";
+}
+
+export function customerWebsiteUsers(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): CustomerWebsiteUser[] {
+  const value = customer?.payloadJson?.websiteUsers;
+  if (!Array.isArray(value)) return [];
+  return value.filter((user): user is CustomerWebsiteUser => Boolean(
+    user && typeof user === "object" && Number((user as CustomerWebsiteUser).wordpressUserId) > 0
+  ));
+}
 
 export type CustomerRecord = {
   id: string;
