@@ -624,7 +624,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.02.01",
+    version: "V26.08.05.03",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -1165,6 +1165,26 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
     SELECT quote_id::text AS "quoteId",production_job_id::text AS "productionJobId" FROM integration.wordpress_orders
     WHERE tenant_id=$1::uuid AND external_order_id=$2::varchar LIMIT 1
   `, [connection.tenantId, externalOrderId]);
+  if (!existing.rows[0]) {
+    const orphaned = await pool.query<{ quoteId: string; productionJobId: string | null }>(`
+      SELECT qd.id::text AS "quoteId",
+        (SELECT pj.id::text FROM production.production_jobs pj
+          WHERE pj.tenant_id=qd.tenant_id
+            AND pj.source_type='wordpress_woocommerce'
+            AND pj.external_order_id=$2::varchar
+          ORDER BY pj.created_at DESC LIMIT 1) AS "productionJobId"
+      FROM sales.quote_drafts qd
+      WHERE qd.tenant_id=$1::uuid
+        AND EXISTS (
+          SELECT 1 FROM sales.quote_lines ql
+          WHERE ql.quote_id=qd.id
+            AND ql.configuration_snapshot->>'externalOrderId'=$2::varchar
+        )
+      ORDER BY qd.created_at DESC
+      LIMIT 1
+    `, [connection.tenantId, externalOrderId]);
+    if (orphaned.rows[0]) existing.rows.push(orphaned.rows[0]);
+  }
   const paidStatuses = new Set(["processing", "completed", "on-hold"]);
   const quoteStatus = paidStatuses.has(text(payload.status)) ? "accepted" : "draft";
   if (existing.rows[0]) {
@@ -1241,10 +1261,17 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
       }
     }
     await pool.query(`
-      UPDATE integration.wordpress_orders
-      SET order_status=$3::varchar,order_total=$4::numeric,payload_json=$5::jsonb,production_job_id=$6::uuid,updated_at=now()
-      WHERE tenant_id=$1::uuid AND external_order_id=$2::varchar
-    `, [connection.tenantId, externalOrderId, text(payload.status) || null, numberValue(payload.total), JSON.stringify(payload), productionJobId]);
+      INSERT INTO integration.wordpress_orders(
+        tenant_id,external_order_id,quote_id,production_job_id,order_status,order_total,payload_json,received_at,updated_at
+      ) VALUES($1::uuid,$2::varchar,$3::uuid,$4::uuid,$5::varchar,$6::numeric,$7::jsonb,now(),now())
+      ON CONFLICT(tenant_id,external_order_id) DO UPDATE SET
+        quote_id=EXCLUDED.quote_id,
+        production_job_id=COALESCE(EXCLUDED.production_job_id,integration.wordpress_orders.production_job_id),
+        order_status=EXCLUDED.order_status,
+        order_total=EXCLUDED.order_total,
+        payload_json=EXCLUDED.payload_json,
+        updated_at=now()
+    `, [connection.tenantId, externalOrderId, quoteId, productionJobId, text(payload.status) || null, numberValue(payload.total), JSON.stringify(payload)]);
     await pool.query(`UPDATE integration.wordpress_connections SET last_order_received_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
     return { created: false, updated: true, quoteId, productionJobId, status: quoteStatus };
   }
@@ -1323,6 +1350,18 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
     });
   }
 
+  await pool.query(`
+    INSERT INTO integration.wordpress_orders(
+      tenant_id,external_order_id,quote_id,production_job_id,order_status,order_total,payload_json,received_at,updated_at
+    ) VALUES($1::uuid,$2::varchar,$3::uuid,NULL,$4::varchar,$5::numeric,$6::jsonb,now(),now())
+    ON CONFLICT(tenant_id,external_order_id) DO UPDATE SET
+      quote_id=EXCLUDED.quote_id,
+      order_status=EXCLUDED.order_status,
+      order_total=EXCLUDED.order_total,
+      payload_json=EXCLUDED.payload_json,
+      updated_at=now()
+  `, [connection.tenantId, externalOrderId, quote.id, text(payload.status) || null, numberValue(payload.total), JSON.stringify(payload)]);
+
   let productionJobId: string | null = null;
   if (quoteStatus === "accepted") {
     const job = await createProductionJobFromWebsiteOrderForTenant(connection.tenantId, {
@@ -1349,7 +1388,13 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
   await pool.query(`
     INSERT INTO integration.wordpress_orders(tenant_id,external_order_id,quote_id,production_job_id,order_status,order_total,payload_json,received_at,updated_at)
     VALUES($1::uuid,$2::varchar,$3::uuid,$4::uuid,$5::varchar,$6::numeric,$7::jsonb,now(),now())
-    ON CONFLICT(tenant_id,external_order_id) DO NOTHING
+    ON CONFLICT(tenant_id,external_order_id) DO UPDATE SET
+      quote_id=EXCLUDED.quote_id,
+      production_job_id=COALESCE(EXCLUDED.production_job_id,integration.wordpress_orders.production_job_id),
+      order_status=EXCLUDED.order_status,
+      order_total=EXCLUDED.order_total,
+      payload_json=EXCLUDED.payload_json,
+      updated_at=now()
   `, [
     connection.tenantId,
     externalOrderId,

@@ -1326,7 +1326,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
   const dispatchType = normaliseDispatchType(input.dispatchType) ?? "pickup";
   const deliveryAddress = dispatchType === "delivery" ? nullableText(input.address) : null;
   const jobResult = await pool.query<{ id: string }>(`
-    INSERT INTO production.production_jobs (
+    INSERT INTO production.production_jobs AS existing_job (
       tenant_id,artwork_approval_id,quote_id,quote_number,client_name,contact_name,project_name,
       status,dispatch_type,priority,internal_notes,source_type,external_order_id,linked_customer_id,payload_json,created_at,updated_at
     )
