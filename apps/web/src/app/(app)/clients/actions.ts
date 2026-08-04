@@ -242,26 +242,30 @@ async function postWebsiteAccess(input: {
   firstName: string;
   lastName: string;
 }): Promise<WebsiteAccessResponse> {
-  const endpoint = `${input.siteUrl.replace(/\/$/, "")}/wp-json/tender-edge/v1/client-access`;
+  const endpoint = `${input.siteUrl.replace(/\/$/, "")}/wp-admin/admin-ajax.php`;
+  const payload = {
+    customerId: input.customerId,
+    companyName: input.companyName,
+    accountTerms: input.accountTerms,
+    enabled: input.enabled,
+    username: input.username,
+    email: input.email,
+    firstName: input.firstName,
+    lastName: input.lastName,
+    sendInvitation: input.enabled
+  };
+  const body = new URLSearchParams({
+    action: "te_pm_client_access",
+    api_key: input.apiKey,
+    payload: JSON.stringify(payload)
+  });
   const response = await fetch(endpoint, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${input.apiKey}`,
-      "X-Tender-Edge-Key": input.apiKey,
       Accept: "application/json",
-      "Content-Type": "application/json"
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
     },
-    body: JSON.stringify({
-      customerId: input.customerId,
-      companyName: input.companyName,
-      accountTerms: input.accountTerms,
-      enabled: input.enabled,
-      username: input.username,
-      email: input.email,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      sendInvitation: input.enabled
-    }),
+    body: body.toString(),
     cache: "no-store"
   });
   const result = await response.json().catch(() => ({})) as WebsiteAccessResponse;
