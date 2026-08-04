@@ -247,6 +247,7 @@ async function postWebsiteAccess(input: {
     method: "POST",
     headers: {
       Authorization: `Bearer ${input.apiKey}`,
+      "X-Tender-Edge-Key": input.apiKey,
       Accept: "application/json",
       "Content-Type": "application/json"
     },
