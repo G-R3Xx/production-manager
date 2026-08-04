@@ -179,13 +179,33 @@ function ClientEditor({ client }: { client: CustomerRecord | null }) {
           <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "start" }}>
             <div>
               <strong style={{ fontSize: 17 }}>Secure website invitation</strong>
-              <p style={{ margin: "5px 0 0", color: "#475467", fontSize: 13, lineHeight: 1.5 }}>WordPress emails the username and a secure link for the client to create their own password. Sending another invitation can also add another contact to this company.</p>
+              <p style={{ margin: "5px 0 0", color: "#475467", fontSize: 13, lineHeight: 1.5 }}>WordPress emails the username and a secure link for the client to create their own password. Production Manager also keeps the latest secure setup link below so staff can copy it if email delivery is delayed.</p>
             </div>
             <span style={{ borderRadius: 999, padding: "6px 10px", background: payload.websiteAccessEnabled ? "#dcfce7" : "#e2e8f0", color: payload.websiteAccessEnabled ? "#166534" : "#475569", fontSize: 12, fontWeight: 900 }}>{payload.websiteAccessEnabled ? customerAccountTermsLabel(client) : "Website access disabled"}</span>
           </div>
           {websiteUsers.length ? (
             <div style={{ display: "grid", gap: 7 }}>
-              {websiteUsers.map((websiteUser) => <div key={websiteUser.wordpressUserId} style={{ display: "flex", justifyContent: "space-between", gap: 12, border: "1px solid #dbeafe", background: "#fff", borderRadius: 12, padding: "10px 12px" }}><span><b>{websiteUser.username}</b> · {websiteUser.email}</span><span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{websiteUser.status || "connected"}</span></div>)}
+              {websiteUsers.map((websiteUser) => (
+                <div key={websiteUser.wordpressUserId} style={{ display: "grid", gap: 9, border: "1px solid #dbeafe", background: "#fff", borderRadius: 12, padding: "10px 12px" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                    <span><b>{websiteUser.username}</b> · {websiteUser.email}</span>
+                    <span style={{ color: websiteUser.invitationEmailAccepted === false ? "#b42318" : "#64748b", fontSize: 12, fontWeight: 800 }}>
+                      {websiteUser.invitationEmailAccepted === false ? "Email not accepted" : websiteUser.status || "connected"}
+                    </span>
+                  </div>
+                  {websiteUser.passwordSetupUrl ? (
+                    <div style={{ display: "grid", gap: 6 }}>
+                      <b style={{ fontSize: 12 }}>Secure password-setup link</b>
+                      <input readOnly value={websiteUser.passwordSetupUrl} aria-label={`Password setup link for ${websiteUser.email}`} style={{ ...inputStyle, fontSize: 12, background: "#f8fafc" }} />
+                      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                        <a href={websiteUser.passwordSetupUrl} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8", fontWeight: 850, fontSize: 13 }}>Open setup link →</a>
+                        <small style={{ color: "#64748b" }}>Copy this link and send it privately to the client. It normally expires within 24 hours and is replaced when a new invitation is created.</small>
+                      </div>
+                    </div>
+                  ) : null}
+                  {websiteUser.invitationError ? <small style={{ color: "#b42318" }}>{websiteUser.invitationError}</small> : null}
+                </div>
+              ))}
             </div>
           ) : <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>No WordPress users are connected yet.</p>}
           <form action={syncClientWebsiteAccessAction} style={{ display: "grid", gap: 10 }}>

@@ -225,6 +225,9 @@ type WebsiteAccessResponse = {
   email?: string;
   loginUrl?: string;
   invitationSent?: boolean;
+  invitationError?: string;
+  passwordSetupUrl?: string;
+  passwordSetupExpiresAt?: string;
   status?: string;
   error?: string;
   message?: string;
@@ -298,6 +301,7 @@ export async function syncClientWebsiteAccessAction(formData: FormData): Promise
     ? existingUsers.map((user) => ({ username: user.username, email: user.email, firstName: user.firstName || "", lastName: user.lastName || "" }))
     : [{ username: requestedUsername || requestedEmail, email: requestedEmail, firstName: requestedFirstName, lastName: requestedLastName }];
 
+  const invitationWarnings: string[] = [];
   try {
     const synced: CustomerWebsiteUser[] = [];
     let loginUrl = customer.payloadJson.websiteLoginUrl || "";
@@ -311,9 +315,9 @@ export async function syncClientWebsiteAccessAction(formData: FormData): Promise
         enabled,
         ...contact
       });
-      if (enabled && result.invitationSent !== true) {
-        throw new Error(`WordPress updated ${contact.email}, but the secure invitation email was not accepted for delivery. Check WordPress mail settings and try again.`);
-      }
+      if (enabled && result.invitationSent !== true) invitationWarnings.push(
+        result.invitationError || `WordPress created the account for ${contact.email}, but did not accept the invitation email for delivery.`
+      );
       if (result.loginUrl) loginUrl = result.loginUrl;
       if (result.userId) {
         synced.push({
@@ -323,7 +327,11 @@ export async function syncClientWebsiteAccessAction(formData: FormData): Promise
           firstName: contact.firstName || undefined,
           lastName: contact.lastName || undefined,
           invitedAt: enabled ? new Date().toISOString() : existingUsers.find((user) => user.wordpressUserId === result.userId)?.invitedAt,
-          status: enabled ? "invited" : "disabled"
+          status: enabled ? "invited" : "disabled",
+          passwordSetupUrl: enabled ? result.passwordSetupUrl : undefined,
+          passwordSetupExpiresAt: enabled ? result.passwordSetupExpiresAt : undefined,
+          invitationEmailAccepted: enabled ? result.invitationSent === true : undefined,
+          invitationError: enabled && result.invitationSent !== true ? (result.invitationError || "Invitation email was not accepted for delivery.") : undefined
         });
       }
     }
@@ -343,7 +351,11 @@ export async function syncClientWebsiteAccessAction(formData: FormData): Promise
     redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(error instanceof Error ? error.message : "Website access could not be updated.")}`);
   }
 
-  const message = enabled ? "Secure website invitation sent" : "Website account access disabled";
+  if (enabled && invitationWarnings.length > 0) {
+    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(`${invitationWarnings.join(" ")} The secure setup link is available below for manual delivery.`)}`);
+  }
+
+  const message = enabled ? "Website invitation created; email accepted for delivery" : "Website account access disabled";
   redirect(`/clients?selected=${customerId}&message=${encodeURIComponent(message)}`);
 }
 

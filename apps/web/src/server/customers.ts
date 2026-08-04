@@ -20,6 +20,10 @@ export type CustomerWebsiteUser = {
   lastName?: string;
   invitedAt?: string;
   status?: "invited" | "connected" | "disabled";
+  passwordSetupUrl?: string;
+  passwordSetupExpiresAt?: string;
+  invitationEmailAccepted?: boolean;
+  invitationError?: string;
 };
 
 export type CustomerPayload = {
