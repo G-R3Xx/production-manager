@@ -685,7 +685,9 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
     const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
     return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
   };
-  const selectedJobLogoUrl = logoForQuoteId(selectedJob?.quoteId);
+  const logoForJob = (job: ProductionJobRecord | null | undefined) =>
+    logoForQuoteId(job?.quoteId) || customerLogoUrl(job?.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null);
+  const selectedJobLogoUrl = logoForJob(selectedJob);
   const stepSummaryByJobId = new Map(stepSummaries.map((summary) => [summary.jobId, summary]));
   const complete = pageCompletion(selectedJob ? items.flatMap((item) => visibleStepsForItem(item, steps)) : steps);
   const readyCount = allJobs.filter((job) => job.status === "ready_to_start").length;
@@ -740,7 +742,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
             </div>
             {jobs.map((job) => {
               const tone = statusTone(job.status);
-              const jobLogoUrl = logoForQuoteId(job.quoteId);
+              const jobLogoUrl = logoForJob(job);
               const summary = stepSummaryByJobId.get(job.id);
               return (
                 <a key={job.id} href={`/production/${job.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.45fr) minmax(220px, 1fr) 160px 150px 28px", gap: 14, alignItems: "center", border: "1px solid #dbe4f0", borderRadius: 16, padding: "13px 16px", background: "#fff", textDecoration: "none", color: "inherit", boxShadow: "0 6px 18px rgba(15,23,42,0.035)" }}>

@@ -17,6 +17,7 @@ export type ProductionJobRecord = {
   dueDate: string | null;
   assignedTo: string | null;
   internalNotes: string | null;
+  linkedCustomerId: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -694,6 +695,7 @@ function productionJobSelectSql(): string {
       due_date::text as "dueDate",
       assigned_to as "assignedTo",
       internal_notes as "internalNotes",
+      linked_customer_id as "linkedCustomerId",
       created_at as "createdAt",
       updated_at as "updatedAt"
   `;

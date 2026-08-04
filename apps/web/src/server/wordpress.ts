@@ -119,6 +119,9 @@ export type WordPressOrderPayload = {
   total?: number | string;
   customer?: {
     customerId?: string | number;
+    websiteUserId?: string | number;
+    pmClientId?: string;
+    accountTerms?: string;
     company?: string;
     firstName?: string;
     lastName?: string;
@@ -1002,6 +1005,18 @@ function displayAnswersForFields(fields: WebsiteBuilderField[], answers: Record<
 type ResolvedWebsiteCustomer = { id: string | null; displayName: string; match: string };
 
 async function resolveWebsiteCustomer(connection: WordPressConnectionRecord, customer: WordPressOrderPayload["customer"]): Promise<ResolvedWebsiteCustomer> {
+  const pmClientId = text(customer?.pmClientId);
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(pmClientId)) {
+    const linked = await pool.query<{ id: string; displayName: string }>(`
+      SELECT id::text,display_name AS "displayName"
+      FROM app.customers
+      WHERE tenant_id=$1::uuid AND id=$2::uuid AND is_active=true
+        AND COALESCE(payload_json->>'deletedAt','')=''
+      LIMIT 1
+    `, [connection.tenantId, pmClientId]);
+    if (linked.rows[0]) return { ...linked.rows[0], match: "wordpress_client_link" };
+  }
+
   const email = text(customer?.email).toLowerCase();
   const company = text(customer?.company).toLowerCase();
   if (email || company) {
@@ -1133,8 +1148,39 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
   if (existing.rows[0]) {
     const quoteId = existing.rows[0].quoteId;
     let productionJobId = existing.rows[0].productionJobId;
+    const customer = payload.customer ?? {};
+    const resolved = await resolveWebsiteCustomer(connection, customer);
     if (quoteId) {
       await refreshExistingWebsiteQuoteLines(connection, quoteId, externalOrderId, payload);
+      await pool.query(`
+        UPDATE sales.quote_drafts
+        SET linked_customer_id=$3::uuid,client_name=$4::varchar,
+          contact_name=$5::varchar,email=$6::varchar,phone=$7::varchar,updated_at=now()
+        WHERE tenant_id=$1::uuid AND id=$2::uuid
+      `, [
+        connection.tenantId,
+        quoteId,
+        resolved.id,
+        resolved.displayName,
+        [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
+        text(customer.email) || null,
+        text(customer.phone) || null
+      ]);
+      if (productionJobId) {
+        await pool.query(`
+          UPDATE production.production_jobs
+          SET linked_customer_id=$3::uuid,client_name=$4::varchar,contact_name=$5::varchar,
+            payload_json=COALESCE(payload_json,'{}'::jsonb) || $6::jsonb,updated_at=now()
+          WHERE tenant_id=$1::uuid AND id=$2::uuid
+        `, [
+          connection.tenantId,
+          productionJobId,
+          resolved.id,
+          resolved.displayName,
+          [text(customer.firstName), text(customer.lastName)].filter(Boolean).join(" ") || null,
+          JSON.stringify({ customer, customerMatch: resolved.match, websiteStatus: payload.status ?? null, payment: websitePaymentSnapshot(payload) })
+        ]);
+      }
       await setQuoteDraftStatusForTenant(connection.tenantId, quoteId, quoteStatus);
       if (quoteStatus === "accepted") {
         await updateQuoteMyobOrderSyncForTenant(connection.tenantId, quoteId, {
@@ -1142,8 +1188,6 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
           payloadJson: { source: "wordpress", externalOrderId, websiteStatus: payload.status ?? null }
         });
         if (!productionJobId) {
-          const customer = payload.customer ?? {};
-          const resolved = await resolveWebsiteCustomer(connection, customer);
           const job = await createProductionJobFromWebsiteOrderForTenant(connection.tenantId, {
             quoteId,
             externalOrderId,
