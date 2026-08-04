@@ -1,13 +1,15 @@
 # Production Manager V26.08.04.05
 
-## WordPress client access fallback
+## WordPress order production labels
 
-- Stores the latest secure WordPress password-setup link against the connected client contact.
-- Lets staff open or copy that link when an invitation email is delayed or filtered.
-- Records whether WordPress accepted the invitation message and preserves the underlying mail error.
-- Account creation remains successful even when mail delivery fails.
-- Secure setup links expire and are replaced whenever staff send a new invitation.
+- Resolves website option UUIDs to their human-readable labels before creating quote and production summaries.
+- Refreshes imported quote-line summaries when an existing WooCommerce order is sent again.
+- Keeps raw option IDs privately for recipe pricing while showing staff the actual laminate, ink and product labels.
 
-Install Tender Edge WordPress plugin V3.3.19 with this release.
+## Account payment visibility
 
-No database migration is required.
+- Stores the WooCommerce payment method with each imported order line.
+- Shows Charge to account or COD beside the quoted total on the dedicated production job page.
+- Keeps 7, 14 and 30 day terms internal.
+
+Use with Tender Edge WordPress plugin V3.3.24.

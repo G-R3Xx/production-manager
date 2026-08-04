@@ -48,6 +48,9 @@ export type ProductionItemRecord = {
   quoteOptionSummary: string | null;
   quoteLineNotes: string | null;
   quoteLineTotal: string | null;
+  websitePaymentMethod: string | null;
+  websitePaymentTitle: string | null;
+  websiteAccountTerms: string | null;
   status: string;
   sortOrder: number;
   createdAt: string;
@@ -266,6 +269,15 @@ function asJsonArray(value: unknown): unknown[] {
 function jsonText(value: unknown): string | null {
   const cleaned = String(value ?? "").trim();
   return cleaned.length ? cleaned : null;
+}
+
+function displayAnswerText(displayAnswers: JsonRecord, labelPattern: RegExp): string | null {
+  for (const [label, value] of Object.entries(displayAnswers)) {
+    if (!labelPattern.test(label)) continue;
+    if (Array.isArray(value)) return value.map((entry) => String(entry ?? '').trim()).filter(Boolean).join(', ') || null;
+    return jsonText(value);
+  }
+  return null;
 }
 
 function photoUrlFromJson(value: unknown): string | null {
@@ -794,6 +806,9 @@ export async function listProductionItemsForJob(jobId: string): Promise<Producti
       ql.option_summary as "quoteOptionSummary",
       ql.notes as "quoteLineNotes",
       ql.line_total::text as "quoteLineTotal",
+      NULLIF(ql.configuration_snapshot -> 'payment' ->> 'method','') as "websitePaymentMethod",
+      NULLIF(ql.configuration_snapshot -> 'payment' ->> 'title','') as "websitePaymentTitle",
+      NULLIF(ql.configuration_snapshot -> 'payment' ->> 'accountTerms','') as "websiteAccountTerms",
       pi.status,
       pi.sort_order as "sortOrder",
       pi.created_at as "createdAt",
@@ -1342,6 +1357,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
     const snapshot = asJsonRecord(line.configurationSnapshot);
     const rawConfiguration = asJsonRecord(snapshot.rawConfiguration);
     const answers = asJsonRecord(snapshot.answers);
+    const displayAnswers = asJsonRecord(snapshot.displayAnswers);
     const files = websiteArtworkFiles(rawConfiguration.artworkFiles ?? snapshot.artworkFiles);
     artworkFileCount += files.length;
     const firstFile = files[0];
@@ -1369,15 +1385,15 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
         print_ready_uploaded_by=EXCLUDED.print_ready_uploaded_by,status=EXCLUDED.status,payload_json=EXCLUDED.payload_json,updated_at=now()
       RETURNING id
     `, [jobId, line.id, line.productName, normaliseMoney(line.quantity, "1"), sizeSummary,
-      jsonText(answers.material) || jsonText(answers.substrate), line.optionSummary,
+      displayAnswerText(displayAnswers, /material|substrate|stock/i) || jsonText(answers.material) || jsonText(answers.substrate), line.optionSummary,
       firstFile?.downloadUrl ?? null, firstFile?.storagePath ?? null, firstFile?.name ?? null,
       firstFile?.mime ?? null, files.length > 1 ? `${files.length} artwork files supplied; all links are stored on this item.` : null,
-      index, JSON.stringify({ source: "wordpress_woocommerce", answers, artworkFiles: files, rawConfiguration })]);
+      index, JSON.stringify({ source: "wordpress_woocommerce", answers, displayAnswers, artworkFiles: files, rawConfiguration })]);
     const itemId = itemResult.rows[0]?.id;
     if (!itemId) continue;
     const steps = stepPlanForItem({
-      productionType: "signage", title: line.productName, substrateSummary: jsonText(answers.material) || jsonText(answers.substrate),
-      colourSummary: jsonText(answers.ink), finishingSummary: line.optionSummary, sizeSummary, quoteProductName: line.productName,
+      productionType: "signage", title: line.productName, substrateSummary: displayAnswerText(displayAnswers, /material|substrate|stock/i) || jsonText(answers.material) || jsonText(answers.substrate),
+      colourSummary: displayAnswerText(displayAnswers, /^ink$/i) || jsonText(answers.ink), finishingSummary: line.optionSummary, sizeSummary, quoteProductName: line.productName,
       quoteOptionSummary: line.optionSummary
     });
     for (let stepIndex = 0; stepIndex < steps.length; stepIndex += 1) {

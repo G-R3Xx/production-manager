@@ -6,8 +6,7 @@ import { z } from "zod";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { customerAccountTerms, customerWebsiteUsers, getCustomerById, type ClientDiscountRule, type CustomerPayload, type CustomerWebsiteUser, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
-import { getWordPressConnectionForTenant } from "@/server/wordpress";
+import { getCustomerById, type ClientDiscountRule, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
 
 const clientSchema = z.object({
   displayName: z.string().min(1).max(255),
@@ -22,10 +21,7 @@ const clientSchema = z.object({
   notes: z.string().max(4000).optional().or(z.literal("")),
   logoUrl: z.string().url("Logo URL must be a valid URL.").optional().or(z.literal("")),
   defaultDiscountPercent: z.string().optional().or(z.literal("")),
-  discountRulesText: z.string().max(4000).optional().or(z.literal("")),
-  accountTerms: z.enum(["cod", "account_7", "account_14", "account_30"]),
-  websiteAccessEnabled: z.boolean(),
-  websiteUsername: z.string().max(120).optional().or(z.literal(""))
+  discountRulesText: z.string().max(4000).optional().or(z.literal(""))
 });
 
 function nullable(value: string | undefined): string | null {
@@ -105,10 +101,7 @@ function payloadFromParsed(parsed: z.infer<typeof clientSchema>, extra?: { logoU
     logoUrl: extra?.logoUrl ?? nullable(parsed.logoUrl) ?? undefined,
     logoStoragePath: extra?.logoStoragePath ?? undefined,
     defaultDiscountPercent: numberOrZero(parsed.defaultDiscountPercent),
-    discountRules: parseDiscountRules(parsed.discountRulesText),
-    accountTerms: parsed.accountTerms,
-    websiteAccessEnabled: parsed.websiteAccessEnabled,
-    websiteUsername: nullable(parsed.websiteUsername) ?? undefined
+    discountRules: parseDiscountRules(parsed.discountRulesText)
   };
 }
 
@@ -127,10 +120,7 @@ export async function createClientAction(formData: FormData): Promise<void> {
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
     defaultDiscountPercent: String(formData.get("defaultDiscountPercent") || ""),
-    discountRulesText: String(formData.get("discountRulesText") || ""),
-    accountTerms: String(formData.get("accountTerms") || "cod"),
-    websiteAccessEnabled: formData.get("websiteAccessEnabled") === "yes",
-    websiteUsername: String(formData.get("websiteUsername") || "")
+    discountRulesText: String(formData.get("discountRulesText") || "")
   });
 
   if (!parsed.success) {
@@ -179,10 +169,7 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
     defaultDiscountPercent: String(formData.get("defaultDiscountPercent") || ""),
-    discountRulesText: String(formData.get("discountRulesText") || ""),
-    accountTerms: String(formData.get("accountTerms") || "cod"),
-    websiteAccessEnabled: formData.get("websiteAccessEnabled") === "yes",
-    websiteUsername: String(formData.get("websiteUsername") || "")
+    discountRulesText: String(formData.get("discountRulesText") || "")
   });
 
   if (!parsed.success || !customerId) {
@@ -217,146 +204,6 @@ export async function updateClientAction(formData: FormData): Promise<void> {
   });
 
   redirect(`/clients?selected=${customerId}&message=Client%20updated`);
-}
-
-type WebsiteAccessResponse = {
-  userId?: number;
-  username?: string;
-  email?: string;
-  loginUrl?: string;
-  invitationSent?: boolean;
-  invitationError?: string;
-  passwordSetupUrl?: string;
-  passwordSetupExpiresAt?: string;
-  status?: string;
-  error?: string;
-  message?: string;
-};
-
-async function postWebsiteAccess(input: {
-  siteUrl: string;
-  apiKey: string;
-  customerId: string;
-  companyName: string;
-  accountTerms: string;
-  enabled: boolean;
-  username: string;
-  email: string;
-  firstName: string;
-  lastName: string;
-}): Promise<WebsiteAccessResponse> {
-  const endpoint = `${input.siteUrl.replace(/\/$/, "")}/wp-admin/admin-ajax.php`;
-  const payload = {
-    customerId: input.customerId,
-    companyName: input.companyName,
-    accountTerms: input.accountTerms,
-    enabled: input.enabled,
-    username: input.username,
-    email: input.email,
-    firstName: input.firstName,
-    lastName: input.lastName,
-    sendInvitation: input.enabled
-  };
-  const body = new URLSearchParams({
-    action: "te_pm_client_access",
-    api_key: input.apiKey,
-    payload: JSON.stringify(payload)
-  });
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      Accept: "application/json",
-      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
-    },
-    body: body.toString(),
-    cache: "no-store"
-  });
-  const result = await response.json().catch(() => ({})) as WebsiteAccessResponse;
-  if (!response.ok) throw new Error(result.message || result.error || `WordPress returned HTTP ${response.status}`);
-  return result;
-}
-
-export async function syncClientWebsiteAccessAction(formData: FormData): Promise<void> {
-  const activeTenant = await requireTenant();
-  const customerId = String(formData.get("customerId") || "").trim();
-  if (!customerId) redirect("/clients?error=Missing%20client%20id");
-  const customer = await getCustomerById(activeTenant.tenantId, customerId);
-  if (!customer) redirect("/clients?error=Client%20was%20not%20found");
-  const connection = await getWordPressConnectionForTenant(activeTenant.tenantId);
-  if (!connection?.siteUrl || !connection.apiKey) {
-    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent("Save the WordPress connection before sending client access.")}`);
-  }
-
-  const enabled = customer.payloadJson.websiteAccessEnabled === true;
-  const requestedEmail = String(formData.get("websiteEmail") || customer.email || "").trim().toLowerCase();
-  const requestedUsername = String(formData.get("websiteUsername") || customer.payloadJson.websiteUsername || requestedEmail).trim();
-  const requestedFirstName = String(formData.get("websiteFirstName") || customer.firstName || "").trim();
-  const requestedLastName = String(formData.get("websiteLastName") || customer.lastName || "").trim();
-  if (enabled && (!requestedEmail || !z.string().email().safeParse(requestedEmail).success)) {
-    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent("Enter a valid website login email before sending the invitation.")}`);
-  }
-
-  const existingUsers = customerWebsiteUsers(customer);
-  const contacts = !enabled && existingUsers.length > 0
-    ? existingUsers.map((user) => ({ username: user.username, email: user.email, firstName: user.firstName || "", lastName: user.lastName || "" }))
-    : [{ username: requestedUsername || requestedEmail, email: requestedEmail, firstName: requestedFirstName, lastName: requestedLastName }];
-
-  const invitationWarnings: string[] = [];
-  try {
-    const synced: CustomerWebsiteUser[] = [];
-    let loginUrl = customer.payloadJson.websiteLoginUrl || "";
-    for (const contact of contacts) {
-      const result = await postWebsiteAccess({
-        siteUrl: connection.siteUrl,
-        apiKey: connection.apiKey,
-        customerId,
-        companyName: customer.companyName || customer.displayName,
-        accountTerms: customerAccountTerms(customer),
-        enabled,
-        ...contact
-      });
-      if (enabled && result.invitationSent !== true) invitationWarnings.push(
-        result.invitationError || `WordPress created the account for ${contact.email}, but did not accept the invitation email for delivery.`
-      );
-      if (result.loginUrl) loginUrl = result.loginUrl;
-      if (result.userId) {
-        synced.push({
-          wordpressUserId: result.userId,
-          username: result.username || contact.username,
-          email: result.email || contact.email,
-          firstName: contact.firstName || undefined,
-          lastName: contact.lastName || undefined,
-          invitedAt: enabled ? new Date().toISOString() : existingUsers.find((user) => user.wordpressUserId === result.userId)?.invitedAt,
-          status: enabled ? "invited" : "disabled",
-          passwordSetupUrl: enabled ? result.passwordSetupUrl : undefined,
-          passwordSetupExpiresAt: enabled ? result.passwordSetupExpiresAt : undefined,
-          invitationEmailAccepted: enabled ? result.invitationSent === true : undefined,
-          invitationError: enabled && result.invitationSent !== true ? (result.invitationError || "Invitation email was not accepted for delivery.") : undefined
-        });
-      }
-    }
-    const merged = [...existingUsers];
-    for (const user of synced) {
-      const index = merged.findIndex((entry) => entry.wordpressUserId === user.wordpressUserId || entry.email.toLowerCase() === user.email.toLowerCase());
-      if (index >= 0) merged[index] = user;
-      else merged.push(user);
-    }
-    await updateCustomerPayloadForTenant(activeTenant.tenantId, customerId, {
-      websiteUsername: requestedUsername || undefined,
-      websiteUsers: merged,
-      websiteAccessUpdatedAt: new Date().toISOString(),
-      websiteLoginUrl: loginUrl || undefined
-    });
-  } catch (error) {
-    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(error instanceof Error ? error.message : "Website access could not be updated.")}`);
-  }
-
-  if (enabled && invitationWarnings.length > 0) {
-    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(`${invitationWarnings.join(" ")} The secure setup link is available below for manual delivery.`)}`);
-  }
-
-  const message = enabled ? "Website invitation created; email accepted for delivery" : "Website account access disabled";
-  redirect(`/clients?selected=${customerId}&message=${encodeURIComponent(message)}`);
 }
 
 export async function archiveClientAction(formData: FormData): Promise<void> {

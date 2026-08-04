@@ -1,8 +1,8 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { customerAccountTerms, customerAccountTermsLabel, customerDefaultDiscount, customerDiscountRules, customerLogoUrl, customerWebsiteUsers, isDeletedCustomer, listCustomersForTenant, type CustomerRecord } from "@/server/customers";
-import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, syncClientWebsiteAccessAction, updateClientAction } from "./actions";
+import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, isDeletedCustomer, listCustomersForTenant, type CustomerRecord } from "@/server/customers";
+import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, updateClientAction } from "./actions";
 import { ClientDiscountRulesEditor } from "./ClientDiscountRulesEditor";
 
 type ClientsPageProps = {
@@ -82,7 +82,6 @@ function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; sel
           <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 11, fontWeight: 950, ...statusStyle(client) }}>{statusLabel(client)}</span>
         </div>
         <span style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[client.companyName, client.email, client.phone].filter(Boolean).join(" · ") || "No contact details yet"}</span>
-        <span style={{ color: "#475467", fontSize: 12 }}>{customerAccountTermsLabel(client)}{client.payloadJson.websiteAccessEnabled ? " · Website access" : ""}</span>
         <span style={{ color: "#475467", fontSize: 12 }}>{customerDefaultDiscount(client) ? `${customerDefaultDiscount(client)}% default discount` : "No default discount"}{discountCount ? ` · ${discountCount} qty rule${discountCount === 1 ? "" : "s"}` : ""}</span>
       </div>
     </a>
@@ -95,7 +94,6 @@ function ClientEditor({ client }: { client: CustomerRecord | null }) {
   const deleted = client ? isDeletedCustomer(client) : false;
   const logoUrl = client ? customerLogoUrl(client) : "";
   const payload = client?.payloadJson ?? {};
-  const websiteUsers = client ? customerWebsiteUsers(client) : [];
 
   return (
     <section style={{ ...panelStyle(), display: "grid", gap: 18 }}>
@@ -136,29 +134,6 @@ function ClientEditor({ client }: { client: CustomerRecord | null }) {
           <label style={{ display: "grid", gap: 6 }}><b>Default site / delivery address</b><textarea name="defaultSiteAddress" defaultValue={String(payload.defaultSiteAddress ?? "")} style={textareaStyle} /></label>
         </div>
 
-        <div style={{ border: "1px solid #a7f3d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 12 }}>
-          <div>
-            <strong style={{ fontSize: 17 }}>Website account and payment terms</strong>
-            <p style={{ margin: "5px 0 0", color: "#475467", fontSize: 13, lineHeight: 1.5 }}>These controls approve the company for COD or account checkout. Customers with 7, 14 or 30 day terms will only see <b>Charge to account</b> on the website; the number of days remains internal.</p>
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(230px,.7fr) minmax(280px,1.3fr)", gap: 12 }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Payment terms</b>
-              <select name="accountTerms" defaultValue={client ? customerAccountTerms(client) : "cod"} style={inputStyle}>
-                <option value="cod">COD</option>
-                <option value="account_7">7 Day Account</option>
-                <option value="account_14">14 Day Account</option>
-                <option value="account_30">30 Day Account</option>
-              </select>
-            </label>
-            <label style={{ display: "grid", gap: 6 }}><b>Website username</b><input name="websiteUsername" defaultValue={String(payload.websiteUsername ?? client?.email ?? "")} placeholder="Usually the client email address" style={inputStyle} /></label>
-          </div>
-          <label style={{ display: "flex", alignItems: "center", gap: 10, borderRadius: 14, background: "#fff", border: "1px solid #bbf7d0", padding: 13, fontWeight: 850 }}>
-            <input type="checkbox" name="websiteAccessEnabled" value="yes" defaultChecked={payload.websiteAccessEnabled === true} />
-            Enable approved website account access
-          </label>
-          <small style={{ color: "#475467" }}>Save the client first, then use the secure invitation section below. Production Manager never emails a readable password.</small>
-        </div>
-
         <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 14, background: "#f8fbff", display: "grid", gap: 10 }}>
           <strong>Client logo</strong>
           <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Upload a logo or paste a logo URL. This follows the client into survey requests and Install Scheduler jobs.</p>
@@ -173,56 +148,6 @@ function ClientEditor({ client }: { client: CustomerRecord | null }) {
 
         <button type="submit" style={darkButton}>{isNew ? "Create client" : "Save client details"}</button>
       </form>
-
-      {!isNew && client ? (
-        <section style={{ border: "1px solid #bfdbfe", borderRadius: 20, padding: 16, background: "#eff6ff", display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "start" }}>
-            <div>
-              <strong style={{ fontSize: 17 }}>Secure website invitation</strong>
-              <p style={{ margin: "5px 0 0", color: "#475467", fontSize: 13, lineHeight: 1.5 }}>WordPress emails the username and a secure link for the client to create their own password. Production Manager also keeps the latest secure setup link below so staff can copy it if email delivery is delayed.</p>
-            </div>
-            <span style={{ borderRadius: 999, padding: "6px 10px", background: payload.websiteAccessEnabled ? "#dcfce7" : "#e2e8f0", color: payload.websiteAccessEnabled ? "#166534" : "#475569", fontSize: 12, fontWeight: 900 }}>{payload.websiteAccessEnabled ? customerAccountTermsLabel(client) : "Website access disabled"}</span>
-          </div>
-          {websiteUsers.length ? (
-            <div style={{ display: "grid", gap: 7 }}>
-              {websiteUsers.map((websiteUser) => (
-                <div key={websiteUser.wordpressUserId} style={{ display: "grid", gap: 9, border: "1px solid #dbeafe", background: "#fff", borderRadius: 12, padding: "10px 12px" }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                    <span><b>{websiteUser.username}</b> · {websiteUser.email}</span>
-                    <span style={{ color: websiteUser.invitationEmailAccepted === false ? "#b42318" : "#64748b", fontSize: 12, fontWeight: 800 }}>
-                      {websiteUser.invitationEmailAccepted === false ? "Email not accepted" : websiteUser.status || "connected"}
-                    </span>
-                  </div>
-                  {websiteUser.passwordSetupUrl ? (
-                    <div style={{ display: "grid", gap: 6 }}>
-                      <b style={{ fontSize: 12 }}>Secure password-setup link</b>
-                      <input readOnly value={websiteUser.passwordSetupUrl} aria-label={`Password setup link for ${websiteUser.email}`} style={{ ...inputStyle, fontSize: 12, background: "#f8fafc" }} />
-                      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-                        <a href={websiteUser.passwordSetupUrl} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8", fontWeight: 850, fontSize: 13 }}>Open setup link →</a>
-                        <small style={{ color: "#64748b" }}>Copy this link and send it privately to the client. It normally expires within 24 hours and is replaced when a new invitation is created.</small>
-                      </div>
-                    </div>
-                  ) : null}
-                  {websiteUser.invitationError ? <small style={{ color: "#b42318" }}>{websiteUser.invitationError}</small> : null}
-                </div>
-              ))}
-            </div>
-          ) : <p style={{ margin: 0, color: "#64748b", fontSize: 13 }}>No WordPress users are connected yet.</p>}
-          <form action={syncClientWebsiteAccessAction} style={{ display: "grid", gap: 10 }}>
-            <input type="hidden" name="customerId" value={client.id} />
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <label style={{ display: "grid", gap: 6 }}><b>First name</b><input name="websiteFirstName" defaultValue={client.firstName ?? ""} style={inputStyle} /></label>
-              <label style={{ display: "grid", gap: 6 }}><b>Last name</b><input name="websiteLastName" defaultValue={client.lastName ?? ""} style={inputStyle} /></label>
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <label style={{ display: "grid", gap: 6 }}><b>Username</b><input name="websiteUsername" defaultValue={String(payload.websiteUsername ?? client.email ?? "")} required={payload.websiteAccessEnabled === true} style={inputStyle} /></label>
-              <label style={{ display: "grid", gap: 6 }}><b>Login email</b><input type="email" name="websiteEmail" defaultValue={client.email ?? ""} required={payload.websiteAccessEnabled === true} style={inputStyle} /></label>
-            </div>
-            <button type="submit" style={{ ...darkButton, justifySelf: "start", background: payload.websiteAccessEnabled ? "#2563eb" : "#475569" }}>{payload.websiteAccessEnabled ? "Send / update website invitation" : "Disable connected website access"}</button>
-          </form>
-          {payload.websiteLoginUrl ? <a href={String(payload.websiteLoginUrl)} target="_blank" rel="noreferrer" style={{ color: "#1d4ed8", fontWeight: 850, fontSize: 13 }}>Open website login page →</a> : null}
-        </section>
-      ) : null}
 
       {!isNew && client ? (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
