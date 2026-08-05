@@ -66,6 +66,7 @@ export type WebsiteCatalogImage = {
   alt: string;
   position: number;
   featured: boolean;
+  conditions: Array<{ fieldKey: string; optionValue: string }>;
 };
 
 export type WebsiteCatalogProduct = {
@@ -151,6 +152,7 @@ export type WordPressOrderPayload = {
     heightMm?: number;
     display?: Record<string, unknown>;
     configuration?: Record<string, unknown>;
+    selectedImage?: Record<string, unknown>;
   }>;
   raw?: Record<string, unknown>;
 };
@@ -195,7 +197,13 @@ function serialisedWebsiteImages(product: ProductRecord, config: Record<string, 
       url,
       alt: text(image.alt) || productName,
       position: index,
-      featured: false
+      featured: false,
+      conditions: asArray(image.conditions).flatMap((rawCondition) => {
+        const condition = asObject(rawCondition);
+        const fieldKey = text(condition.fieldKey);
+        const optionValue = text(condition.optionValue);
+        return fieldKey && optionValue ? [{ fieldKey, optionValue }] : [];
+      })
     }];
   });
 
@@ -207,7 +215,8 @@ function serialisedWebsiteImages(product: ProductRecord, config: Record<string, 
           url: product.websiteImageUrl,
           alt: productName,
           position: 0,
-          featured: false
+          featured: false,
+          conditions: []
         }]
       : [];
 
@@ -624,7 +633,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.05.04",
+    version: "V26.08.05.05",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -1112,6 +1121,7 @@ async function refreshExistingWebsiteQuoteLines(
     const displayAnswers = Object.keys(calculated.displayAnswers).length
       ? calculated.displayAnswers
       : asObject(line.display);
+    const selectedImage = asObject(line.selectedImage ?? asObject(line.configuration).selectedImage);
     const snapshot = {
       source: "wordpress_woocommerce",
       externalOrderId,
@@ -1124,6 +1134,7 @@ async function refreshExistingWebsiteQuoteLines(
       payment: websitePaymentSnapshot(payload),
       fulfilment: websiteFulfilmentSnapshot(payload),
       purchaseOrderNumber: text(payload.purchaseOrderNumber) || null,
+      selectedImage,
       productionCost: calculated.cost,
       calculatedWebsiteLineTotal: calculated.lineTotal,
       chargedWebsiteLineTotal: lineTotal,
@@ -1307,6 +1318,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
     const lineTotal = line.lineTotal == null
       ? calculated.lineTotal
       : Math.max(0, numberValue(line.lineTotal, calculated.lineTotal));
+    const selectedImage = asObject(line.selectedImage ?? asObject(line.configuration).selectedImage);
     await addQuoteLine(quote.id, {
       productId,
       productName: calculated.productName || text(line.productName) || "Website product",
@@ -1326,6 +1338,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
         payment: websitePaymentSnapshot(payload),
         fulfilment,
         purchaseOrderNumber,
+        selectedImage,
         productionCost: calculated.cost,
         calculatedWebsiteLineTotal: calculated.lineTotal,
         chargedWebsiteLineTotal: lineTotal,

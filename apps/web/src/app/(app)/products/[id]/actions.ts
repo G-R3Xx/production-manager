@@ -861,6 +861,7 @@ type WebsiteImageStateItem = {
   url: string | null;
   alt: string;
   storagePath: string | null;
+  conditions: Array<{ fieldKey: string; optionValue: string }>;
 };
 
 type SavedWebsiteImage = {
@@ -868,6 +869,7 @@ type SavedWebsiteImage = {
   url: string;
   alt: string;
   storagePath: string | null;
+  conditions: Array<{ fieldKey: string; optionValue: string }>;
 };
 
 function parseWebsiteImageState(value: string): { featuredToken: string | null; items: WebsiteImageStateItem[] } {
@@ -878,7 +880,7 @@ function parseWebsiteImageState(value: string): { featuredToken: string | null; 
   }
   const record = parsed as Record<string, unknown>;
   const rawItems = Array.isArray(record.items) ? record.items : [];
-  const items = rawItems.slice(0, 12).flatMap((entry): WebsiteImageStateItem[] => {
+  const items = rawItems.slice(0, 24).flatMap((entry): WebsiteImageStateItem[] => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return [];
     const image = entry as Record<string, unknown>;
     const token = String(image.token ?? "").trim();
@@ -890,7 +892,14 @@ function parseWebsiteImageState(value: string): { featuredToken: string | null; 
       id: String(image.id ?? "").trim().slice(0, 160) || randomUUID(),
       url: image.url ? String(image.url).trim().slice(0, 3000) : null,
       alt: String(image.alt ?? "").trim().slice(0, 500),
-      storagePath: image.storagePath ? String(image.storagePath).trim().slice(0, 1500) : null
+      storagePath: image.storagePath ? String(image.storagePath).trim().slice(0, 1500) : null,
+      conditions: (Array.isArray(image.conditions) ? image.conditions : []).slice(0, 12).flatMap((rawCondition) => {
+        if (!rawCondition || typeof rawCondition !== "object" || Array.isArray(rawCondition)) return [];
+        const condition = rawCondition as Record<string, unknown>;
+        const fieldKey = String(condition.fieldKey ?? "").trim().replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 160);
+        const optionValue = String(condition.optionValue ?? "").trim().slice(0, 500);
+        return fieldKey && optionValue ? [{ fieldKey, optionValue }] : [];
+      })
     }];
   });
   return {
@@ -907,7 +916,7 @@ async function saveWebsiteImages(
   const stateRaw = read(formData, "websiteImagesState");
   if (!stateRaw) {
     const fallback = fallbackImageUrl
-      ? [{ id: "legacy-featured-image", url: fallbackImageUrl, alt: productName, storagePath: null }]
+      ? [{ id: "legacy-featured-image", url: fallbackImageUrl, alt: productName, storagePath: null, conditions: [] }]
       : [];
     return {
       images: fallback,
@@ -926,7 +935,8 @@ async function saveWebsiteImages(
       id: item.id || randomUUID(),
       url: item.url,
       alt: item.alt || productName,
-      storagePath: item.storagePath
+      storagePath: item.storagePath,
+      conditions: item.conditions
     });
   }
 

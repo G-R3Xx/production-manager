@@ -12,7 +12,7 @@ import {
 } from "@/server/productionResources";
 import { normalizeProductionFlowName } from "@/lib/productionFlowPresets";
 import { ProductProductionFlowBuilder } from "./ProductProductionFlowBuilder";
-import { WebsiteImageManager, type WebsiteImageItem } from "./WebsiteImageManager";
+import { WebsiteImageManager, type WebsiteImageItem, type WebsiteImageOptionField } from "./WebsiteImageManager";
 import {
   addSimpleProductQuestionAction,
   deleteSimpleProductQuestionAction,
@@ -128,6 +128,15 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     .map((field, index) => ({ field, order: sharedFieldOrder(field, index) }))
     .sort((left, right) => left.order - right.order)
     .map(({ field }) => field);
+  const websiteImageOptionFields: WebsiteImageOptionField[] = fields.flatMap((field): WebsiteImageOptionField[] => {
+    const key = String(field.key ?? "").trim();
+    const options = asArray(field.options).flatMap((option): Array<{ value: string; label: string }> => {
+      const value = String(option?.value ?? "").trim();
+      if (!value) return [];
+      return [{ value, label: String(option?.label ?? value) }];
+    });
+    return key && options.length ? [{ key, label: String(field.label ?? key), options }] : [];
+  });
   const definitionComponents = asArray(definition.components).map(asObject);
   const eyeletStockComponent = definitionComponents.find((component) => Boolean(component.materialId) && /eyelet|grommet/i.test(String(component.label ?? "")));
   const eyeletFollowUpComponent = definitionComponents.find((component) => {
@@ -143,7 +152,13 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
       id: String(image.id ?? `website-image-${index + 1}`),
       url,
       alt: String(image.alt ?? product.name),
-      storagePath: image.storagePath ? String(image.storagePath) : null
+      storagePath: image.storagePath ? String(image.storagePath) : null,
+      conditions: asArray(image.conditions).flatMap((rawCondition) => {
+        const condition = asObject(rawCondition);
+        const fieldKey = String(condition.fieldKey ?? "").trim();
+        const optionValue = String(condition.optionValue ?? "").trim();
+        return fieldKey && optionValue ? [{ fieldKey, optionValue }] : [];
+      })
     }];
   });
   const initialWebsiteImages: WebsiteImageItem[] = configuredWebsiteImages.length
@@ -379,7 +394,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         </label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Short description<textarea name="websiteShortDescription" defaultValue={product.websiteShortDescription ?? ""} rows={3} style={{ ...input,padding:12 }}/></label>
         <label style={{ display:"grid",gap:7,fontWeight:850 }}>Full description<textarea name="websiteDescription" defaultValue={product.websiteDescription ?? ""} rows={6} style={{ ...input,padding:12 }}/></label>
-        <WebsiteImageManager productId={product.id} productName={String(config.websiteProductName ?? product.name)} initialImages={initialWebsiteImages} featuredImageId={initialFeaturedWebsiteImageId}/>
+        <WebsiteImageManager productId={product.id} productName={String(config.websiteProductName ?? product.name)} initialImages={initialWebsiteImages} featuredImageId={initialFeaturedWebsiteImageId} optionFields={websiteImageOptionFields}/>
         <div><h3 style={{ marginBottom:8 }}>Default price preview</h3><div style={{ display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10 }}><label style={{ display:"grid",gap:7,fontWeight:850 }}>Width mm<input name="defaultWidthMm" type="number" defaultValue={config.defaultWidthMm ?? 600} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Height mm<input name="defaultHeightMm" type="number" defaultValue={config.defaultHeightMm ?? 450} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Quantity<input name="defaultQuantity" type="number" defaultValue={config.defaultQuantity ?? 1} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Fallback base price<input name="basePrice" type="number" step="0.01" defaultValue={config.basePrice ?? 0} style={input}/></label></div></div>
         {fields.length ? <div><h3 style={{ marginBottom:8 }}>Website question style</h3><div style={{ display:"grid",gap:9 }}>{fields.map((field,index)=><div key={field.id ?? index} style={{ display:"grid",gridTemplateColumns:"1fr 220px",gap:12,alignItems:"center",padding:12,border:"1px solid #e2e8f0",borderRadius:13,background:"#f8fafc" }}><div><b>{field.label}</b><div style={{ color:"#64748b",fontSize:13,marginTop:3 }}>{field.type?.replace(/_/g," ")} · {asArray(field.options).length} options</div></div><select name={`display:${field.key}`} defaultValue={fieldDisplay(field,config)} style={input}><option value="buttons">Buttons</option><option value="cards">Cards</option><option value="dropdown">Dropdown</option><option value="swatches">Swatches</option><option value="number">Number field</option><option value="text">Text field</option></select></div>)}</div></div> : null}
         <button style={{ justifySelf:"start",minHeight:44,border:0,borderRadius:11,background:"#7c3aed",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Save website settings</button>

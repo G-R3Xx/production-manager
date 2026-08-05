@@ -84,16 +84,21 @@ function isPdfOrFile(url: string | null | undefined, fileName?: string | null): 
 }
 
 function proofPreview(item: ProductionItemRecord) {
-  if (!item.proofImageUrl) return <div style={{ color: "#667085" }}>No approved proof attached.</div>;
-  if (isPdfOrFile(item.proofImageUrl, item.proofFileName)) {
+  const previewUrl = item.proofImageUrl || item.selectedImageUrl;
+  const previewAlt = item.proofImageUrl ? item.title : item.selectedImageAlt || item.title;
+  if (!previewUrl) return <div style={{ color: "#667085" }}>No approved proof or product reference attached.</div>;
+  if (isPdfOrFile(previewUrl, item.proofFileName)) {
     return (
       <div style={{ display: "grid", placeItems: "center", minHeight: 180, gap: 10, background: "#fff", borderRadius: 16, border: "1px dashed #cbd5e1" }}>
         <strong>Approved proof file</strong>
-        <a href={item.proofImageUrl} target="_blank" rel="noreferrer" style={{ color: "#6d28d9", fontWeight: 900, textDecoration: "none" }}>{item.proofFileName || "Open proof"}</a>
+        <a href={previewUrl} target="_blank" rel="noreferrer" style={{ color: "#6d28d9", fontWeight: 900, textDecoration: "none" }}>{item.proofFileName || "Open proof"}</a>
       </div>
     );
   }
-  return <img src={item.proofImageUrl} alt={item.title} style={{ width: "100%", height: 220, objectFit: "contain", objectPosition: "center", display: "block", background: "#fff", borderRadius: 16 }} />;
+  return <div style={{ display: "grid", gap: 6 }}>
+    <img src={previewUrl} alt={previewAlt} style={{ width: "100%", height: 220, objectFit: "contain", objectPosition: "center", display: "block", background: "#fff", borderRadius: 16 }} />
+    {!item.proofImageUrl && item.selectedImageUrl ? <span style={{ color: "#475467", fontSize: 12, fontWeight: 850 }}>Selected product option reference</span> : null}
+  </div>;
 }
 
 

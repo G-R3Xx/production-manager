@@ -37,6 +37,8 @@ export type ProductionItemRecord = {
   finishingSummary: string | null;
   proofImageUrl: string | null;
   proofFileName: string | null;
+  selectedImageUrl: string | null;
+  selectedImageAlt: string | null;
   printReadyUrl: string | null;
   printReadyStoragePath: string | null;
   printReadyFileName: string | null;
@@ -796,6 +798,8 @@ export async function listProductionItemsForJob(jobId: string): Promise<Producti
       pi.finishing_summary as "finishingSummary",
       pi.proof_image_url as "proofImageUrl",
       pi.proof_file_name as "proofFileName",
+      NULLIF(pi.payload_json -> 'selectedImage' ->> 'url','') as "selectedImageUrl",
+      NULLIF(pi.payload_json -> 'selectedImage' ->> 'alt','') as "selectedImageAlt",
       pi.print_ready_url as "printReadyUrl",
       pi.print_ready_storage_path as "printReadyStoragePath",
       pi.print_ready_file_name as "printReadyFileName",
@@ -1365,6 +1369,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
     const line = lines.rows[index];
     const snapshot = asJsonRecord(line.configurationSnapshot);
     const rawConfiguration = asJsonRecord(snapshot.rawConfiguration);
+    const selectedImage = asJsonRecord(snapshot.selectedImage ?? rawConfiguration.selectedImage);
     const answers = asJsonRecord(snapshot.answers);
     const displayAnswers = asJsonRecord(snapshot.displayAnswers);
     const files = websiteArtworkFiles(rawConfiguration.artworkFiles ?? snapshot.artworkFiles);
@@ -1397,7 +1402,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
       displayAnswerText(displayAnswers, /material|substrate|stock/i) || jsonText(answers.material) || jsonText(answers.substrate), line.optionSummary,
       firstFile?.downloadUrl ?? null, firstFile?.storagePath ?? null, firstFile?.name ?? null,
       firstFile?.mime ?? null, files.length > 1 ? `${files.length} artwork files supplied; all links are stored on this item.` : null,
-      index, JSON.stringify({ source: "wordpress_woocommerce", answers, displayAnswers, artworkFiles: files, rawConfiguration })]);
+      index, JSON.stringify({ source: "wordpress_woocommerce", answers, displayAnswers, selectedImage, artworkFiles: files, rawConfiguration })]);
     const itemId = itemResult.rows[0]?.id;
     if (!itemId) continue;
     const steps = stepPlanForItem({
@@ -1959,6 +1964,8 @@ export async function getProductionItemByIdForTenant(tenantId: string, itemId: s
       pi.finishing_summary as "finishingSummary",
       pi.proof_image_url as "proofImageUrl",
       pi.proof_file_name as "proofFileName",
+      NULLIF(pi.payload_json -> 'selectedImage' ->> 'url','') as "selectedImageUrl",
+      NULLIF(pi.payload_json -> 'selectedImage' ->> 'alt','') as "selectedImageAlt",
       pi.print_ready_url as "printReadyUrl",
       pi.print_ready_storage_path as "printReadyStoragePath",
       pi.print_ready_file_name as "printReadyFileName",

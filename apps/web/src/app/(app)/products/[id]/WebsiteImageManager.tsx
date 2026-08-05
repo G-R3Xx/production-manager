@@ -8,6 +8,18 @@ export type WebsiteImageItem = {
   url: string;
   alt: string;
   storagePath?: string | null;
+  conditions?: WebsiteImageCondition[];
+};
+
+export type WebsiteImageCondition = {
+  fieldKey: string;
+  optionValue: string;
+};
+
+export type WebsiteImageOptionField = {
+  key: string;
+  label: string;
+  options: Array<{ value: string; label: string }>;
 };
 
 type ManagedImage = WebsiteImageItem & {
@@ -21,6 +33,7 @@ type Props = {
   productName: string;
   initialImages: WebsiteImageItem[];
   featuredImageId: string | null;
+  optionFields: WebsiteImageOptionField[];
 };
 
 type SignedImageUpload = {
@@ -31,7 +44,7 @@ type SignedImageUpload = {
   imageId: string;
 };
 
-const MAX_IMAGES = 12;
+const MAX_IMAGES = 24;
 const MAX_FILE_BYTES = 12 * 1024 * 1024;
 const RASTER_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
 const RASTER_IMAGE_EXTENSIONS = new Set(["jpg", "jpeg", "png", "webp", "gif", "avif"]);
@@ -129,7 +142,8 @@ function serialisable(images: ManagedImage[], featuredToken: string | null) {
       id: image.id,
       url: image.url,
       alt: image.alt,
-      storagePath: image.storagePath ?? null
+      storagePath: image.storagePath ?? null,
+      conditions: (image.conditions ?? []).filter((condition) => condition.fieldKey && condition.optionValue)
     }))
   });
 }
@@ -173,7 +187,7 @@ async function uploadProductImageDirectly(productId: string, file: File): Promis
   };
 }
 
-export function WebsiteImageManager({ productId, productName, initialImages, featuredImageId }: Props) {
+export function WebsiteImageManager({ productId, productName, initialImages, featuredImageId, optionFields }: Props) {
   const [images, setImages] = useState<ManagedImage[]>(() => initialImages.map((image) => ({
     ...image,
     token: `existing:${image.id}`,
@@ -240,7 +254,8 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
           url: result.publicUrl,
           previewUrl: result.publicUrl,
           alt: productName,
-          storagePath: result.storagePath
+          storagePath: result.storagePath,
+          conditions: []
         });
       } catch (error) {
         failures.push(`${originalFile.name}: ${error instanceof Error ? error.message : "upload failed"}`);
@@ -293,7 +308,8 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
       url: value,
       previewUrl: value,
       alt: productName,
-      storagePath: null
+      storagePath: null,
+      conditions: []
     };
     const next = [...images, item];
     commit(next);
@@ -308,6 +324,37 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
 
   function changeAlt(imageToken: string, alt: string) {
     commit(images.map((image) => image.token === imageToken ? { ...image, alt } : image));
+  }
+
+  function changeConditions(imageToken: string, conditions: WebsiteImageCondition[]) {
+    commit(images.map((image) => image.token === imageToken ? { ...image, conditions } : image));
+  }
+
+  function addCondition(image: ManagedImage) {
+    const current = image.conditions ?? [];
+    const available = optionFields.find((field) => !current.some((condition) => condition.fieldKey === field.key));
+    const firstOption = available?.options[0];
+    if (!available || !firstOption) return;
+    changeConditions(image.token, [...current, { fieldKey: available.key, optionValue: firstOption.value }]);
+  }
+
+  function updateCondition(image: ManagedImage, index: number, update: Partial<WebsiteImageCondition>) {
+    const current = [...(image.conditions ?? [])];
+    const existing = current[index];
+    if (!existing) return;
+    const next = { ...existing, ...update };
+    if (update.fieldKey) {
+      const field = optionFields.find((item) => item.key === update.fieldKey);
+      if (field && !field.options.some((option) => option.value === next.optionValue)) {
+        next.optionValue = field.options[0]?.value ?? "";
+      }
+    }
+    current[index] = next;
+    changeConditions(image.token, current);
+  }
+
+  function removeCondition(image: ManagedImage, index: number) {
+    changeConditions(image.token, (image.conditions ?? []).filter((_condition, conditionIndex) => conditionIndex !== index));
   }
 
   function move(imageToken: string, direction: -1 | 1) {
@@ -379,6 +426,25 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
             Alt text
             <input value={image.alt} onChange={(event) => changeAlt(image.token, event.target.value)} placeholder={productName} style={{ minHeight: 38, border: "1px solid #cbd5e1", borderRadius: 9, padding: "0 9px" }}/>
           </label>
+          <div style={{ display: "grid", gap: 8, padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
+            <div>
+              <strong style={{ display: "block", fontSize: 12 }}>Change to this image when</strong>
+              <span style={{ color: "#64748b", fontSize: 11 }}>{(image.conditions ?? []).length ? "Every rule below must match." : featured ? "Default image when no option-image rule matches." : "Gallery only until a matching option is added."}</span>
+            </div>
+            {(image.conditions ?? []).map((condition, conditionIndex) => {
+              const selectedField = optionFields.find((field) => field.key === condition.fieldKey);
+              return <div key={`${image.token}-condition-${conditionIndex}`} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) minmax(0,1fr) auto", gap: 6 }}>
+                <select value={condition.fieldKey} onChange={(event) => updateCondition(image, conditionIndex, { fieldKey: event.target.value })} style={{ minHeight: 36, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "0 7px" }}>
+                  {optionFields.map((field) => <option key={field.key} value={field.key}>{field.label}</option>)}
+                </select>
+                <select value={condition.optionValue} onChange={(event) => updateCondition(image, conditionIndex, { optionValue: event.target.value })} style={{ minHeight: 36, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "0 7px" }}>
+                  {(selectedField?.options ?? []).map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                </select>
+                <button type="button" onClick={() => removeCondition(image, conditionIndex)} style={{ border: "1px solid #fecaca", borderRadius: 8, background: "#fff", color: "#b91c1c", padding: "0 8px", fontWeight: 900 }} aria-label="Remove option-image rule">×</button>
+              </div>;
+            })}
+            {optionFields.length > (image.conditions ?? []).length ? <button type="button" onClick={() => addCondition(image)} style={{ justifySelf: "start", border: "1px solid #bfdbfe", borderRadius: 8, background: "#eff6ff", color: "#1d4ed8", padding: "6px 9px", fontWeight: 850, cursor: "pointer" }}>+ Add matching option</button> : null}
+          </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button type="button" onClick={() => move(image.token, -1)} disabled={uploading || index === 0} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: uploading || index === 0 ? "not-allowed" : "pointer" }}>← Earlier</button>
             <button type="button" onClick={() => move(image.token, 1)} disabled={uploading || index === images.length - 1} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: uploading || index === images.length - 1 ? "not-allowed" : "pointer" }}>Later →</button>
@@ -388,7 +454,7 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
       })}
     </div> : <div style={{ padding: 18, border: "1px dashed #94a3b8", borderRadius: 13, background: "#fff", color: "#64748b", textAlign: "center" }}>No website images yet. Add a featured image and optional gallery images.</div>}
 
-    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. JPG, PNG, WebP, GIF and AVIF are uploaded directly. SVG files are automatically converted to high-resolution PNG for WooCommerce.</div>
+    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. The most specific matching option image wins; the featured image remains the fallback. JPG, PNG, WebP, GIF and AVIF are uploaded directly. SVG files are automatically converted to high-resolution PNG for WooCommerce.</div>
   </section>;
 }
 
