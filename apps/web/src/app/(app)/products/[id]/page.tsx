@@ -70,7 +70,7 @@ function normaliseSharedField(field: Record<string, any>): Record<string, any> {
 }
 
 function sharedFieldOrder(field: Record<string, any>, index: number): number {
-  const order = ["finished_size", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
+  const order = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
   const standard = order.indexOf(String(field.key ?? ""));
   return standard >= 0 ? standard : 1000 + index;
 }
@@ -121,6 +121,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     productionResourcesPromise,
     pricingPreviewPromise
   ]);
+  const currentRecipe = recipes.find((recipe) => recipe.id === product.productionRecipeId) ?? null;
   const definition = asObject(template?.definitionJson);
   const fields = asArray(definition.fields)
     .map((field) => normaliseSharedField(asObject(field)))
@@ -138,6 +139,18 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     return key && options.length ? [{ key, label: String(field.label ?? key), options }] : [];
   });
   const definitionComponents = asArray(definition.components).map(asObject);
+  const baseMaterialField = fields.find((field) => String(field.key ?? "") === "base_material") ?? null;
+  const optionBaseMaterialComponents = definitionComponents.filter((component) => {
+    const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
+    return Boolean(component.materialId) && (String(component.role ?? "") === "option_selected_base_material" || triggerKey === "base_material");
+  });
+  const initialBaseMaterialChoices = optionBaseMaterialComponents.map((component) => {
+    const materialId = String(component.materialId ?? "");
+    const option = asArray(baseMaterialField?.options).find((choice) => String(choice?.value ?? "") === materialId);
+    return { materialId, label: String(option?.label ?? component.label ?? materialId) };
+  });
+  const initialBaseMaterialMode = initialBaseMaterialChoices.length ? "option" : currentRecipe?.materialId ? "fixed" : "none";
+  const optionBaseMaterialIds = new Set(initialBaseMaterialChoices.map((choice) => choice.materialId));
   const eyeletStockComponent = definitionComponents.find((component) => Boolean(component.materialId) && /eyelet|grommet/i.test(String(component.label ?? "")));
   const eyeletFollowUpComponent = definitionComponents.find((component) => {
     const usage = asObject(component.stockUsage);
@@ -219,7 +232,6 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   const initialFinishingOptions = finishingDefaults.length ? finishingDefaults : optionValues(finishingField);
   const message = read(query, "message");
   const error = read(query, "error");
-  const currentRecipe = recipes.find((recipe) => recipe.id === product.productionRecipeId) ?? null;
   const currentProcessSteps = currentRecipe?.processSteps.length
     ? currentRecipe.processSteps
     : currentRecipe?.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null })) ?? [];
@@ -275,7 +287,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         productId={product.id}
         department={product.department}
         currentStatus={product.status}
-        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId).map((material) => ({
+        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id)).map((material) => ({
           id: material.id,
           name: material.name,
           sku: material.sku,
@@ -295,6 +307,9 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           labourOperationName: process.labourOperationName
         }))}
         initialMaterialId={currentRecipe?.materialId ?? ""}
+        initialBaseMaterialMode={initialBaseMaterialMode}
+        initialBaseMaterialQuestionLabel={String(baseMaterialField?.label ?? "Material / thickness")}
+        initialBaseMaterialChoices={initialBaseMaterialChoices}
         initialSteps={initialProductionSteps}
         initialDeliveryMethod={String(config.internalDeliveryMethod ?? (initialProductionSteps.some((step) => normalizeProductionFlowName(step.name) === "install") ? "install" : "pickup"))}
         initialPrintOptions={initialPrintOptions}

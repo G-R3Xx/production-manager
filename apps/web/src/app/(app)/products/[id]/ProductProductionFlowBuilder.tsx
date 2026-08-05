@@ -33,6 +33,13 @@ type FlowStep = {
   labourOperationId: string | null;
 };
 
+type BaseMaterialMode = "fixed" | "option" | "none";
+
+type BaseMaterialChoice = {
+  materialId: string;
+  label: string;
+};
+
 type PreviewSummary = {
   materialCost: number;
   machineCost: number;
@@ -54,6 +61,9 @@ type Props = {
   materials: MaterialOption[];
   processes: ProcessOption[];
   initialMaterialId: string;
+  initialBaseMaterialMode: BaseMaterialMode;
+  initialBaseMaterialQuestionLabel: string;
+  initialBaseMaterialChoices: BaseMaterialChoice[];
   initialSteps: FlowStep[];
   initialDeliveryMethod: string;
   initialPrintOptions: string[];
@@ -243,6 +253,9 @@ export function ProductProductionFlowBuilder({
   materials,
   processes,
   initialMaterialId,
+  initialBaseMaterialMode,
+  initialBaseMaterialQuestionLabel,
+  initialBaseMaterialChoices,
   initialSteps,
   initialDeliveryMethod,
   initialPrintOptions,
@@ -272,6 +285,9 @@ export function ProductProductionFlowBuilder({
   const [activeStep, setActiveStep] = useState<BuilderStep>("material");
   const [materialSearch, setMaterialSearch] = useState("");
   const [materialId, setMaterialId] = useState(initialMaterialId);
+  const [baseMaterialMode, setBaseMaterialMode] = useState<BaseMaterialMode>(initialBaseMaterialMode);
+  const [baseMaterialQuestionLabel, setBaseMaterialQuestionLabel] = useState(initialBaseMaterialQuestionLabel || "Material / thickness");
+  const [baseMaterialChoices, setBaseMaterialChoices] = useState<BaseMaterialChoice[]>(initialBaseMaterialChoices);
   const [steps, setSteps] = useState<FlowStep[]>(initialSteps);
   const [width, setWidth] = useState(previewWidth);
   const [height, setHeight] = useState(previewHeight);
@@ -313,6 +329,46 @@ export function ProductProductionFlowBuilder({
   const otherProcesses = processes.filter((process) => !selectedTokens.has(process.id) && !productionFlowPresets.some((preset) => normalizeProductionFlowName(preset.name) === normalizeProductionFlowName(process.name)));
 
   const markChanged = () => setDirty(true);
+
+  const setMaterialMode = (mode: BaseMaterialMode) => {
+    setBaseMaterialMode(mode);
+    if (mode === "none") {
+      setMaterialId("");
+    } else if (mode === "option") {
+      const seededChoices = baseMaterialChoices.length
+        ? baseMaterialChoices
+        : materialId
+          ? [{ materialId, label: materials.find((material) => material.id === materialId)?.name ?? "Material" }]
+          : [];
+      if (!baseMaterialChoices.length && seededChoices.length) setBaseMaterialChoices(seededChoices);
+      if (!seededChoices.some((choice) => choice.materialId === materialId)) setMaterialId(seededChoices[0]?.materialId ?? "");
+    } else if (!materialId && baseMaterialChoices.length) {
+      setMaterialId(baseMaterialChoices[0].materialId);
+    }
+    markChanged();
+  };
+
+  const chooseFixedMaterial = (nextMaterialId: string) => {
+    setBaseMaterialMode(nextMaterialId ? "fixed" : "none");
+    setMaterialId(nextMaterialId);
+    markChanged();
+  };
+
+  const toggleBaseMaterialChoice = (material: MaterialOption) => {
+    const selected = baseMaterialChoices.some((choice) => choice.materialId === material.id);
+    const next = selected
+      ? baseMaterialChoices.filter((choice) => choice.materialId !== material.id)
+      : [...baseMaterialChoices, { materialId: material.id, label: material.name }];
+    setBaseMaterialChoices(next);
+    if (!selected && !materialId) setMaterialId(material.id);
+    if (selected && materialId === material.id) setMaterialId(next[0]?.materialId ?? "");
+    markChanged();
+  };
+
+  const updateBaseMaterialChoiceLabel = (materialIdValue: string, label: string) => {
+    setBaseMaterialChoices((current) => current.map((choice) => choice.materialId === materialIdValue ? { ...choice, label } : choice));
+    markChanged();
+  };
 
   const setPreset = (key: string, selected: boolean) => {
     const nextStep = stepFromPreset(key, processes);
@@ -459,6 +515,15 @@ export function ProductProductionFlowBuilder({
   const previousStep = currentIndex > 0 ? builderSteps[currentIndex - 1] : null;
   const nextStep = currentIndex < builderSteps.length - 1 ? builderSteps[currentIndex + 1] : null;
   const laminateNames = laminateMaterialIds.map((id) => materials.find((material) => material.id === id)?.name ?? id);
+  const baseMaterialChoicePayload = baseMaterialChoices.map((choice) => {
+    const material = materials.find((item) => item.id === choice.materialId);
+    return {
+      materialId: choice.materialId,
+      label: choice.label.trim() || material?.name || "Material",
+      materialName: material?.name ?? choice.label,
+      isRoll: Boolean(material && isRollPrintMaterial(material))
+    };
+  });
 
   const stepNavigation = <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginTop: 18 }}>
     {previousStep ? <button type="button" onClick={() => setActiveStep(previousStep.key)} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← {previousStep.label}</button> : <span />}
@@ -487,6 +552,9 @@ export function ProductProductionFlowBuilder({
 
     <form action={saveInternalProductSetupAction} style={{ display: "grid", gap: 16 }}>
       <input type="hidden" name="productId" value={productId} />
+      <input type="hidden" name="baseMaterialMode" value={baseMaterialMode} />
+      <input type="hidden" name="baseMaterialQuestionLabel" value={baseMaterialQuestionLabel} />
+      <input type="hidden" name="baseMaterialChoicesJson" value={JSON.stringify(baseMaterialChoicePayload)} />
       <input type="hidden" name="materialId" value={materialId} />
       <input type="hidden" name="mainMaterialName" value={selectedMaterial?.name ?? ""} />
       <input type="hidden" name="mainMaterialIsRoll" value={selectedMainMaterialIsRoll ? "1" : "0"} />
@@ -517,12 +585,42 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="eyeletPreset" value={eyeletPreset} />
 
       {activeStep === "material" ? <section style={panel}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}><div><h3 style={{ margin: 0 }}>1. Choose the main material</h3><p style={{ margin: "5px 0 0", color: "#64748b" }}>Start with the substrate or stock staff will normally quote.</p></div><input value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Search substrates or roll stock" style={{ ...input, maxWidth: 320 }} /></div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10, marginTop: 15 }}>
-          <button type="button" onClick={() => { setMaterialId(""); markChanged(); }} style={choiceCardStyle(materialId === "")}><strong>No physical material</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>Customer-supplied signage, installation-only or service work.</span></button>
-          {mainMaterials.map((material) => <button key={material.id} type="button" onClick={() => { setMaterialId(material.id); markChanged(); }} style={choiceCardStyle(material.id === materialId)}><strong>{material.name}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{materialDescription(material)}</span>{material.sku ? <span style={{ display: "block", color: "#94a3b8", fontSize: 11, marginTop: 4 }}>{material.sku}</span> : null}</button>)}
+        <div><h3 style={{ margin: 0 }}>1. Choose how the base material is selected</h3><p style={{ margin: "5px 0 0", color: "#64748b" }}>Use one fixed stock item, let the quote or website choice select the stock, or create a service-only product.</p></div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(190px,1fr))", gap: 10, marginTop: 15 }}>
+          <button type="button" onClick={() => setMaterialMode("fixed")} style={choiceCardStyle(baseMaterialMode === "fixed")}><strong>One fixed material</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>Every quote uses the same substrate or roll stock.</span></button>
+          <button type="button" onClick={() => setMaterialMode("option")} style={choiceCardStyle(baseMaterialMode === "option")}><strong>Selected by customer option</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>One product can choose 3 mm, 4.5 mm, 6 mm or other stocked materials.</span></button>
+          <button type="button" onClick={() => setMaterialMode("none")} style={choiceCardStyle(baseMaterialMode === "none")}><strong>No physical material</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>Customer-supplied signage, installation-only or service work.</span></button>
         </div>
-        {!mainMaterials.length && materialSearch ? <div style={{ marginTop: 13, padding: 13, borderRadius: 12, background: "#fff7ed", color: "#9a3412" }}>No materials match “{materialSearch}”.</div> : null}
+
+        {baseMaterialMode !== "none" ? <div style={{ marginTop: 17, display: "grid", gap: 12 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end", flexWrap: "wrap" }}>
+            <div><strong>{baseMaterialMode === "option" ? "Choose every available base material" : "Choose the fixed base material"}</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>{baseMaterialMode === "option" ? "Tick the real inventory items. Choose one as the normal default." : "This material is always used for costing and stock."}</p></div>
+            <input value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Search substrates or roll stock" style={{ ...input, maxWidth: 320 }} />
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10 }}>
+            {mainMaterials.map((material) => {
+              const selected = baseMaterialMode === "option"
+                ? baseMaterialChoices.some((choice) => choice.materialId === material.id)
+                : material.id === materialId;
+              return <article key={material.id} style={{ ...choiceCardStyle(selected), cursor: "default", display: "grid", gap: 8 }}>
+                <button type="button" onClick={() => baseMaterialMode === "option" ? toggleBaseMaterialChoice(material) : chooseFixedMaterial(material.id)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{selected ? "✓ " : "+ "}{material.name}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{materialDescription(material)}</span>{material.sku ? <span style={{ display: "block", color: "#94a3b8", fontSize: 11, marginTop: 4 }}>{material.sku}</span> : null}</button>
+                {baseMaterialMode === "option" && selected ? <button type="button" onClick={() => { setMaterialId(material.id); markChanged(); }} style={{ minHeight: 34, border: materialId === material.id ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: materialId === material.id ? "#2563eb" : "#fff", color: materialId === material.id ? "#fff" : "#334155", fontWeight: 900, cursor: "pointer" }}>{materialId === material.id ? "Default answer" : "Make default"}</button> : null}
+              </article>;
+            })}
+          </div>
+          {!mainMaterials.length && materialSearch ? <div style={{ padding: 13, borderRadius: 12, background: "#fff7ed", color: "#9a3412" }}>No materials match “{materialSearch}”.</div> : null}
+        </div> : null}
+
+        {baseMaterialMode === "option" ? <div style={{ display: "grid", gap: 11, marginTop: 17, padding: 15, borderRadius: 15, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
+          <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Customer question<span style={{ fontSize: 12, color: "#64748b", fontWeight: 650 }}>For Acrylic, use “Acrylic thickness” or “Acrylic colour and thickness”.</span><input value={baseMaterialQuestionLabel} onChange={(event) => { setBaseMaterialQuestionLabel(event.target.value); markChanged(); }} style={input} /></label>
+          {baseMaterialChoices.length ? <div style={{ display: "grid", gap: 8 }}>
+            <strong>Customer choice labels</strong>
+            {baseMaterialChoices.map((choice) => {
+              const material = materials.find((item) => item.id === choice.materialId);
+              return <div key={choice.materialId} style={{ display: "grid", gridTemplateColumns: "minmax(180px,1fr) minmax(180px,1fr)", gap: 9, alignItems: "center" }}><span style={{ color: "#475569", fontWeight: 800 }}>{material?.name ?? choice.materialId}</span><input value={choice.label} onChange={(event) => updateBaseMaterialChoiceLabel(choice.materialId, event.target.value)} placeholder="Label shown to customer" style={input} /></div>;
+            })}
+          </div> : <div style={{ color: "#9a3412", fontWeight: 800 }}>Select at least one material above.</div>}
+        </div> : null}
         {stepNavigation}
       </section> : null}
 
@@ -646,7 +744,8 @@ export function ProductProductionFlowBuilder({
         <h3 style={{ margin: 0 }}>9. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This single save updates the reusable quote product, production flow and website fields together.</p>
         <div style={{ display: "grid", gap: 9, padding: 16, borderRadius: 14, background: "#fff", border: "1px solid #ccfbf1" }}>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Product summary</div>
-          <h3 style={{ margin: 0 }}>{selectedMaterial?.name ?? "No physical material"} · {width} × {height} mm · Qty {quantity}</h3>
+          <h3 style={{ margin: 0 }}>{baseMaterialMode === "option" ? `${baseMaterialQuestionLabel}: ${baseMaterialChoices.map((choice) => choice.label || materials.find((material) => material.id === choice.materialId)?.name).filter(Boolean).join(", ") || "No choices"}` : selectedMaterial?.name ?? "No physical material"} · {width} × {height} mm · Qty {quantity}</h3>
+          {baseMaterialMode === "option" ? <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Default base material:</b> {baseMaterialChoices.find((choice) => choice.materialId === materialId)?.label ?? selectedMaterial?.name ?? "Not selected"} · Each answer is linked to its own inventory material.</div> : null}
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Print choices:</b> {printOptions.map((value) => printChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {printChoices.find((choice) => choice.value === defaultPrintMethod)?.label ?? defaultPrintMethod}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Roll media:</b> {selectedRollMedia?.name ?? "Chosen while quoting"} · <b>Ink choices:</b> {inkOptions.map((value) => inkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {inkChoices.find((choice) => choice.value === defaultInk)?.label ?? defaultInk}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Laminate choices:</b> {laminateNames.length ? `None, ${laminateNames.join(", ")}` : "None"} · <b>Default:</b> {selectedDefaultLaminate?.name ?? "None"}</div>

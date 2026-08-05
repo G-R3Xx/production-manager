@@ -309,7 +309,7 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
 }
 
 function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
-  const standardOrder = new Map(["finished_size", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"].map((key, index) => [key, index]));
+  const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
   asArray(definition.fields).forEach((rawField, sourceIndex) => {
@@ -633,7 +633,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.05.05",
+    version: "V26.08.05.06",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),

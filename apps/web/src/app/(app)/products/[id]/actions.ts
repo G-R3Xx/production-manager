@@ -98,6 +98,37 @@ function parseStringArrayJson(value: string): string[] {
   }
 }
 
+type BaseMaterialChoiceInput = {
+  materialId: string;
+  label: string;
+  materialName: string;
+  isRoll: boolean;
+};
+
+function parseBaseMaterialChoices(value: string): BaseMaterialChoiceInput[] {
+  if (!value) return [];
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (!Array.isArray(parsed)) return [];
+    const seen = new Set<string>();
+    return parsed.flatMap((entry): BaseMaterialChoiceInput[] => {
+      const row = asObject(entry);
+      const materialId = String(row.materialId ?? "").trim();
+      if (!materialId || seen.has(materialId)) return [];
+      seen.add(materialId);
+      const materialName = String(row.materialName ?? "").trim();
+      return [{
+        materialId,
+        label: String(row.label ?? materialName ?? "Material").trim() || materialName || "Material",
+        materialName: materialName || String(row.label ?? "Material").trim() || "Material",
+        isRoll: row.isRoll === true
+      }];
+    });
+  } catch {
+    return [];
+  }
+}
+
 function internalChoice(
   label: string,
   value: string,
@@ -146,6 +177,9 @@ function mergeInternalQuoteFields(
     height: number;
     quantity: number;
     wastePercent: number;
+    baseMaterialMode: "fixed" | "option" | "none";
+    baseMaterialQuestionLabel: string;
+    baseMaterialChoices: BaseMaterialChoiceInput[];
     mainMaterialId: string | null;
     mainMaterialName: string | null;
     mainMaterialIsRoll: boolean;
@@ -175,6 +209,7 @@ function mergeInternalQuoteFields(
   const removeSeparateRollStockQuestion = input.mainMaterialIsRoll || Boolean(input.rollMediaId);
   const existingFields = (Array.isArray(definition.fields) ? [...definition.fields] : [])
     .filter((field: any) => String(field?.key ?? "") !== "quantity")
+    .filter((field: any) => String(field?.key ?? "") !== "base_material")
     .filter((field: any) => !(removeSeparateRollStockQuestion && String(field?.key ?? "") === "roll_stock_type"));
   const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
   const sizeValue = `${Math.round(input.width)}x${Math.round(input.height)}`;
@@ -232,6 +267,26 @@ function mergeInternalQuoteFields(
       ]
     };
   });
+
+  if (input.baseMaterialMode === "option" && input.baseMaterialChoices.length) {
+    const defaultMaterialId = input.baseMaterialChoices.some((choice) => choice.materialId === input.mainMaterialId)
+      ? input.mainMaterialId
+      : input.baseMaterialChoices[0].materialId;
+    existingFields.push({
+      id: randomUUID(),
+      key: "base_material",
+      label: input.baseMaterialQuestionLabel || "Material / thickness",
+      type: "select",
+      required: true,
+      defaultValue: defaultMaterialId,
+      helpText: "Choose the base stock used to manufacture this product.",
+      quoteOnly: true,
+      showWhen: null,
+      meta: { source: "internal_product_setup", websiteVisible: true, selectsInventoryMaterial: true },
+      options: input.baseMaterialChoices.map((choice) => internalChoice(choice.label, choice.materialId)),
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    });
+  }
 
   const printLabels: Record<string, string> = { none: "No print", direct_print: "Direct print", roll_stock: "Roll print / applied media" };
   const quotePrintMethod = input.printMethod === "roll_print" ? "roll_stock" : input.printMethod;
@@ -496,7 +551,7 @@ function mergeInternalQuoteFields(
     const label = String(component.label ?? "").toLowerCase();
     const notes = String(component.notes ?? "").toLowerCase();
     const managedNote = notes.includes("quick product builder") || notes.includes("guided product builder") || notes.includes("guided workflow") || notes.includes("internal product setup");
-    if (role === "base_material") return false;
+    if (["base_material", "option_selected_base_material"].includes(role)) return false;
     if (managedNote && ["print_method", "ink", "laminate"].includes(triggerKey)) return false;
     if (managedNote && isEyeletComponent(component)) return false;
     if (role === "quote_sell_charge" && (triggerKey === "ink" || (label.includes("ink") && (triggerKey === "print_method" || notes.includes("simple print charge"))))) return false;
@@ -504,7 +559,7 @@ function mergeInternalQuoteFields(
     return true;
   });
 
-  if (input.mainMaterialId) {
+  if (input.baseMaterialMode === "fixed" && input.mainMaterialId) {
     const isRoll = input.mainMaterialIsRoll;
     components.push({
       id: randomUUID(),
@@ -528,6 +583,33 @@ function mergeInternalQuoteFields(
       },
       trigger: { optionKey: null, optionValue: null, optionValues: [] }
     });
+  }
+
+  if (input.baseMaterialMode === "option") {
+    for (const choice of input.baseMaterialChoices) {
+      components.push({
+        id: randomUUID(),
+        kind: "material",
+        role: "option_selected_base_material",
+        materialId: choice.materialId,
+        supplierId: null,
+        labourRateName: null,
+        label: choice.materialName,
+        quantity: "1",
+        unit: choice.isRoll ? "lm" : "sheet",
+        notes: `Base material selected by the ${input.baseMaterialQuestionLabel || "Material / thickness"} option.`,
+        ruleType: choice.isRoll ? "per_linear_metre" : "yield_based",
+        wastePercent: baseWastePercent,
+        stockUsage: {
+          usageBasis: choice.isRoll ? "per_linear_metre" : "yield_based",
+          dimensionSource: "finished_size",
+          optionKey: "base_material",
+          optionValues: [choice.materialId],
+          widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
+        },
+        trigger: { optionKey: "base_material", optionValue: null, optionValues: [choice.materialId] }
+      });
+    }
   }
 
   if (input.rollMediaId && input.rollMediaId !== input.mainMaterialId && allowedPrintMethods.includes("roll_stock")) {
@@ -680,7 +762,7 @@ function mergeInternalQuoteFields(
     }
   }
 
-  const standardOrder = ["finished_size", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
+  const standardOrder = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
@@ -712,9 +794,22 @@ export async function saveInternalProductSetupAction(formData: FormData) {
     ? (["roll_print", "roll_stock_applied"].includes(read(formData, "printMethod")) ? "roll_stock" : read(formData, "printMethod"))
     : "none";
   const printMethods = uniqueStrings(read(formData, "printMethodsCsv").split(",")).filter((value) => ["none", "direct_print", "roll_stock", "roll_print", "roll_stock_applied"].includes(value)).map((value) => ["roll_print", "roll_stock_applied"].includes(value) ? "roll_stock" : value);
-  const mainMaterialId = read(formData, "materialId") || null;
-  const mainMaterialName = read(formData, "mainMaterialName") || null;
-  const mainMaterialIsRoll = read(formData, "mainMaterialIsRoll") === "1";
+  const requestedBaseMaterialMode = read(formData, "baseMaterialMode");
+  const baseMaterialMode = (["fixed", "option", "none"].includes(requestedBaseMaterialMode) ? requestedBaseMaterialMode : "fixed") as "fixed" | "option" | "none";
+  const baseMaterialQuestionLabel = read(formData, "baseMaterialQuestionLabel") || "Material / thickness";
+  const baseMaterialChoices = parseBaseMaterialChoices(read(formData, "baseMaterialChoicesJson"));
+  if (baseMaterialMode === "option" && !baseMaterialChoices.length) {
+    redirect(`/products/${productId}?tab=build&error=Choose%20at%20least%20one%20base%20material`);
+  }
+  const requestedMainMaterialId = read(formData, "materialId") || null;
+  const selectedOptionMaterial = baseMaterialMode === "option"
+    ? baseMaterialChoices.find((choice) => choice.materialId === requestedMainMaterialId) ?? baseMaterialChoices[0]
+    : null;
+  const mainMaterialId = baseMaterialMode === "none"
+    ? null
+    : selectedOptionMaterial?.materialId ?? requestedMainMaterialId;
+  const mainMaterialName = selectedOptionMaterial?.materialName ?? (read(formData, "mainMaterialName") || null);
+  const mainMaterialIsRoll = selectedOptionMaterial?.isRoll ?? (read(formData, "mainMaterialIsRoll") === "1");
   const rollMediaId = read(formData, "rollMediaId") || null;
   const rollMediaName = read(formData, "rollMediaName") || null;
   const inkChoices = uniqueStrings(read(formData, "inkChoicesCsv").split(",")).filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value));
@@ -762,6 +857,9 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       height,
       quantity,
       wastePercent,
+      baseMaterialMode,
+      baseMaterialQuestionLabel,
+      baseMaterialChoices,
       mainMaterialId,
       mainMaterialName,
       mainMaterialIsRoll,
