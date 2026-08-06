@@ -68,6 +68,10 @@ export type QuoteComponent = {
     quantityPresets?: QuantityPreset[] | null;
     allowCustomQuantity?: boolean | null;
     customQuantityLabel?: string | null;
+    quantityOptionKey?: string | null;
+    quantityCustomFieldKey?: string | null;
+    quantityValueMap?: Record<string, string | number | null> | null;
+    quantityUnitLabel?: string | null;
   } | null;
   trigger?: {
     optionKey?: string | null;
@@ -340,6 +344,31 @@ function followUpSelectionLabel(followUp: FollowUpOption, followUpAnswers: Recor
   }
   const preset = followUp.presets.find((item) => presetValue(item) === selected);
   return String(preset?.label ?? selected).trim();
+}
+
+function optionQuantityMultiplierFor(component: QuoteComponent, answers: Record<string, string>): { multiplier: number; note?: string } | null {
+  const stockUsage = component.stockUsage;
+  if (String(stockUsage?.quantitySource ?? "") !== "option_quantity") return null;
+  const optionKey = String(stockUsage?.quantityOptionKey ?? "").trim();
+  if (!optionKey) return { multiplier: 1, note: "quantity option is not configured" };
+
+  const selected = String(answers[optionKey] ?? "").trim();
+  const quantityMap = stockUsage?.quantityValueMap && typeof stockUsage.quantityValueMap === "object"
+    ? stockUsage.quantityValueMap
+    : {};
+  const mapped = quantityMap[selected];
+  const customFieldKey = String(stockUsage?.quantityCustomFieldKey ?? "").trim();
+  const useCustom = String(mapped ?? "").toLowerCase() === "custom";
+  const quantity = useCustom
+    ? Math.max(0, numberValue(answers[customFieldKey], 0))
+    : Math.max(0, numberValue(mapped, 0));
+  const unitLabel = String(stockUsage?.quantityUnitLabel ?? "items per finished unit").trim();
+  const selectedLabel = selected ? humanize(selected) : "No selection";
+
+  return {
+    multiplier: quantity,
+    note: `${selectedLabel} = ${formatUsage(quantity)} ${unitLabel}`
+  };
 }
 
 function followUpMultiplierFor(component: QuoteComponent, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): { multiplier: number; note?: string } {
@@ -767,7 +796,8 @@ function componentCostBreakdownFor(
       const rawRuleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
       const dimensions = dimensionsForComponent(product.fields, answers, component);
       const baseAllowance = componentAllowance(component);
-      const followUp = followUpMultiplierFor(component, followUpAnswers, customFollowUpAnswers);
+      const optionQuantity = optionQuantityMultiplierFor(component, answers);
+      const followUp = optionQuantity ?? followUpMultiplierFor(component, followUpAnswers, customFollowUpAnswers);
       const answerMultiplier = componentAnswerMultiplier(product, component, answers);
       const allowance = baseAllowance * followUp.multiplier * answerMultiplier.multiplier;
       const waste = wasteMultiplier(component);
@@ -1217,6 +1247,17 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="productId" value={selectedProductId} />
       <input type="hidden" name="optionSummary" value={autoSummary} />
+      <input type="hidden" name="configurationSnapshot" value={JSON.stringify({
+        source: "saved_product_builder",
+        productId: selectedProductId,
+        answers,
+        followUpAnswers,
+        customFollowUpAnswers,
+        materialBreakdown,
+        unitCost: autoUnitCost,
+        unitPrice: autoUnitPrice,
+        quantity: quantityNumber
+      })} />
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
 
       <label style={labelStyle}>

@@ -101,6 +101,10 @@ type SavedQuoteComponent = {
     quantityPresets?: Array<{ id?: string | null; label?: string | null; value?: string | null; qty?: string | number | null }> | null;
     allowCustomQuantity?: boolean | null;
     customQuantityLabel?: string | null;
+    quantityOptionKey?: string | null;
+    quantityCustomFieldKey?: string | null;
+    quantityValueMap?: Record<string, string | number | null> | null;
+    quantityUnitLabel?: string | null;
   } | null;
   trigger?: {
     optionKey?: string | null;

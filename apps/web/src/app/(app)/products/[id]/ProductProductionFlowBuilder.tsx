@@ -81,6 +81,10 @@ type Props = {
   initialFinishingOptions: string[];
   initialEyeletMaterialId: string;
   initialEyeletPreset: string;
+  initialMountingHardwareEnabled: boolean;
+  initialHolePreset: string;
+  initialSilverStandoffMaterialId: string;
+  initialBlackStandoffMaterialId: string;
   preview: PreviewSummary;
   previewWidth: number;
   previewHeight: number;
@@ -108,6 +112,13 @@ const eyeletPresets = [
   { value: "centre_top_bottom", label: "Centre top + bottom", qty: 2 },
   { value: "pole_fixing", label: "2 top + 2 bottom for pole fixing", qty: 4 },
   { value: "__custom", label: "Ask for a custom quantity", qty: 0 }
+];
+
+const holePresets = [
+  { value: "no_holes", label: "No holes", qty: 0 },
+  { value: "top_corners", label: "Top corners", qty: 2 },
+  { value: "all_corners", label: "All corners", qty: 4 },
+  { value: "custom", label: "Custom number", qty: 0 }
 ];
 
 const printChoices = [
@@ -185,14 +196,18 @@ function isEyeletMaterial(material: MaterialOption): boolean {
   return /\beyelet|grommet\b/.test(materialSearchText(material));
 }
 
+function isStandoffMaterial(material: MaterialOption): boolean {
+  return /\b(standoffs?|stand[- ]?offs?|sign mounts?|mounting spacers?)\b/.test(materialSearchText(material));
+}
+
 function isRollPrintMaterial(material: MaterialOption): boolean {
-  if (isLaminateMaterial(material) || isEyeletMaterial(material)) return false;
+  if (isLaminateMaterial(material) || isEyeletMaterial(material) || isStandoffMaterial(material)) return false;
   const text = materialSearchText(material);
   return Boolean(material.rollWidthMm) || /\broll\b|\bvinyl\b|\bsav\b|\bbanner\b|\bwallpaper\b/.test(text);
 }
 
 function isMainMaterial(material: MaterialOption): boolean {
-  if (isLaminateMaterial(material) || isEyeletMaterial(material)) return false;
+  if (isLaminateMaterial(material) || isEyeletMaterial(material) || isStandoffMaterial(material)) return false;
   const type = material.materialType.toLowerCase();
   return !["fixing", "hardware", "finishing", "binding", "item", "consumable"].includes(type);
 }
@@ -273,6 +288,10 @@ export function ProductProductionFlowBuilder({
   initialFinishingOptions,
   initialEyeletMaterialId,
   initialEyeletPreset,
+  initialMountingHardwareEnabled,
+  initialHolePreset,
+  initialSilverStandoffMaterialId,
+  initialBlackStandoffMaterialId,
   preview,
   previewWidth,
   previewHeight,
@@ -308,6 +327,10 @@ export function ProductProductionFlowBuilder({
   const [deliveryMethod, setDeliveryMethod] = useState(initialDeliveryMethod || "pickup");
   const [eyeletMaterialId, setEyeletMaterialId] = useState(initialEyeletMaterialId);
   const [eyeletPreset, setEyeletPreset] = useState(initialEyeletPreset || "four_corners");
+  const [mountingHardwareEnabled, setMountingHardwareEnabled] = useState(initialMountingHardwareEnabled);
+  const [holePreset, setHolePreset] = useState(initialHolePreset || "no_holes");
+  const [silverStandoffMaterialId, setSilverStandoffMaterialId] = useState(initialSilverStandoffMaterialId);
+  const [blackStandoffMaterialId, setBlackStandoffMaterialId] = useState(initialBlackStandoffMaterialId);
   const [dirty, setDirty] = useState(false);
 
   const selectedPresetKeys = useMemo(() => new Set(steps.map(presetKeyForStep).filter(Boolean)), [steps]);
@@ -317,6 +340,8 @@ export function ProductProductionFlowBuilder({
   const selectedRollMedia = materials.find((material) => material.id === rollMediaId);
   const selectedDefaultLaminate = materials.find((material) => material.id === defaultLaminateMaterialId);
   const selectedEyeletMaterial = materials.find((material) => material.id === eyeletMaterialId);
+  const selectedSilverStandoffMaterial = materials.find((material) => material.id === silverStandoffMaterialId);
+  const selectedBlackStandoffMaterial = materials.find((material) => material.id === blackStandoffMaterialId);
 
   const mainMaterials = useMemo(() => {
     const filtered = materials.filter((material) => isMainMaterial(material) || material.id === materialId);
@@ -326,6 +351,7 @@ export function ProductProductionFlowBuilder({
   const rollMediaMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
   const eyeletMaterials = useMemo(() => materials.filter(isEyeletMaterial), [materials]);
+  const standoffMaterials = useMemo(() => materials.filter(isStandoffMaterial), [materials]);
   const otherProcesses = processes.filter((process) => !selectedTokens.has(process.id) && !productionFlowPresets.some((preset) => normalizeProductionFlowName(preset.name) === normalizeProductionFlowName(process.name)));
 
   const markChanged = () => setDirty(true);
@@ -583,6 +609,12 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="eyeletMaterialId" value={eyeletMaterialId} />
       <input type="hidden" name="eyeletMaterialName" value={selectedEyeletMaterial?.name ?? "Eyelets"} />
       <input type="hidden" name="eyeletPreset" value={eyeletPreset} />
+      <input type="hidden" name="mountingHardwareEnabled" value={mountingHardwareEnabled ? "1" : "0"} />
+      <input type="hidden" name="holePreset" value={holePreset} />
+      <input type="hidden" name="silverStandoffMaterialId" value={silverStandoffMaterialId} />
+      <input type="hidden" name="silverStandoffMaterialName" value={selectedSilverStandoffMaterial?.name ?? "Silver standoff"} />
+      <input type="hidden" name="blackStandoffMaterialId" value={blackStandoffMaterialId} />
+      <input type="hidden" name="blackStandoffMaterialName" value={selectedBlackStandoffMaterial?.name ?? "Black standoff"} />
 
       {activeStep === "material" ? <section style={panel}>
         <div><h3 style={{ margin: 0 }}>1. Choose how the base material is selected</h3><p style={{ margin: "5px 0 0", color: "#64748b" }}>Use one fixed stock item, let the quote or website choice select the stock, or create a service-only product.</p></div>
@@ -705,6 +737,28 @@ export function ProductProductionFlowBuilder({
           </div>
           <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Eyelet stock / hardware, optional<select value={eyeletMaterialId} onChange={(event) => { setEyeletMaterialId(event.target.value); markChanged(); }} style={input}><option value="">Cost labour only / no eyelet stock linked</option>{eyeletMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
         </div> : null}
+
+        <div style={{ display: "grid", gap: 12, padding: 15, borderRadius: 15, background: mountingHardwareEnabled ? "#eff6ff" : "#f8fafc", border: mountingHardwareEnabled ? "1px solid #bfdbfe" : "1px solid #dbe4f0", marginTop: 15 }}>
+          <button type="button" onClick={() => { setMountingHardwareEnabled((current) => !current); markChanged(); }} style={{ ...choiceCardStyle(mountingHardwareEnabled), minHeight: 72 }}>
+            <strong>{mountingHardwareEnabled ? "✓ " : "+ "}Drilled holes and standoffs</strong>
+            <span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>Reusable for acrylic, ACM, aluminium, PVC and other rigid signs. The selected hole count automatically drives the standoff material quantity.</span>
+          </button>
+          {mountingHardwareEnabled ? <>
+            <div>
+              <strong style={{ color: "#1e3a8a" }}>Default hole layout</strong>
+              <p style={{ margin: "4px 0 0", color: "#475569", fontSize: 13 }}>Staff can choose No holes, 2 top-corner holes, 4 corner holes or enter a custom number on each quote.</p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8 }}>
+              {holePresets.map((preset) => <button key={preset.value} type="button" onClick={() => { setHolePreset(preset.value); markChanged(); }} style={{ ...choiceCardStyle(holePreset === preset.value), minHeight: 66 }}><strong>{preset.label}</strong>{preset.qty ? <span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{preset.qty} holes per sign</span> : null}</button>)}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 10 }}>
+              <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Silver standoff material<select value={silverStandoffMaterialId} onChange={(event) => { setSilverStandoffMaterialId(event.target.value); markChanged(); }} style={input}><option value="">Not available</option>{standoffMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+              <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Black standoff material<select value={blackStandoffMaterialId} onChange={(event) => { setBlackStandoffMaterialId(event.target.value); markChanged(); }} style={input}><option value="">Not available</option>{standoffMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+            </div>
+            {!standoffMaterials.length ? <div style={{ padding: 12, borderRadius: 11, background: "#fff7ed", color: "#9a3412" }}>Add Silver Standoff and Black Standoff under Materials as individual <b>each</b> items. They will then appear here.</div> : null}
+            <div style={{ padding: 11, borderRadius: 11, background: "#fff", color: "#334155", fontSize: 13 }}><b>Calculation:</b> standoffs per sign = selected holes. Quote quantity then multiplies the finished material requirement automatically.</div>
+          </> : null}
+        </div>
         {stepNavigation}
       </section> : null}
 
@@ -752,6 +806,7 @@ export function ProductProductionFlowBuilder({
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Artwork choices:</b> {artworkOptions.map((value) => artworkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {artworkChoices.find((choice) => choice.value === defaultArtwork)?.label ?? defaultArtwork}{artworkOptions.includes("artwork_check") ? ` · Check ${currency.format(artworkCheckPrice)}` : ""}{artworkOptions.includes("artwork_required") ? ` · Design ${currency.format(artworkDesignPrice)}` : ""}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Finishing defaults:</b> {finishingValues.length ? finishingValues.map((value) => finishingChoices.find((choice) => choice.value === value)?.label ?? value).join(", ") : "None"} · <b>Supply:</b> {deliveryMethod}{deliveryMethod === "delivery" ? ` (${currency.format(deliveryFee)})` : deliveryMethod === "install" ? " (tailored quote)" : " (no charge)"}</div>
           {finishingValues.includes("eyelets") ? <div style={{ color: "#9a3412" }}><b>Eyelets:</b> {eyeletPresets.find((preset) => preset.value === eyeletPreset)?.label ?? "4 corners"}{selectedEyeletMaterial ? ` · ${selectedEyeletMaterial.name}` : ""}</div> : null}
+          {mountingHardwareEnabled ? <div style={{ color: "#1e3a8a" }}><b>Holes / standoffs:</b> {holePresets.find((preset) => preset.value === holePreset)?.label ?? "No holes"} · Silver: {selectedSilverStandoffMaterial?.name ?? "not available"} · Black: {selectedBlackStandoffMaterial?.name ?? "not available"}</div> : null}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
           <button type="button" onClick={() => setActiveStep("fulfilment")} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← Supply</button>

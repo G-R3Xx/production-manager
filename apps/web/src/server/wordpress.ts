@@ -309,7 +309,7 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
 }
 
 function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
-  const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"].map((key, index) => [key, index]));
+  const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_custom_quantity", "standoffs", "artwork", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
   asArray(definition.fields).forEach((rawField, sourceIndex) => {
@@ -633,7 +633,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.05.06",
+    version: "V26.08.06.01",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -757,6 +757,20 @@ function materialRate(material: WebsitePricingMaterial, basis: "lm" | "sqm" | "s
   return purchaseCost;
 }
 
+function optionQuantityMultiplier(component: Record<string, unknown>, answers: Record<string, unknown>): number | null {
+  const stockUsage = asObject(component.stockUsage);
+  if (text(stockUsage.quantitySource) !== "option_quantity") return null;
+  const optionKey = text(stockUsage.quantityOptionKey);
+  if (!optionKey) return 1;
+  const selected = text(answers[optionKey]);
+  const quantityValueMap = asObject(stockUsage.quantityValueMap);
+  const mapped = quantityValueMap[selected];
+  if (text(mapped).toLowerCase() === "custom") {
+    return Math.max(0, numberValue(answers[text(stockUsage.quantityCustomFieldKey)]));
+  }
+  return Math.max(0, numberValue(mapped));
+}
+
 function followUpMultiplier(component: Record<string, unknown>, answers: Record<string, unknown>): number {
   const stockUsage = asObject(component.stockUsage);
   const label = `${text(component.label)} ${text(component.notes)} ${text(stockUsage.quantityPrompt)}`.toLowerCase();
@@ -788,7 +802,7 @@ function optionalComponentCostTotal(
     const allowance = Math.max(0, numberValue(component.quantity, 1));
     const wastePercent = Math.max(0, numberValue(component.wastePercent));
     const wasteMultiplier = 1 + wastePercent / 100;
-    const answerMultiplier = followUpMultiplier(component, answers);
+    const answerMultiplier = optionQuantityMultiplier(component, answers) ?? followUpMultiplier(component, answers);
 
     if (ruleType === "choice_only") continue;
     if (ruleType === "sell_sqm") {

@@ -202,6 +202,12 @@ function mergeInternalQuoteFields(
     eyeletMaterialId: string | null;
     eyeletMaterialName: string | null;
     eyeletPreset: string;
+    mountingHardwareEnabled: boolean;
+    holePreset: string;
+    silverStandoffMaterialId: string | null;
+    silverStandoffMaterialName: string | null;
+    blackStandoffMaterialId: string | null;
+    blackStandoffMaterialName: string | null;
   }
 ) {
   // Quantity is controlled by WooCommerce and by the quote line itself. Remove
@@ -542,6 +548,91 @@ function mergeInternalQuoteFields(
     }));
   }
 
+  if (input.mountingHardwareEnabled) {
+    const holeOptions = [
+      internalChoice("No holes", "no_holes"),
+      internalChoice("Top Corners (2)", "top_corners"),
+      internalChoice("All Corners (4)", "all_corners"),
+      internalChoice("Custom Number", "custom")
+    ];
+    upsert("holes_drilled", () => ({
+      id: randomUUID(),
+      key: "holes_drilled",
+      label: "Holes drilled",
+      type: "select",
+      required: true,
+      defaultValue: input.holePreset || "no_holes",
+      helpText: "Choose the number and placement of holes drilled in each finished sign.",
+      quoteOnly: true,
+      showWhen: null,
+      meta: { source: "internal_product_setup", websiteVisible: true, calculatedQuantitySource: true },
+      options: holeOptions,
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => ({
+      ...field,
+      label: "Holes drilled",
+      type: "select",
+      required: true,
+      defaultValue: input.holePreset || "no_holes",
+      helpText: "Choose the number and placement of holes drilled in each finished sign.",
+      meta: standardMeta(field, { calculatedQuantitySource: true }),
+      options: holeOptions
+    }));
+
+    upsert("hole_custom_quantity", () => ({
+      id: randomUUID(),
+      key: "hole_custom_quantity",
+      label: "Custom number of holes",
+      type: "quantity",
+      required: true,
+      defaultValue: "4",
+      helpText: "Enter the number of holes per sign.",
+      quoteOnly: true,
+      showWhen: { optionKey: "holes_drilled", optionValues: ["custom"] },
+      meta: { source: "internal_product_setup", websiteVisible: true, minimum: 1, step: 1 },
+      options: [],
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => ({
+      ...field,
+      label: "Custom number of holes",
+      type: "quantity",
+      required: true,
+      defaultValue: String(field.defaultValue || "4"),
+      helpText: "Enter the number of holes per sign.",
+      showWhen: { optionKey: "holes_drilled", optionValues: ["custom"] },
+      meta: standardMeta(field, { minimum: 1, step: 1 }),
+      options: []
+    }));
+
+    const standoffOptions = [internalChoice("No", "no")];
+    if (input.silverStandoffMaterialId) standoffOptions.push(internalChoice("Silver", "silver"));
+    if (input.blackStandoffMaterialId) standoffOptions.push(internalChoice("Black", "black"));
+    upsert("standoffs", () => ({
+      id: randomUUID(),
+      key: "standoffs",
+      label: "Standoffs",
+      type: "select",
+      required: true,
+      defaultValue: "no",
+      helpText: "One standoff is added for every drilled hole.",
+      quoteOnly: true,
+      showWhen: { optionKey: "holes_drilled", optionValues: ["top_corners", "all_corners", "custom"] },
+      meta: { source: "internal_product_setup", websiteVisible: true },
+      options: standoffOptions,
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => ({
+      ...field,
+      label: "Standoffs",
+      type: "select",
+      required: true,
+      defaultValue: standoffOptions.some((option) => String(option.value) === String(field.defaultValue)) ? field.defaultValue : "no",
+      helpText: "One standoff is added for every drilled hole.",
+      showWhen: { optionKey: "holes_drilled", optionValues: ["top_corners", "all_corners", "custom"] },
+      meta: standardMeta(field),
+      options: standoffOptions
+    }));
+  }
+
   let components = Array.isArray(definition.components) ? [...definition.components] : [];
   const baseWastePercent = String(Math.max(0, input.wastePercent));
   components = components.filter((rawComponent: any) => {
@@ -554,6 +645,7 @@ function mergeInternalQuoteFields(
     if (["base_material", "option_selected_base_material"].includes(role)) return false;
     if (managedNote && ["print_method", "ink", "laminate"].includes(triggerKey)) return false;
     if (managedNote && isEyeletComponent(component)) return false;
+    if ((role === "calculated_fixing_material" && triggerKey === "standoffs") || notes.includes("calculated hole quantity")) return false;
     if (role === "quote_sell_charge" && (triggerKey === "ink" || (label.includes("ink") && (triggerKey === "print_method" || notes.includes("simple print charge"))))) return false;
     if (role === "quote_selected_material" && !component.materialId && (label.includes("roll stock") || label.includes("print media"))) return false;
     return true;
@@ -762,12 +854,49 @@ function mergeInternalQuoteFields(
     }
   }
 
-  const standardOrder = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
+  if (input.mountingHardwareEnabled) {
+    const quantityValueMap = { no_holes: 0, top_corners: 2, all_corners: 4, custom: "custom" };
+    const addStandoffComponent = (value: "silver" | "black", materialId: string | null, materialName: string | null) => {
+      if (!materialId) return;
+      components.push({
+        id: randomUUID(),
+        kind: "material",
+        role: "calculated_fixing_material",
+        materialId,
+        supplierId: null,
+        labourRateName: null,
+        label: materialName || `${value === "silver" ? "Silver" : "Black"} standoff`,
+        quantity: "1",
+        unit: "each",
+        notes: "Standoff material quantity is driven by the calculated hole quantity per finished sign.",
+        ruleType: "per_unit",
+        wastePercent: "0",
+        stockUsage: {
+          usageBasis: "per_unit",
+          dimensionSource: "quantity_only",
+          optionKey: "standoffs",
+          optionValues: [value],
+          widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null,
+          quantitySource: "option_quantity",
+          quantityOptionKey: "holes_drilled",
+          quantityCustomFieldKey: "hole_custom_quantity",
+          quantityValueMap,
+          quantityUnitLabel: "holes per sign"
+        },
+        trigger: { optionKey: "standoffs", optionValue: null, optionValues: [value] }
+      });
+    };
+    addStandoffComponent("silver", input.silverStandoffMaterialId, input.silverStandoffMaterialName);
+    addStandoffComponent("black", input.blackStandoffMaterialId, input.blackStandoffMaterialName);
+  }
+
+  const standardOrder = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_custom_quantity", "standoffs", "artwork", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
     .filter((field: any) => !(removeSeparateRollStockQuestion && String(field?.key ?? "") === "roll_stock_type"))
     .filter((field: any) => input.finishings.includes("eyelets") || !["eyelet_placement", "eyelet_custom_quantity"].includes(String(field?.key ?? "")))
+    .filter((field: any) => input.mountingHardwareEnabled || !["holes_drilled", "hole_custom_quantity", "standoffs"].includes(String(field?.key ?? "")))
     .map((field: any, index: number) => ({ field, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex.get(String(left.field?.key ?? ""));
@@ -829,6 +958,12 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const eyeletMaterialId = read(formData, "eyeletMaterialId") || null;
   const eyeletMaterialName = read(formData, "eyeletMaterialName") || null;
   const eyeletPreset = ["four_corners", "top_corners_only", "centre_top_bottom", "pole_fixing", "__custom"].includes(read(formData, "eyeletPreset")) ? read(formData, "eyeletPreset") : "four_corners";
+  const mountingHardwareEnabled = read(formData, "mountingHardwareEnabled") === "1";
+  const holePreset = ["no_holes", "top_corners", "all_corners", "custom"].includes(read(formData, "holePreset")) ? read(formData, "holePreset") : "no_holes";
+  const silverStandoffMaterialId = read(formData, "silverStandoffMaterialId") || null;
+  const silverStandoffMaterialName = read(formData, "silverStandoffMaterialName") || null;
+  const blackStandoffMaterialId = read(formData, "blackStandoffMaterialId") || null;
+  const blackStandoffMaterialName = read(formData, "blackStandoffMaterialName") || null;
 
   try {
     const steps = parseProductionFlowSteps(read(formData, "flowJson"));
@@ -881,7 +1016,13 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       defaultLaminateMaterialId,
       eyeletMaterialId,
       eyeletMaterialName,
-      eyeletPreset
+      eyeletPreset,
+      mountingHardwareEnabled,
+      holePreset,
+      silverStandoffMaterialId,
+      silverStandoffMaterialName,
+      blackStandoffMaterialId,
+      blackStandoffMaterialName
     });
     await updateConfiguratorDefinitionJson(
       tenant.tenantId,

@@ -70,7 +70,7 @@ function normaliseSharedField(field: Record<string, any>): Record<string, any> {
 }
 
 function sharedFieldOrder(field: Record<string, any>, index: number): number {
-  const order = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "artwork", "delivery_method"];
+  const order = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_custom_quantity", "standoffs", "artwork", "delivery_method"];
   const standard = order.indexOf(String(field.key ?? ""));
   return standard >= 0 ? standard : 1000 + index;
 }
@@ -157,6 +157,18 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     return /eyelet|grommet/i.test(`${String(component.label ?? "")} ${String(usage.quantityPrompt ?? "")}`) && asArray(usage.quantityPresets).length > 0;
   });
   const initialEyeletPreset = String(asObject(asArray(asObject(eyeletFollowUpComponent?.stockUsage).quantityPresets)[0]).value ?? "four_corners");
+  const holesField = fields.find((field) => String(field.key ?? "") === "holes_drilled") ?? null;
+  const initialMountingHardwareEnabled = Boolean(holesField);
+  const initialHolePreset = String(holesField?.defaultValue ?? "no_holes");
+  const standoffComponents = definitionComponents.filter((component) => {
+    const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
+    return Boolean(component.materialId) && (String(component.role ?? "") === "calculated_fixing_material" || triggerKey === "standoffs");
+  });
+  const standoffComponentFor = (value: string) => standoffComponents.find((component) => {
+    const values = asArray(asObject(component.trigger).optionValues).concat(asArray(asObject(component.stockUsage).optionValues)).map(String);
+    return values.includes(value);
+  });
+  const linkedStandoffMaterialIds = new Set(standoffComponents.map((component) => String(component.materialId ?? "")).filter(Boolean));
   const configuredWebsiteImages = asArray(config.websiteImages).flatMap((value, index): WebsiteImageItem[] => {
     const image = asObject(value);
     const url = String(image.url ?? "").trim();
@@ -287,7 +299,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         productId={product.id}
         department={product.department}
         currentStatus={product.status}
-        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id)).map((material) => ({
+        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id) || linkedStandoffMaterialIds.has(material.id)).map((material) => ({
           id: material.id,
           name: material.name,
           sku: material.sku,
@@ -327,6 +339,10 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialFinishingOptions={initialFinishingOptions}
         initialEyeletMaterialId={String(eyeletStockComponent?.materialId ?? "")}
         initialEyeletPreset={initialEyeletPreset}
+        initialMountingHardwareEnabled={initialMountingHardwareEnabled}
+        initialHolePreset={initialHolePreset}
+        initialSilverStandoffMaterialId={String(standoffComponentFor("silver")?.materialId ?? "")}
+        initialBlackStandoffMaterialId={String(standoffComponentFor("black")?.materialId ?? "")}
         preview={pricingPreview ? {
           materialCost: pricingPreview.materialCost,
           machineCost: pricingPreview.machineCost,
