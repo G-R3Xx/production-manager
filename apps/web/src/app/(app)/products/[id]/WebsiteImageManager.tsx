@@ -429,7 +429,7 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
           <div style={{ display: "grid", gap: 8, padding: 10, borderRadius: 10, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
             <div>
               <strong style={{ display: "block", fontSize: 12 }}>Change to this image when</strong>
-              <span style={{ color: "#64748b", fontSize: 11 }}>{(image.conditions ?? []).length ? "Every rule below must match." : featured ? "Default image when no option-image rule matches." : "Gallery only until a matching option is added."}</span>
+              <span style={{ color: "#64748b", fontSize: 11 }}>{(image.conditions ?? []).length ? "Only the options listed below are checked. Other product options are ignored." : featured ? "Default image when no option-image rule matches." : "Gallery only until a matching option is added."}</span>
             </div>
             {(image.conditions ?? []).map((condition, conditionIndex) => {
               const selectedField = optionFields.find((field) => field.key === condition.fieldKey);
@@ -443,7 +443,7 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
                 <button type="button" onClick={() => removeCondition(image, conditionIndex)} style={{ border: "1px solid #fecaca", borderRadius: 8, background: "#fff", color: "#b91c1c", padding: "0 8px", fontWeight: 900 }} aria-label="Remove option-image rule">×</button>
               </div>;
             })}
-            {optionFields.length > (image.conditions ?? []).length ? <button type="button" onClick={() => addCondition(image)} style={{ justifySelf: "start", border: "1px solid #bfdbfe", borderRadius: 8, background: "#eff6ff", color: "#1d4ed8", padding: "6px 9px", fontWeight: 850, cursor: "pointer" }}>+ Add matching option</button> : null}
+            {optionFields.length > (image.conditions ?? []).length ? <button type="button" onClick={() => addCondition(image)} style={{ justifySelf: "start", border: "1px solid #bfdbfe", borderRadius: 8, background: "#eff6ff", color: "#1d4ed8", padding: "6px 9px", fontWeight: 850, cursor: "pointer" }}>+ Add required option</button> : null}
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
             <button type="button" onClick={() => move(image.token, -1)} disabled={uploading || index === 0} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "6px 9px", fontWeight: 800, cursor: uploading || index === 0 ? "not-allowed" : "pointer" }}>← Earlier</button>
@@ -454,7 +454,7 @@ export function WebsiteImageManager({ productId, productName, initialImages, fea
       })}
     </div> : <div style={{ padding: 18, border: "1px dashed #94a3b8", borderRadius: 13, background: "#fff", color: "#64748b", textAlign: "center" }}>No website images yet. Add a featured image and optional gallery images.</div>}
 
-    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. The most specific matching option image wins; the featured image remains the fallback. JPG, PNG, WebP, GIF and AVIF are uploaded directly. SVG files are automatically converted to high-resolution PNG for WooCommerce.</div>
+    <div style={{ color: "#64748b", fontSize: 12 }}>Up to {MAX_IMAGES} images, 12 MB each. An image only checks the option rules attached to it; unlisted options act as wildcards. Add more than one rule only when all of those option fields must match. The most specific matching image wins and the featured image remains the fallback. JPG, PNG, WebP, GIF and AVIF are uploaded directly. SVG files are automatically converted to high-resolution PNG for WooCommerce.</div>
   </section>;
 }
 
