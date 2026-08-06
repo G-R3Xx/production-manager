@@ -295,6 +295,8 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
   let optionKey = text(raw.optionKey);
   if (optionKey === "print_type") optionKey = "print_method";
   let optionValues = asArray(raw.optionValues).map(normalizedConditionValue).filter(Boolean);
+  const numericGreaterThanRaw = Number(raw.numericGreaterThan);
+  const numericGreaterThan = Number.isFinite(numericGreaterThanRaw) ? numericGreaterThanRaw : null;
 
   // Older signage templates described the dependency in the help text but did
   // not always persist showWhen. Keep roll media choices out of the way unless
@@ -305,11 +307,11 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
   }
 
   if (!optionKey) return null;
-  return { optionKey, optionValues };
+  return numericGreaterThan == null ? { optionKey, optionValues } : { optionKey, optionValues, numericGreaterThan };
 }
 
 function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
-  const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_custom_quantity", "standoffs", "artwork", "delivery_method"].map((key, index) => [key, index]));
+  const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
   asArray(definition.fields).forEach((rawField, sourceIndex) => {
@@ -633,7 +635,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.06.02",
+    version: "V26.08.06.03",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -658,6 +660,8 @@ function fieldConditionMatches(showWhen: Record<string, unknown> | null, answers
   if (!showWhen) return true;
   const optionKey = text(showWhen.optionKey);
   if (!optionKey) return true;
+  const numericGreaterThanRaw = Number(showWhen.numericGreaterThan);
+  if (Number.isFinite(numericGreaterThanRaw)) return numberValue(answers[optionKey]) > numericGreaterThanRaw;
   const selected = selectedValues(answers[optionKey]);
   const requiredValues = asArray(showWhen.optionValues).map(text).filter(Boolean);
   return requiredValues.length
@@ -764,7 +768,7 @@ function optionQuantityMultiplier(component: Record<string, unknown>, answers: R
   if (!optionKey) return 1;
   const selected = text(answers[optionKey]);
   const quantityValueMap = asObject(stockUsage.quantityValueMap);
-  const mapped = quantityValueMap[selected];
+  const mapped = Object.prototype.hasOwnProperty.call(quantityValueMap, selected) ? quantityValueMap[selected] : selected;
   if (text(mapped).toLowerCase() === "custom") {
     return Math.max(0, numberValue(answers[text(stockUsage.quantityCustomFieldKey)]));
   }

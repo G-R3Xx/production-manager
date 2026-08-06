@@ -70,7 +70,7 @@ function normaliseSharedField(field: Record<string, any>): Record<string, any> {
 }
 
 function sharedFieldOrder(field: Record<string, any>, index: number): number {
-  const order = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_custom_quantity", "standoffs", "artwork", "delivery_method"];
+  const order = ["finished_size", "base_material", "print_method", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"];
   const standard = order.indexOf(String(field.key ?? ""));
   return standard >= 0 ? standard : 1000 + index;
 }
@@ -131,12 +131,24 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     .map(({ field }) => field);
   const websiteImageOptionFields: WebsiteImageOptionField[] = fields.flatMap((field): WebsiteImageOptionField[] => {
     const key = String(field.key ?? "").trim();
+    if (!key) return [];
     const options = asArray(field.options).flatMap((option): Array<{ value: string; label: string }> => {
       const value = String(option?.value ?? "").trim();
       if (!value) return [];
       return [{ value, label: String(option?.label ?? value) }];
     });
-    return key && options.length ? [{ key, label: String(field.label ?? key), options }] : [];
+    if (options.length) return [{ key, label: String(field.label ?? key), options }];
+    const type = String(field.type ?? "text").toLowerCase();
+    if (["number", "quantity"].includes(type)) {
+      return [{ key, label: String(field.label ?? key), options: [
+        { value: "__positive__", label: "Any number above 0" },
+        { value: "__zero__", label: "0 / none" }
+      ] }];
+    }
+    if (["text", "textarea", "note"].includes(type)) {
+      return [{ key, label: String(field.label ?? key), options: [{ value: "__has_value__", label: "Any entered text" }] }];
+    }
+    return [];
   });
   const definitionComponents = asArray(definition.components).map(asObject);
   const baseMaterialField = fields.find((field) => String(field.key ?? "") === "base_material") ?? null;
@@ -158,8 +170,15 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   });
   const initialEyeletPreset = String(asObject(asArray(asObject(eyeletFollowUpComponent?.stockUsage).quantityPresets)[0]).value ?? "four_corners");
   const holesField = fields.find((field) => String(field.key ?? "") === "holes_drilled") ?? null;
+  const legacyHoleCustomField = fields.find((field) => String(field.key ?? "") === "hole_custom_quantity") ?? null;
   const initialMountingHardwareEnabled = Boolean(holesField);
-  const initialHolePreset = String(holesField?.defaultValue ?? "no_holes");
+  const legacyHoleDefault = String(holesField?.defaultValue ?? "0");
+  const legacyHoleMap: Record<string, number> = { no_holes: 0, top_corners: 2, all_corners: 4 };
+  const initialDefaultHoleQuantity = Math.max(0, Math.round(
+    legacyHoleDefault === "custom"
+      ? (Number(legacyHoleCustomField?.defaultValue ?? 4) || 0)
+      : (legacyHoleMap[legacyHoleDefault] ?? (Number(legacyHoleDefault) || 0))
+  ));
   const standoffComponents = definitionComponents.filter((component) => {
     const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
     return Boolean(component.materialId) && (String(component.role ?? "") === "calculated_fixing_material" || triggerKey === "standoffs");
@@ -205,6 +224,15 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     const values = asArray(trigger.optionValues).concat(asArray(usage.optionValues)).map(String);
     return Boolean(component.materialId) && key === "print_method" && values.some((value) => ["roll_stock", "roll_print", "roll_stock_applied"].includes(value));
   });
+  const vinylBackingField = fieldByKey("vinyl_backing") ?? fieldByKey("vinyl_backed") ?? fieldByKey("vinyl_backing_type");
+  const vinylBackingComponents = definitionComponents.filter((component) => {
+    const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
+    return Boolean(component.materialId) && (String(component.role ?? "") === "vinyl_backing_material" || ["vinyl_backing", "vinyl_backed", "vinyl_backing_type"].includes(triggerKey));
+  });
+  const initialVinylBackingMaterialIds = Array.from(new Set(vinylBackingComponents.map((component) => String(component.materialId ?? "")).filter(Boolean)));
+  const vinylBackingDefaultRaw = String(vinylBackingField?.defaultValue ?? "none");
+  const initialDefaultVinylBackingMaterialId = initialVinylBackingMaterialIds.includes(vinylBackingDefaultRaw) ? vinylBackingDefaultRaw : "none";
+  const linkedVinylBackingMaterialIds = new Set(initialVinylBackingMaterialIds);
   const inkField = fieldByKey("ink") ?? fieldByKey("white_ink");
   const initialInkOptions = optionValues(inkField);
   const initialDefaultInk = String(inkField?.defaultValue ?? initialInkOptions[0] ?? "cmyk");
@@ -299,7 +327,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         productId={product.id}
         department={product.department}
         currentStatus={product.status}
-        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id) || linkedStandoffMaterialIds.has(material.id)).map((material) => ({
+        materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id) || linkedStandoffMaterialIds.has(material.id) || linkedVinylBackingMaterialIds.has(material.id)).map((material) => ({
           id: material.id,
           name: material.name,
           sku: material.sku,
@@ -327,6 +355,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialPrintOptions={initialPrintOptions}
         initialDefaultPrintMethod={initialDefaultPrintMethod}
         initialRollMediaId={String(rollMediaComponent?.materialId ?? "")}
+        initialVinylBackingMaterialIds={initialVinylBackingMaterialIds}
+        initialDefaultVinylBackingMaterialId={initialDefaultVinylBackingMaterialId}
         initialInkOptions={initialInkOptions}
         initialDefaultInk={initialDefaultInk}
         initialArtworkOptions={initialArtworkOptions}
@@ -340,7 +370,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialEyeletMaterialId={String(eyeletStockComponent?.materialId ?? "")}
         initialEyeletPreset={initialEyeletPreset}
         initialMountingHardwareEnabled={initialMountingHardwareEnabled}
-        initialHolePreset={initialHolePreset}
+        initialDefaultHoleQuantity={initialDefaultHoleQuantity}
         initialSilverStandoffMaterialId={String(standoffComponentFor("silver")?.materialId ?? "")}
         initialBlackStandoffMaterialId={String(standoffComponentFor("black")?.materialId ?? "")}
         preview={pricingPreview ? {

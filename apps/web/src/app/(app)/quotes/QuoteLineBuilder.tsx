@@ -14,6 +14,7 @@ export type QuoteChoice = {
   showWhen?: {
     optionKey?: string | null;
     optionValues?: string[] | null;
+    numericGreaterThan?: number | null;
   } | null;
 };
 
@@ -29,6 +30,7 @@ export type QuoteQuestion = {
   showWhen?: {
     optionKey?: string | null;
     optionValues?: string[] | null;
+    numericGreaterThan?: number | null;
   } | null;
 };
 
@@ -76,6 +78,7 @@ export type QuoteComponent = {
   trigger?: {
     optionKey?: string | null;
     optionValues?: string[] | null;
+    numericGreaterThan?: number | null;
   } | null;
 };
 
@@ -356,7 +359,8 @@ function optionQuantityMultiplierFor(component: QuoteComponent, answers: Record<
   const quantityMap = stockUsage?.quantityValueMap && typeof stockUsage.quantityValueMap === "object"
     ? stockUsage.quantityValueMap
     : {};
-  const mapped = quantityMap[selected];
+  const hasMappedValue = Object.prototype.hasOwnProperty.call(quantityMap, selected);
+  const mapped = hasMappedValue ? quantityMap[selected] : selected;
   const customFieldKey = String(stockUsage?.quantityCustomFieldKey ?? "").trim();
   const useCustom = String(mapped ?? "").toLowerCase() === "custom";
   const quantity = useCustom
@@ -431,6 +435,8 @@ function isVisible(field: QuoteQuestion, answers: Record<string, string>): boole
   const optionKey = String(showWhen?.optionKey ?? "");
   if (!optionKey) return true;
 
+  const numericGreaterThan = Number(showWhen?.numericGreaterThan);
+  if (Number.isFinite(numericGreaterThan)) return numberValue(answers[optionKey], 0) > numericGreaterThan;
   const requiredValues = Array.isArray(showWhen?.optionValues) ? showWhen?.optionValues ?? [] : [];
   const currentAnswers = selectedValues(answers[optionKey] ?? "");
   if (requiredValues.length === 0) return currentAnswers.length > 0;

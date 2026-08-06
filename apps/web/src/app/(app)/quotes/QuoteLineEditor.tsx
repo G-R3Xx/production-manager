@@ -185,6 +185,8 @@ function isVisible(field: QuoteLineEditorField, answers: Record<string, string>)
   const optionKey = String(field.showWhen?.optionKey ?? "").trim();
   if (!optionKey) return true;
 
+  const numericGreaterThan = Number(field.showWhen?.numericGreaterThan);
+  if (Number.isFinite(numericGreaterThan)) return (Number(answers[optionKey]) || 0) > numericGreaterThan;
   const selected = splitQuoteAnswerValues(answers[optionKey]);
   const required = Array.isArray(field.showWhen?.optionValues) ? field.showWhen?.optionValues ?? [] : [];
   if (required.length === 0) return selected.length > 0;

@@ -1,6 +1,7 @@
 export type QuoteOptionCondition = {
   optionKey?: string | null;
   optionValues?: string[] | null;
+  numericGreaterThan?: number | null;
 } | null;
 
 export type QuoteOptionChoiceLike = {
@@ -35,6 +36,8 @@ function conditionMatches(condition: QuoteOptionCondition | undefined, answers: 
   const optionKey = String(condition?.optionKey ?? "").trim();
   if (!optionKey) return true;
 
+  const numericGreaterThan = Number(condition?.numericGreaterThan);
+  if (Number.isFinite(numericGreaterThan)) return (Number(answers[optionKey]) || 0) > numericGreaterThan;
   const selected = splitQuoteAnswerValues(answers[optionKey]);
   const required = Array.isArray(condition?.optionValues) ? condition?.optionValues ?? [] : [];
   if (required.length === 0) return selected.length > 0;

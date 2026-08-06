@@ -70,6 +70,7 @@ type SavedQuoteQuestion = {
   showWhen?: {
     optionKey?: string | null;
     optionValues?: string[] | null;
+    numericGreaterThan?: number | null;
   } | null;
 };
 
@@ -109,6 +110,7 @@ type SavedQuoteComponent = {
   trigger?: {
     optionKey?: string | null;
     optionValues?: string[] | null;
+    numericGreaterThan?: number | null;
   } | null;
 };
 

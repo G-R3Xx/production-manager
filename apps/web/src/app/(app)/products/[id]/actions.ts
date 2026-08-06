@@ -187,6 +187,10 @@ function mergeInternalQuoteFields(
     printMethods: string[];
     rollMediaId: string | null;
     rollMediaName: string | null;
+    vinylBackingMaterialIds: string[];
+    vinylBackingMaterialNames: string[];
+    defaultVinylBackingMaterialId: string | null;
+    defaultVinylBackingMaterialName: string | null;
     inkChoices: string[];
     defaultInk: string;
     artworkOptions: string[];
@@ -203,7 +207,7 @@ function mergeInternalQuoteFields(
     eyeletMaterialName: string | null;
     eyeletPreset: string;
     mountingHardwareEnabled: boolean;
-    holePreset: string;
+    defaultHoleQuantity: number;
     silverStandoffMaterialId: string | null;
     silverStandoffMaterialName: string | null;
     blackStandoffMaterialId: string | null;
@@ -213,9 +217,14 @@ function mergeInternalQuoteFields(
   // Quantity is controlled by WooCommerce and by the quote line itself. Remove
   // the old generated quantity question so it cannot appear twice.
   const removeSeparateRollStockQuestion = input.mainMaterialIsRoll || Boolean(input.rollMediaId);
+  const managedCalculatedFieldKeys = new Set([
+    "vinyl_backing", "vinyl_backed", "vinyl_backing_type",
+    "holes_drilled", "hole_custom_quantity", "hole_location", "standoffs"
+  ]);
   const existingFields = (Array.isArray(definition.fields) ? [...definition.fields] : [])
     .filter((field: any) => String(field?.key ?? "") !== "quantity")
     .filter((field: any) => String(field?.key ?? "") !== "base_material")
+    .filter((field: any) => !managedCalculatedFieldKeys.has(String(field?.key ?? "")))
     .filter((field: any) => !(removeSeparateRollStockQuestion && String(field?.key ?? "") === "roll_stock_type"));
   const byKey = new Map(existingFields.map((field: any, index: number) => [String(field?.key ?? ""), index]));
   const sizeValue = `${Math.round(input.width)}x${Math.round(input.height)}`;
@@ -322,6 +331,30 @@ function mergeInternalQuoteFields(
     meta: standardMeta(field),
     options: printOptions
   }));
+
+  const vinylBackingPairs = uniqueStrings(input.vinylBackingMaterialIds).map((materialId, index) => ({
+    materialId,
+    name: input.vinylBackingMaterialNames[index] || `Vinyl backing ${index + 1}`
+  }));
+  if (vinylBackingPairs.length) {
+    const vinylBackingValue = input.defaultVinylBackingMaterialId && vinylBackingPairs.some((item) => item.materialId === input.defaultVinylBackingMaterialId)
+      ? input.defaultVinylBackingMaterialId
+      : "none";
+    upsert("vinyl_backing", () => ({
+      id: randomUUID(),
+      key: "vinyl_backing",
+      label: "Vinyl backing",
+      type: "select",
+      required: false,
+      defaultValue: vinylBackingValue,
+      helpText: "Choose no backing or the actual vinyl film applied to the rear of the finished sign.",
+      quoteOnly: true,
+      showWhen: null,
+      meta: { source: "internal_product_setup", websiteVisible: true },
+      options: [internalChoice("No vinyl backing", "none"), ...vinylBackingPairs.map((item) => internalChoice(item.name, item.materialId))],
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => field);
+  }
 
   const inkLabels: Record<string, string> = { none: "No ink", cmyk: "CMYK", white: "White", cmyk_white: "CMYK + White" };
   const allowedInkChoices = uniqueStrings(input.inkChoices.filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value)));
@@ -549,60 +582,35 @@ function mergeInternalQuoteFields(
   }
 
   if (input.mountingHardwareEnabled) {
-    const holeOptions = [
-      internalChoice("No holes", "no_holes"),
-      internalChoice("Top Corners (2)", "top_corners"),
-      internalChoice("All Corners (4)", "all_corners"),
-      internalChoice("Custom Number", "custom")
-    ];
     upsert("holes_drilled", () => ({
       id: randomUUID(),
       key: "holes_drilled",
-      label: "Holes drilled",
-      type: "select",
+      label: "Number of holes per sign",
+      type: "number",
       required: true,
-      defaultValue: input.holePreset || "no_holes",
-      helpText: "Choose the number and placement of holes drilled in each finished sign.",
+      defaultValue: String(Math.max(0, Math.round(input.defaultHoleQuantity || 0))),
+      helpText: "Enter the number of holes required in each finished sign. Enter 0 for no holes.",
       quoteOnly: true,
       showWhen: null,
-      meta: { source: "internal_product_setup", websiteVisible: true, calculatedQuantitySource: true },
-      options: holeOptions,
-      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-    }), (field) => ({
-      ...field,
-      label: "Holes drilled",
-      type: "select",
-      required: true,
-      defaultValue: input.holePreset || "no_holes",
-      helpText: "Choose the number and placement of holes drilled in each finished sign.",
-      meta: standardMeta(field, { calculatedQuantitySource: true }),
-      options: holeOptions
-    }));
-
-    upsert("hole_custom_quantity", () => ({
-      id: randomUUID(),
-      key: "hole_custom_quantity",
-      label: "Custom number of holes",
-      type: "quantity",
-      required: true,
-      defaultValue: "4",
-      helpText: "Enter the number of holes per sign.",
-      quoteOnly: true,
-      showWhen: { optionKey: "holes_drilled", optionValues: ["custom"] },
-      meta: { source: "internal_product_setup", websiteVisible: true, minimum: 1, step: 1 },
+      meta: { source: "internal_product_setup", websiteVisible: true, calculatedQuantitySource: true, minimum: 0, step: 1 },
       options: [],
       rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-    }), (field) => ({
-      ...field,
-      label: "Custom number of holes",
-      type: "quantity",
-      required: true,
-      defaultValue: String(field.defaultValue || "4"),
-      helpText: "Enter the number of holes per sign.",
-      showWhen: { optionKey: "holes_drilled", optionValues: ["custom"] },
-      meta: standardMeta(field, { minimum: 1, step: 1 }),
-      options: []
-    }));
+    }), (field) => field);
+
+    upsert("hole_location", () => ({
+      id: randomUUID(),
+      key: "hole_location",
+      label: "Hole position / details",
+      type: "text",
+      required: false,
+      defaultValue: "",
+      helpText: "Optional production note, for example: Along top of panel, 4 corners, or evenly spaced.",
+      quoteOnly: true,
+      showWhen: { optionKey: "holes_drilled", numericGreaterThan: 0 },
+      meta: { source: "internal_product_setup", websiteVisible: true },
+      options: [],
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => field);
 
     const standoffOptions = [internalChoice("No", "no")];
     if (input.silverStandoffMaterialId) standoffOptions.push(internalChoice("Silver", "silver"));
@@ -616,21 +624,11 @@ function mergeInternalQuoteFields(
       defaultValue: "no",
       helpText: "One standoff is added for every drilled hole.",
       quoteOnly: true,
-      showWhen: { optionKey: "holes_drilled", optionValues: ["top_corners", "all_corners", "custom"] },
+      showWhen: { optionKey: "holes_drilled", numericGreaterThan: 0 },
       meta: { source: "internal_product_setup", websiteVisible: true },
       options: standoffOptions,
       rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
-    }), (field) => ({
-      ...field,
-      label: "Standoffs",
-      type: "select",
-      required: true,
-      defaultValue: standoffOptions.some((option) => String(option.value) === String(field.defaultValue)) ? field.defaultValue : "no",
-      helpText: "One standoff is added for every drilled hole.",
-      showWhen: { optionKey: "holes_drilled", optionValues: ["top_corners", "all_corners", "custom"] },
-      meta: standardMeta(field),
-      options: standoffOptions
-    }));
+    }), (field) => field);
   }
 
   let components = Array.isArray(definition.components) ? [...definition.components] : [];
@@ -643,7 +641,8 @@ function mergeInternalQuoteFields(
     const notes = String(component.notes ?? "").toLowerCase();
     const managedNote = notes.includes("quick product builder") || notes.includes("guided product builder") || notes.includes("guided workflow") || notes.includes("internal product setup");
     if (["base_material", "option_selected_base_material"].includes(role)) return false;
-    if (managedNote && ["print_method", "ink", "laminate"].includes(triggerKey)) return false;
+    if (managedNote && ["print_method", "ink", "laminate", "vinyl_backing", "vinyl_backed", "vinyl_backing_type"].includes(triggerKey)) return false;
+    if (role === "vinyl_backing_material" || ["vinyl_backing", "vinyl_backed", "vinyl_backing_type"].includes(triggerKey)) return false;
     if (managedNote && isEyeletComponent(component)) return false;
     if ((role === "calculated_fixing_material" && triggerKey === "standoffs") || notes.includes("calculated hole quantity")) return false;
     if (role === "quote_sell_charge" && (triggerKey === "ink" || (label.includes("ink") && (triggerKey === "print_method" || notes.includes("simple print charge"))))) return false;
@@ -726,6 +725,31 @@ function mergeInternalQuoteFields(
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
       trigger: { optionKey: "print_method", optionValue: null, optionValues: ["roll_stock"] }
+    });
+  }
+
+  for (const item of vinylBackingPairs) {
+    components.push({
+      id: randomUUID(),
+      kind: "material",
+      role: "vinyl_backing_material",
+      materialId: item.materialId,
+      supplierId: null,
+      labourRateName: null,
+      label: item.name,
+      quantity: "1",
+      unit: "lm",
+      notes: "Vinyl backing material linked by the guided product builder. Finished dimensions and roll width drive usage.",
+      ruleType: "per_linear_metre",
+      wastePercent: "10",
+      stockUsage: {
+        usageBasis: "per_linear_metre",
+        dimensionSource: "finished_size",
+        optionKey: "vinyl_backing",
+        optionValues: [item.materialId],
+        widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
+      },
+      trigger: { optionKey: "vinyl_backing", optionValue: null, optionValues: [item.materialId] }
     });
   }
 
@@ -855,7 +879,6 @@ function mergeInternalQuoteFields(
   }
 
   if (input.mountingHardwareEnabled) {
-    const quantityValueMap = { no_holes: 0, top_corners: 2, all_corners: 4, custom: "custom" };
     const addStandoffComponent = (value: "silver" | "black", materialId: string | null, materialName: string | null) => {
       if (!materialId) return;
       components.push({
@@ -879,8 +902,6 @@ function mergeInternalQuoteFields(
           widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null,
           quantitySource: "option_quantity",
           quantityOptionKey: "holes_drilled",
-          quantityCustomFieldKey: "hole_custom_quantity",
-          quantityValueMap,
           quantityUnitLabel: "holes per sign"
         },
         trigger: { optionKey: "standoffs", optionValue: null, optionValues: [value] }
@@ -890,13 +911,13 @@ function mergeInternalQuoteFields(
     addStandoffComponent("black", input.blackStandoffMaterialId, input.blackStandoffMaterialName);
   }
 
-  const standardOrder = ["finished_size", "base_material", "print_method", "ink", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_custom_quantity", "standoffs", "artwork", "delivery_method"];
+  const standardOrder = ["finished_size", "base_material", "print_method", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
     .filter((field: any) => !(removeSeparateRollStockQuestion && String(field?.key ?? "") === "roll_stock_type"))
     .filter((field: any) => input.finishings.includes("eyelets") || !["eyelet_placement", "eyelet_custom_quantity"].includes(String(field?.key ?? "")))
-    .filter((field: any) => input.mountingHardwareEnabled || !["holes_drilled", "hole_custom_quantity", "standoffs"].includes(String(field?.key ?? "")))
+    .filter((field: any) => input.mountingHardwareEnabled || !["holes_drilled", "hole_custom_quantity", "hole_location", "standoffs"].includes(String(field?.key ?? "")))
     .map((field: any, index: number) => ({ field, index }))
     .sort((left, right) => {
       const leftOrder = orderIndex.get(String(left.field?.key ?? ""));
@@ -941,6 +962,10 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const mainMaterialIsRoll = selectedOptionMaterial?.isRoll ?? (read(formData, "mainMaterialIsRoll") === "1");
   const rollMediaId = read(formData, "rollMediaId") || null;
   const rollMediaName = read(formData, "rollMediaName") || null;
+  const vinylBackingMaterialIds = uniqueStrings(read(formData, "vinylBackingMaterialIdsCsv").split(","));
+  const vinylBackingMaterialNames = parseStringArrayJson(read(formData, "vinylBackingMaterialNamesJson"));
+  const defaultVinylBackingMaterialId = read(formData, "defaultVinylBackingMaterialId") || null;
+  const defaultVinylBackingMaterialName = read(formData, "defaultVinylBackingMaterialName") || null;
   const inkChoices = uniqueStrings(read(formData, "inkChoicesCsv").split(",")).filter((value) => ["none", "cmyk", "white", "cmyk_white"].includes(value));
   const defaultInk = ["none", "cmyk", "white", "cmyk_white"].includes(read(formData, "defaultInk")) ? read(formData, "defaultInk") : (inkChoices[0] || "cmyk");
   const artworkOptions = uniqueStrings(read(formData, "artworkOptionsCsv").split(","))
@@ -959,7 +984,7 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const eyeletMaterialName = read(formData, "eyeletMaterialName") || null;
   const eyeletPreset = ["four_corners", "top_corners_only", "centre_top_bottom", "pole_fixing", "__custom"].includes(read(formData, "eyeletPreset")) ? read(formData, "eyeletPreset") : "four_corners";
   const mountingHardwareEnabled = read(formData, "mountingHardwareEnabled") === "1";
-  const holePreset = ["no_holes", "top_corners", "all_corners", "custom"].includes(read(formData, "holePreset")) ? read(formData, "holePreset") : "no_holes";
+  const defaultHoleQuantity = Math.max(0, Math.round(Number(read(formData, "defaultHoleQuantity")) || 0));
   const silverStandoffMaterialId = read(formData, "silverStandoffMaterialId") || null;
   const silverStandoffMaterialName = read(formData, "silverStandoffMaterialName") || null;
   const blackStandoffMaterialId = read(formData, "blackStandoffMaterialId") || null;
@@ -1002,6 +1027,10 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       printMethods,
       rollMediaId,
       rollMediaName,
+      vinylBackingMaterialIds,
+      vinylBackingMaterialNames,
+      defaultVinylBackingMaterialId,
+      defaultVinylBackingMaterialName,
       inkChoices,
       defaultInk,
       artworkOptions,
@@ -1018,7 +1047,7 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       eyeletMaterialName,
       eyeletPreset,
       mountingHardwareEnabled,
-      holePreset,
+      defaultHoleQuantity,
       silverStandoffMaterialId,
       silverStandoffMaterialName,
       blackStandoffMaterialId,

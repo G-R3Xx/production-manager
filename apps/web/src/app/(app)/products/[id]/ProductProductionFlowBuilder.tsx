@@ -69,6 +69,8 @@ type Props = {
   initialPrintOptions: string[];
   initialDefaultPrintMethod: string;
   initialRollMediaId: string;
+  initialVinylBackingMaterialIds: string[];
+  initialDefaultVinylBackingMaterialId: string;
   initialInkOptions: string[];
   initialDefaultInk: string;
   initialArtworkOptions: string[];
@@ -82,7 +84,7 @@ type Props = {
   initialEyeletMaterialId: string;
   initialEyeletPreset: string;
   initialMountingHardwareEnabled: boolean;
-  initialHolePreset: string;
+  initialDefaultHoleQuantity: number;
   initialSilverStandoffMaterialId: string;
   initialBlackStandoffMaterialId: string;
   preview: PreviewSummary;
@@ -112,13 +114,6 @@ const eyeletPresets = [
   { value: "centre_top_bottom", label: "Centre top + bottom", qty: 2 },
   { value: "pole_fixing", label: "2 top + 2 bottom for pole fixing", qty: 4 },
   { value: "__custom", label: "Ask for a custom quantity", qty: 0 }
-];
-
-const holePresets = [
-  { value: "no_holes", label: "No holes", qty: 0 },
-  { value: "top_corners", label: "Top corners", qty: 2 },
-  { value: "all_corners", label: "All corners", qty: 4 },
-  { value: "custom", label: "Custom number", qty: 0 }
 ];
 
 const printChoices = [
@@ -276,6 +271,8 @@ export function ProductProductionFlowBuilder({
   initialPrintOptions,
   initialDefaultPrintMethod,
   initialRollMediaId,
+  initialVinylBackingMaterialIds,
+  initialDefaultVinylBackingMaterialId,
   initialInkOptions,
   initialDefaultInk,
   initialArtworkOptions,
@@ -289,7 +286,7 @@ export function ProductProductionFlowBuilder({
   initialEyeletMaterialId,
   initialEyeletPreset,
   initialMountingHardwareEnabled,
-  initialHolePreset,
+  initialDefaultHoleQuantity,
   initialSilverStandoffMaterialId,
   initialBlackStandoffMaterialId,
   preview,
@@ -314,6 +311,8 @@ export function ProductProductionFlowBuilder({
   const [printOptions, setPrintOptions] = useState<string[]>(startingPrintOptions);
   const [defaultPrintMethod, setDefaultPrintMethodState] = useState(initialDefaultPrintMethod || startingPrintOptions[0] || "none");
   const [rollMediaId, setRollMediaId] = useState(initialRollMediaId);
+  const [vinylBackingMaterialIds, setVinylBackingMaterialIds] = useState<string[]>(unique(initialVinylBackingMaterialIds));
+  const [defaultVinylBackingMaterialId, setDefaultVinylBackingMaterialId] = useState(initialDefaultVinylBackingMaterialId || "none");
   const [inkOptions, setInkOptions] = useState<string[]>(startingInkOptions);
   const [defaultInk, setDefaultInk] = useState(initialDefaultInk || startingInkOptions[0] || "cmyk");
   const [artworkOptions, setArtworkOptions] = useState<string[]>(startingArtworkOptions);
@@ -328,7 +327,7 @@ export function ProductProductionFlowBuilder({
   const [eyeletMaterialId, setEyeletMaterialId] = useState(initialEyeletMaterialId);
   const [eyeletPreset, setEyeletPreset] = useState(initialEyeletPreset || "four_corners");
   const [mountingHardwareEnabled, setMountingHardwareEnabled] = useState(initialMountingHardwareEnabled);
-  const [holePreset, setHolePreset] = useState(initialHolePreset || "no_holes");
+  const [defaultHoleQuantity, setDefaultHoleQuantity] = useState(Math.max(0, Math.round(initialDefaultHoleQuantity || 0)));
   const [silverStandoffMaterialId, setSilverStandoffMaterialId] = useState(initialSilverStandoffMaterialId);
   const [blackStandoffMaterialId, setBlackStandoffMaterialId] = useState(initialBlackStandoffMaterialId);
   const [dirty, setDirty] = useState(false);
@@ -338,6 +337,7 @@ export function ProductProductionFlowBuilder({
   const selectedMaterial = materials.find((material) => material.id === materialId);
   const selectedMainMaterialIsRoll = Boolean(selectedMaterial && isRollPrintMaterial(selectedMaterial));
   const selectedRollMedia = materials.find((material) => material.id === rollMediaId);
+  const selectedDefaultVinylBacking = materials.find((material) => material.id === defaultVinylBackingMaterialId);
   const selectedDefaultLaminate = materials.find((material) => material.id === defaultLaminateMaterialId);
   const selectedEyeletMaterial = materials.find((material) => material.id === eyeletMaterialId);
   const selectedSilverStandoffMaterial = materials.find((material) => material.id === silverStandoffMaterialId);
@@ -349,6 +349,7 @@ export function ProductProductionFlowBuilder({
     return (query ? filtered.filter((material) => materialSearchText(material).includes(query)) : filtered).slice(0, 50);
   }, [materials, materialId, materialSearch]);
   const rollMediaMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
+  const vinylBackingMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
   const eyeletMaterials = useMemo(() => materials.filter(isEyeletMaterial), [materials]);
   const standoffMaterials = useMemo(() => materials.filter(isStandoffMaterial), [materials]);
@@ -469,6 +470,23 @@ export function ProductProductionFlowBuilder({
     markChanged();
   };
 
+  const toggleVinylBacking = (materialIdValue: string) => {
+    const selected = vinylBackingMaterialIds.includes(materialIdValue);
+    setVinylBackingMaterialIds(selected
+      ? vinylBackingMaterialIds.filter((item) => item !== materialIdValue)
+      : unique([...vinylBackingMaterialIds, materialIdValue]));
+    if (selected && defaultVinylBackingMaterialId === materialIdValue) setDefaultVinylBackingMaterialId("none");
+    markChanged();
+  };
+
+  const setDefaultVinylBacking = (value: string) => {
+    setDefaultVinylBackingMaterialId(value);
+    if (value !== "none" && !vinylBackingMaterialIds.includes(value)) {
+      setVinylBackingMaterialIds((current) => unique([...current, value]));
+    }
+    markChanged();
+  };
+
   const toggleLaminate = (materialIdValue: string) => {
     const selected = laminateMaterialIds.includes(materialIdValue);
     setLaminateMaterialIds(selected
@@ -540,6 +558,7 @@ export function ProductProductionFlowBuilder({
   const currentIndex = builderSteps.findIndex((step) => step.key === activeStep);
   const previousStep = currentIndex > 0 ? builderSteps[currentIndex - 1] : null;
   const nextStep = currentIndex < builderSteps.length - 1 ? builderSteps[currentIndex + 1] : null;
+  const vinylBackingNames = vinylBackingMaterialIds.map((id) => materials.find((material) => material.id === id)?.name ?? id);
   const laminateNames = laminateMaterialIds.map((id) => materials.find((material) => material.id === id)?.name ?? id);
   const baseMaterialChoicePayload = baseMaterialChoices.map((choice) => {
     const material = materials.find((item) => item.id === choice.materialId);
@@ -594,6 +613,10 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="printMethodsCsv" value={printOptions.join(",")} />
       <input type="hidden" name="rollMediaId" value={rollMediaId} />
       <input type="hidden" name="rollMediaName" value={selectedRollMedia?.name ?? ""} />
+      <input type="hidden" name="vinylBackingMaterialIdsCsv" value={vinylBackingMaterialIds.join(",")} />
+      <input type="hidden" name="vinylBackingMaterialNamesJson" value={JSON.stringify(vinylBackingNames)} />
+      <input type="hidden" name="defaultVinylBackingMaterialId" value={defaultVinylBackingMaterialId === "none" ? "" : defaultVinylBackingMaterialId} />
+      <input type="hidden" name="defaultVinylBackingMaterialName" value={selectedDefaultVinylBacking?.name ?? ""} />
       <input type="hidden" name="inkChoicesCsv" value={inkOptions.join(",")} />
       <input type="hidden" name="defaultInk" value={defaultInk} />
       <input type="hidden" name="artworkOptionsCsv" value={artworkOptions.join(",")} />
@@ -610,7 +633,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="eyeletMaterialName" value={selectedEyeletMaterial?.name ?? "Eyelets"} />
       <input type="hidden" name="eyeletPreset" value={eyeletPreset} />
       <input type="hidden" name="mountingHardwareEnabled" value={mountingHardwareEnabled ? "1" : "0"} />
-      <input type="hidden" name="holePreset" value={holePreset} />
+      <input type="hidden" name="defaultHoleQuantity" value={defaultHoleQuantity} />
       <input type="hidden" name="silverStandoffMaterialId" value={silverStandoffMaterialId} />
       <input type="hidden" name="silverStandoffMaterialName" value={selectedSilverStandoffMaterial?.name ?? "Silver standoff"} />
       <input type="hidden" name="blackStandoffMaterialId" value={blackStandoffMaterialId} />
@@ -686,6 +709,20 @@ export function ProductProductionFlowBuilder({
         <h3 style={{ margin: 0 }}>4. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
         <div style={{ display: "grid", gap: 18 }}>
           {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaMaterials.map((material) => <option key={material.id} value={material.id}>{material.name} — {materialDescription(material)}</option>)}</select></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
+          <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 14, background: "#f8fafc", border: "1px solid #dbe4f0" }}>
+            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the actual white, frosted or other backing films available for this product. The selected stock is calculated from the finished size and roll width exactly like print media.</p></div>
+            <button type="button" onClick={() => setDefaultVinylBacking("none")} style={{ ...choiceCardStyle(defaultVinylBackingMaterialId === "none"), minHeight: 58 }}><strong>No vinyl backing</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{defaultVinylBackingMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 9 }}>
+              {vinylBackingMaterials.map((material) => {
+                const available = vinylBackingMaterialIds.includes(material.id);
+                const isDefault = defaultVinylBackingMaterialId === material.id;
+                return <article key={material.id} style={{ ...choiceCardStyle(available), cursor: "default", display: "grid", gap: 8 }}>
+                  <button type="button" onClick={() => toggleVinylBacking(material.id)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{available ? "✓ " : "+ "}{material.name}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{materialDescription(material)}</span></button>
+                  <button type="button" disabled={!available} onClick={() => setDefaultVinylBacking(material.id)} style={{ minHeight: 34, border: isDefault ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: isDefault ? "#2563eb" : "#fff", color: isDefault ? "#fff" : available ? "#334155" : "#94a3b8", fontWeight: 900, cursor: available ? "pointer" : "not-allowed" }}>{isDefault ? "Default answer" : "Make default"}</button>
+                </article>;
+              })}
+            </div>
+          </div>
           <div>
             <strong>Available ink answers</strong>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(150px,1fr))", gap: 9, marginTop: 9 }}>
@@ -745,12 +782,10 @@ export function ProductProductionFlowBuilder({
           </button>
           {mountingHardwareEnabled ? <>
             <div>
-              <strong style={{ color: "#1e3a8a" }}>Default hole layout</strong>
-              <p style={{ margin: "4px 0 0", color: "#475569", fontSize: 13 }}>Staff can choose No holes, 2 top-corner holes, 4 corner holes or enter a custom number on each quote.</p>
+              <strong style={{ color: "#1e3a8a" }}>Hole count and position note</strong>
+              <p style={{ margin: "4px 0 0", color: "#475569", fontSize: 13 }}>Staff or customers enter one number per sign, then an optional note such as “Along top of panel” or “4 corners”. No preset list is required.</p>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(170px,1fr))", gap: 8 }}>
-              {holePresets.map((preset) => <button key={preset.value} type="button" onClick={() => { setHolePreset(preset.value); markChanged(); }} style={{ ...choiceCardStyle(holePreset === preset.value), minHeight: 66 }}><strong>{preset.label}</strong>{preset.qty ? <span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{preset.qty} holes per sign</span> : null}</button>)}
-            </div>
+            <label style={{ display: "grid", gap: 6, fontWeight: 850, maxWidth: 360 }}>Default holes per sign<input type="number" min="0" step="1" value={defaultHoleQuantity} onChange={(event) => { setDefaultHoleQuantity(Math.max(0, Math.round(Number(event.target.value) || 0))); markChanged(); }} style={input} /><small style={{ color: "#64748b", fontWeight: 650 }}>Enter 0 when the normal answer is no holes.</small></label>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 10 }}>
               <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Silver standoff material<select value={silverStandoffMaterialId} onChange={(event) => { setSilverStandoffMaterialId(event.target.value); markChanged(); }} style={input}><option value="">Not available</option>{standoffMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
               <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Black standoff material<select value={blackStandoffMaterialId} onChange={(event) => { setBlackStandoffMaterialId(event.target.value); markChanged(); }} style={input}><option value="">Not available</option>{standoffMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
@@ -802,11 +837,12 @@ export function ProductProductionFlowBuilder({
           {baseMaterialMode === "option" ? <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Default base material:</b> {baseMaterialChoices.find((choice) => choice.materialId === materialId)?.label ?? selectedMaterial?.name ?? "Not selected"} · Each answer is linked to its own inventory material.</div> : null}
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Print choices:</b> {printOptions.map((value) => printChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {printChoices.find((choice) => choice.value === defaultPrintMethod)?.label ?? defaultPrintMethod}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Roll media:</b> {selectedRollMedia?.name ?? "Chosen while quoting"} · <b>Ink choices:</b> {inkOptions.map((value) => inkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {inkChoices.find((choice) => choice.value === defaultInk)?.label ?? defaultInk}</div>
+          <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Vinyl backing:</b> {vinylBackingNames.length ? `None, ${vinylBackingNames.join(", ")}` : "None"} · <b>Default:</b> {selectedDefaultVinylBacking?.name ?? "None"}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Laminate choices:</b> {laminateNames.length ? `None, ${laminateNames.join(", ")}` : "None"} · <b>Default:</b> {selectedDefaultLaminate?.name ?? "None"}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Artwork choices:</b> {artworkOptions.map((value) => artworkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {artworkChoices.find((choice) => choice.value === defaultArtwork)?.label ?? defaultArtwork}{artworkOptions.includes("artwork_check") ? ` · Check ${currency.format(artworkCheckPrice)}` : ""}{artworkOptions.includes("artwork_required") ? ` · Design ${currency.format(artworkDesignPrice)}` : ""}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Finishing defaults:</b> {finishingValues.length ? finishingValues.map((value) => finishingChoices.find((choice) => choice.value === value)?.label ?? value).join(", ") : "None"} · <b>Supply:</b> {deliveryMethod}{deliveryMethod === "delivery" ? ` (${currency.format(deliveryFee)})` : deliveryMethod === "install" ? " (tailored quote)" : " (no charge)"}</div>
           {finishingValues.includes("eyelets") ? <div style={{ color: "#9a3412" }}><b>Eyelets:</b> {eyeletPresets.find((preset) => preset.value === eyeletPreset)?.label ?? "4 corners"}{selectedEyeletMaterial ? ` · ${selectedEyeletMaterial.name}` : ""}</div> : null}
-          {mountingHardwareEnabled ? <div style={{ color: "#1e3a8a" }}><b>Holes / standoffs:</b> {holePresets.find((preset) => preset.value === holePreset)?.label ?? "No holes"} · Silver: {selectedSilverStandoffMaterial?.name ?? "not available"} · Black: {selectedBlackStandoffMaterial?.name ?? "not available"}</div> : null}
+          {mountingHardwareEnabled ? <div style={{ color: "#1e3a8a" }}><b>Holes / standoffs:</b> default {defaultHoleQuantity} hole{defaultHoleQuantity === 1 ? "" : "s"} per sign plus a position note · Silver: {selectedSilverStandoffMaterial?.name ?? "not available"} · Black: {selectedBlackStandoffMaterial?.name ?? "not available"}</div> : null}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
           <button type="button" onClick={() => setActiveStep("fulfilment")} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← Supply</button>
