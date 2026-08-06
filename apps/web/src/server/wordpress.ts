@@ -635,7 +635,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.06.03",
+    version: "V26.08.06.04",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -757,6 +757,12 @@ function materialRate(material: WebsitePricingMaterial, basis: "lm" | "sqm" | "s
       return purchaseCost / (rollWidthM * stockQuantity);
     }
     return purchaseCost;
+  }
+  if (basis === "each") {
+    const packagedPurchaseUnits = ["box", "pack", "bag", "carton", "bundle"];
+    if (packagedPurchaseUnits.some((unit) => purchaseUom.includes(unit)) && stockQuantity > 0) {
+      return purchaseCost / stockQuantity;
+    }
   }
   return purchaseCost;
 }

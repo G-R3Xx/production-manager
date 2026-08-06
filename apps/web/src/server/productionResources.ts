@@ -848,6 +848,8 @@ export async function previewRecipeCost(
     else if (stockQuantity > 0 && linearUnits.includes(stockUom)) normalizedUnitCost = purchaseCost / stockQuantity;
   } else if (looksLikeSheet && (purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box")) && stockQuantity > 0) {
     normalizedUnitCost = purchaseCost / stockQuantity;
+  } else if (["box", "pack", "bag", "carton", "bundle"].some((unit) => purchaseUom.includes(unit)) && stockQuantity > 0 && stockUom.includes("each")) {
+    normalizedUnitCost = purchaseCost / stockQuantity;
   }
 
   const base = calculateProductionRecipeCost({

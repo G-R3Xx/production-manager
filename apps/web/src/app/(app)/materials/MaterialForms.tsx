@@ -367,7 +367,7 @@ function EachFields({ material, kind }: { material?: MaterialFormRecord; kind: M
       <Field label="Used / sold as" helper="How product recipes consume this item.">
         <UnitSelect name="stockUom" defaultValue={material?.stockUom ?? defaultStockUomFor(kind)} options={["each", "pack", "box", "lm"]} />
       </Field>
-      <Field label="Units per pack / stock qty" helper="For eyelets, screws, tape rolls, binding strips, etc. Use 1 if priced each.">
+      <Field label="Units per pack / stock qty" helper="When bought as a pack/box and used as each, enter the number inside the pack. Example: $17 per pack of 4 becomes $4.25 each. Use 1 when priced individually.">
         <input name="stockQuantity" defaultValue={material?.stockQuantity ?? "0"} placeholder="eg 100, 500 or 1" style={inputStyle} />
       </Field>
       <Field label="Purchase cost" helper="Cost for the selected Bought as unit.">

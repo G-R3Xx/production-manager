@@ -742,6 +742,15 @@ function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "e
     return { rate: purchaseCost, unit: "sqm", note: "set material purchase cost per sqm for exact area pricing" };
   }
 
+  const packagedPurchaseUnits = ["box", "pack", "bag", "carton", "bundle"];
+  if (packagedPurchaseUnits.some((unit) => purchaseUom.includes(unit)) && stockQuantity > 0) {
+    return {
+      rate: purchaseCost / stockQuantity,
+      unit: "each",
+      note: `${formatUsage(stockQuantity)} each per ${purchaseUom}`
+    };
+  }
+
   return { rate: purchaseCost, unit: "each" };
 }
 
