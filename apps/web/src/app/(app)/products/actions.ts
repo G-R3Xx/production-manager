@@ -1816,17 +1816,36 @@ export async function deleteProductComponentAction(formData: FormData) {
 export async function deleteProductAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
-  if (!productId) redirect("/products/advanced?error=Choose%20a%20product%20to%20delete");
+  const source = readString(formData, "source") || "advanced";
+  if (!productId) {
+    redirect(source === "advanced"
+      ? "/products/advanced?error=Choose%20a%20product%20to%20remove"
+      : "/products?error=Choose%20a%20product%20to%20remove");
+  }
 
   await setProductStatusForTenant(activeTenant.tenantId, productId, "deleted");
-  redirect("/products/advanced?message=Product%20deleted%20from%20the%20active%20list");
+  if (source === "advanced") {
+    redirect("/products/advanced?message=Product%20removed%20from%20the%20active%20list");
+  }
+  redirect("/products?message=Product%20removed.%20Existing%20quotes%20and%20orders%20were%20kept");
 }
 
 export async function restoreProductAction(formData: FormData) {
   const activeTenant = await requireTenant();
   const productId = readString(formData, "productId");
-  if (!productId) redirect("/products/advanced?filter=deleted&error=Choose%20a%20product%20to%20restore");
+  const source = readString(formData, "source") || "advanced";
+  if (!productId) {
+    redirect(source === "advanced"
+      ? "/products/advanced?filter=deleted&error=Choose%20a%20product%20to%20restore"
+      : "/products?status=deleted&error=Choose%20a%20product%20to%20restore");
+  }
 
   await setProductStatusForTenant(activeTenant.tenantId, productId, "draft");
-  redirect(`/products/advanced?selected=${productId}&message=Product%20restored`);
+  if (source === "advanced") {
+    redirect(`/products/advanced?selected=${productId}&message=Product%20restored`);
+  }
+  if (source === "detail") {
+    redirect(`/products/${productId}?message=Product%20restored%20as%20a%20draft`);
+  }
+  redirect("/products?message=Product%20restored%20as%20a%20draft");
 }

@@ -1,5 +1,5 @@
-# Production Manager V26.08.06.04
+# Production Manager V26.08.06.05
 
 Production Manager prioritises fast internal quoting and production, with optional WordPress/WooCommerce publishing.
 
-See `README-V26.08.06.04.md` for the latest changes.
+See `README-V26.08.06.05.md` for the latest changes.

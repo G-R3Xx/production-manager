@@ -12,6 +12,7 @@ import {
 } from "@/server/productionResources";
 import { normalizeProductionFlowName } from "@/lib/productionFlowPresets";
 import { ProductProductionFlowBuilder } from "./ProductProductionFlowBuilder";
+import { ProductRemovalControl } from "../ProductRemovalControl";
 import { WebsiteImageManager, type WebsiteImageItem, type WebsiteImageOptionField } from "./WebsiteImageManager";
 import {
   addSimpleProductQuestionAction,
@@ -292,12 +293,13 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         <Link href="/products" style={{ color: "#475569", textDecoration: "none", fontWeight: 850 }}>← Products</Link>
         <div style={{ marginTop: 10, fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>Internal product setup</div>
         <h1 style={{ margin: "6px 0", fontSize: 38 }}>{product.name}</h1>
-        <div style={{ color: "#64748b" }}>{product.sku || "No SKU"} · {product.department.replace(/_/g," ")} · {product.status === "active" ? "Ready for quoting" : product.status}</div>
+        <div style={{ color: "#64748b" }}>{product.sku || "No SKU"} · {product.department.replace(/_/g," ")} · {product.status === "active" ? "Ready for quoting" : product.status === "deleted" ? "Removed" : product.status}</div>
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {product.websiteEnabled ? <span style={{ borderRadius: 999, padding: "7px 10px", fontSize: 12, fontWeight: 950, background: "#dcfce7", color: "#166534" }}>Also published online</span> : null}
         <Link href={`/products/${product.id}?tab=website`} style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", color: "#475569", fontWeight: 850 }}>Website publishing (optional)</Link>
         <Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", color: "#334155", fontWeight: 850 }}>Advanced setup</Link>
+        <ProductRemovalControl productId={product.id} productName={product.name} status={product.status} source="detail" />
       </div>
     </header>
 

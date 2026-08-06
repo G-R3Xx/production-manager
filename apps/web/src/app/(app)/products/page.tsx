@@ -4,6 +4,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listProductSummariesForTenant } from "@/server/products";
 import { createProductAction } from "./actions";
+import { ProductRemovalControl } from "./ProductRemovalControl";
 
 type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const read = (p: Record<string, string | string[] | undefined>, key: string) => Array.isArray(p[key]) ? p[key]?.[0] ?? "" : p[key] ?? "";
@@ -74,19 +75,28 @@ export default async function ProductsPage({ searchParams }: Props) {
       <div style={{ color: "#64748b", fontWeight: 800 }}>{products.length} product{products.length === 1 ? "" : "s"}</div>
     </section>
 
+    <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.55 }}>
+      Removing a product hides it from current product and quote lists. Existing quotes and orders are preserved, and removed products can be restored from the <b>Deleted</b> filter.
+    </div>
+
     <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
-      {products.map(product => <Link key={product.id} href={`/products/${product.id}`} style={{ ...card, padding: 14, textDecoration: "none", color: "inherit", display: "grid", gap: 9, minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
-          <div style={{ minWidth: 0 }}><div style={{ fontSize: 11, color: "#64748b", fontWeight: 850 }}>{product.sku || "No SKU"}</div><h2 style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.2, overflowWrap: "anywhere" }}>{product.name}</h2></div>
-          <span style={{ borderRadius: 999, padding: "5px 8px", fontSize: 10, fontWeight: 950, background: product.status === "active" ? "#dcfce7" : product.status === "draft" ? "#fef3c7" : "#e2e8f0", color: product.status === "active" ? "#166534" : "#475569" }}>{product.status}</span>
+      {products.map(product => <article key={product.id} style={{ ...card, display: "grid", minWidth: 0, overflow: "hidden" }}>
+        <Link href={`/products/${product.id}`} style={{ padding: 14, textDecoration: "none", color: "inherit", display: "grid", gap: 9, minWidth: 0 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ minWidth: 0 }}><div style={{ fontSize: 11, color: "#64748b", fontWeight: 850 }}>{product.sku || "No SKU"}</div><h2 style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.2, overflowWrap: "anywhere" }}>{product.name}</h2></div>
+            <span style={{ borderRadius: 999, padding: "5px 8px", fontSize: 10, fontWeight: 950, background: product.status === "active" ? "#dcfce7" : product.status === "draft" ? "#fef3c7" : "#e2e8f0", color: product.status === "active" ? "#166534" : "#475569" }}>{product.status === "deleted" ? "removed" : product.status}</span>
+          </div>
+          <div style={{ display: "grid", gap: 5, color: "#475569", fontSize: 12.5, lineHeight: 1.4 }}>
+            <span>Production: <b>{product.productionRecipeName || "Setup not finished"}</b></span>
+            <span>Quote template: <b>{product.templateName || "Automatic starter"}</b></span>
+            <span>Online: <b>{product.websiteEnabled ? "Published as a bonus" : "Not published"}</b></span>
+          </div>
+          <div style={{ color: "#2563eb", fontWeight: 900, fontSize: 13 }}>Open guided builder →</div>
+        </Link>
+        <div style={{ borderTop: "1px solid #e2e8f0", padding: "10px 14px", display: "flex", justifyContent: "flex-end", background: "#f8fafc" }}>
+          <ProductRemovalControl productId={product.id} productName={product.name} status={product.status} source="library" compact />
         </div>
-        <div style={{ display: "grid", gap: 5, color: "#475569", fontSize: 12.5, lineHeight: 1.4 }}>
-          <span>Production: <b>{product.productionRecipeName || "Setup not finished"}</b></span>
-          <span>Quote template: <b>{product.templateName || "Automatic starter"}</b></span>
-          <span>Online: <b>{product.websiteEnabled ? "Published as a bonus" : "Not published"}</b></span>
-        </div>
-        <div style={{ color: "#2563eb", fontWeight: 900, fontSize: 13 }}>Open guided builder →</div>
-      </Link>)}
+      </article>)}
       {products.length === 0 ? <div style={{ ...card, padding: 28, color: "#64748b" }}>No products match this view.</div> : null}
     </section>
   </main>;
