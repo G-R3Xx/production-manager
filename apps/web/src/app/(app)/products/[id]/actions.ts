@@ -103,6 +103,7 @@ type BaseMaterialChoiceInput = {
   label: string;
   materialName: string;
   isRoll: boolean;
+  autoMaterialIds: string[];
 };
 
 function parseBaseMaterialChoices(value: string): BaseMaterialChoiceInput[] {
@@ -121,12 +122,45 @@ function parseBaseMaterialChoices(value: string): BaseMaterialChoiceInput[] {
         materialId,
         label: String(row.label ?? materialName ?? "Material").trim() || materialName || "Material",
         materialName: materialName || String(row.label ?? "Material").trim() || "Material",
-        isRoll: row.isRoll === true
+        isRoll: row.isRoll === true,
+        autoMaterialIds: uniqueStrings(Array.isArray(row.autoMaterialIds) ? row.autoMaterialIds.map(String) : [materialId])
       }];
     });
   } catch {
     return [];
   }
+}
+
+type AutoMaterialChoiceGroup = {
+  value: string;
+  name: string;
+  materialId: string;
+  materialIds: string[];
+};
+
+function autoMaterialChoiceGroups(materialIds: string[], materialNames: string[]): AutoMaterialChoiceGroup[] {
+  const groups = new Map<string, { name: string; ids: string[] }>();
+  const seenIds = new Set<string>();
+  materialIds.forEach((rawMaterialId, index) => {
+    const materialId = String(rawMaterialId ?? "").trim();
+    if (!materialId || seenIds.has(materialId)) return;
+    seenIds.add(materialId);
+    const name = String(materialNames[index] ?? `Material ${index + 1}`).trim() || `Material ${index + 1}`;
+    const key = name.toLowerCase().replace(/\s+/g, " ");
+    const current = groups.get(key) ?? { name, ids: [] };
+    current.ids.push(materialId);
+    groups.set(key, current);
+  });
+  return Array.from(groups.values()).map((group) => {
+    const materialIdsForGroup = uniqueStrings(group.ids);
+    const materialId = materialIdsForGroup[0] ?? "";
+    return {
+      value: materialIdsForGroup.length > 1 ? `auto:${materialId}` : materialId,
+      name: group.name,
+      materialId,
+      materialIds: materialIdsForGroup
+    };
+  }).filter((group) => Boolean(group.materialId));
 }
 
 function internalChoice(
@@ -183,10 +217,12 @@ function mergeInternalQuoteFields(
     mainMaterialId: string | null;
     mainMaterialName: string | null;
     mainMaterialIsRoll: boolean;
+    mainMaterialAutoIds: string[];
     printMethod: string;
     printMethods: string[];
     rollMediaId: string | null;
     rollMediaName: string | null;
+    rollMediaAutoIds: string[];
     vinylBackingMaterialIds: string[];
     vinylBackingMaterialNames: string[];
     defaultVinylBackingMaterialId: string | null;
@@ -332,14 +368,12 @@ function mergeInternalQuoteFields(
     options: printOptions
   }));
 
-  const vinylBackingPairs = uniqueStrings(input.vinylBackingMaterialIds).map((materialId, index) => ({
-    materialId,
-    name: input.vinylBackingMaterialNames[index] || `Vinyl backing ${index + 1}`
-  }));
+  const vinylBackingPairs = autoMaterialChoiceGroups(input.vinylBackingMaterialIds, input.vinylBackingMaterialNames);
   if (vinylBackingPairs.length) {
-    const vinylBackingValue = input.defaultVinylBackingMaterialId && vinylBackingPairs.some((item) => item.materialId === input.defaultVinylBackingMaterialId)
-      ? input.defaultVinylBackingMaterialId
-      : "none";
+    const defaultBackingGroup = input.defaultVinylBackingMaterialId
+      ? vinylBackingPairs.find((item) => item.materialIds.includes(input.defaultVinylBackingMaterialId as string))
+      : null;
+    const vinylBackingValue = defaultBackingGroup?.value ?? "none";
     upsert("vinyl_backing", () => ({
       id: randomUUID(),
       key: "vinyl_backing",
@@ -351,7 +385,7 @@ function mergeInternalQuoteFields(
       quoteOnly: true,
       showWhen: null,
       meta: { source: "internal_product_setup", websiteVisible: true },
-      options: [internalChoice("No vinyl backing", "none"), ...vinylBackingPairs.map((item) => internalChoice(item.name, item.materialId))],
+      options: [internalChoice("No vinyl backing", "none"), ...vinylBackingPairs.map((item) => internalChoice(item.name, item.value))],
       rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
     }), (field) => field);
   }
@@ -466,14 +500,12 @@ function mergeInternalQuoteFields(
     };
   });
 
-  const laminatePairs = uniqueStrings(input.laminateMaterialIds).map((materialId, index) => ({
-    materialId,
-    name: input.laminateMaterialNames[index] || `Laminate ${index + 1}`
-  }));
-  const laminateValue = input.defaultLaminateMaterialId && laminatePairs.some((item) => item.materialId === input.defaultLaminateMaterialId)
-    ? input.defaultLaminateMaterialId
-    : "none";
-  const laminateOptions = [internalChoice("No laminate", "none"), ...laminatePairs.map((item) => internalChoice(item.name, item.materialId))];
+  const laminatePairs = autoMaterialChoiceGroups(input.laminateMaterialIds, input.laminateMaterialNames);
+  const defaultLaminateGroup = input.defaultLaminateMaterialId
+    ? laminatePairs.find((item) => item.materialIds.includes(input.defaultLaminateMaterialId as string))
+    : null;
+  const laminateValue = defaultLaminateGroup?.value ?? "none";
+  const laminateOptions = [internalChoice("No laminate", "none"), ...laminatePairs.map((item) => internalChoice(item.name, item.value))];
   upsert("laminate", () => ({
     id: randomUUID(),
     key: "laminate",
@@ -670,6 +702,8 @@ function mergeInternalQuoteFields(
         dimensionSource: "finished_size",
         optionKey: "finished_size",
         optionValues: [],
+        autoMaterialIds: isRoll ? uniqueStrings(input.mainMaterialAutoIds.length ? input.mainMaterialAutoIds : input.mainMaterialId ? [input.mainMaterialId] : []) : [],
+        autoSelectStrategy: isRoll ? "lowest_cost_fit" : null,
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
       trigger: { optionKey: null, optionValue: null, optionValues: [] }
@@ -696,6 +730,8 @@ function mergeInternalQuoteFields(
           dimensionSource: "finished_size",
           optionKey: "base_material",
           optionValues: [choice.materialId],
+          autoMaterialIds: choice.isRoll ? uniqueStrings(choice.autoMaterialIds.length ? choice.autoMaterialIds : [choice.materialId]) : [],
+          autoSelectStrategy: choice.isRoll ? "lowest_cost_fit" : null,
           widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
         },
         trigger: { optionKey: "base_material", optionValue: null, optionValues: [choice.materialId] }
@@ -722,6 +758,8 @@ function mergeInternalQuoteFields(
         dimensionSource: "finished_size",
         optionKey: "print_method",
         optionValues: ["roll_stock"],
+        autoMaterialIds: uniqueStrings(input.rollMediaAutoIds.length ? input.rollMediaAutoIds : input.rollMediaId ? [input.rollMediaId] : []),
+        autoSelectStrategy: "lowest_cost_fit",
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
       trigger: { optionKey: "print_method", optionValue: null, optionValues: ["roll_stock"] }
@@ -746,10 +784,13 @@ function mergeInternalQuoteFields(
         usageBasis: "per_linear_metre",
         dimensionSource: "finished_size",
         optionKey: "vinyl_backing",
-        optionValues: [item.materialId],
+        optionValues: [item.value],
+        autoMaterialIds: item.materialIds,
+        autoMaterialLabel: item.name,
+        autoSelectStrategy: "lowest_cost_fit",
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
-      trigger: { optionKey: "vinyl_backing", optionValue: null, optionValues: [item.materialId] }
+      trigger: { optionKey: "vinyl_backing", optionValue: null, optionValues: [item.value] }
     });
   }
 
@@ -800,10 +841,13 @@ function mergeInternalQuoteFields(
         usageBasis: "per_linear_metre",
         dimensionSource: "finished_size",
         optionKey: "laminate",
-        optionValues: [item.materialId],
+        optionValues: [item.value],
+        autoMaterialIds: item.materialIds,
+        autoMaterialLabel: item.name,
+        autoSelectStrategy: "lowest_cost_fit",
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
-      trigger: { optionKey: "laminate", optionValue: null, optionValues: [item.materialId] }
+      trigger: { optionKey: "laminate", optionValue: null, optionValues: [item.value] }
     });
   }
 
@@ -960,8 +1004,12 @@ export async function saveInternalProductSetupAction(formData: FormData) {
     : selectedOptionMaterial?.materialId ?? requestedMainMaterialId;
   const mainMaterialName = selectedOptionMaterial?.materialName ?? (read(formData, "mainMaterialName") || null);
   const mainMaterialIsRoll = selectedOptionMaterial?.isRoll ?? (read(formData, "mainMaterialIsRoll") === "1");
+  const mainMaterialAutoIds = selectedOptionMaterial?.autoMaterialIds?.length
+    ? selectedOptionMaterial.autoMaterialIds
+    : uniqueStrings(read(formData, "mainMaterialAutoIdsCsv").split(","));
   const rollMediaId = read(formData, "rollMediaId") || null;
   const rollMediaName = read(formData, "rollMediaName") || null;
+  const rollMediaAutoIds = uniqueStrings(read(formData, "rollMediaAutoIdsCsv").split(","));
   const vinylBackingMaterialIds = uniqueStrings(read(formData, "vinylBackingMaterialIdsCsv").split(","));
   const vinylBackingMaterialNames = parseStringArrayJson(read(formData, "vinylBackingMaterialNamesJson"));
   const defaultVinylBackingMaterialId = read(formData, "defaultVinylBackingMaterialId") || null;
@@ -1023,10 +1071,12 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       mainMaterialId,
       mainMaterialName,
       mainMaterialIsRoll,
+      mainMaterialAutoIds,
       printMethod,
       printMethods,
       rollMediaId,
       rollMediaName,
+      rollMediaAutoIds,
       vinylBackingMaterialIds,
       vinylBackingMaterialNames,
       defaultVinylBackingMaterialId,

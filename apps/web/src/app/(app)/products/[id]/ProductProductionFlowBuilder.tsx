@@ -183,6 +183,53 @@ function customerMaterialName(material: MaterialOption | null | undefined): stri
   return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
 }
 
+type AutoMaterialGroup = {
+  key: string;
+  label: string;
+  materials: MaterialOption[];
+  representative: MaterialOption;
+};
+
+function autoMaterialGroupKey(material: MaterialOption): string {
+  return `${String(material.materialType ?? "").trim().toLowerCase()}::${customerMaterialName(material).trim().toLowerCase()}`;
+}
+
+function autoMaterialGroups(materials: MaterialOption[], preferredId = ""): AutoMaterialGroup[] {
+  const grouped = new Map<string, MaterialOption[]>();
+  for (const material of materials) {
+    const key = autoMaterialGroupKey(material);
+    const current = grouped.get(key) ?? [];
+    current.push(material);
+    grouped.set(key, current);
+  }
+  return Array.from(grouped.entries()).map(([key, groupMaterials]) => {
+    const sorted = [...groupMaterials].sort((left, right) => {
+      const leftWidth = Number(left.rollWidthMm || 0);
+      const rightWidth = Number(right.rollWidthMm || 0);
+      if (leftWidth !== rightWidth) return leftWidth - rightWidth;
+      return left.name.localeCompare(right.name);
+    });
+    const representative = sorted.find((material) => material.id === preferredId) ?? sorted[0];
+    return { key, label: customerMaterialName(representative), materials: sorted, representative };
+  }).sort((left, right) => left.label.localeCompare(right.label));
+}
+
+function autoMaterialIdsFor(material: MaterialOption | null | undefined, pool: MaterialOption[]): string[] {
+  if (!material) return [];
+  const key = autoMaterialGroupKey(material);
+  return pool.filter((candidate) => autoMaterialGroupKey(candidate) === key).map((candidate) => candidate.id);
+}
+
+function autoGroupDescription(group: AutoMaterialGroup): string {
+  const widths = group.materials
+    .map((material) => Number(material.rollWidthMm || 0))
+    .filter((width) => width > 0)
+    .sort((left, right) => left - right);
+  if (widths.length > 1) return `Auto-selects ${widths.join(" / ")} mm stock by finished size and cost`;
+  if (widths.length === 1) return `${widths[0]} mm roll`;
+  return group.materials.length > 1 ? `Auto-selects from ${group.materials.length} linked stock items` : materialDescription(group.representative);
+}
+
 function materialSearchText(material: MaterialOption): string {
   return `${material.name} ${material.customerFacingName ?? ""} ${material.sku ?? ""} ${material.notes ?? ""} ${material.materialType} ${material.materialGroup ?? ""}`.toLowerCase();
 }
@@ -356,6 +403,9 @@ export function ProductProductionFlowBuilder({
   const rollMediaMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
   const vinylBackingMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
+  const rollMediaGroups = useMemo(() => autoMaterialGroups(rollMediaMaterials, rollMediaId), [rollMediaMaterials, rollMediaId]);
+  const vinylBackingGroups = useMemo(() => autoMaterialGroups(vinylBackingMaterials, defaultVinylBackingMaterialId), [vinylBackingMaterials, defaultVinylBackingMaterialId]);
+  const laminateGroups = useMemo(() => autoMaterialGroups(laminateMaterials, defaultLaminateMaterialId), [laminateMaterials, defaultLaminateMaterialId]);
   const eyeletMaterials = useMemo(() => materials.filter(isEyeletMaterial), [materials]);
   const standoffMaterials = useMemo(() => materials.filter(isStandoffMaterial), [materials]);
   const otherProcesses = processes.filter((process) => !selectedTokens.has(process.id) && !productionFlowPresets.some((preset) => normalizeProductionFlowName(preset.name) === normalizeProductionFlowName(process.name)));
@@ -475,42 +525,63 @@ export function ProductProductionFlowBuilder({
     markChanged();
   };
 
-  const toggleVinylBacking = (materialIdValue: string) => {
-    const selected = vinylBackingMaterialIds.includes(materialIdValue);
-    setVinylBackingMaterialIds(selected
-      ? vinylBackingMaterialIds.filter((item) => item !== materialIdValue)
-      : unique([...vinylBackingMaterialIds, materialIdValue]));
-    if (selected && defaultVinylBackingMaterialId === materialIdValue) setDefaultVinylBackingMaterialId("none");
+  const toggleVinylBackingGroup = (group: AutoMaterialGroup) => {
+    const groupIds = new Set(group.materials.map((material) => material.id));
+    const selected = vinylBackingMaterialIds.some((materialIdValue) => groupIds.has(materialIdValue));
+    setVinylBackingMaterialIds((current) => selected
+      ? current.filter((item) => !groupIds.has(item))
+      : unique([...current, ...Array.from(groupIds)]));
+    if (selected && groupIds.has(defaultVinylBackingMaterialId)) setDefaultVinylBackingMaterialId("none");
+    markChanged();
+  };
+
+  const setDefaultVinylBackingGroup = (group: AutoMaterialGroup) => {
+    const groupIds = group.materials.map((material) => material.id);
+    setDefaultVinylBackingMaterialId(group.representative.id);
+    setVinylBackingMaterialIds((current) => unique([...current, ...groupIds]));
     markChanged();
   };
 
   const setDefaultVinylBacking = (value: string) => {
-    setDefaultVinylBackingMaterialId(value);
-    if (value !== "none" && !vinylBackingMaterialIds.includes(value)) {
-      setVinylBackingMaterialIds((current) => unique([...current, value]));
+    if (value === "none") {
+      setDefaultVinylBackingMaterialId("none");
+      markChanged();
+      return;
     }
-    markChanged();
+    const group = vinylBackingGroups.find((item) => item.materials.some((material) => material.id === value));
+    if (group) setDefaultVinylBackingGroup(group);
   };
 
-  const toggleLaminate = (materialIdValue: string) => {
-    const selected = laminateMaterialIds.includes(materialIdValue);
-    setLaminateMaterialIds(selected
-      ? laminateMaterialIds.filter((item) => item !== materialIdValue)
-      : unique([...laminateMaterialIds, materialIdValue]));
-    if (selected && defaultLaminateMaterialId === materialIdValue) {
+  const toggleLaminateGroup = (group: AutoMaterialGroup) => {
+    const groupIds = new Set(group.materials.map((material) => material.id));
+    const selected = laminateMaterialIds.some((materialIdValue) => groupIds.has(materialIdValue));
+    setLaminateMaterialIds((current) => selected
+      ? current.filter((item) => !groupIds.has(item))
+      : unique([...current, ...Array.from(groupIds)]));
+    if (selected && groupIds.has(defaultLaminateMaterialId)) {
       setDefaultLaminateMaterialIdState("none");
       if (selectedPresetKeys.has("laminate")) setPreset("laminate", false);
     }
     markChanged();
   };
 
-  const setDefaultLaminate = (value: string) => {
-    setDefaultLaminateMaterialIdState(value);
-    if (value !== "none" && !laminateMaterialIds.includes(value)) setLaminateMaterialIds((current) => unique([...current, value]));
-    const hasLaminate = selectedPresetKeys.has("laminate");
-    if (value !== "none" && !hasLaminate) setPreset("laminate", true);
-    if (value === "none" && hasLaminate) setPreset("laminate", false);
+  const setDefaultLaminateGroup = (group: AutoMaterialGroup) => {
+    const groupIds = group.materials.map((material) => material.id);
+    setDefaultLaminateMaterialIdState(group.representative.id);
+    setLaminateMaterialIds((current) => unique([...current, ...groupIds]));
+    if (!selectedPresetKeys.has("laminate")) setPreset("laminate", true);
     markChanged();
+  };
+
+  const setDefaultLaminate = (value: string) => {
+    if (value === "none") {
+      setDefaultLaminateMaterialIdState("none");
+      if (selectedPresetKeys.has("laminate")) setPreset("laminate", false);
+      markChanged();
+      return;
+    }
+    const group = laminateGroups.find((item) => item.materials.some((material) => material.id === value));
+    if (group) setDefaultLaminateGroup(group);
   };
 
   const toggleFinishing = (value: string) => {
@@ -563,8 +634,16 @@ export function ProductProductionFlowBuilder({
   const currentIndex = builderSteps.findIndex((step) => step.key === activeStep);
   const previousStep = currentIndex > 0 ? builderSteps[currentIndex - 1] : null;
   const nextStep = currentIndex < builderSteps.length - 1 ? builderSteps[currentIndex + 1] : null;
-  const vinylBackingNames = vinylBackingMaterialIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
-  const laminateNames = laminateMaterialIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
+  const effectiveVinylBackingIds = unique(vinylBackingGroups
+    .filter((group) => group.materials.some((material) => vinylBackingMaterialIds.includes(material.id)))
+    .flatMap((group) => group.materials.map((material) => material.id)));
+  const effectiveLaminateIds = unique(laminateGroups
+    .filter((group) => group.materials.some((material) => laminateMaterialIds.includes(material.id)))
+    .flatMap((group) => group.materials.map((material) => material.id)));
+  const vinylBackingNames = effectiveVinylBackingIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
+  const laminateNames = effectiveLaminateIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
+  const mainMaterialAutoIds = selectedMainMaterialIsRoll ? autoMaterialIdsFor(selectedMaterial, rollMediaMaterials) : [];
+  const rollMediaAutoIds = autoMaterialIdsFor(selectedRollMedia, rollMediaMaterials);
   const baseMaterialChoicePayload = baseMaterialChoices.map((choice) => {
     const material = materials.find((item) => item.id === choice.materialId);
     const currentLabel = choice.label.trim();
@@ -574,7 +653,8 @@ export function ProductProductionFlowBuilder({
       materialId: choice.materialId,
       label: clientLabel || "Material",
       materialName: material?.name ?? choice.label,
-      isRoll: Boolean(material && isRollPrintMaterial(material))
+      isRoll: Boolean(material && isRollPrintMaterial(material)),
+      autoMaterialIds: material && isRollPrintMaterial(material) ? autoMaterialIdsFor(material, rollMediaMaterials) : []
     };
   });
 
@@ -611,6 +691,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="materialId" value={materialId} />
       <input type="hidden" name="mainMaterialName" value={selectedMaterial?.name ?? ""} />
       <input type="hidden" name="mainMaterialIsRoll" value={selectedMainMaterialIsRoll ? "1" : "0"} />
+      <input type="hidden" name="mainMaterialAutoIdsCsv" value={mainMaterialAutoIds.join(",")} />
       <input type="hidden" name="width" value={width} />
       <input type="hidden" name="height" value={height} />
       <input type="hidden" name="quantity" value={quantity} />
@@ -621,7 +702,8 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="printMethodsCsv" value={printOptions.join(",")} />
       <input type="hidden" name="rollMediaId" value={rollMediaId} />
       <input type="hidden" name="rollMediaName" value={selectedRollMedia?.name ?? ""} />
-      <input type="hidden" name="vinylBackingMaterialIdsCsv" value={vinylBackingMaterialIds.join(",")} />
+      <input type="hidden" name="rollMediaAutoIdsCsv" value={rollMediaAutoIds.join(",")} />
+      <input type="hidden" name="vinylBackingMaterialIdsCsv" value={effectiveVinylBackingIds.join(",")} />
       <input type="hidden" name="vinylBackingMaterialNamesJson" value={JSON.stringify(vinylBackingNames)} />
       <input type="hidden" name="defaultVinylBackingMaterialId" value={defaultVinylBackingMaterialId === "none" ? "" : defaultVinylBackingMaterialId} />
       <input type="hidden" name="defaultVinylBackingMaterialName" value={customerMaterialName(selectedDefaultVinylBacking)} />
@@ -633,7 +715,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="artworkDesignPrice" value={artworkDesignPrice} />
       <input type="hidden" name="deliveryFee" value={deliveryFee} />
       <input type="hidden" name="finishingsCsv" value={finishingValues.join(",")} />
-      <input type="hidden" name="laminateMaterialIdsCsv" value={laminateMaterialIds.join(",")} />
+      <input type="hidden" name="laminateMaterialIdsCsv" value={effectiveLaminateIds.join(",")} />
       <input type="hidden" name="laminateMaterialNamesJson" value={JSON.stringify(laminateNames)} />
       <input type="hidden" name="laminateMaterialId" value={defaultLaminateMaterialId === "none" ? "" : defaultLaminateMaterialId} />
       <input type="hidden" name="laminateMaterialName" value={customerMaterialName(selectedDefaultLaminate)} />
@@ -716,17 +798,18 @@ export function ProductProductionFlowBuilder({
       {activeStep === "media_ink" ? <section style={panel}>
         <h3 style={{ margin: 0 }}>4. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
         <div style={{ display: "grid", gap: 18 }}>
-          {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaMaterials.map((material) => <option key={material.id} value={material.id}>{material.name} — {materialDescription(material)}</option>)}</select></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
+          {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label} — {autoGroupDescription(group)}</option>)}</select><small style={{ color: "#64748b", fontWeight: 650 }}>Roll stocks with the same customer-facing name are treated as width variants. Production Manager chooses the lowest-cost stock that fits the finished size.</small></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
           <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 14, background: "#f8fafc", border: "1px solid #dbe4f0" }}>
-            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the actual white, frosted or other backing films available for this product. The selected stock is calculated from the finished size and roll width exactly like print media.</p></div>
+            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.</p></div>
             <button type="button" onClick={() => setDefaultVinylBacking("none")} style={{ ...choiceCardStyle(defaultVinylBackingMaterialId === "none"), minHeight: 58 }}><strong>No vinyl backing</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{defaultVinylBackingMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 9 }}>
-              {vinylBackingMaterials.map((material) => {
-                const available = vinylBackingMaterialIds.includes(material.id);
-                const isDefault = defaultVinylBackingMaterialId === material.id;
-                return <article key={material.id} style={{ ...choiceCardStyle(available), cursor: "default", display: "grid", gap: 8 }}>
-                  <button type="button" onClick={() => toggleVinylBacking(material.id)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{available ? "✓ " : "+ "}{material.name}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{materialDescription(material)}</span></button>
-                  <button type="button" disabled={!available} onClick={() => setDefaultVinylBacking(material.id)} style={{ minHeight: 34, border: isDefault ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: isDefault ? "#2563eb" : "#fff", color: isDefault ? "#fff" : available ? "#334155" : "#94a3b8", fontWeight: 900, cursor: available ? "pointer" : "not-allowed" }}>{isDefault ? "Default answer" : "Make default"}</button>
+              {vinylBackingGroups.map((group) => {
+                const groupIds = group.materials.map((material) => material.id);
+                const available = groupIds.some((id) => vinylBackingMaterialIds.includes(id));
+                const isDefault = groupIds.includes(defaultVinylBackingMaterialId);
+                return <article key={group.key} style={{ ...choiceCardStyle(available), cursor: "default", display: "grid", gap: 8 }}>
+                  <button type="button" onClick={() => toggleVinylBackingGroup(group)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{available ? "✓ " : "+ "}{group.label}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{autoGroupDescription(group)}</span>{group.materials.length > 1 ? <span style={{ display: "block", color: "#0f766e", fontSize: 11, marginTop: 4, fontWeight: 800 }}>Client sees one option · {group.materials.length} stock widths linked</span> : null}</button>
+                  <button type="button" disabled={!available} onClick={() => setDefaultVinylBackingGroup(group)} style={{ minHeight: 34, border: isDefault ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: isDefault ? "#2563eb" : "#fff", color: isDefault ? "#fff" : available ? "#334155" : "#94a3b8", fontWeight: 900, cursor: available ? "pointer" : "not-allowed" }}>{isDefault ? "Default answer" : "Make default"}</button>
                 </article>;
               })}
             </div>
@@ -749,16 +832,17 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "laminate" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>5. Choose laminate options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick the actual laminate materials staff may quote. Choose None or one laminate as the normal default.</p>
+        <h3 style={{ margin: 0 }}>5. Choose laminate options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick the customer-facing laminate choices. Same-name roll widths are grouped automatically and the system selects the best fitting stock. Choose None or one laminate as the normal default.</p>
         <div style={{ display: "grid", gap: 12 }}>
           <button type="button" onClick={() => setDefaultLaminate("none")} style={{ ...choiceCardStyle(defaultLaminateMaterialId === "none"), minHeight: 64 }}><strong>No laminate</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{defaultLaminateMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 10 }}>
-            {laminateMaterials.map((material) => {
-              const available = laminateMaterialIds.includes(material.id);
-              const isDefault = defaultLaminateMaterialId === material.id;
-              return <article key={material.id} style={{ ...choiceCardStyle(available), cursor: "default", display: "grid", gap: 9 }}>
-                <button type="button" onClick={() => toggleLaminate(material.id)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{available ? "✓ " : "+ "}{material.name}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{materialDescription(material)}</span></button>
-                <button type="button" disabled={!available} onClick={() => setDefaultLaminate(material.id)} style={{ minHeight: 35, border: isDefault ? "1px solid #059669" : "1px solid #cbd5e1", borderRadius: 9, background: isDefault ? "#059669" : "#fff", color: isDefault ? "#fff" : available ? "#334155" : "#94a3b8", fontWeight: 900, cursor: available ? "pointer" : "not-allowed" }}>{isDefault ? "Default answer" : "Make default"}</button>
+            {laminateGroups.map((group) => {
+              const groupIds = group.materials.map((material) => material.id);
+              const available = groupIds.some((id) => laminateMaterialIds.includes(id));
+              const isDefault = groupIds.includes(defaultLaminateMaterialId);
+              return <article key={group.key} style={{ ...choiceCardStyle(available), cursor: "default", display: "grid", gap: 9 }}>
+                <button type="button" onClick={() => toggleLaminateGroup(group)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{available ? "✓ " : "+ "}{group.label}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{autoGroupDescription(group)}</span>{group.materials.length > 1 ? <span style={{ display: "block", color: "#0f766e", fontSize: 11, marginTop: 4, fontWeight: 800 }}>Client sees one option · {group.materials.length} stock widths linked</span> : null}</button>
+                <button type="button" disabled={!available} onClick={() => setDefaultLaminateGroup(group)} style={{ minHeight: 35, border: isDefault ? "1px solid #059669" : "1px solid #cbd5e1", borderRadius: 9, background: isDefault ? "#059669" : "#fff", color: isDefault ? "#fff" : available ? "#334155" : "#94a3b8", fontWeight: 900, cursor: available ? "pointer" : "not-allowed" }}>{isDefault ? "Default answer" : "Make default"}</button>
               </article>;
             })}
           </div>

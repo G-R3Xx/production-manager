@@ -270,7 +270,7 @@ function CommonTopFields({ suppliers, material }: { suppliers: SupplierOption[];
         <Field label="Internal stock name" helper="Your supplier / production name. Staff can still use this to identify the exact stock.">
           <input name="name" required defaultValue={material?.name ?? ""} placeholder="eg PERSPEX CC 4.5mm Clear 2440 × 1220" style={inputStyle} />
         </Field>
-        <Field label="Customer-facing name" helper="Shown to clients on quotes, website product options and MYOB order/invoice descriptions. Leave blank to use the internal stock name.">
+        <Field label="Customer-facing name" helper="Shown to clients on quotes, website product options and MYOB order/invoice descriptions. For roll stocks, give width variants the same customer-facing name (eg Frosted) and products can auto-select the best fitting / lowest-cost width. Leave blank to use the internal stock name.">
           <input name="customerFacingName" defaultValue={material?.customerFacingName ?? ""} placeholder="eg Clear Acrylic 4.5mm" style={inputStyle} />
         </Field>
       </div>

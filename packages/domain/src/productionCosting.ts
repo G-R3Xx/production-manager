@@ -103,10 +103,29 @@ export function calculateProductionRecipeCost(input: RecipeCostInput): RecipeCos
       const rollWidth = Math.max(0, safe(material.rollWidthMm ?? material.widthMm ?? 0));
       const normalLanes = rollWidth > 0 ? Math.floor(rollWidth / width) : 0;
       const rotatedLanes = allowRotation && rollWidth > 0 ? Math.floor(rollWidth / height) : 0;
-      const rotate = rotatedLanes > normalLanes;
-      const lanes = Math.max(1, rotate ? rotatedLanes : normalLanes);
-      const runLengthMm = rotate ? width : height;
-      linearMetres = Math.ceil(quantity / lanes) * runLengthMm / 1000;
+      const normalLinearMetres = normalLanes > 0
+        ? Math.ceil(quantity / normalLanes) * height / 1000
+        : Number.POSITIVE_INFINITY;
+      const rotatedLinearMetres = rotatedLanes > 0
+        ? Math.ceil(quantity / rotatedLanes) * width / 1000
+        : Number.POSITIVE_INFINITY;
+
+      // Pick the orientation that actually consumes the least roll length for
+      // this quantity. Choosing only the orientation with the most lanes can
+      // waste media on small quantities (for example, one 800 x 500 panel on
+      // 1220 mm stock is cheaper at 500 mm run length than rotating it merely
+      // to create a second unused lane).
+      let lanes = 1;
+      if (Number.isFinite(normalLinearMetres) || Number.isFinite(rotatedLinearMetres)) {
+        const rotate = rotatedLinearMetres < normalLinearMetres;
+        lanes = rotate ? rotatedLanes : normalLanes;
+        linearMetres = rotate ? rotatedLinearMetres : normalLinearMetres;
+      } else {
+        // Preserve the legacy oversize fallback until panel/tile costing is a
+        // dedicated rule. A valid auto-select group will prefer any stock width
+        // that genuinely fits before this fallback is reached.
+        linearMetres = height / 1000;
+      }
       materialCost = linearMetres * safe(material.unitCost) * wasteFactor;
       materialUsage = { mode: "roll", linearMetres, lanes };
     } else {

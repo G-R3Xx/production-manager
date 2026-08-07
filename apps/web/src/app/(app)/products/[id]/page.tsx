@@ -152,6 +152,14 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     return [];
   });
   const definitionComponents = asArray(definition.components).map(asObject);
+  const componentMaterialIds = (component: Record<string, any>): string[] => Array.from(new Set([
+    String(component.materialId ?? "").trim(),
+    ...asArray(asObject(component.stockUsage).autoMaterialIds).map((value) => String(value ?? "").trim())
+  ].filter(Boolean)));
+  const componentOptionValues = (component: Record<string, any>): string[] => Array.from(new Set([
+    ...asArray(asObject(component.trigger).optionValues),
+    ...asArray(asObject(component.stockUsage).optionValues)
+  ].map((value) => String(value ?? "").trim()).filter(Boolean)));
   const baseMaterialField = fields.find((field) => String(field.key ?? "") === "base_material") ?? null;
   const optionBaseMaterialComponents = definitionComponents.filter((component) => {
     const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
@@ -159,7 +167,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   });
   const initialBaseMaterialChoices = optionBaseMaterialComponents.map((component) => {
     const materialId = String(component.materialId ?? "");
-    const option = asArray(baseMaterialField?.options).find((choice) => String(choice?.value ?? "") === materialId);
+    const triggerValues = componentOptionValues(component);
+    const option = asArray(baseMaterialField?.options).find((choice) => triggerValues.includes(String(choice?.value ?? "")) || String(choice?.value ?? "") === materialId);
     return { materialId, label: String(option?.label ?? component.label ?? materialId) };
   });
   const initialBaseMaterialMode = initialBaseMaterialChoices.length ? "option" : currentRecipe?.materialId ? "fixed" : "none";
@@ -230,9 +239,12 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     const triggerKey = String(asObject(component.trigger).optionKey ?? asObject(component.stockUsage).optionKey ?? "");
     return Boolean(component.materialId) && (String(component.role ?? "") === "vinyl_backing_material" || ["vinyl_backing", "vinyl_backed", "vinyl_backing_type"].includes(triggerKey));
   });
-  const initialVinylBackingMaterialIds = Array.from(new Set(vinylBackingComponents.map((component) => String(component.materialId ?? "")).filter(Boolean)));
+  const initialVinylBackingMaterialIds = Array.from(new Set(vinylBackingComponents.flatMap(componentMaterialIds)));
   const vinylBackingDefaultRaw = String(vinylBackingField?.defaultValue ?? "none");
-  const initialDefaultVinylBackingMaterialId = initialVinylBackingMaterialIds.includes(vinylBackingDefaultRaw) ? vinylBackingDefaultRaw : "none";
+  const vinylBackingDefaultComponent = vinylBackingComponents.find((component) => componentOptionValues(component).includes(vinylBackingDefaultRaw));
+  const initialDefaultVinylBackingMaterialId = vinylBackingDefaultComponent
+    ? componentMaterialIds(vinylBackingDefaultComponent)[0] ?? "none"
+    : initialVinylBackingMaterialIds.includes(vinylBackingDefaultRaw) ? vinylBackingDefaultRaw : "none";
   const linkedVinylBackingMaterialIds = new Set(initialVinylBackingMaterialIds);
   const inkField = fieldByKey("ink") ?? fieldByKey("white_ink");
   const initialInkOptions = optionValues(inkField);
@@ -255,19 +267,12 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     const label = String(component.label ?? "").toLowerCase();
     return Boolean(component.materialId) && (triggerKey === "laminate" || label.includes("laminate") || label.includes("cello"));
   });
-  const initialLaminateMaterialIds = Array.from(new Set(laminateComponents.map((component) => String(component.materialId ?? "")).filter(Boolean)));
+  const initialLaminateMaterialIds = Array.from(new Set(laminateComponents.flatMap(componentMaterialIds)));
   const laminateDefaultRaw = String(laminateField?.defaultValue ?? "none");
-  const initialDefaultLaminateMaterialId = initialLaminateMaterialIds.includes(laminateDefaultRaw)
-    ? laminateDefaultRaw
-    : laminateComponents.find((component) => {
-        const values = asArray(asObject(component.trigger).optionValues).concat(asArray(asObject(component.stockUsage).optionValues)).map(String);
-        return values.includes(laminateDefaultRaw);
-      })?.materialId
-      ? String(laminateComponents.find((component) => {
-          const values = asArray(asObject(component.trigger).optionValues).concat(asArray(asObject(component.stockUsage).optionValues)).map(String);
-          return values.includes(laminateDefaultRaw);
-        })?.materialId)
-      : "none";
+  const laminateDefaultComponent = laminateComponents.find((component) => componentOptionValues(component).includes(laminateDefaultRaw));
+  const initialDefaultLaminateMaterialId = laminateDefaultComponent
+    ? componentMaterialIds(laminateDefaultComponent)[0] ?? "none"
+    : initialLaminateMaterialIds.includes(laminateDefaultRaw) ? laminateDefaultRaw : "none";
   const finishingField = fieldByKey("finishing");
   const finishingDefaults = String(finishingField?.defaultValue ?? "").split(",").map((value) => value.trim()).filter(Boolean);
   const initialFinishingOptions = finishingDefaults.length ? finishingDefaults : optionValues(finishingField);

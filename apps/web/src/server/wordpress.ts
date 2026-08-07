@@ -639,7 +639,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.07.01",
+    version: "V26.08.07.02",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -702,9 +702,11 @@ async function pricingMaterialsForDefinition(
   definition: Record<string, unknown>
 ): Promise<WebsitePricingMaterial[]> {
   const materialIds = Array.from(new Set(
-    asArray(definition.components)
-      .map((rawComponent) => text(asObject(rawComponent).materialId))
-      .filter(Boolean)
+    asArray(definition.components).flatMap((rawComponent) => {
+      const component = asObject(rawComponent);
+      const stockUsage = asObject(component.stockUsage);
+      return [text(component.materialId), ...asArray(stockUsage.autoMaterialIds).map(text)].filter(Boolean);
+    })
   ));
   if (!materialIds.length) return [];
 
@@ -797,13 +799,134 @@ function followUpMultiplier(component: Record<string, unknown>, answers: Record<
   return 1;
 }
 
+type AutoMaterialSelection = {
+  componentId: string | null;
+  componentLabel: string;
+  customerChoice: string;
+  materialId: string;
+  materialName: string;
+  rollWidthMm: number | null;
+  candidateCount: number;
+};
+
+function componentAutoMaterialIds(component: Record<string, unknown>): string[] {
+  const stockUsage = asObject(component.stockUsage);
+  return Array.from(new Set([
+    text(component.materialId),
+    ...asArray(stockUsage.autoMaterialIds).map(text)
+  ].filter(Boolean)));
+}
+
+function websiteMaterialCostForComponent(
+  component: Record<string, unknown>,
+  material: WebsitePricingMaterial,
+  widthMm: number,
+  heightMm: number,
+  quantity: number,
+  selectionSink?: AutoMaterialSelection[]
+): number {
+  const stockUsage = asObject(component.stockUsage);
+  const ruleType = text(component.ruleType) || text(stockUsage.usageBasis) || "yield_based";
+  const wastePercent = Math.max(0, numberValue(component.wastePercent));
+  const areaTotal = Math.max(0, widthMm) * Math.max(0, heightMm) * Math.max(1, quantity) / 1_000_000;
+  const wasteMultiplier = 1 + wastePercent / 100;
+
+  if (ruleType === "per_linear_metre" || (ruleType === "yield_based" && materialLooksLikeRoll(material))) {
+    const autoIds = componentAutoMaterialIds(component);
+    const rollWidthOverride = autoIds.length > 1 ? 0 : numberValue(stockUsage.rollWidthMm);
+    return calculateProductionRecipeCost({
+      finishedWidthMm: widthMm,
+      finishedHeightMm: heightMm,
+      quantity,
+      material: {
+        type: "roll",
+        widthMm: numberValue(material.widthMm),
+        heightMm: numberValue(material.lengthMm),
+        rollWidthMm: rollWidthOverride > 0 ? rollWidthOverride : numberValue(material.rollWidthMm),
+        unitCost: materialRate(material, "lm"),
+        allowRotation: true
+      },
+      machine: null,
+      labour: [],
+      wastePercent,
+      markupMultiplier: 1,
+      profitMultiplier: 1
+    }).materialCost;
+  }
+
+  if (ruleType === "per_sqm") return areaTotal * materialRate(material, "sqm") * wasteMultiplier;
+  if (["per_unit", "selected_by_option"].includes(ruleType)) return materialRate(material, "each") * Math.max(1, quantity) * wasteMultiplier;
+
+  return calculateProductionRecipeCost({
+    finishedWidthMm: widthMm,
+    finishedHeightMm: heightMm,
+    quantity,
+    material: {
+      type: material.materialType,
+      widthMm: numberValue(material.widthMm),
+      heightMm: numberValue(material.lengthMm),
+      rollWidthMm: numberValue(material.rollWidthMm),
+      unitCost: materialLooksLikeRoll(material) ? materialRate(material, "lm") : materialRate(material, "sheet"),
+      minimumBillableSheetFraction: numberValue(material.minimumBillableSheetFraction),
+      allowRotation: true
+    },
+    machine: null,
+    labour: [],
+    wastePercent,
+    markupMultiplier: 1,
+    profitMultiplier: 1
+  }).materialCost;
+}
+
+function resolveWebsiteMaterialForComponent(
+  component: Record<string, unknown>,
+  materialMap: Map<string, WebsitePricingMaterial>,
+  widthMm: number,
+  heightMm: number,
+  quantity: number
+): { material: WebsitePricingMaterial | null; selection: AutoMaterialSelection | null } {
+  const candidateIds = componentAutoMaterialIds(component);
+  const candidates = candidateIds.map((id) => materialMap.get(id)).filter((material): material is WebsitePricingMaterial => Boolean(material));
+  if (!candidates.length) return { material: null, selection: null };
+  if (candidates.length === 1) return { material: candidates[0], selection: null };
+
+  const compatible = candidates.filter((material) => {
+    if (!materialLooksLikeRoll(material)) return true;
+    const rollWidth = numberValue(material.rollWidthMm);
+    if (rollWidth <= 0) return true;
+    return widthMm <= rollWidth || heightMm <= rollWidth;
+  });
+  const candidatePool = compatible.length ? compatible : candidates;
+  const selected = [...candidatePool].sort((left, right) => {
+    const costDifference = websiteMaterialCostForComponent(component, left, widthMm, heightMm, quantity)
+      - websiteMaterialCostForComponent(component, right, widthMm, heightMm, quantity);
+    if (Math.abs(costDifference) > 0.000001) return costDifference;
+    return numberValue(left.rollWidthMm) - numberValue(right.rollWidthMm);
+  })[0] ?? candidates[0];
+  const stockUsage = asObject(component.stockUsage);
+  const customerChoice = text(stockUsage.autoMaterialLabel) || text(component.label) || text(selected.customerFacingName) || selected.name;
+  return {
+    material: selected,
+    selection: {
+      componentId: text(component.id) || null,
+      componentLabel: text(component.label) || customerChoice,
+      customerChoice,
+      materialId: selected.id,
+      materialName: selected.name,
+      rollWidthMm: numberValue(selected.rollWidthMm) > 0 ? numberValue(selected.rollWidthMm) : null,
+      candidateCount: candidates.length
+    }
+  };
+}
+
 function optionalComponentCostTotal(
   definition: Record<string, unknown>,
   materials: WebsitePricingMaterial[],
   answers: Record<string, unknown>,
   widthMm: number,
   heightMm: number,
-  quantity: number
+  quantity: number,
+  selectionSink?: AutoMaterialSelection[]
 ): number {
   const materialMap = new Map(materials.map((material) => [material.id, material]));
   const areaTotal = Math.max(0, widthMm) * Math.max(0, heightMm) * Math.max(1, quantity) / 1_000_000;
@@ -841,8 +964,12 @@ function optionalComponentCostTotal(
       continue;
     }
 
-    const material = materialMap.get(text(component.materialId));
+    const resolvedMaterial = resolveWebsiteMaterialForComponent(component, materialMap, widthMm, heightMm, quantity);
+    const material = resolvedMaterial.material;
     if (!material) continue;
+    if (resolvedMaterial.selection && selectionSink && !selectionSink.some((item) => item.componentId === resolvedMaterial.selection?.componentId && item.materialId === resolvedMaterial.selection?.materialId)) {
+      selectionSink.push(resolvedMaterial.selection);
+    }
 
     if (ruleType === "per_linear_metre" || (ruleType === "yield_based" && materialLooksLikeRoll(material))) {
       const cost = calculateProductionRecipeCost({
@@ -853,7 +980,7 @@ function optionalComponentCostTotal(
           type: "roll",
           widthMm: numberValue(material.widthMm),
           heightMm: numberValue(material.lengthMm),
-          rollWidthMm: numberValue(stockUsage.rollWidthMm, numberValue(material.rollWidthMm)),
+          rollWidthMm: componentAutoMaterialIds(component).length > 1 ? numberValue(material.rollWidthMm) : numberValue(stockUsage.rollWidthMm, numberValue(material.rollWidthMm)),
           unitCost: materialRate(material, "lm"),
           allowRotation: true
         },
@@ -973,7 +1100,8 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
   const recipeSettings = recipes.find((item) => item.id === product.productionRecipeId);
   const markupMultiplier = Math.max(0, numberValue(recipeSettings?.markupMultiplier, numberValue(websiteConfig.markupMultiplier, 1.5)));
   const profitMultiplier = Math.max(0, numberValue(recipeSettings?.profitMultiplier, numberValue(websiteConfig.profitMultiplier, 1.2)));
-  const optionalCost = optionalComponentCostTotal(definition, materials, answers, widthMm, heightMm, quantity);
+  const autoMaterialSelections: AutoMaterialSelection[] = [];
+  const optionalCost = optionalComponentCostTotal(definition, materials, answers, widthMm, heightMm, quantity, autoMaterialSelections);
   const defaultOptionalCost = optionalComponentCostTotal(
     definition,
     materials,
@@ -987,7 +1115,22 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
   // or media is not counted twice.
   const optionalCostDelta = optionalCost - defaultOptionalCost;
   const optionalSell = optionalCostDelta * markupMultiplier * profitMultiplier;
-  const baseSell = recipe?.sellPrice ?? numberValue(websiteConfig.basePrice);
+  const materialMap = new Map(materials.map((material) => [material.id, material]));
+  let baseAutoCostDelta = 0;
+  for (const rawComponent of components) {
+    const component = asObject(rawComponent);
+    if (text(component.role) !== "base_material" || componentAutoMaterialIds(component).length < 2) continue;
+    const resolved = resolveWebsiteMaterialForComponent(component, materialMap, widthMm, heightMm, quantity);
+    const representative = materialMap.get(text(component.materialId));
+    if (!resolved.material || !representative) continue;
+    baseAutoCostDelta += websiteMaterialCostForComponent(component, resolved.material, widthMm, heightMm, quantity)
+      - websiteMaterialCostForComponent(component, representative, widthMm, heightMm, quantity);
+    if (resolved.selection && !autoMaterialSelections.some((item) => item.componentId === resolved.selection?.componentId && item.materialId === resolved.selection?.materialId)) {
+      autoMaterialSelections.push(resolved.selection);
+    }
+  }
+  const baseAutoSellDelta = baseAutoCostDelta * markupMultiplier * profitMultiplier;
+  const baseSell = (recipe?.sellPrice ?? numberValue(websiteConfig.basePrice)) + baseAutoSellDelta;
   const lineTotal = Math.max(0, Math.round((baseSell + optionalSell + optionDelta) * 100) / 100);
   return {
     productId: product.id,
@@ -1013,6 +1156,7 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     } : null,
     materialUsage: recipe?.materialUsage ?? null,
     manufacturingMethodId: product.productionRecipeId,
+    autoMaterialSelections,
     answers,
     displayAnswers: displayAnswersForFields(fields, answers)
   };
@@ -1169,6 +1313,7 @@ async function refreshExistingWebsiteQuoteLines(
       calculatedWebsiteLineTotal: calculated.lineTotal,
       chargedWebsiteLineTotal: lineTotal,
       materialUsage: calculated.materialUsage,
+      autoMaterialSelections: calculated.autoMaterialSelections,
       manufacturingMethodId: calculated.manufacturingMethodId,
       rawConfiguration: line.configuration ?? {}
     };
@@ -1373,6 +1518,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
         calculatedWebsiteLineTotal: calculated.lineTotal,
         chargedWebsiteLineTotal: lineTotal,
         materialUsage: calculated.materialUsage,
+        autoMaterialSelections: calculated.autoMaterialSelections,
         manufacturingMethodId: calculated.manufacturingMethodId,
         rawConfiguration: line.configuration ?? {}
       }

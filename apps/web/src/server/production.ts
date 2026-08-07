@@ -1372,6 +1372,16 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
     const selectedImage = asJsonRecord(snapshot.selectedImage ?? rawConfiguration.selectedImage);
     const answers = asJsonRecord(snapshot.answers);
     const displayAnswers = asJsonRecord(snapshot.displayAnswers);
+    const autoMaterialSelections = Array.isArray(snapshot.autoMaterialSelections) ? snapshot.autoMaterialSelections : [];
+    const autoStockSummary = autoMaterialSelections.flatMap((rawSelection) => {
+      const selection = asJsonRecord(rawSelection);
+      const materialName = jsonText(selection.materialName);
+      if (!materialName) return [];
+      const customerChoice = jsonText(selection.customerChoice) || jsonText(selection.componentLabel);
+      const rollWidth = Number(selection.rollWidthMm);
+      return [`${customerChoice ? `${customerChoice}: ` : ""}${materialName}${Number.isFinite(rollWidth) && rollWidth > 0 ? ` (${rollWidth} mm roll)` : ""}`];
+    }).join(" · ");
+    const internalFinishingSummary = [line.optionSummary, autoStockSummary ? `Auto-selected stock: ${autoStockSummary}` : null].filter(Boolean).join(" · ");
     const files = websiteArtworkFiles(rawConfiguration.artworkFiles ?? snapshot.artworkFiles);
     artworkFileCount += files.length;
     const firstFile = files[0];
@@ -1399,10 +1409,10 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
         print_ready_uploaded_by=EXCLUDED.print_ready_uploaded_by,status=EXCLUDED.status,payload_json=EXCLUDED.payload_json,updated_at=now()
       RETURNING id
     `, [jobId, line.id, line.productName, normaliseMoney(line.quantity, "1"), sizeSummary,
-      displayAnswerText(displayAnswers, /material|substrate|stock/i) || jsonText(answers.material) || jsonText(answers.substrate), line.optionSummary,
+      displayAnswerText(displayAnswers, /material|substrate|stock/i) || jsonText(answers.material) || jsonText(answers.substrate), internalFinishingSummary,
       firstFile?.downloadUrl ?? null, firstFile?.storagePath ?? null, firstFile?.name ?? null,
       firstFile?.mime ?? null, files.length > 1 ? `${files.length} artwork files supplied; all links are stored on this item.` : null,
-      index, JSON.stringify({ source: "wordpress_woocommerce", answers, displayAnswers, selectedImage, artworkFiles: files, rawConfiguration })]);
+      index, JSON.stringify({ source: "wordpress_woocommerce", answers, displayAnswers, autoMaterialSelections, selectedImage, artworkFiles: files, rawConfiguration })]);
     const itemId = itemResult.rows[0]?.id;
     if (!itemId) continue;
     const steps = stepPlanForItem({

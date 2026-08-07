@@ -74,6 +74,9 @@ export type QuoteComponent = {
     quantityCustomFieldKey?: string | null;
     quantityValueMap?: Record<string, string | number | null> | null;
     quantityUnitLabel?: string | null;
+    autoMaterialIds?: string[] | null;
+    autoMaterialLabel?: string | null;
+    autoSelectStrategy?: string | null;
   } | null;
   trigger?: {
     optionKey?: string | null;
@@ -109,6 +112,7 @@ export type QuoteProduct = {
 
 export type CostBreakdownItem = {
   componentLabel: string;
+  materialId?: string;
   materialName: string;
   basis: string;
   amount: number;
@@ -787,10 +791,54 @@ function linearMetresFor(dimensions: { widthMm: number; heightMm: number } | nul
   return { amount: Math.max(widthMm, heightMm) / 1000, note: "roll width missing; using longest side as metres" };
 }
 
+function autoMaterialIdsForComponent(component: QuoteComponent): string[] {
+  const ids = Array.isArray(component.stockUsage?.autoMaterialIds) ? component.stockUsage?.autoMaterialIds ?? [] : [];
+  return Array.from(new Set([component.materialId ?? "", ...ids].map((value) => String(value ?? "").trim()).filter(Boolean)));
+}
+
+function autoSelectMaterialForComponent(
+  component: QuoteComponent,
+  materials: QuoteMaterial[],
+  dimensions: { widthMm: number; heightMm: number } | null
+): { material: QuoteMaterial | undefined; note?: string } {
+  const candidateIds = autoMaterialIdsForComponent(component);
+  const candidates = candidateIds.map((id) => materialFor(materials, id)).filter((material): material is QuoteMaterial => Boolean(material));
+  if (!candidates.length) return { material: materialFor(materials, component.materialId) };
+  if (candidates.length === 1 || !dimensions) return { material: candidates[0] };
+
+  const compatible = candidates.filter((material) => {
+    if (!materialLooksLikeRoll(material)) return true;
+    const rollWidthMm = numberValue(material.rollWidthMm, 0);
+    if (rollWidthMm <= 0) return true;
+    return dimensions.widthMm <= rollWidthMm || dimensions.heightMm <= rollWidthMm;
+  });
+  const pool = compatible.length ? compatible : candidates;
+  const scored = pool.map((material) => {
+    if (materialLooksLikeRoll(material)) {
+      const metres = linearMetresFor(dimensions, material, component).amount;
+      return { material, cost: metres * costRateFor(material, "lm").rate };
+    }
+    const parentArea = sheetAreaSqm(material);
+    const finishedArea = dimensions.widthMm * dimensions.heightMm / 1_000_000;
+    const estimatedSheets = parentArea > 0 ? finishedArea / parentArea : 1;
+    return { material, cost: estimatedSheets * costRateFor(material, "sheet").rate };
+  }).sort((left, right) => left.cost - right.cost || numberValue(left.material.rollWidthMm, 0) - numberValue(right.material.rollWidthMm, 0));
+  const selected = scored[0]?.material ?? candidates[0];
+  const width = numberValue(selected.rollWidthMm, 0);
+  const groupLabel = String(component.stockUsage?.autoMaterialLabel ?? component.label ?? "material").trim();
+  return {
+    material: selected,
+    note: candidateIds.length > 1
+      ? `auto-selected ${selected.name}${width > 0 ? ` (${formatUsage(width)} mm roll)` : ""} from ${candidateIds.length} ${groupLabel} stock option${candidateIds.length === 1 ? "" : "s"}`
+      : undefined
+  };
+}
+
 function costBreakdownItem(item: Omit<CostBreakdownItem, "note"> & { note?: string | null | undefined }): CostBreakdownItem {
   const note = String(item.note ?? "").trim();
   const base = {
     componentLabel: item.componentLabel,
+    ...(item.materialId ? { materialId: item.materialId } : {}),
     materialName: item.materialName,
     basis: item.basis,
     amount: item.amount,
@@ -897,7 +945,8 @@ function componentCostBreakdownFor(
         })];
       }
 
-      const material = materialFor(materials, component.materialId);
+      const autoSelection = autoSelectMaterialForComponent(component, materials, dimensions);
+      const material = autoSelection.material;
       if (!material) return [];
 
       const ruleType = normalizedRuleTypeFor(component, material);
@@ -911,6 +960,7 @@ function componentCostBreakdownFor(
         const rate = costRateFor(material, "lm");
         return [costBreakdownItem({
           componentLabel,
+          materialId: material.id,
           materialName: material.name,
           basis: fixedMetresPerUnit > 0 ? "Fixed roll metres used" : "Roll length used",
           amount,
@@ -920,6 +970,7 @@ function componentCostBreakdownFor(
           note: [
             String(component.ruleType ?? component.stockUsage?.usageBasis ?? "") === "per_linear_metre" ? undefined : "auto-detected roll stock",
             metres.note,
+            autoSelection.note,
             followUp.note,
             answerMultiplier.note,
             rate.note
@@ -938,13 +989,14 @@ function componentCostBreakdownFor(
         const rate = costRateFor(material, "sqm");
         return [costBreakdownItem({
           componentLabel,
+          materialId: material.id,
           materialName: material.name,
           basis: sheetAllocation ? "Billable sheet area used" : component.stockUsage?.widthMm && component.stockUsage?.heightMm ? "Fixed square metres used" : "Square metres used",
           amount,
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [sheetAllocation?.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
+          note: [autoSelection.note, sheetAllocation?.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -957,13 +1009,14 @@ function componentCostBreakdownFor(
         const rate = costRateFor(material, isSheetUnit ? "sheet" : "each");
         return [costBreakdownItem({
           componentLabel,
+          materialId: material.id,
           materialName: material.name,
           basis: isSheetUnit ? "Billable sheets used" : "Fixed items used",
           amount,
           unit: rate.unit,
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, sheetAllocation?.note, followUp.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
+          note: [autoSelection.note, fixedSheetsPerUnit > 0 ? "fixed sheets per item set on product usage" : undefined, sheetAllocation?.note, followUp.note, answerMultiplier.note, rate.note].filter(Boolean).join(" · ")
         })];
       }
 
@@ -985,6 +1038,7 @@ function componentCostBreakdownFor(
 
       return [costBreakdownItem({
         componentLabel,
+        materialId: material.id,
         materialName: material.name,
         basis: fixedSheetsPerUnit > 0 ? "Fixed sheets used" : partsPerSheet > 0 ? "Sheet yield used" : "Part sheet used",
         amount: sheetsUsed,
@@ -997,6 +1051,7 @@ function componentCostBreakdownFor(
             : partsPerSheet > 0
               ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}`
               : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing",
+          autoSelection.note,
           sheetAllocation.note,
           answerMultiplier.note
         ].filter(Boolean).join(" · ")
