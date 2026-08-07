@@ -640,7 +640,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.07.05",
+    version: "V26.08.07.06",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -919,8 +919,10 @@ function resolveWebsiteMaterialForComponent(
       if (rollWidth <= 0) return true;
       return widthMm <= rollWidth || heightMm <= rollWidth;
     }
-    const hasParentDimensions = numberValue(material.widthMm) > 0 && numberValue(material.lengthMm) > 0;
-    return !hasParentDimensions || websiteSheetPiecesPerParent(material, widthMm, heightMm) > 0;
+    // Sheet candidates stay valid when the finished item is larger than one
+    // parent sheet because the costing path can panelise across multiple sheets.
+    // Materials without saved dimensions retain the legacy fallback behaviour.
+    return true;
   });
   const candidatePool = compatible.length ? compatible : candidates;
   const selected = [...candidatePool].sort((left, right) => {

@@ -85,10 +85,10 @@ export function calculateProductionRecipeCost(input: RecipeCostInput): RecipeCos
         ? Math.floor(parentWidth / height) * Math.floor(parentHeight / width)
         : 0;
       const piecesPerSheet = Math.max(normalFit, rotatedFit);
+      const minimumFraction = Math.max(0, safe(material.minimumBillableSheetFraction ?? 0));
 
       if (piecesPerSheet > 0) {
         const rawSheets = quantity / piecesPerSheet;
-        const minimumFraction = Math.max(0, safe(material.minimumBillableSheetFraction ?? 0));
         sheets = minimumFraction > 0
           ? Math.ceil(rawSheets / minimumFraction) * minimumFraction
           : rawSheets;
@@ -98,6 +98,27 @@ export function calculateProductionRecipeCost(input: RecipeCostInput): RecipeCos
           sheets,
           piecesPerSheet,
           wastePieces: Math.max(0, Math.ceil(sheets * piecesPerSheet) - quantity)
+        };
+      } else if (parentWidth > 0 && parentHeight > 0) {
+        // Oversize finished panels can require multiple parent sheets. Previously
+        // this path returned zero material usage, which could make a larger web
+        // configuration cheaper than a smaller one. Calculate the smallest
+        // rectangular parent-sheet grid in either orientation instead.
+        const normalSheetsPerPiece = Math.ceil(width / parentWidth) * Math.ceil(height / parentHeight);
+        const rotatedSheetsPerPiece = allowRotation
+          ? Math.ceil(width / parentHeight) * Math.ceil(height / parentWidth)
+          : Number.POSITIVE_INFINITY;
+        const sheetsPerPiece = Math.min(normalSheetsPerPiece, rotatedSheetsPerPiece);
+        const rawSheets = sheetsPerPiece * quantity;
+        sheets = minimumFraction > 0
+          ? Math.ceil(rawSheets / minimumFraction) * minimumFraction
+          : rawSheets;
+        materialCost = sheets * safe(material.unitCost) * wasteFactor;
+        materialUsage = {
+          mode: "sheet",
+          sheets,
+          piecesPerSheet: 0,
+          wastePieces: 0
         };
       }
     } else if (type.includes("roll") || type.includes("laminate") || type.includes("cello")) {

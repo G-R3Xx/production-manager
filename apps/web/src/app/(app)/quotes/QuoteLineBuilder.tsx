@@ -723,6 +723,29 @@ function sheetPiecesPerParent(material: QuoteMaterial, dimensions: { widthMm: nu
   return Math.max(normal, rotated);
 }
 
+function panelizedSheetsPerFinishedPiece(material: QuoteMaterial, dimensions: { widthMm: number; heightMm: number } | null): { sheets: number; across: number; rows: number; rotated: boolean } | null {
+  if (!dimensions || materialLooksLikeRoll(material)) return null;
+  const parentWidth = numberValue(material.widthMm, 0);
+  const parentHeight = numberValue(material.lengthMm, 0);
+  const pieceWidth = numberValue(dimensions.widthMm, 0);
+  const pieceHeight = numberValue(dimensions.heightMm, 0);
+  if (parentWidth <= 0 || parentHeight <= 0 || pieceWidth <= 0 || pieceHeight <= 0) return null;
+
+  const normal = {
+    sheets: Math.ceil(pieceWidth / parentWidth) * Math.ceil(pieceHeight / parentHeight),
+    across: Math.ceil(pieceWidth / parentWidth),
+    rows: Math.ceil(pieceHeight / parentHeight),
+    rotated: false
+  };
+  const rotated = {
+    sheets: Math.ceil(pieceWidth / parentHeight) * Math.ceil(pieceHeight / parentWidth),
+    across: Math.ceil(pieceWidth / parentHeight),
+    rows: Math.ceil(pieceHeight / parentWidth),
+    rotated: true
+  };
+  return [normal, rotated].sort((a, b) => a.sheets - b.sheets)[0] ?? null;
+}
+
 function normalizedRuleTypeFor(component: QuoteComponent, material: QuoteMaterial): string {
   const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
   if (["yield_based", "auto_sheet", "auto_material"].includes(ruleType) && materialLooksLikeRoll(material)) {
@@ -865,8 +888,10 @@ function autoSelectMaterialForComponent(
       if (rollWidthMm <= 0) return true;
       return dimensions.widthMm <= rollWidthMm || dimensions.heightMm <= rollWidthMm;
     }
-    const hasParentDimensions = numberValue(material.widthMm, 0) > 0 && numberValue(material.lengthMm, 0) > 0;
-    return !hasParentDimensions || sheetPiecesPerParent(material, dimensions) > 0;
+    // Sheet candidates stay valid when the finished item is larger than one
+    // parent sheet because the costing path can panelise across multiple sheets.
+    // Materials without saved dimensions retain the legacy fallback behaviour.
+    return true;
   });
   const pool = compatible.length ? compatible : candidates;
   const scored = pool.map((material) => {
@@ -878,6 +903,11 @@ function autoSelectMaterialForComponent(
     if (piecesPerSheet > 0) {
       const waste = wasteMultiplier(component);
       const allocation = billableSheetAllocation(material, waste / piecesPerSheet, quoteQuantity);
+      return { material, cost: allocation.billableTotal * costRateFor(material, "sheet").rate };
+    }
+    const panelized = panelizedSheetsPerFinishedPiece(material, dimensions);
+    if (panelized && panelized.sheets > 0) {
+      const allocation = billableSheetAllocation(material, panelized.sheets, quoteQuantity);
       return { material, cost: allocation.billableTotal * costRateFor(material, "sheet").rate };
     }
     const parentArea = sheetAreaSqm(material);
@@ -1095,13 +1125,16 @@ function componentCostBreakdownFor(
       const partsPerSheet = configuredPartsPerSheet > 0 ? configuredPartsPerSheet : calculatedPartsPerSheet;
       const parentArea = sheetAreaSqm(material);
       const signArea = dimensions ? (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000) : 0;
+      const panelized = partsPerSheet > 0 ? null : panelizedSheetsPerFinishedPiece(material, dimensions);
       const sheetsBeforeAllowance = fixedSheetsPerUnit > 0
         ? fixedSheetsPerUnit
         : partsPerSheet > 0
           ? 1 / partsPerSheet
-          : parentArea > 0
-            ? signArea / parentArea
-            : 0;
+          : panelized && panelized.sheets > 0
+            ? panelized.sheets
+            : parentArea > 0
+              ? signArea / parentArea
+              : 0;
       const calculatedSheetsPerUnit = sheetsBeforeAllowance * allowance * waste;
       const sheetAllocation = billableSheetAllocation(material, calculatedSheetsPerUnit, quoteQuantity);
       const sheetsUsed = sheetAllocation.amountPerUnit;
@@ -1121,7 +1154,9 @@ function componentCostBreakdownFor(
             ? "fixed sheets per item set on product usage"
             : partsPerSheet > 0
               ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}${configuredPartsPerSheet > 0 ? " (configured yield)" : " by size/rotation"}`
-              : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing",
+              : panelized && panelized.sheets > 0
+                ? `${panelized.sheets} parent sheet${panelized.sheets === 1 ? "" : "s"} per finished item · panelled ${panelized.across} across × ${panelized.rows} high${panelized.rotated ? " · rotated sheet orientation" : ""}`
+                : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing",
           autoSelection.note,
           sheetAllocation.note,
           answerMultiplier.note
