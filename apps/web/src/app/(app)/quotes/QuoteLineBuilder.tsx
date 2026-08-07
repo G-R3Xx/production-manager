@@ -700,6 +700,16 @@ function materialLooksLikeRoll(material: QuoteMaterial): boolean {
   );
 }
 
+function sheetPiecesPerParent(material: QuoteMaterial, dimensions: { widthMm: number; heightMm: number } | null): number {
+  if (!dimensions || materialLooksLikeRoll(material)) return 0;
+  const parentWidth = numberValue(material.widthMm, 0);
+  const parentHeight = numberValue(material.lengthMm, 0);
+  if (parentWidth <= 0 || parentHeight <= 0 || dimensions.widthMm <= 0 || dimensions.heightMm <= 0) return 0;
+  const normal = Math.floor(parentWidth / dimensions.widthMm) * Math.floor(parentHeight / dimensions.heightMm);
+  const rotated = Math.floor(parentWidth / dimensions.heightMm) * Math.floor(parentHeight / dimensions.widthMm);
+  return Math.max(normal, rotated);
+}
+
 function normalizedRuleTypeFor(component: QuoteComponent, material: QuoteMaterial): string {
   const ruleType = String(component.ruleType ?? component.stockUsage?.usageBasis ?? "yield_based");
   if (["yield_based", "auto_sheet", "auto_material"].includes(ruleType) && materialLooksLikeRoll(material)) {
@@ -799,7 +809,8 @@ function autoMaterialIdsForComponent(component: QuoteComponent): string[] {
 function autoSelectMaterialForComponent(
   component: QuoteComponent,
   materials: QuoteMaterial[],
-  dimensions: { widthMm: number; heightMm: number } | null
+  dimensions: { widthMm: number; heightMm: number } | null,
+  quoteQuantity = 1
 ): { material: QuoteMaterial | undefined; note?: string } {
   const candidateIds = autoMaterialIdsForComponent(component);
   const candidates = candidateIds.map((id) => materialFor(materials, id)).filter((material): material is QuoteMaterial => Boolean(material));
@@ -807,10 +818,13 @@ function autoSelectMaterialForComponent(
   if (candidates.length === 1 || !dimensions) return { material: candidates[0] };
 
   const compatible = candidates.filter((material) => {
-    if (!materialLooksLikeRoll(material)) return true;
-    const rollWidthMm = numberValue(material.rollWidthMm, 0);
-    if (rollWidthMm <= 0) return true;
-    return dimensions.widthMm <= rollWidthMm || dimensions.heightMm <= rollWidthMm;
+    if (materialLooksLikeRoll(material)) {
+      const rollWidthMm = numberValue(material.rollWidthMm, 0);
+      if (rollWidthMm <= 0) return true;
+      return dimensions.widthMm <= rollWidthMm || dimensions.heightMm <= rollWidthMm;
+    }
+    const hasParentDimensions = numberValue(material.widthMm, 0) > 0 && numberValue(material.lengthMm, 0) > 0;
+    return !hasParentDimensions || sheetPiecesPerParent(material, dimensions) > 0;
   });
   const pool = compatible.length ? compatible : candidates;
   const scored = pool.map((material) => {
@@ -818,18 +832,31 @@ function autoSelectMaterialForComponent(
       const metres = linearMetresFor(dimensions, material, component).amount;
       return { material, cost: metres * costRateFor(material, "lm").rate };
     }
+    const piecesPerSheet = sheetPiecesPerParent(material, dimensions);
+    if (piecesPerSheet > 0) {
+      const waste = wasteMultiplier(component);
+      const allocation = billableSheetAllocation(material, waste / piecesPerSheet, quoteQuantity);
+      return { material, cost: allocation.billableTotal * costRateFor(material, "sheet").rate };
+    }
     const parentArea = sheetAreaSqm(material);
     const finishedArea = dimensions.widthMm * dimensions.heightMm / 1_000_000;
     const estimatedSheets = parentArea > 0 ? finishedArea / parentArea : 1;
-    return { material, cost: estimatedSheets * costRateFor(material, "sheet").rate };
+    return { material, cost: estimatedSheets * Math.max(1, quoteQuantity) * costRateFor(material, "sheet").rate };
   }).sort((left, right) => left.cost - right.cost || numberValue(left.material.rollWidthMm, 0) - numberValue(right.material.rollWidthMm, 0));
   const selected = scored[0]?.material ?? candidates[0];
   const width = numberValue(selected.rollWidthMm, 0);
+  const parentWidth = numberValue(selected.widthMm, 0);
+  const parentHeight = numberValue(selected.lengthMm, 0);
+  const stockSize = width > 0
+    ? ` (${formatUsage(width)} mm roll)`
+    : parentWidth > 0 && parentHeight > 0
+      ? ` (${formatUsage(parentWidth)} × ${formatUsage(parentHeight)} mm sheet)`
+      : "";
   const groupLabel = String(component.stockUsage?.autoMaterialLabel ?? component.label ?? "material").trim();
   return {
     material: selected,
     note: candidateIds.length > 1
-      ? `auto-selected ${selected.name}${width > 0 ? ` (${formatUsage(width)} mm roll)` : ""} from ${candidateIds.length} ${groupLabel} stock option${candidateIds.length === 1 ? "" : "s"}`
+      ? `auto-selected ${selected.name}${stockSize} from ${candidateIds.length} ${groupLabel} stock option${candidateIds.length === 1 ? "" : "s"}`
       : undefined
   };
 }
@@ -945,7 +972,7 @@ function componentCostBreakdownFor(
         })];
       }
 
-      const autoSelection = autoSelectMaterialForComponent(component, materials, dimensions);
+      const autoSelection = autoSelectMaterialForComponent(component, materials, dimensions, quoteQuantity);
       const material = autoSelection.material;
       if (!material) return [];
 
@@ -1021,7 +1048,9 @@ function componentCostBreakdownFor(
       }
 
       const fixedSheetsPerUnit = numberValue(component.stockUsage?.sheetsPerUnit, 0);
-      const partsPerSheet = numberValue(component.stockUsage?.partsPerSheet, 0);
+      const configuredPartsPerSheet = numberValue(component.stockUsage?.partsPerSheet, 0);
+      const calculatedPartsPerSheet = sheetPiecesPerParent(material, dimensions);
+      const partsPerSheet = configuredPartsPerSheet > 0 ? configuredPartsPerSheet : calculatedPartsPerSheet;
       const parentArea = sheetAreaSqm(material);
       const signArea = dimensions ? (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000) : 0;
       const sheetsBeforeAllowance = fixedSheetsPerUnit > 0
@@ -1049,7 +1078,7 @@ function componentCostBreakdownFor(
           fixedSheetsPerUnit > 0
             ? "fixed sheets per item set on product usage"
             : partsPerSheet > 0
-              ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}`
+              ? `1 parent sheet makes ${formatUsage(partsPerSheet)} item${partsPerSheet === 1 ? "" : "s"}${configuredPartsPerSheet > 0 ? " (configured yield)" : " by size/rotation"}`
               : parentArea > 0 ? `based on ${formatUsage(parentArea)} sqm parent sheet` : "sheet dimensions missing",
           autoSelection.note,
           sheetAllocation.note,

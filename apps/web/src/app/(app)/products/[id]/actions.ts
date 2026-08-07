@@ -702,8 +702,8 @@ function mergeInternalQuoteFields(
         dimensionSource: "finished_size",
         optionKey: "finished_size",
         optionValues: [],
-        autoMaterialIds: isRoll ? uniqueStrings(input.mainMaterialAutoIds.length ? input.mainMaterialAutoIds : input.mainMaterialId ? [input.mainMaterialId] : []) : [],
-        autoSelectStrategy: isRoll ? "lowest_cost_fit" : null,
+        autoMaterialIds: uniqueStrings(input.mainMaterialAutoIds.length ? input.mainMaterialAutoIds : input.mainMaterialId ? [input.mainMaterialId] : []),
+        autoSelectStrategy: "lowest_cost_fit",
         widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
       },
       trigger: { optionKey: null, optionValue: null, optionValues: [] }
@@ -730,8 +730,8 @@ function mergeInternalQuoteFields(
           dimensionSource: "finished_size",
           optionKey: "base_material",
           optionValues: [choice.materialId],
-          autoMaterialIds: choice.isRoll ? uniqueStrings(choice.autoMaterialIds.length ? choice.autoMaterialIds : [choice.materialId]) : [],
-          autoSelectStrategy: choice.isRoll ? "lowest_cost_fit" : null,
+          autoMaterialIds: uniqueStrings(choice.autoMaterialIds.length ? choice.autoMaterialIds : [choice.materialId]),
+          autoSelectStrategy: "lowest_cost_fit",
           widthMm: null, heightMm: null, rollWidthMm: null, partsPerSheet: null, metresPerUnit: null, sheetsPerUnit: null
         },
         trigger: { optionKey: "base_material", optionValue: null, optionValues: [choice.materialId] }

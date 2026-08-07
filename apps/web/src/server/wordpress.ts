@@ -639,7 +639,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.07.02",
+    version: "V26.08.07.03",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -735,6 +735,16 @@ function materialLooksLikeRoll(material: WebsitePricingMaterial): boolean {
     .map((value) => text(value).toLowerCase())
     .join(" ");
   return numberValue(material.rollWidthMm) > 0 || /\b(roll|vinyl|sav|laminat|cello|banner|linear metre|linear meter|\blm\b)\b/.test(source);
+}
+
+function websiteSheetPiecesPerParent(material: WebsitePricingMaterial, widthMm: number, heightMm: number): number {
+  if (materialLooksLikeRoll(material)) return 0;
+  const parentWidth = numberValue(material.widthMm);
+  const parentHeight = numberValue(material.lengthMm);
+  if (parentWidth <= 0 || parentHeight <= 0 || widthMm <= 0 || heightMm <= 0) return 0;
+  const normal = Math.floor(parentWidth / widthMm) * Math.floor(parentHeight / heightMm);
+  const rotated = Math.floor(parentWidth / heightMm) * Math.floor(parentHeight / widthMm);
+  return Math.max(normal, rotated);
 }
 
 function materialRate(material: WebsitePricingMaterial, basis: "lm" | "sqm" | "sheet" | "each"): number {
@@ -891,17 +901,24 @@ function resolveWebsiteMaterialForComponent(
   if (candidates.length === 1) return { material: candidates[0], selection: null };
 
   const compatible = candidates.filter((material) => {
-    if (!materialLooksLikeRoll(material)) return true;
-    const rollWidth = numberValue(material.rollWidthMm);
-    if (rollWidth <= 0) return true;
-    return widthMm <= rollWidth || heightMm <= rollWidth;
+    if (materialLooksLikeRoll(material)) {
+      const rollWidth = numberValue(material.rollWidthMm);
+      if (rollWidth <= 0) return true;
+      return widthMm <= rollWidth || heightMm <= rollWidth;
+    }
+    const hasParentDimensions = numberValue(material.widthMm) > 0 && numberValue(material.lengthMm) > 0;
+    return !hasParentDimensions || websiteSheetPiecesPerParent(material, widthMm, heightMm) > 0;
   });
   const candidatePool = compatible.length ? compatible : candidates;
   const selected = [...candidatePool].sort((left, right) => {
     const costDifference = websiteMaterialCostForComponent(component, left, widthMm, heightMm, quantity)
       - websiteMaterialCostForComponent(component, right, widthMm, heightMm, quantity);
     if (Math.abs(costDifference) > 0.000001) return costDifference;
-    return numberValue(left.rollWidthMm) - numberValue(right.rollWidthMm);
+    const rollWidthDifference = numberValue(left.rollWidthMm) - numberValue(right.rollWidthMm);
+    if (Math.abs(rollWidthDifference) > 0.000001) return rollWidthDifference;
+    const leftSheetArea = numberValue(left.widthMm) * numberValue(left.lengthMm);
+    const rightSheetArea = numberValue(right.widthMm) * numberValue(right.lengthMm);
+    return leftSheetArea - rightSheetArea;
   })[0] ?? candidates[0];
   const stockUsage = asObject(component.stockUsage);
   const customerChoice = text(stockUsage.autoMaterialLabel) || text(component.label) || text(selected.customerFacingName) || selected.name;

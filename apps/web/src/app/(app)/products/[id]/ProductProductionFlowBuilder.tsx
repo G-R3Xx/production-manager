@@ -204,9 +204,12 @@ function autoMaterialGroups(materials: MaterialOption[], preferredId = ""): Auto
   }
   return Array.from(grouped.entries()).map(([key, groupMaterials]) => {
     const sorted = [...groupMaterials].sort((left, right) => {
-      const leftWidth = Number(left.rollWidthMm || 0);
-      const rightWidth = Number(right.rollWidthMm || 0);
-      if (leftWidth !== rightWidth) return leftWidth - rightWidth;
+      const leftRollWidth = Number(left.rollWidthMm || 0);
+      const rightRollWidth = Number(right.rollWidthMm || 0);
+      if (leftRollWidth !== rightRollWidth) return leftRollWidth - rightRollWidth;
+      const leftSheetArea = Number(left.widthMm || 0) * Number(left.lengthMm || 0);
+      const rightSheetArea = Number(right.widthMm || 0) * Number(right.lengthMm || 0);
+      if (leftSheetArea !== rightSheetArea) return leftSheetArea - rightSheetArea;
       return left.name.localeCompare(right.name);
     });
     const representative = sorted.find((material) => material.id === preferredId) ?? sorted[0];
@@ -225,8 +228,15 @@ function autoGroupDescription(group: AutoMaterialGroup): string {
     .map((material) => Number(material.rollWidthMm || 0))
     .filter((width) => width > 0)
     .sort((left, right) => left - right);
-  if (widths.length > 1) return `Auto-selects ${widths.join(" / ")} mm stock by finished size and cost`;
+  if (widths.length > 1) return `Auto-selects ${widths.join(" / ")} mm roll stock by finished size, yield and cost`;
   if (widths.length === 1) return `${widths[0]} mm roll`;
+
+  const sheetSizes = group.materials
+    .map((material) => ({ width: Number(material.widthMm || 0), length: Number(material.lengthMm || 0) }))
+    .filter((size) => size.width > 0 && size.length > 0)
+    .map((size) => `${size.width}×${size.length}`);
+  if (sheetSizes.length > 1) return `Auto-selects ${sheetSizes.join(" / ")} mm parent sheets by fit, nesting and cost`;
+  if (sheetSizes.length === 1) return `${sheetSizes[0]} mm parent sheet`;
   return group.materials.length > 1 ? `Auto-selects from ${group.materials.length} linked stock items` : materialDescription(group.representative);
 }
 
@@ -395,11 +405,12 @@ export function ProductProductionFlowBuilder({
   const selectedSilverStandoffMaterial = materials.find((material) => material.id === silverStandoffMaterialId);
   const selectedBlackStandoffMaterial = materials.find((material) => material.id === blackStandoffMaterialId);
 
+  const allMainMaterials = useMemo(() => materials.filter((material) => isMainMaterial(material) || material.id === materialId), [materials, materialId]);
   const mainMaterials = useMemo(() => {
-    const filtered = materials.filter((material) => isMainMaterial(material) || material.id === materialId);
     const query = materialSearch.trim().toLowerCase();
-    return (query ? filtered.filter((material) => materialSearchText(material).includes(query)) : filtered).slice(0, 50);
-  }, [materials, materialId, materialSearch]);
+    return (query ? allMainMaterials.filter((material) => materialSearchText(material).includes(query)) : allMainMaterials).slice(0, 80);
+  }, [allMainMaterials, materialSearch]);
+  const mainMaterialGroups = useMemo(() => autoMaterialGroups(mainMaterials, materialId), [mainMaterials, materialId]);
   const rollMediaMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
   const vinylBackingMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
@@ -430,20 +441,22 @@ export function ProductProductionFlowBuilder({
     markChanged();
   };
 
-  const chooseFixedMaterial = (nextMaterialId: string) => {
-    setBaseMaterialMode(nextMaterialId ? "fixed" : "none");
-    setMaterialId(nextMaterialId);
+  const chooseFixedMaterialGroup = (group: AutoMaterialGroup) => {
+    setBaseMaterialMode("fixed");
+    setMaterialId(group.representative.id);
     markChanged();
   };
 
-  const toggleBaseMaterialChoice = (material: MaterialOption) => {
-    const selected = baseMaterialChoices.some((choice) => choice.materialId === material.id);
+  const toggleBaseMaterialGroup = (group: AutoMaterialGroup) => {
+    const groupIds = new Set(group.materials.map((material) => material.id));
+    const selected = baseMaterialChoices.some((choice) => groupIds.has(choice.materialId));
+    const withoutGroup = baseMaterialChoices.filter((choice) => !groupIds.has(choice.materialId));
     const next = selected
-      ? baseMaterialChoices.filter((choice) => choice.materialId !== material.id)
-      : [...baseMaterialChoices, { materialId: material.id, label: customerMaterialName(material) }];
+      ? withoutGroup
+      : [...withoutGroup, { materialId: group.representative.id, label: customerMaterialName(group.representative) }];
     setBaseMaterialChoices(next);
-    if (!selected && !materialId) setMaterialId(material.id);
-    if (selected && materialId === material.id) setMaterialId(next[0]?.materialId ?? "");
+    if (!selected && !materialId) setMaterialId(group.representative.id);
+    if (selected && groupIds.has(materialId)) setMaterialId(next[0]?.materialId ?? "");
     markChanged();
   };
 
@@ -642,20 +655,24 @@ export function ProductProductionFlowBuilder({
     .flatMap((group) => group.materials.map((material) => material.id)));
   const vinylBackingNames = effectiveVinylBackingIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
   const laminateNames = effectiveLaminateIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
-  const mainMaterialAutoIds = selectedMainMaterialIsRoll ? autoMaterialIdsFor(selectedMaterial, rollMediaMaterials) : [];
+  const mainMaterialAutoIds = autoMaterialIdsFor(selectedMaterial, allMainMaterials);
   const rollMediaAutoIds = autoMaterialIdsFor(selectedRollMedia, rollMediaMaterials);
-  const baseMaterialChoicePayload = baseMaterialChoices.map((choice) => {
+  const seenBaseMaterialGroups = new Set<string>();
+  const baseMaterialChoicePayload = baseMaterialChoices.flatMap((choice) => {
     const material = materials.find((item) => item.id === choice.materialId);
+    const groupKey = material ? autoMaterialGroupKey(material) : choice.materialId;
+    if (seenBaseMaterialGroups.has(groupKey)) return [];
+    seenBaseMaterialGroups.add(groupKey);
     const currentLabel = choice.label.trim();
     const customerName = customerMaterialName(material);
     const clientLabel = !currentLabel || currentLabel === String(material?.name ?? "").trim() ? customerName : currentLabel;
-    return {
+    return [{
       materialId: choice.materialId,
       label: clientLabel || "Material",
       materialName: material?.name ?? choice.label,
       isRoll: Boolean(material && isRollPrintMaterial(material)),
-      autoMaterialIds: material && isRollPrintMaterial(material) ? autoMaterialIdsFor(material, rollMediaMaterials) : []
-    };
+      autoMaterialIds: material ? autoMaterialIdsFor(material, allMainMaterials) : [choice.materialId]
+    }];
   });
 
   const stepNavigation = <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginTop: 18 }}>
@@ -742,18 +759,21 @@ export function ProductProductionFlowBuilder({
             <div><strong>{baseMaterialMode === "option" ? "Choose every available base material" : "Choose the fixed base material"}</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>{baseMaterialMode === "option" ? "Tick the real inventory items. Choose one as the normal default." : "This material is always used for costing and stock."}</p></div>
             <input value={materialSearch} onChange={(event) => setMaterialSearch(event.target.value)} placeholder="Search substrates or roll stock" style={{ ...input, maxWidth: 320 }} />
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10 }}>
-            {mainMaterials.map((material) => {
+          <div style={{ padding: 12, borderRadius: 12, background: "#f0fdf4", border: "1px solid #bbf7d0", color: "#166534", fontSize: 13, lineHeight: 1.5 }}><b>Automatic stock sizes:</b> materials with the same Customer-facing name are shown as one choice. For roll or sheet size variants, Production Manager automatically chooses the lowest-cost stock that fits the finished size and quantity.</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(240px,1fr))", gap: 10 }}>
+            {mainMaterialGroups.map((group) => {
+              const groupIds = new Set(group.materials.map((material) => material.id));
               const selected = baseMaterialMode === "option"
-                ? baseMaterialChoices.some((choice) => choice.materialId === material.id)
-                : material.id === materialId;
-              return <article key={material.id} style={{ ...choiceCardStyle(selected), cursor: "default", display: "grid", gap: 8 }}>
-                <button type="button" onClick={() => baseMaterialMode === "option" ? toggleBaseMaterialChoice(material) : chooseFixedMaterial(material.id)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{selected ? "✓ " : "+ "}{material.name}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{materialDescription(material)}</span>{material.sku ? <span style={{ display: "block", color: "#94a3b8", fontSize: 11, marginTop: 4 }}>{material.sku}</span> : null}</button>
-                {baseMaterialMode === "option" && selected ? <button type="button" onClick={() => { setMaterialId(material.id); markChanged(); }} style={{ minHeight: 34, border: materialId === material.id ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: materialId === material.id ? "#2563eb" : "#fff", color: materialId === material.id ? "#fff" : "#334155", fontWeight: 900, cursor: "pointer" }}>{materialId === material.id ? "Default answer" : "Make default"}</button> : null}
+                ? baseMaterialChoices.some((choice) => groupIds.has(choice.materialId))
+                : groupIds.has(materialId);
+              const defaultSelected = groupIds.has(materialId);
+              return <article key={group.key} style={{ ...choiceCardStyle(selected), cursor: "default", display: "grid", gap: 8 }}>
+                <button type="button" onClick={() => baseMaterialMode === "option" ? toggleBaseMaterialGroup(group) : chooseFixedMaterialGroup(group)} style={{ border: 0, background: "transparent", padding: 0, textAlign: "left", cursor: "pointer" }}><strong>{selected ? "✓ " : "+ "}{group.label}</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{autoGroupDescription(group)}</span><span style={{ display: "block", color: "#94a3b8", fontSize: 11, marginTop: 4 }}>{group.materials.length > 1 ? `${group.materials.length} interchangeable stock sizes` : group.representative.name}</span></button>
+                {baseMaterialMode === "option" && selected ? <button type="button" onClick={() => { setMaterialId(group.representative.id); markChanged(); }} style={{ minHeight: 34, border: defaultSelected ? "1px solid #2563eb" : "1px solid #cbd5e1", borderRadius: 9, background: defaultSelected ? "#2563eb" : "#fff", color: defaultSelected ? "#fff" : "#334155", fontWeight: 900, cursor: "pointer" }}>{defaultSelected ? "Default answer" : "Make default"}</button> : null}
               </article>;
             })}
           </div>
-          {!mainMaterials.length && materialSearch ? <div style={{ padding: 13, borderRadius: 12, background: "#fff7ed", color: "#9a3412" }}>No materials match “{materialSearch}”.</div> : null}
+          {!mainMaterialGroups.length && materialSearch ? <div style={{ padding: 13, borderRadius: 12, background: "#fff7ed", color: "#9a3412" }}>No materials match “{materialSearch}”.</div> : null}
         </div> : null}
 
         {baseMaterialMode === "option" ? <div style={{ display: "grid", gap: 11, marginTop: 17, padding: 15, borderRadius: 15, background: "#eff6ff", border: "1px solid #bfdbfe" }}>
