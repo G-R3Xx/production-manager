@@ -303,7 +303,12 @@ export async function upsertImportedProduct(tenantId: string, input: {
         name = EXCLUDED.name,
         department = EXCLUDED.department,
         product_family = EXCLUDED.product_family,
-        status = EXCLUDED.status,
+        -- A product removed in Production Manager is a local visibility choice.
+        -- Keep it removed during MYOB imports while still refreshing its MYOB data.
+        status = CASE
+          WHEN catalog.products.status::text = 'deleted' THEN catalog.products.status
+          ELSE EXCLUDED.status
+        END,
         calculator_type = EXCLUDED.calculator_type,
         tax_code = EXCLUDED.tax_code,
         payload_json = EXCLUDED.payload_json,

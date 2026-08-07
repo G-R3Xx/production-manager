@@ -563,7 +563,7 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
                       ) : (
                         <form action={deleteProductAction} style={{ margin: 0 }}>
                           <input type="hidden" name="productId" value={product.id} />
-                          <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", color: "#b42318", padding: "8px 12px", minHeight: 34 }}>Delete</button>
+                          <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", color: "#b42318", padding: "8px 12px", minHeight: 34 }}>Remove</button>
                         </form>
                       )}
                     </div>
@@ -634,7 +634,7 @@ function ProductBasicsPanel({ selectedProduct }: { selectedProduct: any }) {
         ) : (
           <form action={deleteProductAction}>
             <input type="hidden" name="productId" value={selectedProduct.id} />
-            <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", color: "#b42318" }}>Delete product</button>
+            <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", color: "#b42318" }}>Remove product</button>
           </form>
         )}
       </div>
@@ -2264,7 +2264,7 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
           ) : (
             <form action={deleteProductAction} style={{ margin: 0 }}>
               <input type="hidden" name="productId" value={selectedProduct.id} />
-              <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", background: "#fff1f3", color: "#b42318" }}>Delete product</button>
+              <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", background: "#fff1f3", color: "#b42318" }}>Remove product</button>
             </form>
           )}
           <Link href="/quotes" style={{ ...ghostStyle, borderColor: "#334155", background: "#0f172a", color: "#fff" }}>Go to Quotes</Link>

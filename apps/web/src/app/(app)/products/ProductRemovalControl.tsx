@@ -27,7 +27,7 @@ export function ProductRemovalControl({
       onSubmit={(event) => {
         if (removed) return;
         const confirmed = window.confirm(
-          `Remove “${productName}” from Production Manager?\n\nIt will disappear from current product and quote lists, but existing quotes and orders will remain intact. You can restore it later from the Deleted products view.`
+          `Remove “${productName}” from Production Manager?\n\nIt will disappear from current product and quote lists, but existing quotes and orders will remain intact. Any linked MYOB item will NOT be changed or deleted, and future MYOB syncs will keep this product hidden until you restore it.`
         );
         if (!confirmed) event.preventDefault();
       }}

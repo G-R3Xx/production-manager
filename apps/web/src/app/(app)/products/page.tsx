@@ -76,7 +76,7 @@ export default async function ProductsPage({ searchParams }: Props) {
     </section>
 
     <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.55 }}>
-      Removing a product hides it from current product and quote lists. Existing quotes and orders are preserved, and removed products can be restored from the <b>Deleted</b> filter.
+      Removing a product only hides it inside Production Manager. Existing quotes and orders are preserved, linked MYOB items are never changed or deleted, and future MYOB syncs keep removed products hidden until you restore them from the <b>Deleted</b> filter.
     </div>
 
     <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
