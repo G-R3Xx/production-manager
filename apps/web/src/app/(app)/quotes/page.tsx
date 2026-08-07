@@ -499,6 +499,7 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                     profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
                     labourRate: companySettings?.quoteLabourRate ?? "66",
                     inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
+                    inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
                     monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
                     signageSizePresets: companySettings?.quoteSignageSizePresets,
                     smallSizePresets: companySettings?.quoteSmallSizePresets,

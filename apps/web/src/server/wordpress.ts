@@ -10,7 +10,8 @@ import {
   listPublishedWebsiteProductsForTenant,
   type ProductRecord
 } from "@/server/products";
-import type { MaterialRecord } from "@/server/materials";
+import { ensureMaterialPricingColumns, type MaterialRecord } from "@/server/materials";
+import { getCompanySettingsByTenantId } from "@/server/company";
 import { listRecipesForTenant, previewRecipeCost } from "@/server/productionResources";
 import { createProductionJobFromWebsiteOrderForTenant, ensureProductionTables } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
@@ -93,7 +94,7 @@ export type WebsiteCatalogProduct = {
 
 type WebsitePricingMaterial = Pick<MaterialRecord,
   "id" | "name" | "customerFacingName" | "materialType" | "stockUom" | "purchaseUom" | "stockQuantity" |
-  "purchaseCost" | "widthMm" | "lengthMm" | "rollWidthMm" | "minimumBillableSheetFraction"
+  "purchaseCost" | "widthMm" | "lengthMm" | "rollWidthMm" | "minimumBillableSheetFraction" | "rollBillingIncrementMetres"
 >;
 
 type PriceBody = {
@@ -639,7 +640,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.07.04",
+    version: "V26.08.07.05",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -710,6 +711,7 @@ async function pricingMaterialsForDefinition(
   tenantId: string,
   definition: Record<string, unknown>
 ): Promise<WebsitePricingMaterial[]> {
+  await ensureMaterialPricingColumns();
   const materialIds = Array.from(new Set(
     asArray(definition.components).flatMap((rawComponent) => {
       const component = asObject(rawComponent);
@@ -732,7 +734,8 @@ async function pricingMaterialsForDefinition(
       width_mm::text AS "widthMm",
       length_mm::text AS "lengthMm",
       roll_width_mm::text AS "rollWidthMm",
-      minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction"
+      minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      roll_billing_increment_metres::text AS "rollBillingIncrementMetres"
     FROM catalog.materials
     WHERE tenant_id = $1::uuid AND id = ANY($2::uuid[])
   `, [tenantId, materialIds]);
@@ -841,8 +844,7 @@ function websiteMaterialCostForComponent(
   material: WebsitePricingMaterial,
   widthMm: number,
   heightMm: number,
-  quantity: number,
-  selectionSink?: AutoMaterialSelection[]
+  quantity: number
 ): number {
   const stockUsage = asObject(component.stockUsage);
   const ruleType = text(component.ruleType) || text(stockUsage.usageBasis) || "yield_based";
@@ -863,6 +865,7 @@ function websiteMaterialCostForComponent(
         heightMm: numberValue(material.lengthMm),
         rollWidthMm: rollWidthOverride > 0 ? rollWidthOverride : numberValue(material.rollWidthMm),
         unitCost: materialRate(material, "lm"),
+        rollBillingIncrementMetres: material.rollBillingIncrementMetres == null ? null : numberValue(material.rollBillingIncrementMetres),
         allowRotation: true
       },
       machine: null,
@@ -887,6 +890,7 @@ function websiteMaterialCostForComponent(
       rollWidthMm: numberValue(material.rollWidthMm),
       unitCost: materialLooksLikeRoll(material) ? materialRate(material, "lm") : materialRate(material, "sheet"),
       minimumBillableSheetFraction: numberValue(material.minimumBillableSheetFraction),
+      rollBillingIncrementMetres: material.rollBillingIncrementMetres == null ? null : numberValue(material.rollBillingIncrementMetres),
       allowRotation: true
     },
     machine: null,
@@ -952,7 +956,8 @@ function optionalComponentCostTotal(
   widthMm: number,
   heightMm: number,
   quantity: number,
-  selectionSink?: AutoMaterialSelection[]
+  selectionSink?: AutoMaterialSelection[],
+  inkBillingIncrementSqm = 0.5
 ): number {
   const materialMap = new Map(materials.map((material) => [material.id, material]));
   const areaTotal = Math.max(0, widthMm) * Math.max(0, heightMm) * Math.max(1, quantity) / 1_000_000;
@@ -971,7 +976,12 @@ function optionalComponentCostTotal(
     if (ruleType === "choice_only") continue;
     if (ruleType === "sell_sqm") {
       const rate = Math.max(0, numberValue(stockUsage.sellRate, numberValue(component.quantity)));
-      total += areaTotal * rate * answerMultiplier;
+      const looksLikeInk = /\bink\b/i.test(`${text(component.label)} ${text(component.notes)} ${text(stockUsage.chargeName)}`);
+      const increment = looksLikeInk ? Math.max(0, inkBillingIncrementSqm) : 0;
+      const billableArea = increment > 0 && areaTotal > 0
+        ? Math.ceil((areaTotal - 0.0000001) / increment) * increment
+        : areaTotal;
+      total += billableArea * rate * answerMultiplier;
       continue;
     }
     if (ruleType === "sell_each") {
@@ -1008,6 +1018,7 @@ function optionalComponentCostTotal(
           heightMm: numberValue(material.lengthMm),
           rollWidthMm: componentAutoMaterialIds(component).length > 1 ? numberValue(material.rollWidthMm) : numberValue(stockUsage.rollWidthMm, numberValue(material.rollWidthMm)),
           unitCost: materialRate(material, "lm"),
+          rollBillingIncrementMetres: material.rollBillingIncrementMetres == null ? null : numberValue(material.rollBillingIncrementMetres),
           allowRotation: true
         },
         machine: null,
@@ -1117,24 +1128,28 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     }
   }
 
-  const [recipe, recipes] = await Promise.all([
+  const [recipe, recipes, companySettings] = await Promise.all([
     product.productionRecipeId
       ? previewRecipeCost(tenantId, product.productionRecipeId, widthMm, heightMm, quantity).catch(() => null)
       : Promise.resolve(null),
-    product.productionRecipeId ? listRecipesForTenant(tenantId).catch(() => []) : Promise.resolve([])
+    product.productionRecipeId ? listRecipesForTenant(tenantId).catch(() => []) : Promise.resolve([]),
+    getCompanySettingsByTenantId(tenantId).catch(() => null)
   ]);
   const recipeSettings = recipes.find((item) => item.id === product.productionRecipeId);
   const markupMultiplier = Math.max(0, numberValue(recipeSettings?.markupMultiplier, numberValue(websiteConfig.markupMultiplier, 1.5)));
   const profitMultiplier = Math.max(0, numberValue(recipeSettings?.profitMultiplier, numberValue(websiteConfig.profitMultiplier, 1.2)));
   const autoMaterialSelections: AutoMaterialSelection[] = [];
-  const optionalCost = optionalComponentCostTotal(definition, materials, answers, widthMm, heightMm, quantity, autoMaterialSelections);
+  const inkBillingIncrementSqm = Math.max(0, numberValue(companySettings?.quoteInkBillingIncrementSqm, 0.5));
+  const optionalCost = optionalComponentCostTotal(definition, materials, answers, widthMm, heightMm, quantity, autoMaterialSelections, inkBillingIncrementSqm);
   const defaultOptionalCost = optionalComponentCostTotal(
     definition,
     materials,
     defaultAnswersForFields(fields),
     widthMm,
     heightMm,
-    quantity
+    quantity,
+    undefined,
+    inkBillingIncrementSqm
   );
   // The recipe preview is the saved/default configuration. Add only the
   // difference created by the customer's current option answers so default ink

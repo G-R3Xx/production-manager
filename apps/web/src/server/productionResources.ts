@@ -2,6 +2,7 @@ import { pool } from "@production-manager/db";
 import { cache } from "react";
 import { calculateProductionRecipeCost } from "@production-manager/domain";
 import { normalizeProductionFlowName, productionFlowPresets } from "@/lib/productionFlowPresets";
+import { ensureMaterialPricingColumns } from "@/server/materials";
 
 type DbClient = {
   query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }>;
@@ -797,6 +798,7 @@ export async function previewRecipeCost(
   heightMm: number,
   quantity: number
 ) {
+  await ensureMaterialPricingColumns();
   const [recipes, machines, labour] = await Promise.all([
     listRecipesForTenant(tenantId),
     listMachinesForTenant(tenantId),
@@ -812,6 +814,7 @@ export async function previewRecipeCost(
         length_mm: string | null;
         roll_width_mm: string | null;
         minimum_billable_sheet_fraction: string | null;
+        roll_billing_increment_metres: string | null;
         purchase_uom: string | null;
         stock_uom: string | null;
         stock_quantity: string | null;
@@ -823,6 +826,7 @@ export async function previewRecipeCost(
           length_mm,
           roll_width_mm,
           minimum_billable_sheet_fraction,
+          roll_billing_increment_metres,
           purchase_uom,
           stock_uom,
           stock_quantity::text,
@@ -867,6 +871,7 @@ export async function previewRecipeCost(
           rollWidthMm: Number(material.roll_width_mm || 0),
           unitCost: normalizedUnitCost,
           minimumBillableSheetFraction: Number(material.minimum_billable_sheet_fraction || 0),
+          rollBillingIncrementMetres: material.roll_billing_increment_metres == null ? null : Number(material.roll_billing_increment_metres),
           allowRotation: true
         }
       : null,

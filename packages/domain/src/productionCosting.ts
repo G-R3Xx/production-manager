@@ -5,6 +5,7 @@ export type MaterialCostInput = {
   rollWidthMm?: number | null;
   unitCost: number;
   minimumBillableSheetFraction?: number | null;
+  rollBillingIncrementMetres?: number | null;
   allowRotation?: boolean;
 };
 
@@ -125,6 +126,12 @@ export function calculateProductionRecipeCost(input: RecipeCostInput): RecipeCos
         // dedicated rule. A valid auto-select group will prefer any stock width
         // that genuinely fits before this fallback is reached.
         linearMetres = height / 1000;
+      }
+      const billingIncrement = material.rollBillingIncrementMetres == null
+        ? 0.5
+        : Math.max(0, safe(material.rollBillingIncrementMetres));
+      if (linearMetres > 0 && billingIncrement > 0) {
+        linearMetres = Math.ceil((linearMetres - 0.0000001) / billingIncrement) * billingIncrement;
       }
       materialCost = linearMetres * safe(material.unitCost) * wasteFactor;
       materialUsage = { mode: "roll", linearMetres, lanes };

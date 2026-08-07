@@ -211,6 +211,16 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
               <input name="quoteInkRatePerSqm" defaultValue={settings?.quoteInkRatePerSqm ?? "10"} placeholder="eg 10" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
               <small style={{ color: "#475467" }}>CMYK uses this rate. White ink adds this rate again.</small>
             </label>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Ink billing increment (m²)</span>
+              <select name="quoteInkBillingIncrementSqm" defaultValue={settings?.quoteInkBillingIncrementSqm ?? "0.5"} style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }}>
+                <option value="0">Exact calculated area</option>
+                <option value="0.25">0.25m² increments</option>
+                <option value="0.5">0.5m² increments</option>
+                <option value="1">1m² increments</option>
+              </select>
+              <small style={{ color: "#475467" }}>Applied once to the total ink area for the quote line. Default is 0.5m².</small>
+            </label>
 
             <label style={{ display: "grid", gap: 8 }}>
               <span style={{ fontWeight: 600 }}>Mono print rate per m²</span>

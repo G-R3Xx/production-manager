@@ -12,6 +12,7 @@ type QuoteMaterial = {
   materialType?: string | null;
   materialGroup?: string | null;
   minimumBillableSheetFraction?: string | null;
+  rollBillingIncrementMetres?: string | null;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -44,6 +45,7 @@ type PricingSettings = {
   profitMultiplier?: string | number | null;
   labourRate?: string | number | null;
   inkRatePerSqm?: string | number | null;
+  inkBillingIncrementSqm?: string | number | null;
   monoRatePerSqm?: string | number | null;
   signageSizePresets?: QuoteSizePreset[] | null;
   smallSizePresets?: QuoteSizePreset[] | null;
@@ -687,6 +689,24 @@ function eachRate(material: QuoteMaterial): { rate: number; note?: string } {
   return { rate: purchaseCost };
 }
 
+type RollBillingRule = { increment: number; label: string };
+
+function rollBillingRule(material: QuoteMaterial): RollBillingRule {
+  const raw = String(material.rollBillingIncrementMetres ?? "").trim();
+  if (raw !== "") {
+    const configured = Math.max(0, numberValue(raw, 0));
+    if (configured <= 0) return { increment: 0, label: "exact calculated roll usage" };
+    return { increment: configured, label: `${usage(configured)}m billing increment` };
+  }
+  return { increment: 0.5, label: "recommended 0.5m billing increment" };
+}
+
+function roundRollUsage(totalMetres: number, increment: number): number {
+  if (!Number.isFinite(totalMetres) || totalMetres <= 0) return 0;
+  if (!Number.isFinite(increment) || increment <= 0) return totalMetres;
+  return Math.max(totalMetres, Math.ceil((totalMetres - 0.0000001) / increment) * increment);
+}
+
 function panelisedRollMetres(widthMm: number, heightMm: number, rollWidthMm: number): { amount: number; panels: number; panelWidthMm: number; note: string } {
   const panels = Math.max(1, Math.ceil(widthMm / rollWidthMm));
   const panelWidthMm = widthMm / panels;
@@ -718,32 +738,34 @@ function linearMetres(widthMm: number, heightMm: number, material: QuoteMaterial
 function roundedRollMetresForQuantity(widthMm: number, heightMm: number, material: QuoteMaterial, pieces: number): { amount: number; unroundedAmount: number; note?: string } {
   const rollWidthMm = numberValue(material.rollWidthMm, 0);
   const pieceCount = Math.max(1, Math.ceil(pieces));
+  const billing = rollBillingRule(material);
   if (widthMm <= 0 || heightMm <= 0) return { amount: 0, unroundedAmount: 0, note: "size missing" };
 
   if (rollWidthMm <= 0) {
     const single = linearMetres(widthMm, heightMm, material);
     const unroundedAmount = single.amount * pieceCount;
-    const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
-    return { amount, unroundedAmount, note: ["roll width missing", `${usage(unroundedAmount)}lm before whole-metre rounding`].join(" · ") };
+    const amount = roundRollUsage(unroundedAmount, billing.increment);
+    return { amount, unroundedAmount, note: ["roll width missing", `${usage(unroundedAmount)}lm calculated`, billing.label, `charged as ${usage(amount)}lm`].join(" · ") };
   }
 
   // When neither finished dimension fits the roll, keep the entered width as the
   // panelled direction. Example: 2000 × 4000mm on a 1370mm roll becomes
-  // 2 panels at 1000 × 4000mm = 8lm before whole-metre rounding.
+  // 2 panels at 1000 × 4000mm = 8lm before billing increment rounding.
   if (widthMm > rollWidthMm && heightMm > rollWidthMm) {
     const panelised = panelisedRollMetres(widthMm, heightMm, rollWidthMm);
     const totalPanels = panelised.panels * pieceCount;
     const panelsAcross = Math.max(1, Math.floor(rollWidthMm / panelised.panelWidthMm));
     const rows = Math.ceil(totalPanels / panelsAcross);
     const unroundedAmount = (rows * heightMm) / 1000;
-    const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
+    const amount = roundRollUsage(unroundedAmount, billing.increment);
     return {
       amount,
       unroundedAmount,
       note: [
         panelised.note,
         `${totalPanels} panel${totalPanels === 1 ? "" : "s"} nested ${panelsAcross} across × ${rows} row${rows === 1 ? "" : "s"}`,
-        `${usage(unroundedAmount)}lm before whole-metre rounding`,
+        `${usage(unroundedAmount)}lm calculated`,
+        billing.label,
         `charged as ${usage(amount)}lm`
       ].filter(Boolean).join(" · ")
     };
@@ -769,19 +791,20 @@ function roundedRollMetresForQuantity(widthMm: number, heightMm: number, materia
   if (layouts.length === 0) {
     const single = linearMetres(widthMm, heightMm, material);
     const unroundedAmount = single.amount * pieceCount;
-    const amount = unroundedAmount > 0 ? Math.max(1, Math.ceil(unroundedAmount)) : 0;
-    return { amount, unroundedAmount, note: [single.note, "panelled wider-than-roll print", `${usage(unroundedAmount)}lm before whole-metre rounding`].filter(Boolean).join(" · ") };
+    const amount = roundRollUsage(unroundedAmount, billing.increment);
+    return { amount, unroundedAmount, note: [single.note, "panelled wider-than-roll print", `${usage(unroundedAmount)}lm calculated`, billing.label, `charged as ${usage(amount)}lm`].filter(Boolean).join(" · ") };
   }
 
   const best = layouts.sort((a, b) => a.unroundedAmount - b.unroundedAmount)[0];
-  const amount = best.unroundedAmount > 0 ? Math.max(1, Math.ceil(best.unroundedAmount)) : 0;
+  const amount = roundRollUsage(best.unroundedAmount, billing.increment);
   return {
     amount,
     unroundedAmount: best.unroundedAmount,
     note: [
       `${pieceCount} face${pieceCount === 1 ? "" : "s"} nested ${best.across} across × ${best.rows} row${best.rows === 1 ? "" : "s"}`,
       best.rotated ? "rotated to save roll length" : null,
-      `${usage(best.unroundedAmount)}lm before whole-metre rounding`,
+      `${usage(best.unroundedAmount)}lm calculated`,
+      billing.label,
       `charged as ${usage(amount)}lm`
     ].filter(Boolean).join(" · ")
   };
@@ -792,7 +815,8 @@ function roundedInkSquareMetresForQuoteLine(
   areaPerItemSqm: number,
   sideMultiplier: number,
   quantity: number,
-  rollUsage?: { amount: number; unroundedAmount: number } | null
+  rollUsage?: { amount: number; unroundedAmount: number } | null,
+  inkBillingIncrementSqm = 0.5
 ): { amount: number; calculatedTotal: number; mediaAdjustedTotal: number; billableTotal: number; note?: string } {
   const safeQuantity = Math.max(1, quantity);
   const calculatedTotal = Math.max(0, areaPerItemSqm) * Math.max(1, sideMultiplier) * safeQuantity;
@@ -800,7 +824,10 @@ function roundedInkSquareMetresForQuoteLine(
     ? Math.max(1, rollUsage.amount / rollUsage.unroundedAmount)
     : 1;
   const mediaAdjustedTotal = calculatedTotal * rollRoundingMultiplier;
-  const billableTotal = mediaAdjustedTotal > 0 ? Math.max(1, Math.ceil(mediaAdjustedTotal - 0.0000001)) : 0;
+  const safeIncrement = Math.max(0, Number.isFinite(inkBillingIncrementSqm) ? inkBillingIncrementSqm : 0.5);
+  const billableTotal = mediaAdjustedTotal > 0
+    ? (safeIncrement > 0 ? Math.ceil((mediaAdjustedTotal - 0.0000001) / safeIncrement) * safeIncrement : mediaAdjustedTotal)
+    : 0;
 
   return {
     amount: billableTotal / safeQuantity,
@@ -810,8 +837,8 @@ function roundedInkSquareMetresForQuoteLine(
     note: calculatedTotal > 0
       ? [
           `${usage(calculatedTotal)}sqm artwork area`,
-          rollRoundingMultiplier > 1.0000001 ? `${usage(mediaAdjustedTotal)}sqm after whole-metre media rounding` : null,
-          "whole-square-metre ink rounding",
+          rollRoundingMultiplier > 1.0000001 ? `${usage(mediaAdjustedTotal)}sqm after media billing round-up` : null,
+          safeIncrement > 0 ? `${usage(safeIncrement)}sqm ink billing increment` : "exact ink area",
           `charged as ${usage(billableTotal)}sqm`
         ].filter(Boolean).join(" · ")
       : undefined
@@ -866,6 +893,7 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
     materialType: material.materialType ?? null,
     materialGroup: material.materialGroup ?? null,
     minimumBillableSheetFraction: material.minimumBillableSheetFraction ?? null,
+    rollBillingIncrementMetres: material.rollBillingIncrementMetres ?? null,
     supplierName: material.supplierName ?? null,
     sku: material.sku ?? null,
     stockUom: material.stockUom ?? null,
@@ -1041,6 +1069,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const sellMultiplier = markupMultiplier * profitMultiplier;
   const labourRate = numberValue(pricingSettings?.labourRate, defaultLabourRate);
   const inkRatePerSqm = numberValue(pricingSettings?.inkRatePerSqm, defaultInkRatePerSqm);
+  const inkBillingIncrementSqm = Math.max(0, numberValue(pricingSettings?.inkBillingIncrementSqm, 0.5));
   const monoRatePerSqm = numberValue(pricingSettings?.monoRatePerSqm, defaultMonoRatePerSqm);
   const signageSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.signageSizePresets, defaultSignageSizePresets), [pricingSettings?.signageSizePresets]);
   const smallSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.smallSizePresets, defaultSmallSizePresets), [pricingSettings?.smallSizePresets]);
@@ -1452,7 +1481,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         const inkRollUse = inkRollMaterial
           ? roundedRollMetresForQuantity(width, height, inkRollMaterial, inkRollPieces)
           : null;
-        const inkUse = roundedInkSquareMetresForQuoteLine(areaSqm, sideMultiplier, quantityNumber, inkRollUse);
+        const inkUse = roundedInkSquareMetresForQuoteLine(areaSqm, sideMultiplier, quantityNumber, inkRollUse, inkBillingIncrementSqm);
         const inkNote = [inkUse.note, sides === "double" ? "double sided" : null].filter(Boolean).join(" · ") || undefined;
         if (ink === "cmyk" || ink === "both") {
           rows.push({ label: "CMYK ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
@@ -1691,7 +1720,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1961,6 +1990,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       profitMultiplier,
       labourRate,
       inkRatePerSqm,
+      inkBillingIncrementSqm,
       monoRatePerSqm,
       rawCost,
       autoUnitPrice,

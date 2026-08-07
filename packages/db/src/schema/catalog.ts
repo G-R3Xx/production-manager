@@ -123,6 +123,10 @@ export const materials = catalogSchema.table("materials", {
     precision: 6,
     scale: 4
   }),
+  rollBillingIncrementMetres: numeric("roll_billing_increment_metres", {
+    precision: 6,
+    scale: 4
+  }),
   name: varchar("name", { length: 200 }).notNull(),
   customerFacingName: varchar("customer_facing_name", { length: 200 }),
   supplierId: uuid("supplier_id"),

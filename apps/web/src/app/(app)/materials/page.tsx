@@ -41,6 +41,14 @@ function minimumSheetBillingLabel(material: MaterialSummary): string {
   return "Recommended: exact calculated usage";
 }
 
+function rollBillingLabel(material: MaterialSummary): string {
+  const explicit = String(material.rollBillingIncrementMetres ?? "").trim();
+  if (!explicit) return "Recommended: 0.5m increments";
+  const amount = Number(explicit);
+  if (Number.isFinite(amount) && amount <= 0) return "Exact calculated roll usage";
+  return `${amount}m increments`;
+}
+
 function normaliseMaterialType(value: string | null | undefined): string {
   switch (value) {
     case "sheet":
@@ -221,6 +229,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
       <div style={mutedTextStyle}>Supplier: {material.supplierName ?? "Not linked"} · SKU: {material.sku ?? "—"}</div>
       <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
       {isSheetType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Sheet billing: {minimumSheetBillingLabel(material)}</div> : null}
+      {isRollType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Roll billing: {rollBillingLabel(material)}</div> : null}
       {material.sourceProductName ? <div style={{ ...mutedTextStyle, color: "#b54708" }}>Legacy source product link: {material.sourceProductName}</div> : null}
       {material.notes ? <div style={mutedTextStyle}>{material.notes}</div> : null}
 

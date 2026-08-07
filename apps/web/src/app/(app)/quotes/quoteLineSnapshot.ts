@@ -37,6 +37,7 @@ export type SnapshotMaterial = {
   materialType?: string | null;
   materialGroup?: string | null;
   minimumBillableSheetFraction?: string | null;
+  rollBillingIncrementMetres?: string | null;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -127,6 +128,7 @@ export type QuickQuoteSnapshot = {
     profitMultiplier?: number;
     labourRate?: number;
     inkRatePerSqm?: number;
+    inkBillingIncrementSqm?: number;
     monoRatePerSqm?: number;
     rawCost?: number;
     autoUnitPrice?: number;
@@ -183,6 +185,7 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
     materialType: stringValue(value.materialType) || null,
     materialGroup: stringValue(value.materialGroup) || null,
     minimumBillableSheetFraction: stringValue(value.minimumBillableSheetFraction) || null,
+    rollBillingIncrementMetres: stringValue(value.rollBillingIncrementMetres) || null,
     supplierName: stringValue(value.supplierName) || null,
     sku: stringValue(value.sku) || null,
     stockUom: stringValue(value.stockUom) || null,

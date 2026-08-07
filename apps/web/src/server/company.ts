@@ -41,6 +41,7 @@ export type CompanySettingsRecord = {
   globalProfitMultiplier: string;
   quoteLabourRate: string;
   quoteInkRatePerSqm: string;
+  quoteInkBillingIncrementSqm: string;
   quoteMonoRatePerSqm: string;
   quoteSignageSizePresets: QuoteSizePreset[];
   quoteSmallSizePresets: QuoteSizePreset[];
@@ -81,6 +82,7 @@ async function ensurePricingSettingsColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS global_profit_multiplier numeric(8,4) NOT NULL DEFAULT 1.2,
       ADD COLUMN IF NOT EXISTS quote_labour_rate numeric(10,2) NOT NULL DEFAULT 66,
       ADD COLUMN IF NOT EXISTS quote_ink_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 10,
+      ADD COLUMN IF NOT EXISTS quote_ink_billing_increment_sqm numeric(6,4) NOT NULL DEFAULT 0.5,
       ADD COLUMN IF NOT EXISTS quote_mono_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 4,
       ADD COLUMN IF NOT EXISTS company_logo_url text,
       ADD COLUMN IF NOT EXISTS company_logo_storage_path text,
@@ -93,6 +95,8 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
   if (!process.env.DATABASE_URL) {
     return null;
   }
+
+  await ensurePricingSettingsColumns();
 
   const result = await pool.query<CompanySettingsRecord>(
     `
@@ -113,6 +117,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
         COALESCE(ts.global_profit_multiplier, 1.2)::text AS "globalProfitMultiplier",
         COALESCE(ts.quote_labour_rate, 66)::text AS "quoteLabourRate",
         COALESCE(ts.quote_ink_rate_per_sqm, 10)::text AS "quoteInkRatePerSqm",
+        COALESCE(ts.quote_ink_billing_increment_sqm, 0.5)::text AS "quoteInkBillingIncrementSqm",
         COALESCE(ts.quote_mono_rate_per_sqm, 4)::text AS "quoteMonoRatePerSqm",
         COALESCE(ts.quote_signage_size_presets_json, '${sizePresetDefaultSql(defaultSignageSizePresets)}'::jsonb) AS "quoteSignageSizePresets",
         COALESCE(ts.quote_small_size_presets_json, '${sizePresetDefaultSql(defaultSmallSizePresets)}'::jsonb) AS "quoteSmallSizePresets",
@@ -164,6 +169,7 @@ export async function updateCompanySettingsByTenantId(
         global_profit_multiplier,
         quote_labour_rate,
         quote_ink_rate_per_sqm,
+        quote_ink_billing_increment_sqm,
         quote_mono_rate_per_sqm,
         quote_signage_size_presets_json,
         quote_small_size_presets_json,
@@ -171,7 +177,7 @@ export async function updateCompanySettingsByTenantId(
         proof_terms,
         job_terms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::jsonb,$17::jsonb,$18,$19,$20)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,$17::jsonb,$18::jsonb,$19,$20,$21)
       ON CONFLICT (tenant_id)
       DO UPDATE SET
         company_legal_name = EXCLUDED.company_legal_name,
@@ -187,6 +193,7 @@ export async function updateCompanySettingsByTenantId(
         global_profit_multiplier = EXCLUDED.global_profit_multiplier,
         quote_labour_rate = EXCLUDED.quote_labour_rate,
         quote_ink_rate_per_sqm = EXCLUDED.quote_ink_rate_per_sqm,
+        quote_ink_billing_increment_sqm = EXCLUDED.quote_ink_billing_increment_sqm,
         quote_mono_rate_per_sqm = EXCLUDED.quote_mono_rate_per_sqm,
         quote_signage_size_presets_json = EXCLUDED.quote_signage_size_presets_json,
         quote_small_size_presets_json = EXCLUDED.quote_small_size_presets_json,
@@ -210,6 +217,7 @@ export async function updateCompanySettingsByTenantId(
       input.globalProfitMultiplier || "1.2",
       input.quoteLabourRate || "66",
       input.quoteInkRatePerSqm || "10",
+      input.quoteInkBillingIncrementSqm ?? "0.5",
       input.quoteMonoRatePerSqm || "4",
       JSON.stringify(normaliseSizePresetArray(input.quoteSignageSizePresets, defaultSignageSizePresets)),
       JSON.stringify(normaliseSizePresetArray(input.quoteSmallSizePresets, defaultSmallSizePresets)),

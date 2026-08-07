@@ -93,6 +93,7 @@ export type QuoteMaterial = {
   customerFacingName?: string | null;
   materialType?: string | null;
   minimumBillableSheetFraction?: string | null;
+  rollBillingIncrementMetres?: string | null;
   stockUom?: string | null;
   purchaseUom?: string | null;
   stockQuantity?: string | null;
@@ -786,6 +787,35 @@ function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "e
   return { rate: purchaseCost, unit: "each" };
 }
 
+function rollBillingIncrement(material: QuoteMaterial): { increment: number; label: string } {
+  const raw = String(material.rollBillingIncrementMetres ?? "").trim();
+  if (raw !== "") {
+    const configured = Math.max(0, numberValue(raw, 0));
+    if (configured <= 0) return { increment: 0, label: "exact calculated roll usage" };
+    return { increment: configured, label: `${formatUsage(configured)}m billing increment` };
+  }
+  return { increment: 0.5, label: "recommended 0.5m billing increment" };
+}
+
+function roundRollMetres(total: number, increment: number): number {
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  if (!Number.isFinite(increment) || increment <= 0) return total;
+  return Math.ceil((total - 0.0000001) / increment) * increment;
+}
+
+function billableLinearMetresFor(dimensions: { widthMm: number; heightMm: number } | null, material: QuoteMaterial, component: QuoteComponent | undefined, quoteQuantity: number): { amountPerUnit: number; total: number; note?: string } {
+  const safeQuantity = Math.max(1, quoteQuantity);
+  const raw = linearMetresFor(dimensions, material, component);
+  const calculatedTotal = raw.amount * safeQuantity;
+  const billing = rollBillingIncrement(material);
+  const total = roundRollMetres(calculatedTotal, billing.increment);
+  return {
+    amountPerUnit: total / safeQuantity,
+    total,
+    note: [raw.note, `${formatUsage(calculatedTotal)}lm calculated across qty ${formatUsage(safeQuantity)}`, billing.label, `charged as ${formatUsage(total)}lm`].filter(Boolean).join(" · ")
+  };
+}
+
 function linearMetresFor(dimensions: { widthMm: number; heightMm: number } | null, material: QuoteMaterial, component?: QuoteComponent): { amount: number; note?: string } {
   if (!dimensions) return { amount: 0, note: "size missing" };
 
@@ -841,7 +871,7 @@ function autoSelectMaterialForComponent(
   const pool = compatible.length ? compatible : candidates;
   const scored = pool.map((material) => {
     if (materialLooksLikeRoll(material)) {
-      const metres = linearMetresFor(dimensions, material, component).amount;
+      const metres = billableLinearMetresFor(dimensions, material, component, quoteQuantity).total;
       return { material, cost: metres * costRateFor(material, "lm").rate };
     }
     const piecesPerSheet = sheetPiecesPerParent(material, dimensions);
@@ -993,9 +1023,9 @@ function componentCostBreakdownFor(
       if (ruleType === "per_linear_metre") {
         const fixedMetresPerUnit = numberValue(component.stockUsage?.metresPerUnit, 0);
         const metres = fixedMetresPerUnit > 0
-          ? { amount: fixedMetresPerUnit, note: "fixed roll metres set on product usage" }
-          : linearMetresFor(dimensions, material, component);
-        const amount = metres.amount * allowance * waste;
+          ? { amountPerUnit: fixedMetresPerUnit, total: fixedMetresPerUnit * Math.max(1, quoteQuantity), note: "fixed roll metres set on product usage" }
+          : billableLinearMetresFor(dimensions, material, component, quoteQuantity);
+        const amount = metres.amountPerUnit * allowance * waste;
         const rate = costRateFor(material, "lm");
         return [costBreakdownItem({
           componentLabel,

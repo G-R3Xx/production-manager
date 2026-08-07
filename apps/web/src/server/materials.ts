@@ -15,6 +15,7 @@ export type MaterialRecord = {
   materialType: string;
   materialGroup: string | null;
   minimumBillableSheetFraction: string | null;
+  rollBillingIncrementMetres: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -44,6 +45,7 @@ export type CreateMaterialInput = {
   materialType: string;
   materialGroup: string | null;
   minimumBillableSheetFraction: string | null;
+  rollBillingIncrementMetres: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -59,13 +61,14 @@ export type UpdateMaterialInput = CreateMaterialInput & {
   id: string;
 };
 
-async function ensureMaterialPricingColumns(): Promise<void> {
+export async function ensureMaterialPricingColumns(): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
   await pool.query(`
     ALTER TABLE catalog.materials
       ADD COLUMN IF NOT EXISTS material_group varchar(50),
       ADD COLUMN IF NOT EXISTS minimum_billable_sheet_fraction numeric(6, 4),
+      ADD COLUMN IF NOT EXISTS roll_billing_increment_metres numeric(6, 4),
       ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)
   `);
 }
@@ -146,6 +149,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       END AS "materialType",
       m.material_group AS "materialGroup",
       m.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      m.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
       m.stock_quantity::text AS "stockQuantity",
@@ -216,6 +220,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       material_type,
       material_group,
       minimum_billable_sheet_fraction,
+      roll_billing_increment_metres,
       stock_uom,
       purchase_uom,
       stock_quantity,
@@ -239,15 +244,16 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $8::varchar,
       $9::varchar,
       $10::numeric,
-      $11::varchar,
+      $11::numeric,
       $12::varchar,
-      $13::numeric,
+      $13::varchar,
       $14::numeric,
       $15::numeric,
       $16::numeric,
       $17::numeric,
       $18::numeric,
-      $19::varchar,
+      $19::numeric,
+      $20::varchar,
       true,
       now(),
       now()
@@ -263,6 +269,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     normalizeMaterialType(input.materialType),
     input.materialGroup,
     input.minimumBillableSheetFraction,
+    input.rollBillingIncrementMetres,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,
@@ -290,15 +297,16 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       material_type = $9::varchar,
       material_group = $10::varchar,
       minimum_billable_sheet_fraction = $11::numeric,
-      stock_uom = $12::varchar,
-      purchase_uom = $13::varchar,
-      stock_quantity = $14::numeric,
-      purchase_cost = $15::numeric,
-      width_mm = $16::numeric,
-      length_mm = $17::numeric,
-      roll_width_mm = $18::numeric,
-      gsm = $19::numeric,
-      notes = $20::varchar,
+      roll_billing_increment_metres = $12::numeric,
+      stock_uom = $13::varchar,
+      purchase_uom = $14::varchar,
+      stock_quantity = $15::numeric,
+      purchase_cost = $16::numeric,
+      width_mm = $17::numeric,
+      length_mm = $18::numeric,
+      roll_width_mm = $19::numeric,
+      gsm = $20::numeric,
+      notes = $21::varchar,
       updated_at = now()
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
@@ -314,6 +322,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     normalizeMaterialType(input.materialType),
     input.materialGroup,
     input.minimumBillableSheetFraction,
+    input.rollBillingIncrementMetres,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,

@@ -18,6 +18,7 @@ type MaterialFormRecord = {
   materialType: string;
   materialGroup: string | null;
   minimumBillableSheetFraction: string | null;
+  rollBillingIncrementMetres: string | null;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -166,6 +167,16 @@ function defaultStockUomFor(kind: MaterialKind): string {
 }
 
 function sheetBillingFormValue(value: string | null | undefined): string {
+  if (value == null || String(value).trim() === "") return "auto";
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return "0";
+  if (Math.abs(amount - 0.25) < 0.0001) return "0.25";
+  if (Math.abs(amount - 0.5) < 0.0001) return "0.5";
+  if (Math.abs(amount - 1) < 0.0001) return "1";
+  return "auto";
+}
+
+function rollBillingFormValue(value: string | null | undefined): string {
   if (value == null || String(value).trim() === "") return "auto";
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 0) return "0";
@@ -344,6 +355,15 @@ function RollFields({ material, kind }: { material?: MaterialFormRecord; kind: M
         </Field>
         <Field label="GSM / Thickness" helper="Optional media weight, laminate thickness, micron rating or description.">
           <input name="gsm" defaultValue={material?.gsm ?? ""} placeholder="eg 100mic, 145gsm, 80mic" style={inputStyle} />
+        </Field>
+        <Field label="Billable roll increment" helper="Rounds the total roll use for the whole quote line. Auto recommends 0.5m. Choose Exact for no billing round-up.">
+          <select name="rollBillingIncrementMetres" defaultValue={rollBillingFormValue(material?.rollBillingIncrementMetres)} style={inputStyle}>
+            <option value="auto">Recommended: 0.5m increments</option>
+            <option value="0">Exact calculated usage</option>
+            <option value="0.25">0.25m increments</option>
+            <option value="0.5">0.5m increments</option>
+            <option value="1">1m increments</option>
+          </select>
         </Field>
       </div>
       <div style={gridStyle}>
