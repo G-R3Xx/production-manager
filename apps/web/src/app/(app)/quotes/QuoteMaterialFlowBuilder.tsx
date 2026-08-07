@@ -8,6 +8,7 @@ import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType,
 type QuoteMaterial = {
   id: string;
   name: string;
+  customerFacingName?: string | null;
   materialType?: string | null;
   materialGroup?: string | null;
   minimumBillableSheetFraction?: string | null;
@@ -400,7 +401,7 @@ function explicitMaterialGroup(material: QuoteMaterial): MaterialDepartmentGroup
 }
 
 function materialText(material: QuoteMaterial): string {
-  return `${material.name} ${material.materialType ?? ""} ${material.materialGroup ?? ""} ${material.gsm ?? ""} ${material.notes ?? ""}`.toLowerCase();
+  return `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""} ${material.materialGroup ?? ""} ${material.gsm ?? ""} ${material.notes ?? ""}`.toLowerCase();
 }
 
 function isSignageStock(material: QuoteMaterial): boolean {
@@ -861,6 +862,7 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
   return {
     id: material.id,
     name: material.name,
+    customerFacingName: material.customerFacingName ?? null,
     materialType: material.materialType ?? null,
     materialGroup: material.materialGroup ?? null,
     minimumBillableSheetFraction: material.minimumBillableSheetFraction ?? null,
@@ -939,6 +941,10 @@ function flowDepartmentProductName(value: FlowType): string {
   if (value === "plan_printing") return "Plan Printing";
   if (value === "poster_printing") return "Poster Printing";
   return flowTypeLabel(value);
+}
+
+function customerMaterialName(material: QuoteMaterial | null | undefined): string {
+  return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
 }
 
 export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [], editingLine = null, editingStep = null }: QuoteMaterialFlowBuilderProps) {
@@ -1710,9 +1716,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const autoUnitPrice = rawCost * sellMultiplier * discountMultiplier;
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
-  const selectedMediaName = isRollStockBase ? "" : selectedMedia?.name ?? "";
-  const selectedLaminateName = laminateId === "none" ? "None" : selectedLaminate?.name ?? "";
-  const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : selectedSmallCoating?.name ?? "";
+  const selectedMediaName = isRollStockBase ? "" : customerMaterialName(selectedMedia);
+  const selectedLaminateName = laminateId === "none" ? "None" : customerMaterialName(selectedLaminate);
+  const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : customerMaterialName(selectedSmallCoating);
   const dispatchCosts = useMemo<CostRow[]>(() => {
     const rows: CostRow[] = [];
 
@@ -1783,7 +1789,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
   const componentPartSummary = pricedComponentParts.map((part) => {
     const material = materialPool.find((item) => item.id === part.materialId);
-    return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || material?.name || "part"}`;
+    return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || customerMaterialName(material) || "part"}`;
   }).join(", ");
   const finishedSizeLabel = width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : "";
   const lineName = flowType === "component"
@@ -1797,7 +1803,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         : flowType === "poster_printing"
           ? "Poster Printing"
           : isRollStockBase
-            ? selectedMainMaterial?.name ?? selectedBase?.label ?? "Vinyl/Roll Stock"
+            ? customerMaterialName(selectedMainMaterial) || selectedBase?.label || "Vinyl/Roll Stock"
             : selectedBase?.label ?? "Signage item";
 
   const optionSummary = flowType === "component"
@@ -1820,7 +1826,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : isPrintDepartment
       ? [
       flowDepartmentProductName(flowType),
-      selectedSmallStock?.name ? `Stock: ${selectedSmallStock.name}` : null,
+      customerMaterialName(selectedSmallStock) ? `Stock: ${customerMaterialName(selectedSmallStock)}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `Artwork ${minutesLabel(artworkMinutes)}` : "Artwork required" : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
@@ -1833,7 +1839,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : flowType === "small_format"
       ? [
       selectedSmallType?.label,
-      selectedSmallStock?.name ? `Stock: ${selectedSmallStock.name}` : null,
+      customerMaterialName(selectedSmallStock) ? `Stock: ${customerMaterialName(selectedSmallStock)}` : null,
       isDuplicateBook && ncrCopies ? `${ncrCopiesCount} part book` : null,
       isDuplicateBook && ncrSetsPerBook ? `${ncrSetsPerBook} sets/book` : null,
       isDuplicateBook && ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : null,
@@ -1850,7 +1856,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ].filter(Boolean).join(" · ")
     : [
       selectedBase?.label,
-      selectedMainMaterial?.name ? `Substrate: ${selectedMainMaterial.name}` : null,
+      customerMaterialName(selectedMainMaterial) ? `Substrate: ${customerMaterialName(selectedMainMaterial)}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `Artwork ${minutesLabel(artworkMinutes)}` : "Artwork required" : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       isRollStockBase ? null : printMethods.find((item) => item.key === resolvedPrintMethod)?.label,

@@ -332,6 +332,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id) || linkedStandoffMaterialIds.has(material.id) || linkedVinylBackingMaterialIds.has(material.id)).map((material) => ({
           id: material.id,
           name: material.name,
+          customerFacingName: material.customerFacingName,
           sku: material.sku,
           notes: material.notes,
           materialType: material.materialType,

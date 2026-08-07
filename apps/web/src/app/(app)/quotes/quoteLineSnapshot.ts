@@ -33,6 +33,7 @@ export type QuickQuoteStep =
 export type SnapshotMaterial = {
   id: string;
   name: string;
+  customerFacingName?: string | null;
   materialType?: string | null;
   materialGroup?: string | null;
   minimumBillableSheetFraction?: string | null;
@@ -178,6 +179,7 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
   return {
     id,
     name,
+    customerFacingName: stringValue(value.customerFacingName) || null,
     materialType: stringValue(value.materialType) || null,
     materialGroup: stringValue(value.materialGroup) || null,
     minimumBillableSheetFraction: stringValue(value.minimumBillableSheetFraction) || null,

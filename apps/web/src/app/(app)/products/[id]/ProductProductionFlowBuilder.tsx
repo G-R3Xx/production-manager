@@ -9,6 +9,7 @@ import { saveInternalProductSetupAction } from "./actions";
 type MaterialOption = {
   id: string;
   name: string;
+  customerFacingName: string | null;
   sku: string | null;
   notes: string | null;
   materialType: string;
@@ -178,8 +179,12 @@ function materialDescription(material: MaterialOption): string {
   return [material.materialGroup, material.materialType].filter(Boolean).join(" · ") || "Material";
 }
 
+function customerMaterialName(material: MaterialOption | null | undefined): string {
+  return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
+}
+
 function materialSearchText(material: MaterialOption): string {
-  return `${material.name} ${material.sku ?? ""} ${material.notes ?? ""} ${material.materialType} ${material.materialGroup ?? ""}`.toLowerCase();
+  return `${material.name} ${material.customerFacingName ?? ""} ${material.sku ?? ""} ${material.notes ?? ""} ${material.materialType} ${material.materialGroup ?? ""}`.toLowerCase();
 }
 
 function isLaminateMaterial(material: MaterialOption): boolean {
@@ -365,7 +370,7 @@ export function ProductProductionFlowBuilder({
       const seededChoices = baseMaterialChoices.length
         ? baseMaterialChoices
         : materialId
-          ? [{ materialId, label: materials.find((material) => material.id === materialId)?.name ?? "Material" }]
+          ? [{ materialId, label: customerMaterialName(materials.find((material) => material.id === materialId)) || "Material" }]
           : [];
       if (!baseMaterialChoices.length && seededChoices.length) setBaseMaterialChoices(seededChoices);
       if (!seededChoices.some((choice) => choice.materialId === materialId)) setMaterialId(seededChoices[0]?.materialId ?? "");
@@ -385,7 +390,7 @@ export function ProductProductionFlowBuilder({
     const selected = baseMaterialChoices.some((choice) => choice.materialId === material.id);
     const next = selected
       ? baseMaterialChoices.filter((choice) => choice.materialId !== material.id)
-      : [...baseMaterialChoices, { materialId: material.id, label: material.name }];
+      : [...baseMaterialChoices, { materialId: material.id, label: customerMaterialName(material) }];
     setBaseMaterialChoices(next);
     if (!selected && !materialId) setMaterialId(material.id);
     if (selected && materialId === material.id) setMaterialId(next[0]?.materialId ?? "");
@@ -558,13 +563,16 @@ export function ProductProductionFlowBuilder({
   const currentIndex = builderSteps.findIndex((step) => step.key === activeStep);
   const previousStep = currentIndex > 0 ? builderSteps[currentIndex - 1] : null;
   const nextStep = currentIndex < builderSteps.length - 1 ? builderSteps[currentIndex + 1] : null;
-  const vinylBackingNames = vinylBackingMaterialIds.map((id) => materials.find((material) => material.id === id)?.name ?? id);
-  const laminateNames = laminateMaterialIds.map((id) => materials.find((material) => material.id === id)?.name ?? id);
+  const vinylBackingNames = vinylBackingMaterialIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
+  const laminateNames = laminateMaterialIds.map((id) => customerMaterialName(materials.find((material) => material.id === id)) || id);
   const baseMaterialChoicePayload = baseMaterialChoices.map((choice) => {
     const material = materials.find((item) => item.id === choice.materialId);
+    const currentLabel = choice.label.trim();
+    const customerName = customerMaterialName(material);
+    const clientLabel = !currentLabel || currentLabel === String(material?.name ?? "").trim() ? customerName : currentLabel;
     return {
       materialId: choice.materialId,
-      label: choice.label.trim() || material?.name || "Material",
+      label: clientLabel || "Material",
       materialName: material?.name ?? choice.label,
       isRoll: Boolean(material && isRollPrintMaterial(material))
     };
@@ -616,7 +624,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="vinylBackingMaterialIdsCsv" value={vinylBackingMaterialIds.join(",")} />
       <input type="hidden" name="vinylBackingMaterialNamesJson" value={JSON.stringify(vinylBackingNames)} />
       <input type="hidden" name="defaultVinylBackingMaterialId" value={defaultVinylBackingMaterialId === "none" ? "" : defaultVinylBackingMaterialId} />
-      <input type="hidden" name="defaultVinylBackingMaterialName" value={selectedDefaultVinylBacking?.name ?? ""} />
+      <input type="hidden" name="defaultVinylBackingMaterialName" value={customerMaterialName(selectedDefaultVinylBacking)} />
       <input type="hidden" name="inkChoicesCsv" value={inkOptions.join(",")} />
       <input type="hidden" name="defaultInk" value={defaultInk} />
       <input type="hidden" name="artworkOptionsCsv" value={artworkOptions.join(",")} />
@@ -628,7 +636,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="laminateMaterialIdsCsv" value={laminateMaterialIds.join(",")} />
       <input type="hidden" name="laminateMaterialNamesJson" value={JSON.stringify(laminateNames)} />
       <input type="hidden" name="laminateMaterialId" value={defaultLaminateMaterialId === "none" ? "" : defaultLaminateMaterialId} />
-      <input type="hidden" name="laminateMaterialName" value={selectedDefaultLaminate?.name ?? ""} />
+      <input type="hidden" name="laminateMaterialName" value={customerMaterialName(selectedDefaultLaminate)} />
       <input type="hidden" name="eyeletMaterialId" value={eyeletMaterialId} />
       <input type="hidden" name="eyeletMaterialName" value={selectedEyeletMaterial?.name ?? "Eyelets"} />
       <input type="hidden" name="eyeletPreset" value={eyeletPreset} />

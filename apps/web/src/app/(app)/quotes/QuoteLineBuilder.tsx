@@ -85,6 +85,7 @@ export type QuoteComponent = {
 export type QuoteMaterial = {
   id: string;
   name: string;
+  customerFacingName?: string | null;
   materialType?: string | null;
   minimumBillableSheetFraction?: string | null;
   stockUom?: string | null;
@@ -443,7 +444,11 @@ function isVisible(field: QuoteQuestion, answers: Record<string, string>): boole
   return requiredValues.some((required) => currentAnswers.includes(required));
 }
 
-function summaryFor(product: QuoteProduct | undefined, fields: QuoteQuestion[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>): string {
+function customerFacingMaterialName(material: QuoteMaterial | undefined): string {
+  return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
+}
+
+function summaryFor(product: QuoteProduct | undefined, fields: QuoteQuestion[], answers: Record<string, string>, followUpAnswers: Record<string, string>, customFollowUpAnswers: Record<string, string>, materials: QuoteMaterial[]): string {
   return fields
     .filter((field) => isVisible(field, answers))
     .filter((field) => field.key !== "quantity")
@@ -464,7 +469,8 @@ function summaryFor(product: QuoteProduct | undefined, fields: QuoteQuestion[], 
           const followUp = followUps.find((entry) => entry.optionValue === item);
           if (followUp) return `${followUp.answerLabel} (${followUpSelectionLabel(followUp, followUpAnswers, customFollowUpAnswers)})`;
           const matched = selectedChoice(field, item);
-          return String(matched?.label ?? item).replace(/_/g, " ");
+          const linkedMaterial = materials.find((material) => material.id === String(matched?.value ?? item));
+          return (customerFacingMaterialName(linkedMaterial) || String(matched?.label ?? item)).replace(/_/g, " ");
         })
         .join(", ");
       return `${field.label}: ${followUpText}`;
@@ -1128,7 +1134,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const quantityField = visibleFields.find((field) => field.key === "quantity");
   const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : standaloneQuantity;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
-  const autoSummary = selectedProduct && visibleFields.length > 0 ? summaryFor(selectedProduct, visibleFields, answers, followUpAnswers, customFollowUpAnswers) : manualSummary;
+  const autoSummary = selectedProduct && visibleFields.length > 0 ? summaryFor(selectedProduct, visibleFields, answers, followUpAnswers, customFollowUpAnswers, materials) : manualSummary;
   const autoPricing = useMemo(
     () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber),
     [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber]

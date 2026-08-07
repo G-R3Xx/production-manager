@@ -113,6 +113,7 @@ function isValidGroup(value: string): value is MaterialGroup {
 function searchTextFor(material: MaterialSummary): string {
   return [
     material.name,
+    material.customerFacingName,
     material.sku,
     material.supplierName,
     material.materialType,
@@ -204,6 +205,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
           <div style={{ fontWeight: 800 }}>{material.name}</div>
+          {material.customerFacingName ? <div style={{ marginTop: 3, color: "#0f766e", fontSize: 13, fontWeight: 750 }}>Client sees: {material.customerFacingName}</div> : null}
           <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{formatMaterialType(material.materialType)} · Stock {material.stockQuantity ?? "0"} {material.stockUom ?? "units"} · Cost ${material.purchaseCost ?? "0"}/{material.purchaseUom ?? "unit"}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>

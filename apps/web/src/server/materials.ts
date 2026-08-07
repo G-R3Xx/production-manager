@@ -10,6 +10,7 @@ export type MaterialRecord = {
   supplierName: string | null;
   sourceProductName: string | null;
   name: string;
+  customerFacingName: string | null;
   sku: string | null;
   materialType: string;
   materialGroup: string | null;
@@ -38,6 +39,7 @@ export type CreateMaterialInput = {
   supplierId: string | null;
   sourceProductId: string | null;
   name: string;
+  customerFacingName: string | null;
   sku: string | null;
   materialType: string;
   materialGroup: string | null;
@@ -63,7 +65,8 @@ async function ensureMaterialPricingColumns(): Promise<void> {
   await pool.query(`
     ALTER TABLE catalog.materials
       ADD COLUMN IF NOT EXISTS material_group varchar(50),
-      ADD COLUMN IF NOT EXISTS minimum_billable_sheet_fraction numeric(6, 4)
+      ADD COLUMN IF NOT EXISTS minimum_billable_sheet_fraction numeric(6, 4),
+      ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)
   `);
 }
 
@@ -125,6 +128,7 @@ function presentMaterialType(value: string): string {
 }
 
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
+  await ensureMaterialPricingColumns();
   const result = await pool.query<MaterialRecord>(`
     SELECT
       m.id,
@@ -134,6 +138,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       s.display_name AS "supplierName",
       p.name AS "sourceProductName",
       m.name,
+      m.customer_facing_name AS "customerFacingName",
       m.sku,
       CASE
         WHEN m.material_type IS NOT NULL THEN m.material_type::text
@@ -205,6 +210,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       supplier_id,
       source_product_id,
       name,
+      customer_facing_name,
       sku,
       type,
       material_type,
@@ -228,19 +234,20 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $3::uuid,
       $4::varchar,
       $5::varchar,
-      $6::material_type,
-      $7::varchar,
+      $6::varchar,
+      $7::material_type,
       $8::varchar,
-      $9::numeric,
-      $10::varchar,
+      $9::varchar,
+      $10::numeric,
       $11::varchar,
-      $12::numeric,
+      $12::varchar,
       $13::numeric,
       $14::numeric,
       $15::numeric,
       $16::numeric,
       $17::numeric,
-      $18::varchar,
+      $18::numeric,
+      $19::varchar,
       true,
       now(),
       now()
@@ -250,6 +257,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.supplierId,
     input.sourceProductId,
     input.name,
+    input.customerFacingName,
     input.sku,
     toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),
@@ -276,20 +284,21 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       supplier_id = $3::uuid,
       source_product_id = $4::uuid,
       name = $5::varchar,
-      sku = $6::varchar,
-      type = $7::material_type,
-      material_type = $8::varchar,
-      material_group = $9::varchar,
-      minimum_billable_sheet_fraction = $10::numeric,
-      stock_uom = $11::varchar,
-      purchase_uom = $12::varchar,
-      stock_quantity = $13::numeric,
-      purchase_cost = $14::numeric,
-      width_mm = $15::numeric,
-      length_mm = $16::numeric,
-      roll_width_mm = $17::numeric,
-      gsm = $18::numeric,
-      notes = $19::varchar,
+      customer_facing_name = $6::varchar,
+      sku = $7::varchar,
+      type = $8::material_type,
+      material_type = $9::varchar,
+      material_group = $10::varchar,
+      minimum_billable_sheet_fraction = $11::numeric,
+      stock_uom = $12::varchar,
+      purchase_uom = $13::varchar,
+      stock_quantity = $14::numeric,
+      purchase_cost = $15::numeric,
+      width_mm = $16::numeric,
+      length_mm = $17::numeric,
+      roll_width_mm = $18::numeric,
+      gsm = $19::numeric,
+      notes = $20::varchar,
       updated_at = now()
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
@@ -299,6 +308,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     input.supplierId,
     input.sourceProductId,
     input.name,
+    input.customerFacingName,
     input.sku,
     toLegacyMaterialType(input.materialType),
     normalizeMaterialType(input.materialType),

@@ -92,7 +92,7 @@ export type WebsiteCatalogProduct = {
 };
 
 type WebsitePricingMaterial = Pick<MaterialRecord,
-  "id" | "name" | "materialType" | "stockUom" | "purchaseUom" | "stockQuantity" |
+  "id" | "name" | "customerFacingName" | "materialType" | "stockUom" | "purchaseUom" | "stockQuantity" |
   "purchaseCost" | "widthMm" | "lengthMm" | "rollWidthMm" | "minimumBillableSheetFraction"
 >;
 
@@ -264,7 +264,7 @@ function displayForField(field: Record<string, unknown>, config: Record<string, 
   return type === "size_select" ? "cards" : "buttons";
 }
 
-function serialisedChoices(field: Record<string, unknown>): WebsiteBuilderChoice[] {
+function serialisedChoices(field: Record<string, unknown>, materialDisplayNames: Map<string, string> = new Map()): WebsiteBuilderChoice[] {
   const type = normalisedFieldType(field);
   const source = asArray(field.options);
   const rawChoices = type === "yes_no" && source.length === 0
@@ -272,10 +272,11 @@ function serialisedChoices(field: Record<string, unknown>): WebsiteBuilderChoice
     : source;
   return rawChoices.map((rawChoice) => {
     const choice = asObject(rawChoice);
+    const value = text(choice.value) || text(choice.label);
     return {
       id: text(choice.id) || null,
-      label: friendlyDisplayText(choice.label) || friendlyDisplayText(choice.value) || "Option",
-      value: text(choice.value) || text(choice.label),
+      label: materialDisplayNames.get(value) || friendlyDisplayText(choice.label) || friendlyDisplayText(choice.value) || "Option",
+      value,
       priceDelta: numberValue(choice.priceDelta ?? choice.priceAdjustment),
       quoteRequired: choice.quoteRequired === true || text(choice.effectType) === "quote",
       widthMm: choice.widthMm == null ? null : numberValue(choice.widthMm),
@@ -310,7 +311,7 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
   return numericGreaterThan == null ? { optionKey, optionValues } : { optionKey, optionValues, numericGreaterThan };
 }
 
-function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>): WebsiteBuilderField[] {
+function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>, materialDisplayNames: Map<string, string> = new Map()): WebsiteBuilderField[] {
   const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
@@ -324,7 +325,7 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
     // quantity question as a second customer-facing control.
     if (key === "quantity") return;
     const type = normalisedFieldType(field);
-    let options = serialisedChoices(field);
+    let options = serialisedChoices(field, materialDisplayNames);
     let label = text(field.label) || "Option";
     let helpText = text(field.helpText) || null;
     let defaultValue = field.defaultValue ?? null;
@@ -414,6 +415,7 @@ export async function ensureWordPressBridgeSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || wordPressBridgeSchemaReady) return;
   await ensureWordPressProductPublishingSchema();
   await ensureProductionTables();
+  await pool.query(`ALTER TABLE catalog.materials ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)`);
   await pool.query(`ALTER TABLE sales.quote_drafts ADD COLUMN IF NOT EXISTS client_purchase_order_number varchar(120)`);
   await pool.query(`
     CREATE TABLE IF NOT EXISTS integration.wordpress_connections (
@@ -579,7 +581,9 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     heightMm: Math.max(1, numberValue(config.defaultHeightMm, 450)),
     quantity: Math.max(1, Math.round(numberValue(config.defaultQuantity, 1)))
   };
-  const fields = serializeFields(definition, config);
+  const catalogueMaterials = await pricingMaterialsForDefinition(product.tenantId, definition).catch(() => [] as WebsitePricingMaterial[]);
+  const materialDisplayNames = new Map(catalogueMaterials.map((material) => [material.id, text(material.customerFacingName) || material.name]));
+  const fields = serializeFields(definition, config, materialDisplayNames);
   const websiteProductName = text(config.websiteProductName) || product.name;
   const images = serialisedWebsiteImages(product, config, websiteProductName);
   const featuredImageUrl = images.find((image) => image.featured)?.url ?? images[0]?.url ?? null;
@@ -635,7 +639,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.06.06",
+    version: "V26.08.07.01",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -708,6 +712,7 @@ async function pricingMaterialsForDefinition(
     SELECT
       id::text,
       name,
+      customer_facing_name AS "customerFacingName",
       COALESCE(material_type::text, type::text) AS "materialType",
       stock_uom AS "stockUom",
       purchase_uom AS "purchaseUom",
@@ -912,7 +917,10 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     fields: templateFields.length ? templateFields : asArray(websiteConfig.guidedFields),
     components: templateComponents.length ? templateComponents : asArray(websiteConfig.guidedComponents)
   };
-  const fields = serializeFields(definition, websiteConfig);
+  const components = asArray(definition.components);
+  const materials = components.length ? await pricingMaterialsForDefinition(tenantId, definition).catch(() => [] as WebsitePricingMaterial[]) : [];
+  const materialDisplayNames = new Map(materials.map((material) => [material.id, text(material.customerFacingName) || material.name]));
+  const fields = serializeFields(definition, websiteConfig, materialDisplayNames);
   const answers = asObject(body.answers);
 
   let widthMm = numberValue(body.widthMm, numberValue(websiteConfig.defaultWidthMm, 600));
@@ -956,12 +964,10 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     }
   }
 
-  const components = asArray(definition.components);
-  const [recipe, materials, recipes] = await Promise.all([
+  const [recipe, recipes] = await Promise.all([
     product.productionRecipeId
       ? previewRecipeCost(tenantId, product.productionRecipeId, widthMm, heightMm, quantity).catch(() => null)
       : Promise.resolve(null),
-    components.length ? pricingMaterialsForDefinition(tenantId, definition).catch(() => [] as WebsitePricingMaterial[]) : Promise.resolve([] as WebsitePricingMaterial[]),
     product.productionRecipeId ? listRecipesForTenant(tenantId).catch(() => []) : Promise.resolve([])
   ]);
   const recipeSettings = recipes.find((item) => item.id === product.productionRecipeId);

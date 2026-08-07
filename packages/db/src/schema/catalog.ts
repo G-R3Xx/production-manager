@@ -124,6 +124,7 @@ export const materials = catalogSchema.table("materials", {
     scale: 4
   }),
   name: varchar("name", { length: 200 }).notNull(),
+  customerFacingName: varchar("customer_facing_name", { length: 200 }),
   supplierId: uuid("supplier_id"),
   stockUom: varchar("stock_uom", { length: 20 }).notNull(),
   purchaseUom: varchar("purchase_uom", { length: 20 }).notNull(),

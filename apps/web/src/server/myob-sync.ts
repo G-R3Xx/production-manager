@@ -506,8 +506,30 @@ function readMyobNumber(value: unknown): string | null {
   return textOrNull(record.Number) ?? textOrNull(record.OrderNumber) ?? textOrNull(record.DisplayID) ?? textOrNull(record.UID);
 }
 
-function buildOrderLineDescription(line: import("@/server/quotes").QuoteLineRecord): string {
-  return [line.productName, line.optionSummary, line.notes].filter(Boolean).join("\n").slice(0, 1000);
+function buildOrderLineDescription(line: import("@/server/quotes").QuoteLineRecord, customerMaterialNames: Map<string, string> = new Map()): string {
+  let description = [line.productName, line.optionSummary, line.notes].filter(Boolean).join("\n");
+  for (const [internalName, customerName] of customerMaterialNames) {
+    if (!internalName || !customerName || internalName === customerName) continue;
+    description = description.split(internalName).join(customerName);
+  }
+  return description.slice(0, 1000);
+}
+
+async function customerFacingMaterialNamesForTenant(tenantId: string): Promise<Map<string, string>> {
+  await pool.query(`ALTER TABLE catalog.materials ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)`);
+  const result = await pool.query<{ name: string; customerFacingName: string }>(`
+    SELECT name, customer_facing_name AS "customerFacingName"
+    FROM catalog.materials
+    WHERE tenant_id = $1::uuid
+      AND NULLIF(BTRIM(customer_facing_name), '') IS NOT NULL
+  `, [tenantId]);
+  const names = new Map<string, string>();
+  for (const row of result.rows) {
+    const internalName = String(row.name ?? "").trim();
+    const customerName = String(row.customerFacingName ?? "").trim();
+    if (internalName && customerName) names.set(internalName, customerName);
+  }
+  return names;
 }
 
 async function resolveMyobCustomerUid(tenantId: string, quote: import("@/server/quotes").QuoteDraftRecord): Promise<{ uid: string | null; source: string; customerPayload?: Record<string, unknown> }> {
@@ -567,12 +589,13 @@ function buildMyobServiceOrderPayload(input: {
   quote: import("@/server/quotes").QuoteDraftRecord;
   lines: import("@/server/quotes").QuoteLineRecord[];
   customerUid: string;
+  customerMaterialNames?: Map<string, string>;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const subtotal = input.lines.reduce((sum, line) => sum + numberValue(line.lineTotal), 0);
   const lines = input.lines.map((line) => ({
     Type: "Transaction",
-    Description: buildOrderLineDescription(line),
+    Description: buildOrderLineDescription(line, input.customerMaterialNames),
     Total: numberValue(line.lineTotal),
     TaxCode: { Code: "GST" },
     Job: null
@@ -634,7 +657,8 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
   });
 
   const { accessToken } = await getValidAccessToken(tenantId);
-  const payload = buildMyobServiceOrderPayload({ quote, lines, customerUid: customer.uid });
+  const customerMaterialNames = await customerFacingMaterialNamesForTenant(tenantId).catch(() => new Map<string, string>());
+  const payload = buildMyobServiceOrderPayload({ quote, lines, customerUid: customer.uid, customerMaterialNames });
   const endpoint = "/Sale/Order/Service";
 
   try {
