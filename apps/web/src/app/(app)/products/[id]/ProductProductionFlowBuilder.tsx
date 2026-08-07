@@ -17,6 +17,7 @@ type MaterialOption = {
   widthMm: string | null;
   lengthMm: string | null;
   rollWidthMm: string | null;
+  reversePrintable: boolean;
 };
 
 type ProcessOption = {
@@ -227,6 +228,13 @@ function autoMaterialIdsFor(material: MaterialOption | null | undefined, pool: M
   if (!material) return [];
   const key = autoMaterialGroupKey(material);
   return pool.filter((candidate) => autoMaterialGroupKey(candidate) === key).map((candidate) => candidate.id);
+}
+
+function autoMaterialGroupIsReversePrintable(material: MaterialOption | null | undefined, pool: MaterialOption[]): boolean {
+  if (!material) return false;
+  const ids = new Set(autoMaterialIdsFor(material, pool));
+  const candidates = pool.filter((candidate) => ids.has(candidate.id));
+  return candidates.length > 0 && candidates.every((candidate) => candidate.reversePrintable === true);
 }
 
 function autoGroupDescription(group: AutoMaterialGroup): string {
@@ -678,13 +686,19 @@ export function ProductProductionFlowBuilder({
       materialName: material?.name ?? choice.label,
       isRoll: Boolean(material && isRollPrintMaterial(material)),
       isTransparent: isClearTransparentBaseMaterial(material),
+      isReversePrintable: Boolean(material && isRollPrintMaterial(material) && autoMaterialGroupIsReversePrintable(material, allMainMaterials)),
       autoMaterialIds: material ? autoMaterialIdsFor(material, allMainMaterials) : [choice.materialId]
     }];
   });
   const clearBaseMaterialLabels = baseMaterialMode === "option"
     ? baseMaterialChoicePayload.filter((choice) => choice.isTransparent).map((choice) => choice.label)
     : isClearTransparentBaseMaterial(selectedMaterial) ? [customerMaterialName(selectedMaterial)] : [];
-  const vinylBackingApplicable = clearBaseMaterialLabels.length > 0;
+  const reversePrintableBaseLabels = baseMaterialMode === "option"
+    ? baseMaterialChoicePayload.filter((choice) => choice.isRoll && choice.isReversePrintable).map((choice) => choice.label)
+    : selectedMainMaterialIsRoll && autoMaterialGroupIsReversePrintable(selectedMaterial, allMainMaterials) ? [customerMaterialName(selectedMaterial)] : [];
+  const selectedRollMediaReversePrintable = Boolean(selectedRollMedia && autoMaterialGroupIsReversePrintable(selectedRollMedia, rollMediaMaterials));
+  const reversePrintableApplicable = reversePrintableBaseLabels.length > 0 || (printOptions.includes("roll_stock") && selectedRollMediaReversePrintable);
+  const vinylBackingApplicable = clearBaseMaterialLabels.length > 0 || reversePrintableApplicable;
 
   const stepNavigation = <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginTop: 18 }}>
     {previousStep ? <button type="button" onClick={() => setActiveStep(previousStep.key)} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← {previousStep.label}</button> : <span />}
@@ -720,6 +734,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="mainMaterialName" value={selectedMaterial?.name ?? ""} />
       <input type="hidden" name="mainMaterialIsRoll" value={selectedMainMaterialIsRoll ? "1" : "0"} />
       <input type="hidden" name="mainMaterialIsTransparent" value={isClearTransparentBaseMaterial(selectedMaterial) ? "1" : "0"} />
+      <input type="hidden" name="mainMaterialIsReversePrintable" value={selectedMainMaterialIsRoll && autoMaterialGroupIsReversePrintable(selectedMaterial, allMainMaterials) ? "1" : "0"} />
       <input type="hidden" name="mainMaterialAutoIdsCsv" value={mainMaterialAutoIds.join(",")} />
       <input type="hidden" name="width" value={width} />
       <input type="hidden" name="height" value={height} />
@@ -732,6 +747,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="rollMediaId" value={rollMediaId} />
       <input type="hidden" name="rollMediaName" value={selectedRollMedia?.name ?? ""} />
       <input type="hidden" name="rollMediaAutoIdsCsv" value={rollMediaAutoIds.join(",")} />
+      <input type="hidden" name="rollMediaIsReversePrintable" value={selectedRollMediaReversePrintable ? "1" : "0"} />
       <input type="hidden" name="vinylBackingMaterialIdsCsv" value={effectiveVinylBackingIds.join(",")} />
       <input type="hidden" name="vinylBackingMaterialNamesJson" value={JSON.stringify(vinylBackingNames)} />
       <input type="hidden" name="defaultVinylBackingMaterialId" value={defaultVinylBackingMaterialId === "none" ? "" : defaultVinylBackingMaterialId} />
@@ -831,8 +847,9 @@ export function ProductProductionFlowBuilder({
         <h3 style={{ margin: 0 }}>4. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
         <div style={{ display: "grid", gap: 18 }}>
           {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label} — {autoGroupDescription(group)}</option>)}</select><small style={{ color: "#64748b", fontWeight: 650 }}>Roll stocks with the same customer-facing name are treated as width variants. Production Manager chooses the lowest-cost stock that fits the finished size.</small></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
+          {reversePrintableApplicable ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfeff", color: "#155e75", border: "1px solid #a5f3fc" }}><b>Reverse print enabled.</b> This product will offer <b>Standard print</b> and <b>Reverse print</b>. Choosing Reverse print will reveal the backing-film choices below. Laminate options remain available in the normal Laminate step.</div> : null}
           {vinylBackingApplicable ? <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 14, background: "#f8fafc", border: "1px solid #dbe4f0" }}>
-            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.{baseMaterialMode === "option" ? ` This question will only appear when the customer chooses ${clearBaseMaterialLabels.join(" or ")}.` : ""}</p></div>
+            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.{reversePrintableApplicable && clearBaseMaterialLabels.length === 0 ? " On reverse-printable roll media this question only appears after Reverse print is selected." : baseMaterialMode === "option" && clearBaseMaterialLabels.length > 0 ? ` This question will only appear when the customer chooses ${clearBaseMaterialLabels.join(" or ")}.` : ""}</p></div>
             <button type="button" onClick={() => setDefaultVinylBacking("none")} style={{ ...choiceCardStyle(defaultVinylBackingMaterialId === "none"), minHeight: 58 }}><strong>No vinyl backing</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{defaultVinylBackingMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 9 }}>
               {vinylBackingGroups.map((group) => {
@@ -845,7 +862,7 @@ export function ProductProductionFlowBuilder({
                 </article>;
               })}
             </div>
-          </div> : <div style={{ padding: 14, borderRadius: 14, background: "#f8fafc", color: "#64748b", border: "1px solid #dbe4f0" }}><b>Vinyl backing not applicable.</b> Backing film is only offered for base substrates identified as Clear or Transparent. The selected substrate is opaque, so this question will not be added to quotes or the website.</div>}
+          </div> : <div style={{ padding: 14, borderRadius: 14, background: "#f8fafc", color: "#64748b", border: "1px solid #dbe4f0" }}><b>Vinyl backing not applicable.</b> Backing film is offered for Clear/Transparent substrates or roll media marked Reverse printable. The currently selected stock does not require that option.</div>}
           <div>
             <strong>Available ink answers</strong>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(150px,1fr))", gap: 9, marginTop: 9 }}>

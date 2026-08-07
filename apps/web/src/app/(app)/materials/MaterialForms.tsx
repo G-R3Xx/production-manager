@@ -19,6 +19,7 @@ type MaterialFormRecord = {
   materialGroup: string | null;
   minimumBillableSheetFraction: string | null;
   rollBillingIncrementMetres: string | null;
+  reversePrintable: boolean;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -365,6 +366,12 @@ function RollFields({ material, kind }: { material?: MaterialFormRecord; kind: M
             <option value="1">1m increments</option>
           </select>
         </Field>
+        {kind === "roll_media" ? <Field label="Reverse printable" helper="Enable this for clear print media that can be printed in reverse for viewing through the face. Products using this stock can then offer Standard / Reverse print and backing-film choices while keeping laminate options available.">
+          <label style={{ minHeight: 46, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", display: "flex", alignItems: "center", gap: 10, background: "#fff", fontWeight: 800 }}>
+            <input type="checkbox" name="reversePrintable" defaultChecked={material?.reversePrintable === true} />
+            Reverse printable
+          </label>
+        </Field> : null}
       </div>
       <div style={gridStyle}>
         <Field label="Bought as" helper="Use roll if the supplier charges one full roll price. Use lm if they sell cut metres.">

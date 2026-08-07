@@ -16,6 +16,7 @@ export type MaterialRecord = {
   materialGroup: string | null;
   minimumBillableSheetFraction: string | null;
   rollBillingIncrementMetres: string | null;
+  reversePrintable: boolean;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -46,6 +47,7 @@ export type CreateMaterialInput = {
   materialGroup: string | null;
   minimumBillableSheetFraction: string | null;
   rollBillingIncrementMetres: string | null;
+  reversePrintable: boolean;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -69,6 +71,7 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS material_group varchar(50),
       ADD COLUMN IF NOT EXISTS minimum_billable_sheet_fraction numeric(6, 4),
       ADD COLUMN IF NOT EXISTS roll_billing_increment_metres numeric(6, 4),
+      ADD COLUMN IF NOT EXISTS reverse_printable boolean NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)
   `);
 }
@@ -150,6 +153,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.material_group AS "materialGroup",
       m.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
       m.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
+      COALESCE(m.reverse_printable, false) AS "reversePrintable",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
       m.stock_quantity::text AS "stockQuantity",
@@ -221,6 +225,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       material_group,
       minimum_billable_sheet_fraction,
       roll_billing_increment_metres,
+      reverse_printable,
       stock_uom,
       purchase_uom,
       stock_quantity,
@@ -245,15 +250,16 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       $9::varchar,
       $10::numeric,
       $11::numeric,
-      $12::varchar,
+      $12::boolean,
       $13::varchar,
-      $14::numeric,
+      $14::varchar,
       $15::numeric,
       $16::numeric,
       $17::numeric,
       $18::numeric,
       $19::numeric,
-      $20::varchar,
+      $20::numeric,
+      $21::varchar,
       true,
       now(),
       now()
@@ -270,6 +276,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.materialGroup,
     input.minimumBillableSheetFraction,
     input.rollBillingIncrementMetres,
+    input.reversePrintable,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,
@@ -298,15 +305,16 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       material_group = $10::varchar,
       minimum_billable_sheet_fraction = $11::numeric,
       roll_billing_increment_metres = $12::numeric,
-      stock_uom = $13::varchar,
-      purchase_uom = $14::varchar,
-      stock_quantity = $15::numeric,
-      purchase_cost = $16::numeric,
-      width_mm = $17::numeric,
-      length_mm = $18::numeric,
-      roll_width_mm = $19::numeric,
-      gsm = $20::numeric,
-      notes = $21::varchar,
+      reverse_printable = $13::boolean,
+      stock_uom = $14::varchar,
+      purchase_uom = $15::varchar,
+      stock_quantity = $16::numeric,
+      purchase_cost = $17::numeric,
+      width_mm = $18::numeric,
+      length_mm = $19::numeric,
+      roll_width_mm = $20::numeric,
+      gsm = $21::numeric,
+      notes = $22::varchar,
       updated_at = now()
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
@@ -323,6 +331,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     input.materialGroup,
     input.minimumBillableSheetFraction,
     input.rollBillingIncrementMetres,
+    input.reversePrintable,
     input.stockUom,
     input.purchaseUom,
     input.stockQuantity,

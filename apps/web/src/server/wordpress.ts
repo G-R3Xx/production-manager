@@ -313,7 +313,7 @@ function normalizedShowWhen(field: Record<string, unknown>, key: string): Record
 }
 
 function serializeFields(definition: Record<string, unknown>, websiteConfig: Record<string, unknown>, materialDisplayNames: Map<string, string> = new Map()): WebsiteBuilderField[] {
-  const standardOrder = new Map(["finished_size", "base_material", "print_method", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"].map((key, index) => [key, index]));
+  const standardOrder = new Map(["finished_size", "base_material", "print_method", "print_orientation", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"].map((key, index) => [key, index]));
   const entries: Array<{ sourceIndex: number; order: number; field: WebsiteBuilderField }> = [];
 
   asArray(definition.fields).forEach((rawField, sourceIndex) => {
@@ -640,7 +640,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.07.06",
+    version: "V26.08.07.08",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -699,12 +699,25 @@ function componentConditionMatches(component: Record<string, unknown>, answers: 
   if (!primaryMatches) return false;
 
   const alsoKey = text(stockUsage.alsoRequiresOptionKey);
-  if (!alsoKey) return true;
-  const alsoSelected = selectedValues(answers[alsoKey]).map(normalizedConditionValue);
-  const alsoRequired = asArray(stockUsage.alsoRequiresOptionValues).map(normalizedConditionValue).filter(Boolean);
-  return alsoRequired.length
-    ? alsoRequired.some((value) => alsoSelected.includes(value))
-    : alsoSelected.length > 0;
+  if (alsoKey) {
+    const alsoSelected = selectedValues(answers[alsoKey]).map(normalizedConditionValue);
+    const alsoRequired = asArray(stockUsage.alsoRequiresOptionValues).map(normalizedConditionValue).filter(Boolean);
+    const alsoMatches = alsoRequired.length
+      ? alsoRequired.some((value) => alsoSelected.includes(value))
+      : alsoSelected.length > 0;
+    if (!alsoMatches) return false;
+  }
+
+  for (const rawCondition of asArray(stockUsage.additionalConditions)) {
+    const condition = asObject(rawCondition);
+    const key = text(condition.optionKey);
+    if (!key) continue;
+    const current = selectedValues(answers[key]).map(normalizedConditionValue);
+    const required = asArray(condition.optionValues).map(normalizedConditionValue).filter(Boolean);
+    const matches = required.length ? required.some((value) => current.includes(value)) : current.length > 0;
+    if (!matches) return false;
+  }
+  return true;
 }
 
 async function pricingMaterialsForDefinition(

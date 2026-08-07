@@ -31,6 +31,10 @@ function readRequiredNumeric(formData: FormData, key: string, fallback = "0"): s
   return readOptionalNumeric(formData, key) ?? fallback;
 }
 
+function readChecked(formData: FormData, key: string): boolean {
+  return ["1", "true", "on", "yes"].includes(readString(formData, key).toLowerCase());
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
   return "Something went wrong while saving the material";
@@ -56,6 +60,7 @@ export async function createMaterialAction(formData: FormData) {
       materialGroup: readString(formData, 'materialGroup') || null,
       minimumBillableSheetFraction: readOptionalNumeric(formData, 'minimumBillableSheetFraction'),
       rollBillingIncrementMetres: readOptionalNumeric(formData, 'rollBillingIncrementMetres'),
+      reversePrintable: readChecked(formData, 'reversePrintable'),
       stockUom: readString(formData, 'stockUom') || 'sheet',
       purchaseUom: readString(formData, 'purchaseUom') || 'sheet',
       stockQuantity: readRequiredNumeric(formData, 'stockQuantity'),
@@ -97,6 +102,7 @@ export async function updateMaterialAction(formData: FormData) {
       materialGroup: readString(formData, 'materialGroup') || null,
       minimumBillableSheetFraction: readOptionalNumeric(formData, 'minimumBillableSheetFraction'),
       rollBillingIncrementMetres: readOptionalNumeric(formData, 'rollBillingIncrementMetres'),
+      reversePrintable: readChecked(formData, 'reversePrintable'),
       stockUom: readString(formData, 'stockUom') || 'sheet',
       purchaseUom: readString(formData, 'purchaseUom') || 'sheet',
       stockQuantity: readRequiredNumeric(formData, 'stockQuantity'),

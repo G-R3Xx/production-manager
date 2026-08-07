@@ -104,6 +104,7 @@ type BaseMaterialChoiceInput = {
   materialName: string;
   isRoll: boolean;
   isTransparent: boolean;
+  isReversePrintable: boolean;
   autoMaterialIds: string[];
 };
 
@@ -125,6 +126,7 @@ function parseBaseMaterialChoices(value: string): BaseMaterialChoiceInput[] {
         materialName: materialName || String(row.label ?? "Material").trim() || "Material",
         isRoll: row.isRoll === true,
         isTransparent: row.isTransparent === true,
+        isReversePrintable: row.isReversePrintable === true,
         autoMaterialIds: uniqueStrings(Array.isArray(row.autoMaterialIds) ? row.autoMaterialIds.map(String) : [materialId])
       }];
     });
@@ -220,12 +222,14 @@ function mergeInternalQuoteFields(
     mainMaterialName: string | null;
     mainMaterialIsRoll: boolean;
     mainMaterialIsTransparent: boolean;
+    mainMaterialIsReversePrintable: boolean;
     mainMaterialAutoIds: string[];
     printMethod: string;
     printMethods: string[];
     rollMediaId: string | null;
     rollMediaName: string | null;
     rollMediaAutoIds: string[];
+    rollMediaIsReversePrintable: boolean;
     vinylBackingMaterialIds: string[];
     vinylBackingMaterialNames: string[];
     defaultVinylBackingMaterialId: string | null;
@@ -257,6 +261,7 @@ function mergeInternalQuoteFields(
   // the old generated quantity question so it cannot appear twice.
   const removeSeparateRollStockQuestion = input.mainMaterialIsRoll || Boolean(input.rollMediaId);
   const managedCalculatedFieldKeys = new Set([
+    "print_orientation",
     "vinyl_backing", "vinyl_backed", "vinyl_backing_type",
     "holes_drilled", "hole_custom_quantity", "hole_location", "standoffs"
   ]);
@@ -371,21 +376,62 @@ function mergeInternalQuoteFields(
     options: printOptions
   }));
 
+  const reversePrintableBaseMaterialIds = input.baseMaterialMode === "option"
+    ? input.baseMaterialChoices.filter((choice) => choice.isRoll && choice.isReversePrintable).map((choice) => choice.materialId)
+    : [];
+  const fixedReversePrintableRoll = input.baseMaterialMode === "fixed" && input.mainMaterialIsRoll && input.mainMaterialIsReversePrintable;
+  const separateReversePrintableRoll = Boolean(input.rollMediaId && input.rollMediaIsReversePrintable && allowedPrintMethods.includes("roll_stock"));
+  const reversePrintApplicable = fixedReversePrintableRoll || separateReversePrintableRoll || reversePrintableBaseMaterialIds.length > 0;
+  if (reversePrintApplicable) {
+    const orientationShowWhen = reversePrintableBaseMaterialIds.length > 0 && !separateReversePrintableRoll
+      ? { optionKey: "base_material", optionValues: reversePrintableBaseMaterialIds }
+      : { optionKey: "print_method", optionValues: ["roll_stock"] };
+    upsert("print_orientation", () => ({
+      id: randomUUID(),
+      key: "print_orientation",
+      label: "Print orientation",
+      type: "select",
+      required: true,
+      defaultValue: "standard",
+      helpText: "Choose Standard print or Reverse print. Reverse print is viewed through the clear media and can be backed with another film.",
+      quoteOnly: true,
+      showWhen: orientationShowWhen,
+      meta: { source: "internal_product_setup", websiteVisible: true, reversePrintableOnly: true },
+      options: [internalChoice("Standard print", "standard"), internalChoice("Reverse print", "reverse")],
+      rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
+    }), (field) => ({
+      ...field,
+      label: "Print orientation",
+      type: "select",
+      required: true,
+      defaultValue: ["standard", "reverse"].includes(String(field.defaultValue ?? "")) ? field.defaultValue : "standard",
+      helpText: "Choose Standard print or Reverse print. Reverse print is viewed through the clear media and can be backed with another film.",
+      showWhen: orientationShowWhen,
+      meta: standardMeta(field, { reversePrintableOnly: true }),
+      options: [internalChoice("Standard print", "standard"), internalChoice("Reverse print", "reverse")]
+    }));
+  }
+
   const vinylBackingPairs = autoMaterialChoiceGroups(input.vinylBackingMaterialIds, input.vinylBackingMaterialNames);
   const transparentBaseMaterialIds = input.baseMaterialMode === "option"
     ? input.baseMaterialChoices.filter((choice) => choice.isTransparent).map((choice) => choice.materialId)
     : [];
-  const vinylBackingApplicable = input.baseMaterialMode === "fixed"
+  const clearSubstrateBackingApplicable = input.baseMaterialMode === "fixed"
     ? input.mainMaterialIsTransparent
     : input.baseMaterialMode === "option" && transparentBaseMaterialIds.length > 0;
+  const reverseMediaBackingApplicable = reversePrintApplicable;
+  const vinylBackingApplicable = clearSubstrateBackingApplicable || reverseMediaBackingApplicable;
   if (vinylBackingPairs.length && vinylBackingApplicable) {
     const defaultBackingGroup = input.defaultVinylBackingMaterialId
       ? vinylBackingPairs.find((item) => item.materialIds.includes(input.defaultVinylBackingMaterialId as string))
       : null;
     const vinylBackingValue = defaultBackingGroup?.value ?? "none";
-    const backingShowWhen = input.baseMaterialMode === "option"
-      ? { optionKey: "base_material", optionValues: transparentBaseMaterialIds }
-      : null;
+    const reverseOnlyBacking = reverseMediaBackingApplicable && !clearSubstrateBackingApplicable;
+    const backingShowWhen = reverseOnlyBacking
+      ? { optionKey: "print_orientation", optionValues: ["reverse"] }
+      : input.baseMaterialMode === "option"
+        ? { optionKey: "base_material", optionValues: transparentBaseMaterialIds }
+        : null;
     upsert("vinyl_backing", () => ({
       id: randomUUID(),
       key: "vinyl_backing",
@@ -393,10 +439,12 @@ function mergeInternalQuoteFields(
       type: "select",
       required: false,
       defaultValue: vinylBackingValue,
-      helpText: "Choose no backing or the actual vinyl film applied to the rear of the finished clear sign.",
+      helpText: reverseOnlyBacking
+        ? "Available when Reverse print is selected. Choose no backing or the film applied behind the reverse-printed media."
+        : "Choose no backing or the actual vinyl film applied to the rear of the finished clear sign.",
       quoteOnly: true,
       showWhen: backingShowWhen,
-      meta: { source: "internal_product_setup", websiteVisible: true, clearSubstrateOnly: true },
+      meta: { source: "internal_product_setup", websiteVisible: true, clearSubstrateOnly: !reverseOnlyBacking, reversePrintableMedia: reverseOnlyBacking },
       options: [internalChoice("No vinyl backing", "none"), ...vinylBackingPairs.map((item) => internalChoice(item.name, item.value))],
       rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
     }), (field) => field);
@@ -778,6 +826,7 @@ function mergeInternalQuoteFields(
     });
   }
 
+  const reverseOnlyBackingComponents = reverseMediaBackingApplicable && !clearSubstrateBackingApplicable;
   for (const item of vinylBackingApplicable ? vinylBackingPairs : []) {
     components.push({
       id: randomUUID(),
@@ -797,8 +846,9 @@ function mergeInternalQuoteFields(
         dimensionSource: "finished_size",
         optionKey: "vinyl_backing",
         optionValues: [item.value],
-        alsoRequiresOptionKey: input.baseMaterialMode === "option" ? "base_material" : null,
-        alsoRequiresOptionValues: input.baseMaterialMode === "option" ? transparentBaseMaterialIds : [],
+        alsoRequiresOptionKey: reverseOnlyBackingComponents ? "print_orientation" : input.baseMaterialMode === "option" ? "base_material" : null,
+        alsoRequiresOptionValues: reverseOnlyBackingComponents ? ["reverse"] : input.baseMaterialMode === "option" ? transparentBaseMaterialIds : [],
+        additionalConditions: reverseOnlyBackingComponents ? [{ optionKey: "print_method", optionValues: ["roll_stock"] }] : [],
         autoMaterialIds: item.materialIds,
         autoMaterialLabel: item.name,
         autoSelectStrategy: "lowest_cost_fit",
@@ -969,7 +1019,7 @@ function mergeInternalQuoteFields(
     addStandoffComponent("black", input.blackStandoffMaterialId, input.blackStandoffMaterialName);
   }
 
-  const standardOrder = ["finished_size", "base_material", "print_method", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"];
+  const standardOrder = ["finished_size", "base_material", "print_method", "print_orientation", "ink", "vinyl_backing", "laminate", "finishing", "eyelet_placement", "eyelet_custom_quantity", "holes_drilled", "hole_location", "standoffs", "artwork", "delivery_method"];
   const orderIndex = new Map(standardOrder.map((key, index) => [key, index]));
   const orderedFields = existingFields
     .filter((field: any) => !["white_ink", "print_type"].includes(String(field?.key ?? "")))
@@ -1019,12 +1069,14 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const mainMaterialName = selectedOptionMaterial?.materialName ?? (read(formData, "mainMaterialName") || null);
   const mainMaterialIsRoll = selectedOptionMaterial?.isRoll ?? (read(formData, "mainMaterialIsRoll") === "1");
   const mainMaterialIsTransparent = selectedOptionMaterial?.isTransparent ?? (read(formData, "mainMaterialIsTransparent") === "1");
+  const mainMaterialIsReversePrintable = selectedOptionMaterial?.isReversePrintable ?? (read(formData, "mainMaterialIsReversePrintable") === "1");
   const mainMaterialAutoIds = selectedOptionMaterial?.autoMaterialIds?.length
     ? selectedOptionMaterial.autoMaterialIds
     : uniqueStrings(read(formData, "mainMaterialAutoIdsCsv").split(","));
   const rollMediaId = read(formData, "rollMediaId") || null;
   const rollMediaName = read(formData, "rollMediaName") || null;
   const rollMediaAutoIds = uniqueStrings(read(formData, "rollMediaAutoIdsCsv").split(","));
+  const rollMediaIsReversePrintable = read(formData, "rollMediaIsReversePrintable") === "1";
   const vinylBackingMaterialIds = uniqueStrings(read(formData, "vinylBackingMaterialIdsCsv").split(","));
   const vinylBackingMaterialNames = parseStringArrayJson(read(formData, "vinylBackingMaterialNamesJson"));
   const defaultVinylBackingMaterialId = read(formData, "defaultVinylBackingMaterialId") || null;
@@ -1087,12 +1139,14 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       mainMaterialName,
       mainMaterialIsRoll,
       mainMaterialIsTransparent,
+      mainMaterialIsReversePrintable,
       mainMaterialAutoIds,
       printMethod,
       printMethods,
       rollMediaId,
       rollMediaName,
       rollMediaAutoIds,
+      rollMediaIsReversePrintable,
       vinylBackingMaterialIds,
       vinylBackingMaterialNames,
       defaultVinylBackingMaterialId,

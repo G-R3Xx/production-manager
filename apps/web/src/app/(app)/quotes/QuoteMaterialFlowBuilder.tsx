@@ -13,6 +13,7 @@ type QuoteMaterial = {
   materialGroup?: string | null;
   minimumBillableSheetFraction?: string | null;
   rollBillingIncrementMetres?: string | null;
+  reversePrintable?: boolean;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -894,6 +895,7 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
     materialGroup: material.materialGroup ?? null,
     minimumBillableSheetFraction: material.minimumBillableSheetFraction ?? null,
     rollBillingIncrementMetres: material.rollBillingIncrementMetres ?? null,
+    reversePrintable: material.reversePrintable === true,
     supplierName: material.supplierName ?? null,
     sku: material.sku ?? null,
     stockUom: material.stockUom ?? null,
@@ -1160,6 +1162,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const ncrCopiesCount = ncrCopyCount(ncrCopies);
   const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
+  const selectedReversePrintableRoll = Boolean((isRollStockBase ? selectedMainMaterial : selectedMedia)?.reversePrintable);
+  const canChooseReversePrint = isClearAcrylic || selectedReversePrintableRoll;
   const resolvedPrintMethod: PrintMethod = isRollStockBase ? "roll_stock" : printMethod;
   const printed = resolvedPrintMethod !== "" && resolvedPrintMethod !== "no_print";
   const needsMediaStep = isRollStockBase || resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl";
@@ -2198,7 +2202,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
                 <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => event.target.value === "install_only" ? chooseInstallOnly() : resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option><option value="install_only">Install only — client-supplied signage</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
                 {isRollStockBase ? (
-                  <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
                 ) : (
                   <label style={{ display: "grid", gap: 6 }}><b>Thickness / stock</b><select value={thickness} onChange={(event) => { setThickness(event.target.value); setColour(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose thickness</option>{thicknessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 )}
@@ -2208,10 +2212,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
                 {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes (optional)</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no setup charge. Entered minutes are priced at {money(labourRate)}/hr.</small></label> : null}
-                {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
+                {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => setInk(event.target.value as InkChoice)} style={inputStyle}><option value="">Choose ink</option>{inkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
-                {isClearAcrylic && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
+                {canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour minutes (optional)</b><input value={laminateMinutes} onChange={(event) => setLaminateMinutes(event.target.value)} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /></label> : null}
               </div>
@@ -2770,13 +2774,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "sides") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title={isClearAcrylic ? "Choose sides and print direction" : "Choose sides"} text={isClearAcrylic ? "Clear acrylic needs a positive/reverse print choice." : "Single or double sided printing affects ink, roll media and laminate usage."} />
-          <SidesCards onComplete={() => isClearAcrylic ? undefined : setActiveStep("laminate")} sides={sides} setSides={setSides} />
-          {isClearAcrylic ? (
+          <StepIntro icon="•" title={canChooseReversePrint ? "Choose sides and print direction" : "Choose sides"} text={canChooseReversePrint ? (isClearAcrylic ? "Clear acrylic needs a positive/reverse print choice." : "This roll media is marked Reverse printable, so choose Standard or Reverse print.") : "Single or double sided printing affects ink, roll media and laminate usage."} />
+          <SidesCards onComplete={() => canChooseReversePrint ? undefined : setActiveStep("laminate")} sides={sides} setSides={setSides} />
+          {canChooseReversePrint ? (
             <div style={{ display: "grid", gap: 10 }}>
-              <strong>Clear acrylic print direction</strong>
+              <strong>{isClearAcrylic ? "Clear acrylic print direction" : "Print direction"}</strong>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                {[{ key: "positive", label: "Positive print", note: "Print/read from the front." }, { key: "reverse", label: "Reverse print", note: "Reverse printed for viewing through clear acrylic." }].map((choice) => (
+                {[{ key: "positive", label: selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive print", note: "Print/read from the front." }, { key: "reverse", label: "Reverse print", note: isClearAcrylic ? "Reverse printed for viewing through clear acrylic." : "Reverse printed for viewing through the clear media." }].map((choice) => (
                   <button key={choice.key} type="button" onClick={() => { setPrintDirection(choice.key as PrintDirection); setActiveStep("laminate"); }} style={cardButtonStyle(printDirection === choice.key, "#7c3aed")}>
                     <span style={{ fontSize: 30 }}>{choice.key === "reverse" ? "⇄" : "→"}</span>
                     <strong>{choice.label}</strong>

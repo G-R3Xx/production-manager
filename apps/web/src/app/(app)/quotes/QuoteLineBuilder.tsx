@@ -59,6 +59,7 @@ export type QuoteComponent = {
     optionValues?: string[] | null;
     alsoRequiresOptionKey?: string | null;
     alsoRequiresOptionValues?: string[] | null;
+    additionalConditions?: Array<{ optionKey?: string | null; optionValues?: string[] | null }> | null;
     widthMm?: string | null;
     heightMm?: string | null;
     rollWidthMm?: string | null;
@@ -574,6 +575,14 @@ function componentApplies(component: QuoteComponent, answers: Record<string, str
     const currentAnswers = selectedValues(answers[alsoKey] ?? "");
     if (alsoValues.length === 0) return currentAnswers.length > 0;
     if (!alsoValues.some((required) => currentAnswers.includes(required))) return false;
+  }
+  const additionalConditions = Array.isArray(component.stockUsage?.additionalConditions) ? component.stockUsage?.additionalConditions ?? [] : [];
+  for (const condition of additionalConditions) {
+    const key = String(condition?.optionKey ?? "").trim();
+    if (!key) continue;
+    const required = Array.isArray(condition?.optionValues) ? condition.optionValues ?? [] : [];
+    const currentAnswers = selectedValues(answers[key] ?? "");
+    if (required.length === 0 ? currentAnswers.length === 0 : !required.some((value) => currentAnswers.includes(value))) return false;
   }
   return true;
 }
