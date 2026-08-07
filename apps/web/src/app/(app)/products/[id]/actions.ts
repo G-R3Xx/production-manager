@@ -103,6 +103,7 @@ type BaseMaterialChoiceInput = {
   label: string;
   materialName: string;
   isRoll: boolean;
+  isTransparent: boolean;
   autoMaterialIds: string[];
 };
 
@@ -123,6 +124,7 @@ function parseBaseMaterialChoices(value: string): BaseMaterialChoiceInput[] {
         label: String(row.label ?? materialName ?? "Material").trim() || materialName || "Material",
         materialName: materialName || String(row.label ?? "Material").trim() || "Material",
         isRoll: row.isRoll === true,
+        isTransparent: row.isTransparent === true,
         autoMaterialIds: uniqueStrings(Array.isArray(row.autoMaterialIds) ? row.autoMaterialIds.map(String) : [materialId])
       }];
     });
@@ -217,6 +219,7 @@ function mergeInternalQuoteFields(
     mainMaterialId: string | null;
     mainMaterialName: string | null;
     mainMaterialIsRoll: boolean;
+    mainMaterialIsTransparent: boolean;
     mainMaterialAutoIds: string[];
     printMethod: string;
     printMethods: string[];
@@ -369,11 +372,20 @@ function mergeInternalQuoteFields(
   }));
 
   const vinylBackingPairs = autoMaterialChoiceGroups(input.vinylBackingMaterialIds, input.vinylBackingMaterialNames);
-  if (vinylBackingPairs.length) {
+  const transparentBaseMaterialIds = input.baseMaterialMode === "option"
+    ? input.baseMaterialChoices.filter((choice) => choice.isTransparent).map((choice) => choice.materialId)
+    : [];
+  const vinylBackingApplicable = input.baseMaterialMode === "fixed"
+    ? input.mainMaterialIsTransparent
+    : input.baseMaterialMode === "option" && transparentBaseMaterialIds.length > 0;
+  if (vinylBackingPairs.length && vinylBackingApplicable) {
     const defaultBackingGroup = input.defaultVinylBackingMaterialId
       ? vinylBackingPairs.find((item) => item.materialIds.includes(input.defaultVinylBackingMaterialId as string))
       : null;
     const vinylBackingValue = defaultBackingGroup?.value ?? "none";
+    const backingShowWhen = input.baseMaterialMode === "option"
+      ? { optionKey: "base_material", optionValues: transparentBaseMaterialIds }
+      : null;
     upsert("vinyl_backing", () => ({
       id: randomUUID(),
       key: "vinyl_backing",
@@ -381,10 +393,10 @@ function mergeInternalQuoteFields(
       type: "select",
       required: false,
       defaultValue: vinylBackingValue,
-      helpText: "Choose no backing or the actual vinyl film applied to the rear of the finished sign.",
+      helpText: "Choose no backing or the actual vinyl film applied to the rear of the finished clear sign.",
       quoteOnly: true,
-      showWhen: null,
-      meta: { source: "internal_product_setup", websiteVisible: true },
+      showWhen: backingShowWhen,
+      meta: { source: "internal_product_setup", websiteVisible: true, clearSubstrateOnly: true },
       options: [internalChoice("No vinyl backing", "none"), ...vinylBackingPairs.map((item) => internalChoice(item.name, item.value))],
       rule: { effectType: "none", effectTarget: null, effectValue: null, effectUnit: null, componentLinkMode: "none" }
     }), (field) => field);
@@ -766,7 +778,7 @@ function mergeInternalQuoteFields(
     });
   }
 
-  for (const item of vinylBackingPairs) {
+  for (const item of vinylBackingApplicable ? vinylBackingPairs : []) {
     components.push({
       id: randomUUID(),
       kind: "material",
@@ -785,6 +797,8 @@ function mergeInternalQuoteFields(
         dimensionSource: "finished_size",
         optionKey: "vinyl_backing",
         optionValues: [item.value],
+        alsoRequiresOptionKey: input.baseMaterialMode === "option" ? "base_material" : null,
+        alsoRequiresOptionValues: input.baseMaterialMode === "option" ? transparentBaseMaterialIds : [],
         autoMaterialIds: item.materialIds,
         autoMaterialLabel: item.name,
         autoSelectStrategy: "lowest_cost_fit",
@@ -1004,6 +1018,7 @@ export async function saveInternalProductSetupAction(formData: FormData) {
     : selectedOptionMaterial?.materialId ?? requestedMainMaterialId;
   const mainMaterialName = selectedOptionMaterial?.materialName ?? (read(formData, "mainMaterialName") || null);
   const mainMaterialIsRoll = selectedOptionMaterial?.isRoll ?? (read(formData, "mainMaterialIsRoll") === "1");
+  const mainMaterialIsTransparent = selectedOptionMaterial?.isTransparent ?? (read(formData, "mainMaterialIsTransparent") === "1");
   const mainMaterialAutoIds = selectedOptionMaterial?.autoMaterialIds?.length
     ? selectedOptionMaterial.autoMaterialIds
     : uniqueStrings(read(formData, "mainMaterialAutoIdsCsv").split(","));
@@ -1071,6 +1086,7 @@ export async function saveInternalProductSetupAction(formData: FormData) {
       mainMaterialId,
       mainMaterialName,
       mainMaterialIsRoll,
+      mainMaterialIsTransparent,
       mainMaterialAutoIds,
       printMethod,
       printMethods,

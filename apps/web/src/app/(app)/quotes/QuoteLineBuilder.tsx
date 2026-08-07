@@ -57,6 +57,8 @@ export type QuoteComponent = {
     dimensionSource?: string | null;
     optionKey?: string | null;
     optionValues?: string[] | null;
+    alsoRequiresOptionKey?: string | null;
+    alsoRequiresOptionValues?: string[] | null;
     widthMm?: string | null;
     heightMm?: string | null;
     rollWidthMm?: string | null;
@@ -548,20 +550,30 @@ function materialFor(materials: QuoteMaterial[], materialId: string | null | und
 
 function componentApplies(component: QuoteComponent, answers: Record<string, string>): boolean {
   const triggerKey = String(component.trigger?.optionKey ?? "").trim();
+  let primaryMatches = true;
   if (triggerKey) {
     const currentAnswers = selectedValues(answers[triggerKey] ?? "");
     const requiredValues = Array.isArray(component.trigger?.optionValues) ? component.trigger?.optionValues ?? [] : [];
-    if (requiredValues.length === 0) return currentAnswers.length > 0;
-    return requiredValues.some((required) => currentAnswers.includes(required));
+    primaryMatches = requiredValues.length === 0
+      ? currentAnswers.length > 0
+      : requiredValues.some((required) => currentAnswers.includes(required));
+  } else {
+    const usageKey = String(component.stockUsage?.optionKey ?? "").trim();
+    const usageValues = Array.isArray(component.stockUsage?.optionValues) ? component.stockUsage?.optionValues ?? [] : [];
+    if (usageKey && usageValues.length > 0) {
+      const currentAnswers = selectedValues(answers[usageKey] ?? "");
+      primaryMatches = usageValues.some((required) => currentAnswers.includes(required));
+    }
   }
+  if (!primaryMatches) return false;
 
-  const usageKey = String(component.stockUsage?.optionKey ?? "").trim();
-  const usageValues = Array.isArray(component.stockUsage?.optionValues) ? component.stockUsage?.optionValues ?? [] : [];
-  if (usageKey && usageValues.length > 0) {
-    const currentAnswers = selectedValues(answers[usageKey] ?? "");
-    return usageValues.some((required) => currentAnswers.includes(required));
+  const alsoKey = String(component.stockUsage?.alsoRequiresOptionKey ?? "").trim();
+  const alsoValues = Array.isArray(component.stockUsage?.alsoRequiresOptionValues) ? component.stockUsage?.alsoRequiresOptionValues ?? [] : [];
+  if (alsoKey) {
+    const currentAnswers = selectedValues(answers[alsoKey] ?? "");
+    if (alsoValues.length === 0) return currentAnswers.length > 0;
+    if (!alsoValues.some((required) => currentAnswers.includes(required))) return false;
   }
-
   return true;
 }
 

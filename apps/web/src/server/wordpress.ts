@@ -639,7 +639,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.07.03",
+    version: "V26.08.07.04",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -692,9 +692,18 @@ function componentConditionMatches(component: Record<string, unknown>, answers: 
     ? asArray(trigger.optionValues)
     : asArray(stockUsage.optionValues);
   const requiredValues = sourceValues.map(normalizedConditionValue).filter(Boolean);
-  return requiredValues.length
+  const primaryMatches = requiredValues.length
     ? requiredValues.some((value) => selected.map(normalizedConditionValue).includes(value))
     : selected.length > 0;
+  if (!primaryMatches) return false;
+
+  const alsoKey = text(stockUsage.alsoRequiresOptionKey);
+  if (!alsoKey) return true;
+  const alsoSelected = selectedValues(answers[alsoKey]).map(normalizedConditionValue);
+  const alsoRequired = asArray(stockUsage.alsoRequiresOptionValues).map(normalizedConditionValue).filter(Boolean);
+  return alsoRequired.length
+    ? alsoRequired.some((value) => alsoSelected.includes(value))
+    : alsoSelected.length > 0;
 }
 
 async function pricingMaterialsForDefinition(

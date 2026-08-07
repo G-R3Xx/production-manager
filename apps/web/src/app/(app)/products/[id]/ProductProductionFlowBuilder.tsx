@@ -183,6 +183,12 @@ function customerMaterialName(material: MaterialOption | null | undefined): stri
   return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
 }
 
+function isClearTransparentBaseMaterial(material: MaterialOption | null | undefined): boolean {
+  if (!material) return false;
+  const text = `${material.name} ${material.customerFacingName ?? ""} ${material.sku ?? ""} ${material.notes ?? ""}`.toLowerCase();
+  return /\b(clear|transparent)\b/.test(text);
+}
+
 type AutoMaterialGroup = {
   key: string;
   label: string;
@@ -671,9 +677,14 @@ export function ProductProductionFlowBuilder({
       label: clientLabel || "Material",
       materialName: material?.name ?? choice.label,
       isRoll: Boolean(material && isRollPrintMaterial(material)),
+      isTransparent: isClearTransparentBaseMaterial(material),
       autoMaterialIds: material ? autoMaterialIdsFor(material, allMainMaterials) : [choice.materialId]
     }];
   });
+  const clearBaseMaterialLabels = baseMaterialMode === "option"
+    ? baseMaterialChoicePayload.filter((choice) => choice.isTransparent).map((choice) => choice.label)
+    : isClearTransparentBaseMaterial(selectedMaterial) ? [customerMaterialName(selectedMaterial)] : [];
+  const vinylBackingApplicable = clearBaseMaterialLabels.length > 0;
 
   const stepNavigation = <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginTop: 18 }}>
     {previousStep ? <button type="button" onClick={() => setActiveStep(previousStep.key)} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← {previousStep.label}</button> : <span />}
@@ -708,6 +719,7 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="materialId" value={materialId} />
       <input type="hidden" name="mainMaterialName" value={selectedMaterial?.name ?? ""} />
       <input type="hidden" name="mainMaterialIsRoll" value={selectedMainMaterialIsRoll ? "1" : "0"} />
+      <input type="hidden" name="mainMaterialIsTransparent" value={isClearTransparentBaseMaterial(selectedMaterial) ? "1" : "0"} />
       <input type="hidden" name="mainMaterialAutoIdsCsv" value={mainMaterialAutoIds.join(",")} />
       <input type="hidden" name="width" value={width} />
       <input type="hidden" name="height" value={height} />
@@ -819,8 +831,8 @@ export function ProductProductionFlowBuilder({
         <h3 style={{ margin: 0 }}>4. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
         <div style={{ display: "grid", gap: 18 }}>
           {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label} — {autoGroupDescription(group)}</option>)}</select><small style={{ color: "#64748b", fontWeight: 650 }}>Roll stocks with the same customer-facing name are treated as width variants. Production Manager chooses the lowest-cost stock that fits the finished size.</small></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
-          <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 14, background: "#f8fafc", border: "1px solid #dbe4f0" }}>
-            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.</p></div>
+          {vinylBackingApplicable ? <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 14, background: "#f8fafc", border: "1px solid #dbe4f0" }}>
+            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.{baseMaterialMode === "option" ? ` This question will only appear when the customer chooses ${clearBaseMaterialLabels.join(" or ")}.` : ""}</p></div>
             <button type="button" onClick={() => setDefaultVinylBacking("none")} style={{ ...choiceCardStyle(defaultVinylBackingMaterialId === "none"), minHeight: 58 }}><strong>No vinyl backing</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{defaultVinylBackingMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 9 }}>
               {vinylBackingGroups.map((group) => {
@@ -833,7 +845,7 @@ export function ProductProductionFlowBuilder({
                 </article>;
               })}
             </div>
-          </div>
+          </div> : <div style={{ padding: 14, borderRadius: 14, background: "#f8fafc", color: "#64748b", border: "1px solid #dbe4f0" }}><b>Vinyl backing not applicable.</b> Backing film is only offered for base substrates identified as Clear or Transparent. The selected substrate is opaque, so this question will not be added to quotes or the website.</div>}
           <div>
             <strong>Available ink answers</strong>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(150px,1fr))", gap: 9, marginTop: 9 }}>
