@@ -15,6 +15,7 @@ import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { inferLegacyQuickQuoteSnapshot, readQuickQuoteSnapshot, type QuickQuoteStep } from "./quoteLineSnapshot";
+import { MyobSubmitButton } from "./MyobSubmitButton";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -518,8 +519,8 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                                 )}
                                 {suggestedMyobCustomer ? <span style={{ fontSize: 12, color: "#9a3412" }}>Suggested match: <strong>{suggestedMyobCustomer.displayName}</strong></span> : null}
                               </label>
-                              {importedMyobCustomers.length ? <button type="submit" style={{ ...buttonStyle, background: "#475467" }}>Link customer</button> : <Link href="/integrations" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Import MYOB customers</Link>}
-                              {importedMyobCustomers.length && selectedQuote.status === "accepted" ? <button type="submit" name="sendNow" value="1" style={{ ...buttonStyle, background: "#0f766e" }}>Link & send to MYOB</button> : null}
+                              {importedMyobCustomers.length ? <MyobSubmitButton label="Link customer" pendingLabel="Linking…" background="#475467" /> : <Link href="/integrations" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Import MYOB customers</Link>}
+                              {importedMyobCustomers.length && selectedQuote.status === "accepted" ? <MyobSubmitButton label="Link & send to MYOB" pendingLabel="Linking & sending…" background="#0f766e" name="sendNow" value="1" /> : null}
                             </form>
 
                             <form action={createQuoteClientInMyobAction} style={{ border: "1px solid #fed7aa", borderRadius: 14, background: "rgba(255,255,255,0.72)", padding: 12, display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
@@ -529,8 +530,8 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                                 <span style={{ fontSize: 12, color: "#9a3412" }}>Production Manager checks MYOB for an exact company/email match first. If one exists it links it; otherwise it creates a new MYOB customer and stores the MYOB link permanently.</span>
                               </div>
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                                <button type="submit" style={{ ...buttonStyle, background: "#7c3aed" }}>Create in MYOB</button>
-                                {selectedQuote.status === "accepted" ? <button type="submit" name="sendNow" value="1" style={{ ...buttonStyle, background: "#0f766e" }}>Create & send to MYOB</button> : null}
+                                <MyobSubmitButton label="Create in MYOB" pendingLabel="Checking MYOB…" background="#7c3aed" />
+                                {selectedQuote.status === "accepted" ? <MyobSubmitButton label="Create & send to MYOB" pendingLabel="Creating & sending…" background="#0f766e" name="sendNow" value="1" /> : null}
                               </div>
                             </form>
                           </div>

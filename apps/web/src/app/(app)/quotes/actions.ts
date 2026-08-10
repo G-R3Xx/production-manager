@@ -2,6 +2,7 @@
 
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
+import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
@@ -813,37 +814,37 @@ export async function createQuoteClientInMyobAction(formData: FormData): Promise
   }
 
   let result: Awaited<ReturnType<typeof createMyobCustomerFromLocalClientForTenant>> | null = null;
-  let createError = "";
+  let actionError = "";
   try {
     result = await createMyobCustomerFromLocalClientForTenant(activeTenant.tenantId, quote.linkedCustomerId);
+
+    await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {
+      status: quote.status === "accepted" ? "ready_to_sync" : "not_synced",
+      error: null,
+      payloadJson: {
+        customerLinkedAt: new Date().toISOString(),
+        linkedCustomerId: quote.linkedCustomerId,
+        myobCustomerUid: result.uid,
+        myobCustomerName: result.displayName,
+        myobCustomerDisplayId: result.displayId,
+        customerCreatedInMyob: result.created
+      }
+    });
+
+    if (sendNow && quote.status === "accepted") {
+      await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    }
   } catch (error) {
-    createError = error instanceof Error ? error.message : String(error);
-  }
-  if (createError || !result) {
-    redirect(`/quotes?selected=${quoteId}&myobLink=required&error=${encodeURIComponent(createError || "Could not create the MYOB customer.")}`);
+    // Surface MYOB/API/database failures on the quote page instead of leaving a failed Server Action with no useful UI feedback.
+    actionError = error instanceof Error ? error.message : String(error);
   }
 
-  await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {
-    status: quote.status === "accepted" ? "ready_to_sync" : "not_synced",
-    error: null,
-    payloadJson: {
-      customerLinkedAt: new Date().toISOString(),
-      linkedCustomerId: quote.linkedCustomerId,
-      myobCustomerUid: result.uid,
-      myobCustomerName: result.displayName,
-      myobCustomerDisplayId: result.displayId,
-      customerCreatedInMyob: result.created
-    }
-  });
+  revalidatePath("/quotes");
+  if (actionError || !result) {
+    redirect(`/quotes?selected=${quoteId}&myobLink=required&error=${encodeURIComponent(actionError || "Could not create or link the MYOB customer.")}`);
+  }
 
   if (sendNow && quote.status === "accepted") {
-    let sendError = "";
-    try {
-      await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
-    } catch (error) {
-      sendError = error instanceof Error ? error.message : String(error);
-    }
-    if (sendError) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(sendError)}`);
     const verb = result.created ? "Created" : "Found and linked";
     redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`${verb} MYOB customer ${result.displayName} and sent the accepted quote to MYOB.`)}`);
   }

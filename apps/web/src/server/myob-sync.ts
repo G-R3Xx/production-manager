@@ -65,7 +65,8 @@ async function refreshMyobAccessToken(refreshToken: string) {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body,
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
   });
 
   const text = await response.text();
@@ -126,7 +127,8 @@ export async function fetchMyobJson(accessToken: string, companyFileId: string, 
       "x-myobapi-key": env.MYOB_CLIENT_ID ?? "",
       "x-myobapi-version": "v2"
     },
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
   });
 
   const text = await response.text();
@@ -465,7 +467,8 @@ async function sendMyobJson(accessToken: string, companyFileId: string, endpoint
       "x-myobapi-version": "v2"
     },
     body: JSON.stringify(body),
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
   });
 
   const text = await response.text();
@@ -602,8 +605,8 @@ async function exactMyobCustomerMatches(
   if (!companyName && lastName) endpoints.push(`/Contact/Customer?$filter=LastName eq '${odataString(lastName)}'&$top=20`);
 
   const byUid = new Map<string, Record<string, unknown>>();
-  for (const endpoint of endpoints) {
-    const result = await fetchMyobJson(accessToken, companyFileId, endpoint);
+  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint)));
+  for (const result of results) {
     for (const candidate of myobCollectionRecords(result.data)) {
       const uid = textOrNull(candidate.UID);
       if (!uid) continue;
