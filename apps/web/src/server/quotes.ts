@@ -1,6 +1,7 @@
 import "server-only";
 
 import { randomBytes } from "crypto";
+import { after } from "next/server";
 import { pool } from "@production-manager/db";
 import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
@@ -157,9 +158,16 @@ function nullableText(value: string | null | undefined): string | null {
   return trimmed.length ? trimmed : null;
 }
 
-async function ensureQuoteLifecycleColumns(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+let quoteLifecycleSchemaReady = false;
+let quoteLifecycleSchemaPromise: Promise<void> | null = null;
+let quoteLineClientResponseSchemaReady = false;
+let quoteLineClientResponseSchemaPromise: Promise<void> | null = null;
 
+async function ensureQuoteLifecycleColumns(): Promise<void> {
+  if (!process.env.DATABASE_URL || quoteLifecycleSchemaReady) return;
+  if (quoteLifecycleSchemaPromise) return quoteLifecycleSchemaPromise;
+
+  quoteLifecycleSchemaPromise = (async () => {
   await pool.query(`
     ALTER TABLE sales.quote_drafts
       ADD COLUMN IF NOT EXISTS quote_number varchar(50),
@@ -184,6 +192,12 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
       ON sales.quote_drafts (public_token)
       WHERE public_token IS NOT NULL
   `);
+  quoteLifecycleSchemaReady = true;
+  })().catch((error) => {
+    quoteLifecycleSchemaPromise = null;
+    throw error;
+  });
+  return quoteLifecycleSchemaPromise;
 }
 
 async function ensureQuoteLineConfigurationColumn(): Promise<void> {
@@ -195,7 +209,10 @@ async function ensureQuoteLineConfigurationColumn(): Promise<void> {
 }
 
 async function ensureQuoteLineClientResponseColumns(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL || quoteLineClientResponseSchemaReady) return;
+  if (quoteLineClientResponseSchemaPromise) return quoteLineClientResponseSchemaPromise;
+
+  quoteLineClientResponseSchemaPromise = (async () => {
   await pool.query(`
     ALTER TABLE sales.quote_lines
       ADD COLUMN IF NOT EXISTS client_response_status varchar(32) NOT NULL DEFAULT 'pending',
@@ -206,6 +223,12 @@ async function ensureQuoteLineClientResponseColumns(): Promise<void> {
     CREATE INDEX IF NOT EXISTS quote_lines_client_response_idx
       ON sales.quote_lines (quote_id, client_response_status)
   `);
+  quoteLineClientResponseSchemaReady = true;
+  })().catch((error) => {
+    quoteLineClientResponseSchemaPromise = null;
+    throw error;
+  });
+  return quoteLineClientResponseSchemaPromise;
 }
 
 async function ensureArtworkApprovalTables(): Promise<void> {
@@ -734,8 +757,9 @@ export async function respondToQuoteLineByToken(
   token: string,
   lineId: string,
   response: QuoteLineClientResponse,
-  notes: string | null
-): Promise<{ quoteStatus: string; lineStatus: QuoteLineClientResponse }> {
+  notes: string | null,
+  options?: { deferNotification?: boolean }
+): Promise<{ quoteStatus: string; lineStatus: QuoteLineClientResponse; subtotal: number; gst: number; total: number }> {
   await ensureQuoteLifecycleColumns();
   await ensureQuoteLineClientResponseColumns();
 
@@ -745,6 +769,7 @@ export async function respondToQuoteLineByToken(
   let quoteNumber = "Quote";
   let productName = "Quote line";
   let overallStatus = "viewed";
+  let subtotal = 0;
   try {
     await client.query("BEGIN");
     const quoteResult = await client.query<{ id: string; tenantId: string; quoteNumber: string | null; status: string }>(`
@@ -775,13 +800,14 @@ export async function respondToQuoteLineByToken(
     if (!lineResult.rowCount) throw new Error("Quote line not found.");
     productName = lineResult.rows[0]?.productName ?? productName;
 
-    const summary = await client.query<{ total: string; approved: string; requested: string; cancelled: string; pending: string }>(`
+    const summary = await client.query<{ total: string; approved: string; requested: string; cancelled: string; pending: string; subtotal: string }>(`
       SELECT
         count(*)::text as total,
         count(*) FILTER (WHERE client_response_status = 'approved')::text as approved,
         count(*) FILTER (WHERE client_response_status = 'changes_requested')::text as requested,
         count(*) FILTER (WHERE client_response_status = 'cancelled')::text as cancelled,
-        count(*) FILTER (WHERE COALESCE(client_response_status, 'pending') = 'pending')::text as pending
+        count(*) FILTER (WHERE COALESCE(client_response_status, 'pending') = 'pending')::text as pending,
+        COALESCE(SUM(CASE WHEN COALESCE(client_response_status, 'pending') <> 'cancelled' THEN line_total ELSE 0 END), 0)::text as subtotal
       FROM sales.quote_lines
       WHERE quote_id = $1::uuid
     `, [quote.id]);
@@ -791,6 +817,8 @@ export async function respondToQuoteLineByToken(
     const requested = Number(counts?.requested ?? 0);
     const cancelled = Number(counts?.cancelled ?? 0);
     const pending = Number(counts?.pending ?? 0);
+    subtotal = Number(counts?.subtotal ?? 0);
+    if (!Number.isFinite(subtotal)) subtotal = 0;
 
     if (requested > 0) overallStatus = "changes_requested";
     else if (total > 0 && pending === 0 && approved > 0 && approved + cancelled === total) overallStatus = "accepted";
@@ -821,15 +849,18 @@ export async function respondToQuoteLineByToken(
   }
 
   const responseLabel = response === "approved" ? "approved" : response === "cancelled" ? "cancelled" : "requested changes to";
-  await createNotificationForTenant(tenantId, {
+  const saveNotification = () => createNotificationForTenant(tenantId, {
     eventType: "quote_line_response",
     title: `Client ${responseLabel} a quote line`,
     message: `${quoteNumber}: ${productName}${notes ? ` — ${notes}` : ""}`,
     href: `/quotes?quote=${quoteId}`,
     payloadJson: { quoteId, lineId, response, notes }
   }).catch((error) => console.error("Quote line response saved, but notification failed", error));
+  if (options?.deferNotification) after(saveNotification);
+  else await saveNotification();
 
-  return { quoteStatus: overallStatus, lineStatus: response };
+  const gst = subtotal * 0.1;
+  return { quoteStatus: overallStatus, lineStatus: response, subtotal, gst, total: subtotal + gst };
 }
 
 export async function createArtworkApprovalForAcceptedQuoteToken(token: string): Promise<{ id: string } | null> {

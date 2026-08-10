@@ -1,6 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { createArtworkApprovalForAcceptedQuoteToken, respondToQuoteByToken, respondToQuoteLineByToken, type QuoteLineClientResponse } from "@/server/quotes";
 
 function text(value: FormDataEntryValue | null): string | null {
@@ -83,4 +84,62 @@ export async function respondToQuoteLineAction(formData: FormData): Promise<void
   }
 
   redirect(`/public/quotes/${token}?message=${encodeURIComponent(successMessage)}`);
+}
+
+
+export type FastQuoteLineResponseResult = {
+  ok: boolean;
+  lineStatus?: QuoteLineClientResponse;
+  quoteStatus?: string;
+  notes?: string | null;
+  subtotal?: number;
+  gst?: number;
+  total?: number;
+  message: string;
+};
+
+export async function respondToQuoteLineFastAction(input: {
+  token: string;
+  lineId: string;
+  response: QuoteLineClientResponse;
+  notes?: string | null;
+}): Promise<FastQuoteLineResponseResult> {
+  const token = String(input.token ?? "").trim();
+  const lineId = String(input.lineId ?? "").trim();
+  const response = input.response;
+  const notes = String(input.notes ?? "").trim() || null;
+
+  if (!token || !lineId || !( ["approved", "changes_requested", "cancelled"] as const).includes(response)) {
+    return { ok: false, message: "That line response was not recognised." };
+  }
+  if (response === "changes_requested" && !notes) {
+    return { ok: false, message: "Please add a short note describing the requested change." };
+  }
+
+  try {
+    const result = await respondToQuoteLineByToken(token, lineId, response, notes, { deferNotification: true });
+    if (result.quoteStatus === "accepted") {
+      after(async () => {
+        try {
+          await createArtworkApprovalForAcceptedQuoteToken(token);
+        } catch (error) {
+          console.error("Line responses accepted the quote, but artwork approval creation failed", error);
+        }
+      });
+    }
+    const message = response === "approved"
+      ? (result.quoteStatus === "accepted" ? "Approved — quote complete." : "Approved")
+      : response === "cancelled"
+        ? (result.quoteStatus === "declined" ? "Cancelled — all quote lines are now cancelled." : "Cancelled")
+        : "Changes requested";
+    return { ok: true, ...result, notes, message };
+  } catch (error) {
+    console.error("Failed to save public quote line response", error);
+    return {
+      ok: false,
+      message: error instanceof Error && /finalised/i.test(error.message)
+        ? "This quote has already been finalised."
+        : "We couldn’t save that response. Please try again."
+    };
+  }
 }

@@ -8,6 +8,7 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
 import { PrintQuoteButton } from "./PrintQuoteButton";
 import { QuoteLineResponseControls } from "./QuoteLineResponseControls";
+import { QuoteLiveTotals } from "./QuoteLiveTotals";
 
 type PageProps = {
   params: Promise<{ token: string }>;
@@ -444,11 +445,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
             })}
             {lines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>This quote has no saved line items yet.</p> : null}
           </div>
-          <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 14, display: "grid", justifyContent: "end", gap: 6 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10 }}><span>Subtotal</span><strong style={{ textAlign: "right" }}>{formatMoney(subtotal)}</strong></div>
-            <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10 }}><span>GST</span><strong style={{ textAlign: "right" }}>{formatMoney(gst)}</strong></div>
-            <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10, fontSize: 22 }}><span>Total</span><strong style={{ textAlign: "right" }}>{formatMoney(total)}</strong></div>
-          </div>
+          <QuoteLiveTotals subtotal={subtotal} gst={gst} total={total} />
             </div>
           </div>
         </section>
