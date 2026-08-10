@@ -8,7 +8,7 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, deleteQuoteDraftAction, deleteQuoteLineAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
+import { createArtworkApprovalAction, deleteQuoteDraftAction, deleteQuoteLineAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
@@ -243,6 +243,25 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
   ]);
   const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
+  const importedMyobCustomers = clients.filter((client) => client.isActive && Boolean(client.myobUid) && !client.myobUid.startsWith("manual-"));
+  const linkedClientMyobUid = linkedClient
+    ? (!linkedClient.myobUid.startsWith("manual-")
+        ? linkedClient.myobUid
+        : typeof linkedClient.payloadJson?.myobUid === "string" ? linkedClient.payloadJson.myobUid.trim() : "")
+    : "";
+  const linkedMyobCustomer = linkedClientMyobUid
+    ? importedMyobCustomers.find((candidate) => candidate.myobUid === linkedClientMyobUid) ?? null
+    : null;
+  const linkedEmail = String(linkedClient?.email ?? "").trim().toLowerCase();
+  const linkedCompany = String(linkedClient?.companyName || linkedClient?.displayName || "").trim().toLowerCase();
+  const suggestedMyobCustomers = !linkedMyobCustomer && linkedClient
+    ? importedMyobCustomers.filter((candidate) => {
+        const candidateEmail = String(candidate.email ?? "").trim().toLowerCase();
+        const candidateCompany = String(candidate.companyName || candidate.displayName || "").trim().toLowerCase();
+        return (linkedEmail && candidateEmail === linkedEmail) || (linkedCompany && candidateCompany === linkedCompany);
+      })
+    : [];
+  const suggestedMyobCustomer = suggestedMyobCustomers.length === 1 ? suggestedMyobCustomers[0] : null;
 
   const editingQuoteLineRecord = editLineId ? quoteLines.find((line) => line.id === editLineId) ?? null : null;
   const editingSnapshot = editingQuoteLineRecord
@@ -459,18 +478,20 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                   {(() => {
                     const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
                     const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
+                    const needsMyobLink = Boolean(linkedClient && !linkedMyobCustomer);
                     return (
-                      <section style={{ border: `1px solid ${myobTone.border}`, borderRadius: 18, background: myobTone.bg, color: myobTone.fg, padding: 14, display: "grid", gap: 10 }}>
+                      <section style={{ border: `1px solid ${needsMyobLink ? "#fdba74" : myobTone.border}`, borderRadius: 18, background: needsMyobLink ? "#fff7ed" : myobTone.bg, color: needsMyobLink ? "#9a3412" : myobTone.fg, padding: 14, display: "grid", gap: 12 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                           <div style={{ display: "grid", gap: 4 }}>
                             <strong>MYOB open job / order</strong>
                             <span style={{ fontSize: 13 }}>Accepted quotes become open MYOB Orders. Drafts, enquiries and surveys stay in Production Manager only.</span>
+                            {linkedClient ? <span style={{ fontSize: 13 }}>Client: <strong>{linkedClient.displayName}</strong> · MYOB: <strong>{linkedMyobCustomer ? linkedMyobCustomer.displayName : "Not linked"}</strong></span> : null}
                             {selectedQuote.myobOrderNumber ? <span style={{ fontSize: 13 }}>Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · synced ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</span> : null}
-                            {selectedQuote.myobOrderSyncError ? <span style={{ fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</span> : null}
+                            {selectedQuote.myobOrderSyncError && !needsMyobLink ? <span style={{ fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</span> : null}
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            <span style={{ borderRadius: 999, border: `1px solid ${myobTone.border}`, background: "rgba(255,255,255,0.75)", color: myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{myobTone.label}</span>
-                            {canPush ? (
+                            <span style={{ borderRadius: 999, border: `1px solid ${needsMyobLink ? "#fdba74" : myobTone.border}`, background: "rgba(255,255,255,0.75)", color: needsMyobLink ? "#9a3412" : myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{needsMyobLink ? "MYOB customer link needed" : myobTone.label}</span>
+                            {canPush && !needsMyobLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
                                 <input type="hidden" name="quoteId" value={selectedQuote.id} />
                                 <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
@@ -478,6 +499,28 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                             ) : null}
                           </div>
                         </div>
+
+                        {needsMyobLink ? (
+                          <form action={linkQuoteClientToMyobAction} style={{ borderTop: "1px solid #fed7aa", paddingTop: 12, display: "grid", gridTemplateColumns: "minmax(260px,1fr) auto auto", gap: 8, alignItems: "end" }}>
+                            <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                            <label style={{ display: "grid", gap: 6 }}>
+                              <b style={{ fontSize: 13 }}>Link {linkedClient?.displayName} to MYOB customer</b>
+                              {importedMyobCustomers.length ? (
+                                <select name="myobCustomerId" defaultValue={suggestedMyobCustomer?.id ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
+                                  <option value="">Choose MYOB customer…</option>
+                                  {importedMyobCustomers.map((candidate) => (
+                                    <option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.companyName && candidate.companyName !== candidate.displayName ? ` — ${candidate.companyName}` : ""}{candidate.email ? ` · ${candidate.email}` : ""}</option>
+                                  ))}
+                                </select>
+                              ) : (
+                                <span style={{ fontSize: 13 }}>No imported MYOB customers are available yet.</span>
+                              )}
+                              {suggestedMyobCustomer ? <span style={{ fontSize: 12, color: "#9a3412" }}>Suggested match: <strong>{suggestedMyobCustomer.displayName}</strong></span> : null}
+                            </label>
+                            {importedMyobCustomers.length ? <button type="submit" style={{ ...buttonStyle, background: "#475467" }}>Link customer</button> : <Link href="/integrations" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Import MYOB customers</Link>}
+                            {importedMyobCustomers.length && selectedQuote.status === "accepted" ? <button type="submit" name="sendNow" value="1" style={{ ...buttonStyle, background: "#0f766e" }}>Link & send to MYOB</button> : null}
+                          </form>
+                        ) : null}
                       </section>
                     );
                   })()}

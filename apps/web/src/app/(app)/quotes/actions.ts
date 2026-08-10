@@ -16,12 +16,14 @@ import {
   updateQuoteLineForTenant,
   markQuoteSentForTenant,
   removeArtworkApprovalPageForTenant,
-  setQuoteDraftStatusForTenant
+  setQuoteDraftStatusForTenant,
+  getQuoteDraftById,
+  updateQuoteMyobOrderSyncForTenant
 } from "@/server/quotes";
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
 import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
-import { getCustomerById } from "@/server/customers";
+import { getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -739,16 +741,85 @@ export async function restoreQuoteDraftAction(formData: FormData): Promise<void>
 }
 
 
+export async function linkQuoteClientToMyobAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const myobCustomerId = String(formData.get("myobCustomerId") ?? "").trim();
+  const sendNow = String(formData.get("sendNow") ?? "") === "1";
+
+  if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20first");
+  if (!myobCustomerId) redirect(`/quotes?selected=${quoteId}&myobLink=required`);
+
+  const quote = await getQuoteDraftById(activeTenant.tenantId, quoteId);
+  if (!quote?.linkedCustomerId) {
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("This quote is not linked to a Production Manager client.")}`);
+  }
+
+  const [localClient, myobCustomer] = await Promise.all([
+    getCustomerById(activeTenant.tenantId, quote.linkedCustomerId),
+    getCustomerById(activeTenant.tenantId, myobCustomerId)
+  ]);
+
+  if (!localClient) {
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("The linked client could not be found.")}`);
+  }
+  if (!myobCustomer || !myobCustomer.myobUid || myobCustomer.myobUid.startsWith("manual-")) {
+    redirect(`/quotes?selected=${quoteId}&myobLink=required&error=${encodeURIComponent("Choose a customer imported from MYOB.")}`);
+  }
+
+  await updateCustomerPayloadForTenant(activeTenant.tenantId, localClient.id, {
+    myobUid: myobCustomer.myobUid,
+    myobDisplayName: myobCustomer.displayName,
+    myobMatch: "quote_manual_selection"
+  }, true);
+
+  await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {
+    status: quote.status === "accepted" ? "ready_to_sync" : "not_synced",
+    error: null,
+    payloadJson: {
+      customerLinkedAt: new Date().toISOString(),
+      linkedCustomerId: localClient.id,
+      myobCustomerUid: myobCustomer.myobUid,
+      myobCustomerName: myobCustomer.displayName
+    }
+  });
+
+  if (sendNow && quote.status === "accepted") {
+    let sendError = "";
+    try {
+      await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    } catch (error) {
+      sendError = error instanceof Error ? error.message : String(error);
+    }
+    if (sendError) {
+      redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(sendError)}`);
+    }
+    redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`Linked ${localClient.displayName} to ${myobCustomer.displayName} and sent the accepted quote to MYOB.`)}`);
+  }
+
+  redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`MYOB customer linked: ${myobCustomer.displayName}`)}`);
+}
+
+
 export async function pushAcceptedQuoteToMyobOrderAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const quoteId = String(formData.get("quoteId") ?? "").trim();
   if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20to%20send%20to%20MYOB");
 
+  let pushError = "";
   try {
     await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
-    redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Order`);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(message)}`);
+    pushError = error instanceof Error ? error.message : String(error);
   }
+
+  if (pushError) {
+    const needsCustomerLink = pushError.includes("not mapped to a MYOB customer");
+    if (needsCustomerLink) {
+      redirect(`/quotes?selected=${quoteId}`);
+    }
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(pushError)}`);
+  }
+
+  redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Order`);
 }
