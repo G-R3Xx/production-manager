@@ -7,6 +7,7 @@ import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
 import { acceptQuoteAction, declineQuoteAction, requestQuoteChangesAction } from "./actions";
+import { PrintQuoteButton } from "./PrintQuoteButton";
 
 type PageProps = {
   params: Promise<{ token: string }>;
@@ -199,14 +200,20 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   const materialTitle = clientMaterialTitle(selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
   const printMethod = friendlyPrintMethod(parts.find((part) => /^(no print|direct print|roll stock|cut vinyl)$/i.test(part)));
-  const ink = parts.find((part) => /^(cmyk|mono|cmyk \+ white|white ink|cmyk \+ special)$/i.test(part));
+  const ink = parts.find((part) => /^(cmyk|mono|white|white ink|cmyk \+ white|cmyk \+ special)$/i.test(part));
   const side = friendlySide(parts.find((part) => /\bsided\b/i.test(part)));
+  const printDirection = parts.find((part) => /^(reverse|standard|positive) print$/i.test(part));
+  const backingPart = parts.find((part) => /^backing:/i.test(part));
+  const backingName = compactText(backingPart?.replace(/^backing:\s*/i, ""));
+  const backing = backingName && !/^none$/i.test(backingName) ? `Backed in ${titleCaseLabel(backingName)}` : null;
   const laminate = friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
   const title = [materialTitle, dimension, laminate].filter(Boolean).join(" ") || line.productName;
   const detailParts = [
     selectedMaterial && selectedMaterial !== materialTitle ? `Substrate: ${selectedMaterial}` : null,
     printMethod,
-    ink ? ink.toUpperCase().replace("CMYK + WHITE", "CMYK + White") : null,
+    ink ? ink.toUpperCase().replace("CMYK + WHITE", "CMYK + White").replace(/^WHITE$/, "White") : null,
+    printDirection ? titleCaseLabel(printDirection) : null,
+    backing,
     laminate,
     side
   ].filter(Boolean);
@@ -295,10 +302,11 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
         : null;
 
   return (
-    <main style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
-      <div style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
+    <main className="quote-print-page" style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
+      <style>{`@media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } }`}</style>
+      <div className="quote-print-wrap" style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
-        <section style={{ ...cardStyle, display: "grid", gap: 18 }}>
+        <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 18 }}>
           <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 28, alignItems: "start" }}>
             <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
               <img src={companyLogoUrl} alt={`${companyName} logo`} style={{ width: 230, maxWidth: "100%", maxHeight: 105, height: "auto", objectFit: "contain", objectPosition: "left center", borderRadius: 14, background: "#fff" }} />
@@ -315,6 +323,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                 <span style={{ color: "#667085", fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Quote number</span>
                 <h1 style={{ margin: 0, fontSize: 30, letterSpacing: "-0.04em" }}>{quote.quoteNumber ?? "Quote"}</h1>
                 <span style={{ color: "#667085", fontSize: 13 }}>Issued {formatDate(quote.sentAt ?? quote.createdAt)}</span>
+                <PrintQuoteButton />
               </div>
             </div>
           </div>
@@ -341,13 +350,13 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
           </div>
         </section>
 
-        <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
+        <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 12 }}>
           <h2 style={{ margin: 0 }}>Quote details</h2>
           <div style={{ display: "grid", gap: 10 }}>
             {lines.map((line) => {
               const clientLine = quoteLineForClient(line);
               return (
-                <div key={line.id} style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, background: "#fbfdff" }}>
+                <div key={line.id} className="quote-print-line" style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, background: "#fbfdff" }}>
                   <div style={{ display: "grid", gap: 5 }}>
                     <strong>{clientLine.title}</strong>
                     {clientLine.detail ? <span style={{ color: "#667085", fontSize: 13 }}>{clientLine.detail}</span> : null}
@@ -368,16 +377,16 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
           </div>
         </section>
 
-        {quote.notes ? <section style={{ ...cardStyle, display: "grid", gap: 8 }}><h2 style={{ margin: 0 }}>Notes</h2><p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{quote.notes}</p></section> : null}
+        {quote.notes ? <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 8 }}><h2 style={{ margin: 0 }}>Notes</h2><p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{quote.notes}</p></section> : null}
 
         {responseStatus ? (
-          <section style={{ ...cardStyle, display: "grid", gap: 10, borderColor: quote.status === "accepted" ? "#abefc6" : "#fed7aa" }}>
+          <section className="quote-print-hide" style={{ ...cardStyle, display: "grid", gap: 10, borderColor: quote.status === "accepted" ? "#abefc6" : "#fed7aa" }}>
             <h2 style={{ margin: 0 }}>Response received</h2>
             <p style={{ margin: 0, color: "#475467" }}>This quote has been marked as <strong>{responseStatus}</strong>. Tender Edge has received the response.</p>
             {quote.clientResponseNotes ? <p style={{ margin: 0, color: "#667085", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>Notes: {quote.clientResponseNotes}</p> : null}
           </section>
         ) : (
-          <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
+          <section className="quote-print-hide" style={{ ...cardStyle, display: "grid", gap: 14 }}>
             <h2 style={{ margin: 0 }}>Respond to quote</h2>
             <p style={{ margin: 0, color: "#667085" }}>Accept this quote, request changes, or decline. Your response goes straight back to Production Manager.</p>
             <form action={acceptQuoteAction} style={{ display: "grid", gap: 10 }}>
