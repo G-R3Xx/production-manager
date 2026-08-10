@@ -28,7 +28,12 @@ export async function approveArtworkAction(formData: FormData): Promise<void> {
     redirect(`/public/artwork-approvals/${token}?error=Please%20confirm%20you%20have%20checked%20the%20proof`);
   }
 
-  await respondToArtworkApprovalByToken(token, "approved", text(formData.get("notes")), signatoryName, signatureDataUrl);
+  try {
+    await respondToArtworkApprovalByToken(token, "approved", text(formData.get("notes")), signatoryName, signatureDataUrl);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/public/artwork-approvals/${token}?error=${encodeURIComponent(message)}`);
+  }
   redirect(`/public/artwork-approvals/${token}?message=Artwork%20approved`);
 }
 
@@ -41,6 +46,11 @@ export async function requestArtworkChangesAction(formData: FormData): Promise<v
     redirect(`/public/artwork-approvals/${token}?error=Please%20describe%20the%20changes%20needed`);
   }
 
-  await respondToArtworkApprovalByToken(token, "changes_requested", notes);
+  try {
+    await respondToArtworkApprovalByToken(token, "changes_requested", notes);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/public/artwork-approvals/${token}?error=${encodeURIComponent(message)}`);
+  }
   redirect(`/public/artwork-approvals/${token}?message=Changes%20requested`);
 }

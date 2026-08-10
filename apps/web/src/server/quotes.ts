@@ -106,6 +106,7 @@ export type ArtworkApprovalPageRecord = {
   smallFormatSummary: string | null;
   sortOrder: number;
   sourceQuoteLineId: string | null;
+  proofRevision: string | null;
   createdAt: string;
 };
 
@@ -160,6 +161,8 @@ function nullableText(value: string | null | undefined): string | null {
 
 let quoteLifecycleSchemaReady = false;
 let quoteLifecycleSchemaPromise: Promise<void> | null = null;
+let artworkApprovalSchemaReady = false;
+let artworkApprovalSchemaPromise: Promise<void> | null = null;
 let quoteLineClientResponseSchemaReady = false;
 let quoteLineClientResponseSchemaPromise: Promise<void> | null = null;
 
@@ -232,8 +235,10 @@ async function ensureQuoteLineClientResponseColumns(): Promise<void> {
 }
 
 async function ensureArtworkApprovalTables(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL || artworkApprovalSchemaReady) return;
+  if (artworkApprovalSchemaPromise) return artworkApprovalSchemaPromise;
 
+  artworkApprovalSchemaPromise = (async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales.artwork_approvals (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -311,7 +316,17 @@ async function ensureArtworkApprovalTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS install_summary text,
       ADD COLUMN IF NOT EXISTS small_format_summary text,
       ADD COLUMN IF NOT EXISTS source_quote_line_id uuid,
+      ADD COLUMN IF NOT EXISTS proof_revision varchar(40),
       ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
+  `);
+
+  await pool.query(`
+    UPDATE sales.artwork_approval_pages p
+    SET proof_revision = aa.revision
+    FROM sales.artwork_approvals aa
+    WHERE p.approval_id = aa.id
+      AND p.proof_revision IS NULL
+      AND p.image_url NOT LIKE 'data:image/svg+xml%'
   `);
 
   await pool.query(`
@@ -324,6 +339,12 @@ async function ensureArtworkApprovalTables(): Promise<void> {
     CREATE INDEX IF NOT EXISTS artwork_approval_pages_approval_sort_idx
       ON sales.artwork_approval_pages (approval_id, sort_order, created_at)
   `);
+  artworkApprovalSchemaReady = true;
+  })().catch((error) => {
+    artworkApprovalSchemaPromise = null;
+    throw error;
+  });
+  return artworkApprovalSchemaPromise;
 }
 
 function quoteSelectSql(): string {
@@ -1112,12 +1133,13 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
     listArtworkApprovalPages(approval.id)
   ]);
   const existingLineIds = new Set(existingPages.map((page) => page.sourceQuoteLineId).filter(Boolean));
+  const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
   let created = 0;
   let skipped = 0;
   let nextIndex = existingPages.length + 1;
 
   for (const line of lines) {
-    if (line.clientResponseStatus === "cancelled") {
+    if (line.clientResponseStatus === "cancelled" || (usesLineResponses && line.clientResponseStatus !== "approved")) {
       skipped += 1;
       continue;
     }
@@ -1216,6 +1238,7 @@ export async function getArtworkApprovalByPublicToken(token: string): Promise<Ar
 }
 
 export async function listArtworkApprovalPages(approvalId: string): Promise<ArtworkApprovalPageRecord[]> {
+  await ensureArtworkApprovalTables();
   const result = await pool.query<ArtworkApprovalPageRecord>(`
     SELECT
       id,
@@ -1236,6 +1259,7 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
       small_format_summary as "smallFormatSummary",
       sort_order as "sortOrder",
       source_quote_line_id as "sourceQuoteLineId",
+      proof_revision as "proofRevision",
       created_at as "createdAt"
     FROM sales.artwork_approval_pages
     WHERE approval_id = $1::uuid
@@ -1300,6 +1324,7 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
       install_summary,
       small_format_summary,
       source_quote_line_id,
+      proof_revision,
       sort_order,
       created_at,
       updated_at
@@ -1320,6 +1345,7 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
            $15,
            $16,
            NULLIF($17::text, '')::uuid,
+           aa.revision,
            COALESCE((SELECT max(sort_order) + 1 FROM sales.artwork_approval_pages WHERE approval_id = aa.id), 1),
            now(),
            now()
@@ -1369,6 +1395,7 @@ export async function replaceArtworkApprovalPageProofForTenant(tenantId: string,
     SET image_url = $4::text,
         image_storage_path = COALESCE($5::text, image_storage_path),
         file_name = COALESCE($6::varchar, file_name),
+        proof_revision = aa.revision,
         notes = CASE
           WHEN notes ILIKE 'Auto-created from quote line.%' THEN NULL
           ELSE notes
@@ -1388,10 +1415,57 @@ export async function markArtworkApprovalSentForTenant(tenantId: string, approva
     UPDATE sales.artwork_approvals
     SET status = 'sent',
         public_token = COALESCE(public_token, $3),
-        sent_at = COALESCE(sent_at, now()),
+        sent_at = now(),
+        viewed_at = NULL,
+        changes_requested_at = NULL,
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
+      AND status NOT IN ('approved','deleted')
   `, [tenantId, approvalId, makePublicToken()]);
+}
+
+function nextArtworkRevision(value: string | null | undefined): string {
+  const current = String(value ?? "A").trim().toUpperCase();
+  if (/^[A-Z]+$/.test(current)) {
+    const chars = current.split("");
+    for (let index = chars.length - 1; index >= 0; index -= 1) {
+      if (chars[index] !== "Z") {
+        chars[index] = String.fromCharCode(chars[index].charCodeAt(0) + 1);
+        return chars.join("");
+      }
+      chars[index] = "A";
+    }
+    return `A${chars.join("")}`;
+  }
+  if (/^\d+$/.test(current)) return String(Number(current) + 1);
+  return `${current}.1`;
+}
+
+export async function startArtworkApprovalRevisionForTenant(tenantId: string, approvalId: string): Promise<string> {
+  await ensureArtworkApprovalTables();
+  const current = await getArtworkApprovalById(tenantId, approvalId);
+  if (!current) throw new Error("Artwork approval not found.");
+  if (current.status === "approved") throw new Error("Approved artwork cannot be moved back into revision. Create a new approval if production scope changes.");
+  if (current.status === "deleted") throw new Error("Restore the artwork approval before starting a new revision.");
+
+  const revision = nextArtworkRevision(current.revision);
+  await pool.query(`
+    UPDATE sales.artwork_approvals
+    SET status = 'draft',
+        revision = $3::varchar,
+        revision_note = 'Revised for approval',
+        client_response_notes = NULL,
+        client_signatory_name = NULL,
+        client_signature_data_url = NULL,
+        client_confirmed_at = NULL,
+        sent_at = NULL,
+        viewed_at = NULL,
+        approved_at = NULL,
+        changes_requested_at = NULL,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, approvalId, revision]);
+  return revision;
 }
 
 export async function setArtworkApprovalStatusForTenant(tenantId: string, approvalId: string, status: string): Promise<void> {
@@ -1443,8 +1517,13 @@ export async function respondToArtworkApprovalByToken(token: string, response: "
         client_confirmed_at = CASE WHEN $2 = 'approved' THEN now() ELSE client_confirmed_at END,
         updated_at = now()
     WHERE public_token = $1
+      AND status IN ('sent','viewed')
     RETURNING id, tenant_id as "tenantId"
   `, [token, response, notes, signatoryName ?? null, signatureDataUrl ?? null]);
+
+  if (!result.rowCount) {
+    throw new Error("This artwork revision is not currently open for approval.");
+  }
 
   if (response === "approved") {
     const approvedApproval = result.rows[0];

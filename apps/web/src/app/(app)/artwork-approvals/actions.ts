@@ -7,13 +7,18 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   addArtworkApprovalPageForTenant,
+  artworkQuoteLineKind,
   createArtworkApprovalFromQuote,
+  getArtworkApprovalById,
+  listArtworkApprovalPages,
+  listQuoteLines,
   markArtworkApprovalInternallyApprovedForTenant,
   markArtworkApprovalSentForTenant,
   prefillArtworkApprovalPagesFromQuoteLines,
   removeArtworkApprovalPageForTenant,
   replaceArtworkApprovalPageProofForTenant,
   setArtworkApprovalStatusForTenant,
+  startArtworkApprovalRevisionForTenant,
   updateArtworkApprovalDetailsForTenant
 } from "@/server/quotes";
 
@@ -163,14 +168,63 @@ export async function sendArtworkApprovalFromPageAction(formData: FormData): Pro
     redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
   }
 
+  const approval = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
+  if (!approval) return redirect("/artwork-approvals?error=Artwork%20approval%20not%20found");
+  const [pages, lines] = await Promise.all([listArtworkApprovalPages(approvalId), listQuoteLines(approval.quoteId)]);
+  const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
+  const inScopeLineIds = new Set(lines.filter((line) => {
+    if (!artworkQuoteLineKind(line)) return false;
+    if (line.clientResponseStatus === "cancelled") return false;
+    if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
+    return true;
+  }).map((line) => line.id));
+  const requiredPages = pages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
+  const missingProof = requiredPages.some((page) => page.imageUrl.startsWith("data:image/svg+xml") || (!page.fileName && !page.imageStoragePath && /auto-created from quote line/i.test(page.notes ?? "")) || (approval.revision && page.proofRevision !== approval.revision));
+  const missingSlots = [...inScopeLineIds].some((lineId) => !pages.some((page) => page.sourceQuoteLineId === lineId));
+
+  if (!requiredPages.length || missingProof || missingSlots) {
+    redirect(`/artwork-approvals?selected=${approvalId}&error=Artwork%20is%20not%20ready%20to%20send.%20Upload%20all%20required%20proofs%20and%20sync%20any%20missing%20quote%20lines%20first.`);
+  }
+
   await markArtworkApprovalSentForTenant(activeTenant.tenantId, approvalId);
   redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20approval%20marked%20as%20sent`);
+}
+
+export async function startArtworkApprovalRevisionAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
+  let revision = "";
+  try {
+    revision = await startArtworkApprovalRevisionForTenant(activeTenant.tenantId, approvalId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent(message)}`);
+  }
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(`Revision ${revision} started. Upload the revised proofs, then resend the client link.`)}`);
 }
 
 export async function directApproveArtworkApprovalAction(formData: FormData): Promise<void> {
   const { user, activeTenant } = await requireTenant();
   const approvalId = String(formData.get("approvalId") ?? "").trim();
   if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
+
+  const approval = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
+  if (!approval) return redirect("/artwork-approvals?error=Artwork%20approval%20not%20found");
+  const [pages, lines] = await Promise.all([listArtworkApprovalPages(approvalId), listQuoteLines(approval.quoteId)]);
+  const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
+  const inScopeLineIds = new Set(lines.filter((line) => {
+    if (!artworkQuoteLineKind(line)) return false;
+    if (line.clientResponseStatus === "cancelled") return false;
+    if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
+    return true;
+  }).map((line) => line.id));
+  const requiredPages = pages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
+  const missingProof = requiredPages.some((page) => page.imageUrl.startsWith("data:image/svg+xml") || (!page.fileName && !page.imageStoragePath && /auto-created from quote line/i.test(page.notes ?? "")) || (approval.revision && page.proofRevision !== approval.revision));
+  const missingSlots = [...inScopeLineIds].some((lineId) => !pages.some((page) => page.sourceQuoteLineId === lineId));
+  if (!requiredPages.length || missingProof || missingSlots) {
+    redirect(`/artwork-approvals?selected=${approvalId}&error=Artwork%20is%20not%20ready%20for%20approval.%20Upload%20all%20required%20proofs%20first.`);
+  }
 
   await markArtworkApprovalInternallyApprovedForTenant(activeTenant.tenantId, approvalId, user.email ?? null);
   redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20approved%20internally`);

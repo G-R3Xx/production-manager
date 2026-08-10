@@ -11,7 +11,8 @@ import {
   listArtworkApprovalsForTenant,
   listQuoteDraftsForTenant,
   listQuoteLines,
-  type ArtworkApprovalPageRecord
+  type ArtworkApprovalPageRecord,
+  type QuoteLineRecord
 } from "@/server/quotes";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { listEnquiriesForTenant } from "@/server/enquiries";
@@ -27,17 +28,15 @@ import {
   replaceArtworkApprovalPageProofAction,
   restoreArtworkApprovalAction,
   saveArtworkApprovalDetailsAction,
-  sendArtworkApprovalFromPageAction
+  sendArtworkApprovalFromPageAction,
+  startArtworkApprovalRevisionAction
 } from "./actions";
 
-type PageProps = {
-  searchParams?: Promise<Record<string, string | string[] | undefined>>;
-};
+type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
   const value = params[key];
-  if (Array.isArray(value)) return value[0] ?? "";
-  return value ?? "";
+  return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
 
 function appBaseUrl(): string {
@@ -48,9 +47,7 @@ function appBaseUrl(): string {
 }
 
 function publicArtworkUrl(token: string | null | undefined): string {
-  if (!token) return "";
-  const base = appBaseUrl();
-  return `${base}/public/artwork-approvals/${token}`;
+  return token ? `${appBaseUrl()}/public/artwork-approvals/${token}` : "";
 }
 
 function parseMoney(value: string | null | undefined): number {
@@ -62,173 +59,112 @@ function formatMoney(value: number): string {
   return new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" }).format(value);
 }
 
-function formatDate(value: string | null | undefined): string {
-  if (!value) return "Not yet";
+function formatDate(value: string | null | undefined, fallback = "Not yet"): string {
+  if (!value) return fallback;
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not yet";
+  if (Number.isNaN(date.getTime())) return fallback;
   return new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", dateStyle: "medium", timeStyle: "short" }).format(date);
 }
-
 
 function isPdfArtwork(url: string | null | undefined, fileName?: string | null): boolean {
   const haystack = `${url ?? ""} ${fileName ?? ""}`.toLowerCase().split("?")[0];
   return haystack.endsWith(".pdf") || haystack.includes(".pdf ");
 }
 
-function proofArtworkPreview(page: ArtworkApprovalPageRecord, maxHeight = 395) {
+function isPlaceholderProof(page: ArtworkApprovalPageRecord): boolean {
+  return page.imageUrl.startsWith("data:image/svg+xml") || (!page.fileName && !page.imageStoragePath && /auto-created from quote line/i.test(page.notes ?? ""));
+}
+
+function isProofReadyForRevision(page: ArtworkApprovalPageRecord, revision: string | null | undefined): boolean {
+  if (isPlaceholderProof(page)) return false;
+  if (!revision) return true;
+  return page.proofRevision === revision;
+}
+
+function proofArtworkPreview(page: ArtworkApprovalPageRecord, maxHeight = 300) {
   if (isPdfArtwork(page.imageUrl, page.fileName)) {
     return (
-      <div style={{ width: "100%", minHeight: Math.min(maxHeight, 380), display: "grid", gap: 10 }}>
-        <object data={page.imageUrl} type="application/pdf" style={{ width: "100%", height: Math.min(maxHeight, 380), border: "none", borderRadius: 12, background: "#fff" }}>
-          <iframe src={page.imageUrl} title={page.title} style={{ width: "100%", height: Math.min(maxHeight, 380), border: "none", borderRadius: 12, background: "#fff" }} />
+      <div style={{ width: "100%", minHeight: Math.min(maxHeight, 300), display: "grid", gap: 8 }}>
+        <object data={page.imageUrl} type="application/pdf" style={{ width: "100%", height: Math.min(maxHeight, 300), border: "none", borderRadius: 10, background: "#fff" }}>
+          <iframe src={page.imageUrl} title={page.title} style={{ width: "100%", height: Math.min(maxHeight, 300), border: "none", borderRadius: 10, background: "#fff" }} />
         </object>
-        <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#6d28d9", fontWeight: 900, textDecoration: "none", textAlign: "center" }}>Open PDF proof</a>
+        <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#4338ca", fontWeight: 900, textDecoration: "none", textAlign: "center", fontSize: 12 }}>Open PDF proof</a>
       </div>
     );
   }
-
   return <img src={page.imageUrl} alt={page.title} style={{ width: "100%", height: "100%", maxHeight, objectFit: "contain", objectPosition: "center", display: "block" }} />;
 }
 
 function statusTone(status: string): { bg: string; fg: string; border: string } {
-  if (status === "approved") return { bg: "#dcfae6", fg: "#067647", border: "#abefc6" };
-  if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
+  if (status === "approved") return { bg: "#ecfdf3", fg: "#067647", border: "#abefc6" };
   if (status === "changes_requested") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa" };
+  if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
   if (status === "deleted") return { bg: "#fff5f4", fg: "#b42318", border: "#fecaca" };
-  return { bg: "#f5f3ff", fg: "#6d28d9", border: "#ddd6fe" };
+  return { bg: "#f8fafc", fg: "#475467", border: "#d0d5dd" };
 }
 
 function summaryKey(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\b(mm|millimetres|millimeters)\b/g, "mm")
-    .trim();
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\b(mm|millimetres|millimeters)\b/g, "mm").trim();
 }
 
 function tidySummaryLine(value: string): string {
-  return value
-    .replace(/^([a-z0-9 ]{2,24})\s+-\s+(.+)$/i, (full, prefix, rest) => {
-      const prefixKey = summaryKey(String(prefix));
-      const restKey = summaryKey(String(rest));
-      return restKey.includes(prefixKey) ? String(rest).trim() : full;
-    })
-    .replace(/\s+/g, " ")
-    .trim();
+  return value.replace(/^([a-z0-9 ]{2,24})\s+-\s+(.+)$/i, (full, prefix, rest) => {
+    const prefixKey = summaryKey(String(prefix));
+    const restKey = summaryKey(String(rest));
+    return restKey.includes(prefixKey) ? String(rest).trim() : full;
+  }).replace(/\s+/g, " ").trim();
 }
 
 function cleanSummaryLines(value: string | null | undefined, options?: { exclude?: RegExp }): string | null {
   const seen = new Set<string>();
-  const lines = String(value ?? "")
-    .split(/\n+/g)
-    .map((line) => tidySummaryLine(line))
-    .filter(Boolean)
-    .filter((line) => !options?.exclude?.test(line))
-    .filter((line) => {
-      const key = summaryKey(line);
-      if (!key || seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
+  const lines = String(value ?? "").split(/\n+/g).map(tidySummaryLine).filter(Boolean).filter((line) => !options?.exclude?.test(line)).filter((line) => {
+    const key = summaryKey(line);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
   const specific = lines.filter((line, index, list) => {
     const key = summaryKey(line);
-    return !list.some((other, otherIndex) => {
-      if (otherIndex === index) return false;
-      const otherKey = summaryKey(other);
-      return otherKey.length > key.length && otherKey.includes(key);
-    });
+    return !list.some((other, otherIndex) => otherIndex !== index && summaryKey(other).length > key.length && summaryKey(other).includes(key));
   });
-
   return specific.length ? specific.join("\n") : null;
 }
 
-function cleanSubstrateSummary(value: string | null | undefined): string | null {
-  return cleanSummaryLines(value, { exclude: /\b(laminate|lamination|lam-|gloss laminate|matt laminate|matte laminate|coating)\b/i });
-}
-
-function cleanFinishingSummary(value: string | null | undefined): string | null {
-  return cleanSummaryLines(value);
-}
-
-function productionTypeLabel(value: string | null | undefined): string {
-  if (value === "small_format") return "Small format";
-  if (value === "plan_printing") return "Plan printing";
-  if (value === "poster_printing") return "Poster printing";
-  return "Install / finishing";
-}
-
-function isPrintOnlyProductionType(value: string | null | undefined): boolean {
-  return value === "small_format" || value === "plan_printing" || value === "poster_printing";
-}
-
 function detailsList(page: ArtworkApprovalPageRecord): Array<{ label: string; value: string | null }> {
-  const rows = [
-    { label: "Qty", value: page.quantity },
-    { label: "Size", value: page.sizeSummary },
-    { label: "Colours", value: cleanSummaryLines(page.colourSummary) },
-    { label: "Substrate / stock", value: cleanSubstrateSummary(page.substrateSummary) },
-    { label: productionTypeLabel(page.productionType), value: isPrintOnlyProductionType(page.productionType) ? cleanSummaryLines(page.smallFormatSummary) : cleanFinishingSummary(page.installSummary) }
-  ];
-
-  return rows.filter((row) => String(row.value ?? "").trim().length > 0);
+  const finishing = page.productionType === "small_format" || page.productionType === "plan_printing" || page.productionType === "poster_printing"
+    ? cleanSummaryLines(page.smallFormatSummary)
+    : cleanSummaryLines(page.installSummary);
+  return [
+    { label: "Quantity", value: page.quantity },
+    { label: "Finished size", value: page.sizeSummary },
+    { label: "Colour / print", value: cleanSummaryLines(page.colourSummary) },
+    { label: "Stock", value: cleanSummaryLines(page.substrateSummary, { exclude: /\b(laminate|lamination|coating)\b/i }) },
+    { label: "Finishing", value: finishing }
+  ].filter((row) => String(row.value ?? "").trim());
 }
 
-const cardStyle = {
-  border: "1px solid #dbe4f0",
-  borderRadius: 24,
-  background: "rgba(255,255,255,0.94)",
-  boxShadow: "0 18px 44px rgba(15,23,42,0.06)",
-  padding: 18
-} as const;
+function lineIsInArtworkScope(line: QuoteLineRecord, usesLineResponses: boolean): boolean {
+  if (!artworkQuoteLineKind(line)) return false;
+  if (line.clientResponseStatus === "cancelled") return false;
+  if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
+  return true;
+}
 
-const inputStyle = {
-  minHeight: 44,
-  borderRadius: 14,
-  border: "1px solid #cfd9e8",
-  padding: "0 13px",
-  width: "100%",
-  boxSizing: "border-box",
-  font: "inherit",
-  background: "#fff"
-} as const;
+const card = { border: "1px solid #dbe4f0", borderRadius: 22, background: "#fff", boxShadow: "0 12px 34px rgba(15,23,42,0.05)" } as const;
+const input = { minHeight: 42, borderRadius: 12, border: "1px solid #cfd9e8", padding: "0 12px", width: "100%", boxSizing: "border-box", font: "inherit", background: "#fff" } as const;
+const textarea = { minHeight: 76, borderRadius: 12, border: "1px solid #cfd9e8", padding: "10px 12px", width: "100%", boxSizing: "border-box", fontFamily: "inherit", background: "#fff" } as const;
+const label = { display: "grid", gap: 6, fontSize: 12, fontWeight: 900, color: "#344054" } as const;
+const primaryButton = { minHeight: 40, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 900, cursor: "pointer", padding: "0 14px" } as const;
+const secondaryButton = { ...primaryButton, background: "#fff", color: "#344054", border: "1px solid #cfd9e8" } as const;
 
-const textareaStyle = {
-  minHeight: 94,
-  borderRadius: 14,
-  border: "1px solid #cfd9e8",
-  padding: "12px 14px",
-  width: "100%",
-  boxSizing: "border-box",
-  fontFamily: "inherit",
-  background: "#fff"
-} as const;
-
-const labelStyle = {
-  display: "grid",
-  gap: 7,
-  fontSize: 12,
-  fontWeight: 900,
-  color: "#344054"
-} as const;
-
-const buttonStyle = {
-  minHeight: 44,
-  borderRadius: 14,
-  border: "none",
-  background: "#6d28d9",
-  color: "#fff",
-  fontWeight: 950,
-  cursor: "pointer",
-  padding: "0 16px"
-} as const;
-
-const secondaryButtonStyle = {
-  ...buttonStyle,
-  background: "#fff",
-  color: "#344054",
-  border: "1px solid #cfd9e8"
-} as const;
+function WorkflowStep({ label, done, active }: { label: string; done: boolean; active?: boolean }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+      <span style={{ width: 24, height: 24, borderRadius: 999, display: "grid", placeItems: "center", flex: "0 0 auto", background: done ? "#067647" : active ? "#3538cd" : "#e4e7ec", color: "#fff", fontSize: 11, fontWeight: 950 }}>{done ? "✓" : "•"}</span>
+      <span style={{ fontSize: 12, fontWeight: 900, color: done || active ? "#101828" : "#98a2b3", whiteSpace: "nowrap" }}>{label}</span>
+    </div>
+  );
+}
 
 export default async function ArtworkApprovalsPage({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
@@ -248,345 +184,281 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
     listCustomersForTenant(activeTenant.tenantId),
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
   ]);
-  const deletedApprovalCount = allApprovals.filter((approval) => approval.status === "deleted").length;
-  const approvals = filter === "deleted"
-    ? allApprovals.filter((approval) => approval.status === "deleted")
-    : allApprovals.filter((approval) => approval.status !== "deleted");
 
-  const [quoteForCreate, existingForQuote] = quoteParam
-    ? await Promise.all([
-        getQuoteDraftById(activeTenant.tenantId, quoteParam),
-        getArtworkApprovalForQuote(activeTenant.tenantId, quoteParam)
-      ])
-    : [null, null] as const;
-  const selectedApproval = selectedParam
-    ? await getArtworkApprovalById(activeTenant.tenantId, selectedParam)
-    : existingForQuote ?? approvals[0] ?? null;
+  const deletedCount = allApprovals.filter((item) => item.status === "deleted").length;
+  const statusPriority: Record<string, number> = { changes_requested: 0, draft: 1, viewed: 2, sent: 3, approved: 4, deleted: 5 };
+  const approvals = (filter === "deleted" ? allApprovals.filter((item) => item.status === "deleted") : allApprovals.filter((item) => item.status !== "deleted"))
+    .sort((a, b) => (statusPriority[a.status] ?? 9) - (statusPriority[b.status] ?? 9) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+  const [quoteForCreate, existingForQuote] = quoteParam ? await Promise.all([
+    getQuoteDraftById(activeTenant.tenantId, quoteParam),
+    getArtworkApprovalForQuote(activeTenant.tenantId, quoteParam)
+  ]) : [null, null] as const;
+
+  const selectedApproval = selectedParam ? await getArtworkApprovalById(activeTenant.tenantId, selectedParam) : existingForQuote ?? approvals[0] ?? null;
   const selectedQuote = selectedApproval ? await getQuoteDraftById(activeTenant.tenantId, selectedApproval.quoteId) : quoteForCreate;
   const [quoteLines, proofPages] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
     selectedApproval ? listArtworkApprovalPages(selectedApproval.id) : Promise.resolve([])
   ]);
 
-  const quoteTotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const customerById = new Map(clients.map((client) => [client.id, client]));
   const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
   const logoForQuote = (quote: typeof quoteDrafts[number] | null | undefined) => {
     const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
     return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
   };
-  const selectedQuoteLogoUrl = logoForQuote(selectedQuote);
-  const artworkEligibleQuoteLines = quoteLines.filter((line) => artworkQuoteLineKind(line));
-  const quotedPagesAlreadyCreated = proofPages.filter((page) => page.sourceQuoteLineId).length;
-  const missingQuoteLinePages = artworkEligibleQuoteLines.filter((line) => !proofPages.some((page) => page.sourceQuoteLineId === line.id)).length;
+
+  const selectedLogo = logoForQuote(selectedQuote);
+  const usesLineResponses = quoteLines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
+  const inScopeLines = quoteLines.filter((line) => lineIsInArtworkScope(line, usesLineResponses));
+  const inScopeLineIds = new Set(inScopeLines.map((line) => line.id));
+  const linkedPages = new Map(proofPages.filter((page) => page.sourceQuoteLineId).map((page) => [page.sourceQuoteLineId as string, page]));
+  const activeProofPages = proofPages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
+  const outOfScopePages = proofPages.filter((page) => page.sourceQuoteLineId && !inScopeLineIds.has(page.sourceQuoteLineId));
+  const missingLinePages = inScopeLines.filter((line) => !linkedPages.has(line.id));
+  const currentRevision = selectedApproval?.revision ?? null;
+  const realProofCount = activeProofPages.filter((page) => isProofReadyForRevision(page, currentRevision)).length;
+  const readyToSend = activeProofPages.length > 0 && realProofCount === activeProofPages.length && missingLinePages.length === 0;
+  const quoteTotal = quoteLines.filter((line) => line.clientResponseStatus !== "cancelled").reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const publicUrl = selectedApproval ? publicArtworkUrl(selectedApproval.publicToken) : "";
-  const quoteOptions = quoteDrafts.filter((quote) => quote.id !== quoteForCreate?.id && !approvals.some((approval) => approval.quoteId === quote.id));
-  const selectedTone = selectedApproval ? statusTone(selectedApproval.status) : statusTone("draft");
-  const pageCodes = new Set(proofPages.map((page) => page.signCode).filter(Boolean));
-  const nextSignCode = `S${pageCodes.size + 1}`;
+  const selectedTone = statusTone(selectedApproval?.status ?? "draft");
+  const quoteOptions = quoteDrafts.filter((quote) => quote.id !== quoteForCreate?.id && !allApprovals.some((approval) => approval.quoteId === quote.id && approval.status !== "deleted"));
+  const nextSignCode = `S${proofPages.length + 1}`;
+
+  const quoteAccepted = selectedQuote?.status === "accepted";
+  const sent = Boolean(selectedApproval?.sentAt);
+  const viewed = Boolean(selectedApproval?.viewedAt);
+  const approved = selectedApproval?.status === "approved";
+  const changesRequested = selectedApproval?.status === "changes_requested";
 
   return (
-    <div style={{ maxWidth: 1540, margin: "0 auto", display: "grid", gap: 18 }}>
-      {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
-      {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
+    <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 14 }}>
+      <style>{`
+        .artwork-workspace-grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;align-items:start}
+        .artwork-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;align-items:start}
+        .artwork-proof-row{display:grid;grid-template-columns:240px minmax(0,1fr) 250px;overflow:hidden;min-height:190px}
+        .artwork-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+        @media(max-width:1180px){.artwork-detail-grid{grid-template-columns:1fr}.artwork-detail-grid>aside{position:static!important}.artwork-proof-row{grid-template-columns:210px minmax(0,1fr)}.artwork-proof-row>.proof-actions{grid-column:1/-1;border-left:0!important;border-top:1px solid #e4e7ec}}
+        @media(max-width:900px){.artwork-workspace-grid{grid-template-columns:1fr}.artwork-workspace-grid>aside{position:static!important;max-height:none!important}.artwork-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.artwork-proof-row{grid-template-columns:1fr}.artwork-proof-row>.proof-preview{border-right:0!important;border-bottom:1px solid #e4e7ec}.artwork-proof-row>.proof-actions{grid-column:auto}}
+      `}</style>
+      {message ? <div style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 14, padding: "11px 14px", fontWeight: 800 }}>{message}</div> : null}
+      {error ? <div style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 14, padding: "11px 14px", fontWeight: 800 }}>{error}</div> : null}
 
-      <section style={{ ...cardStyle, display: "grid", gap: 8, background: "linear-gradient(135deg, #ffffff 0%, #fbf7ff 58%, #f3e8ff 100%)" }}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approvals</p>
-        <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Artwork approval portal</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>This is now the in-app version of the old approval portal: proof pages, client details, approval links, direct approve, signatures and production notes all live away from the quote builder.</p>
-      </section>
-
-      <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ minWidth: 260 }}>
-            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted artwork approvals" : "Artwork workflow"}</h2>
-            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Switch and manage approval packs without stealing width from the proof/setup area below. Create lives underneath the imported quote/survey data so the workflow reads top-to-bottom.</p>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <a href="/artwork-approvals" style={{ color: filter === "deleted" ? "#667085" : "#6d28d9", fontWeight: 900, textDecoration: "none" }}>Active</a>
-            <a href="/artwork-approvals?filter=deleted" style={{ color: filter === "deleted" ? "#6d28d9" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedApprovalCount})</a>
-            <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{approvals.length} approval pack{approvals.length === 1 ? "" : "s"}</span>
-          </div>
+      <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "end", flexWrap: "wrap" }}>
+        <div>
+          <p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>Artwork</p>
+          <h1 style={{ margin: "4px 0 0", fontSize: 34, letterSpacing: "-0.04em" }}>Artwork workspace</h1>
+          <p style={{ margin: "5px 0 0", color: "#667085" }}>Build proofs from the approved quote scope, send one clean client link, manage revisions, then release approved artwork to production.</p>
         </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <Link href="/artwork-approvals" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none", background: filter === "deleted" ? "#fff" : "#f2f4f7" }}>Active</Link>
+          <Link href="/artwork-approvals?filter=deleted" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none", background: filter === "deleted" ? "#f2f4f7" : "#fff" }}>Deleted ({deletedCount})</Link>
+        </div>
+      </header>
 
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-          {approvals.map((approval) => {
-            const tone = statusTone(approval.status);
-            const quote = quoteDrafts.find((item) => item.id === approval.quoteId);
-            const isSelected = selectedApproval?.id === approval.id;
-            const approvalLogoUrl = logoForQuote(quote);
-
-            return (
-              <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}`} style={{ minWidth: 250, textDecoration: "none", color: "inherit" }}>
-                <div style={{ height: "100%", border: isSelected ? "2px solid #8b5cf6" : "1px solid #e4e7ec", borderRadius: 18, padding: 12, background: isSelected ? "#faf5ff" : "#fff", display: "grid", gap: 7 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
-                    <div style={{ display: "flex", gap: 10, minWidth: 0, alignItems: "center" }}>
-                      <ClientLogoBadge logoUrl={approvalLogoUrl} name={approval.clientName} size={42} radius={12} padding={4} />
-                      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
+      <div className="artwork-workspace-grid">
+        <aside style={{ ...card, padding: 12, display: "grid", gap: 12, position: "sticky", top: 16, maxHeight: "calc(100vh - 32px)", overflow: "auto" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <strong>Approval jobs</strong>
+            <span style={{ borderRadius: 999, background: "#f2f4f7", padding: "4px 8px", fontSize: 11, fontWeight: 900 }}>{approvals.length}</span>
+          </div>
+          <div style={{ display: "grid", gap: 7 }}>
+            {approvals.map((approval) => {
+              const tone = statusTone(approval.status);
+              const quote = quoteDrafts.find((item) => item.id === approval.quoteId);
+              const selected = selectedApproval?.id === approval.id;
+              return (
+                <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
+                  <div style={{ border: selected ? "2px solid #344054" : "1px solid #e4e7ec", borderRadius: 14, padding: 10, background: selected ? "#f8fafc" : "#fff", display: "grid", gap: 6 }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
+                      <ClientLogoBadge logoUrl={logoForQuote(quote)} name={approval.clientName} size={34} radius={9} padding={3} />
+                      <strong style={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{approval.clientName}</strong>
                     </div>
-                    <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950, whiteSpace: "nowrap" }}>{approval.status.replace(/_/g, " ")}</span>
+                    <span style={{ color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName || "Artwork"}</span>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
+                      <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "3px 7px", fontSize: 10, fontWeight: 950 }}>{approval.status.replace(/_/g, " ")}</span>
+                      <span style={{ color: "#98a2b3", fontSize: 10 }}>{formatDate(approval.updatedAt, "")}</span>
+                    </div>
                   </div>
-                  <span style={{ color: "#667085", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName ?? "Artwork proof"}</span>
-                  <span style={{ color: "#98a2b3", fontSize: 11 }}>Updated {formatDate(approval.updatedAt)}</span>
-                </div>
-              </Link>
-            );
-          })}
-          {approvals.length === 0 ? <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>No artwork approvals yet.</p> : null}
-        </div>
-      </section>
-
-      <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "start", flexWrap: "wrap" }}>
-          <div style={{ display: "grid", gap: 4 }}>
-            <h2 style={{ margin: 0 }}>Imported quote / survey data</h2>
-            <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Review the quote/survey source first. Create approval sits underneath this so the page follows the actual workflow.</p>
+                </Link>
+              );
+            })}
+            {!approvals.length ? <p style={{ color: "#667085", fontSize: 12 }}>No artwork approvals in this list.</p> : null}
           </div>
-          {selectedQuote ? <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Open source quote</Link> : null}
-        </div>
 
-        {selectedQuote ? (
-          <>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 10 }}>
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Quote</p><strong>{selectedQuote.quoteNumber ?? "Draft quote"}</strong></div>
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12, display: "grid", gridTemplateColumns: "44px 1fr", gap: 10, alignItems: "center" }}><ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={44} radius={12} padding={4} /><span style={{ minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Client</p><strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{selectedQuote.clientName}</strong></span></div>
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Quote value</p><strong>{formatMoney(quoteTotal)} ex GST</strong></div>
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 16, background: "#fbfdff", padding: 12 }}><p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 900 }}>Artwork lines</p><strong>{artworkEligibleQuoteLines.length} eligible</strong></div>
-            </div>
-
-            <div style={{ border: "1px solid #dbeafe", background: "#f8fbff", borderRadius: 18, padding: 14, display: "grid", gap: 6 }}>
-              <strong>Quote line artwork pages</strong>
-              <p style={{ margin: 0, color: "#475467", fontSize: 13, lineHeight: 1.5 }}>The artwork pack can create one proof page for each signage or small-format quote line. Pickup, delivery, install and custom component lines are ignored.</p>
-              <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>{artworkEligibleQuoteLines.length} eligible quote line{artworkEligibleQuoteLines.length === 1 ? "" : "s"}. {quotedPagesAlreadyCreated} already linked. {missingQuoteLinePages} still to create.</p>
-            </div>
-
-            {selectedQuote.notes ? (
-              <div style={{ border: "1px solid #e4e7ec", background: "#fff", borderRadius: 18, padding: 14, display: "grid", gap: 8 }}>
-                <strong>Imported survey / quote notes</strong>
-                <p style={{ margin: 0, color: "#475467", fontSize: 13, lineHeight: 1.55, whiteSpace: "pre-wrap", maxHeight: 210, overflow: "auto" }}>{selectedQuote.notes}</p>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <p style={{ margin: 0, color: "#667085", lineHeight: 1.6 }}>Select an approval pack or create one from a quote below. Once selected, this section shows the quote/survey source before the approval setup fields.</p>
-        )}
-      </section>
-
-      <section style={{ ...cardStyle, display: "grid", gap: 12 }}>
-        <details open={!selectedApproval || Boolean(quoteForCreate && !existingForQuote)} style={{ border: "1px solid #e9d5ff", borderRadius: 18, background: "#faf5ff", padding: 12 }}>
-          <summary style={{ cursor: "pointer", fontWeight: 950, color: "#5b21b6" }}>Create approval from quote</summary>
-          <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
-            <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Accepted quotes can create an artwork approval automatically, but you can also start one manually here after reviewing the imported quote/survey data above.</p>
-            {quoteParam && quoteForCreate && existingForQuote ? (
-              <Link href={`/artwork-approvals?selected=${existingForQuote.id}`} style={{ ...secondaryButtonStyle, textDecoration: "none", display: "inline-flex", alignItems: "center", justifyContent: "center", width: "fit-content" }}>Open existing approval for this quote</Link>
-            ) : null}
-            <form action={createArtworkApprovalFromQuoteAction} style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10, alignItems: "center" }}>
-              <select name="quoteId" defaultValue={quoteForCreate?.id ?? quoteOptions[0]?.id ?? ""} style={inputStyle}>
-                {quoteForCreate && !existingForQuote ? <option value={quoteForCreate.id}>{quoteForCreate.quoteNumber ?? "Draft quote"} · {quoteForCreate.clientName}</option> : null}
-                {quoteOptions.map((quote) => (
-                  <option key={quote.id} value={quote.id}>{quote.quoteNumber ?? "Draft quote"} · {quote.clientName} · {quote.status.replace(/_/g, " ")}</option>
-                ))}
+          <details open={!selectedApproval || Boolean(quoteForCreate && !existingForQuote)} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 10 }}>
+            <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 12 }}>Create from quote</summary>
+            <form action={createArtworkApprovalFromQuoteAction} style={{ display: "grid", gap: 8, marginTop: 9 }}>
+              <select name="quoteId" defaultValue={quoteForCreate?.id ?? quoteOptions[0]?.id ?? ""} style={{ ...input, minHeight: 38, fontSize: 12 }}>
+                {quoteForCreate && !existingForQuote ? <option value={quoteForCreate.id}>{quoteForCreate.quoteNumber ?? "Draft"} · {quoteForCreate.clientName}</option> : null}
+                {quoteOptions.map((quote) => <option key={quote.id} value={quote.id}>{quote.quoteNumber ?? "Draft"} · {quote.clientName}</option>)}
               </select>
-              <button type="submit" disabled={!quoteForCreate && quoteOptions.length === 0} style={{ ...buttonStyle, background: !quoteForCreate && quoteOptions.length === 0 ? "#94a3b8" : "#6d28d9" }}>Create approval pack</button>
+              <button type="submit" disabled={!quoteForCreate && quoteOptions.length === 0} style={{ ...primaryButton, minHeight: 38, opacity: !quoteForCreate && quoteOptions.length === 0 ? 0.5 : 1 }}>Create approval</button>
             </form>
-          </div>
-        </details>
-      </section>
+          </details>
+        </aside>
 
-      <div style={{ display: "grid", gap: 16 }}>
+        <main style={{ minWidth: 0, display: "grid", gap: 14 }}>
           {selectedApproval && selectedQuote ? (
             <>
-              <section style={{ ...cardStyle, display: "grid", gap: 16 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "start" }}>
-                  <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
-                    <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedApproval.clientName} size={58} radius={16} padding={5} />
-                    <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>{selectedQuote.quoteNumber ?? "Quote"} · {formatMoney(quoteTotal)} ex GST</p>
-                      <h2 style={{ margin: 0, fontSize: 30, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedApproval.projectName || selectedApproval.clientName}</h2>
-                      <p style={{ margin: 0, color: "#475467" }}>{selectedApproval.clientName}{selectedApproval.contactName ? ` · ${selectedApproval.contactName}` : ""}</p>
+              <section style={{ ...card, overflow: "hidden" }}>
+                <div style={{ padding: 18, display: "flex", justifyContent: "space-between", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
+                    <ClientLogoBadge logoUrl={selectedLogo} name={selectedApproval.clientName} size={52} radius={14} padding={4} />
+                    <div style={{ minWidth: 0 }}>
+                      <p style={{ margin: 0, color: "#667085", fontSize: 12, fontWeight: 850 }}>{selectedQuote.quoteNumber ?? "Quote"} · {formatMoney(quoteTotal)} ex GST</p>
+                      <h2 style={{ margin: "3px 0 0", fontSize: 27, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedApproval.projectName || selectedApproval.clientName}</h2>
+                      <p style={{ margin: "4px 0 0", color: "#475467" }}>{selectedApproval.clientName}{selectedApproval.contactName ? ` · ${selectedApproval.contactName}` : ""}</p>
                     </div>
                   </div>
-                  <span style={{ borderRadius: 999, background: selectedTone.bg, color: selectedTone.fg, border: `1px solid ${selectedTone.border}`, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedApproval.status.replace(/_/g, " ")}</span>
-                </div>
-
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}><strong>{proofPages.length}</strong> proof page{proofPages.length === 1 ? "" : "s"}</span>
-                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}>Sent: <strong>{formatDate(selectedApproval.sentAt)}</strong></span>
-                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}>Viewed: <strong>{formatDate(selectedApproval.viewedAt)}</strong></span>
-                  <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fbfdff", fontSize: 12 }}>Approved: <strong>{formatDate(selectedApproval.approvedAt)}</strong></span>
-                </div>
-
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                  {selectedApproval.status !== "deleted" ? (
-                    <>
-                      <form action={sendArtworkApprovalFromPageAction}>
-                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                        <button type="submit" style={buttonStyle}>Mark sent</button>
-                      </form>
-                      <form action={directApproveArtworkApprovalAction}>
-                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                        <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Direct approve</button>
-                      </form>
-                      <form action={deleteArtworkApprovalAction}>
-                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                        <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete approval</button>
-                      </form>
-                    </>
-                  ) : (
-                    <form action={restoreArtworkApprovalAction}>
-                      <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                      <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore approval</button>
-                    </form>
-                  )}
-                  <form action={prefillArtworkApprovalPagesFromQuoteAction}>
-                    <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                    <button type="submit" style={{ ...secondaryButtonStyle, background: missingQuoteLinePages > 0 ? "#eef4ff" : "#fff", color: missingQuoteLinePages > 0 ? "#3538cd" : "#344054" }}>Sync pages from quote lines</button>
-                  </form>
-                  {publicUrl ? <a href={publicUrl} target="_blank" rel="noreferrer" style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Open client approval</a> : null}
-                  {publicUrl && selectedApproval.email ? (
-                    <a href={`mailto:${selectedApproval.email}?subject=${encodeURIComponent(`Artwork proof approval - ${selectedApproval.projectName || selectedApproval.clientName}`)}&body=${encodeURIComponent(`Hi ${selectedApproval.contactName || selectedApproval.clientName},\n\nPlease review and approve the artwork proof using the link below:\n\n${publicUrl}\n\nThanks`)}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Email approval link</a>
-                  ) : null}
-                  <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Back to quote</Link>
-                </div>
-
-                {selectedApproval.status === "deleted" ? <div style={{ border: "1px solid #fecaca", background: "#fff5f4", color: "#b42318", borderRadius: 18, padding: 14, fontWeight: 900 }}>This artwork approval is deleted. Restore it before sending or editing.</div> : null}
-
-              </section>
-
-              <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <h2 style={{ margin: 0 }}>Approval setup</h2>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>These fields follow the same basics as the old artwork app, but now tied to the quote/client.</p>
-                </div>
-                <form action={saveArtworkApprovalDetailsAction} style={{ display: "grid", gap: 12 }}>
-                  <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
-                    <label style={labelStyle}>Client name<input name="clientName" defaultValue={selectedApproval.clientName} style={inputStyle} /></label>
-                    <label style={labelStyle}>Contact<input name="contactName" defaultValue={selectedApproval.contactName ?? ""} style={inputStyle} /></label>
-                    <label style={labelStyle}>Client email<input name="email" type="email" defaultValue={selectedApproval.email ?? ""} style={inputStyle} /></label>
-                    <label style={labelStyle}>Project name<input name="projectName" defaultValue={selectedApproval.projectName ?? ""} style={inputStyle} /></label>
-                    <label style={labelStyle}>Drawing title<input name="drawingTitle" defaultValue={selectedApproval.drawingTitle ?? ""} style={inputStyle} /></label>
-                    <label style={labelStyle}>Drawing number<input name="drawingNumber" defaultValue={selectedApproval.drawingNumber ?? "S1"} style={inputStyle} /></label>
-                    <label style={labelStyle}>Revision<input name="revision" defaultValue={selectedApproval.revision ?? "A"} style={inputStyle} /></label>
-                    <label style={labelStyle}>Revision note<input name="revisionNote" defaultValue={selectedApproval.revisionNote ?? "Issued for approval"} style={inputStyle} /></label>
-                    <label style={labelStyle}>Designer / staff<input name="designerName" defaultValue={selectedApproval.designerName ?? user.email ?? ""} style={inputStyle} /></label>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <span style={{ borderRadius: 999, background: selectedTone.bg, color: selectedTone.fg, border: `1px solid ${selectedTone.border}`, padding: "7px 10px", fontSize: 11, fontWeight: 950 }}>{selectedApproval.status.replace(/_/g, " ")}</span>
+                    {publicUrl ? <a href={`${publicUrl}?preview=1`} target="_blank" rel="noreferrer" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Client preview</a> : null}
+                    <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Source quote</Link>
                   </div>
-                  <label style={labelStyle}>Site / delivery address<textarea name="siteAddress" defaultValue={selectedApproval.siteAddress ?? ""} style={{ ...textareaStyle, minHeight: 68 }} /></label>
-                  <label style={labelStyle}>Client message<textarea name="clientMessage" defaultValue={selectedApproval.clientMessage ?? "Please review the proof pages below."} style={{ ...textareaStyle, minHeight: 68 }} /></label>
-                  <label style={labelStyle}>Internal notes<textarea name="internalNotes" defaultValue={selectedApproval.internalNotes ?? ""} style={{ ...textareaStyle, minHeight: 68 }} /></label>
-                  <button type="submit" style={buttonStyle}>Save approval setup</button>
-                </form>
-              </section>
-
-              <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <h2 style={{ margin: 0 }}>Add proof page</h2>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Upload an image or paste a proof URL. The client page keeps a large white artwork area and a right-side production details panel.</p>
                 </div>
-                <form action={addArtworkApprovalPageFromPageAction} encType="multipart/form-data" style={{ display: "grid", gap: 12 }}>
-                  <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                  <div style={{ display: "grid", gridTemplateColumns: "110px 1.2fr 130px 160px", gap: 10 }}>
-                    <label style={labelStyle}>Item<input name="signCode" defaultValue={nextSignCode} placeholder="S1" style={inputStyle} /></label>
-                    <label style={labelStyle}>Proof title<input name="title" placeholder="Front elevation" style={inputStyle} /></label>
-                    <label style={labelStyle}>Qty<input name="quantity" defaultValue="1" style={inputStyle} /></label>
-                    <label style={labelStyle}>Type<select name="productionType" defaultValue="signage" style={inputStyle}><option value="signage">Signage</option><option value="plan_printing">Plan printing</option><option value="poster_printing">Poster printing</option><option value="small_format">Small format</option></select></label>
-                  </div>
-                  <div style={{ display: "grid", gap: 8 }}>
-                    <label style={labelStyle}>Upload proof image / PDF</label>
-                    <AutoSubmitProofInputs autoSubmit={false} />
-                  </div>
-                  <label style={labelStyle}>Page description<textarea name="description" placeholder="Brief description shown under the proof title" style={{ ...textareaStyle, minHeight: 68 }} /></label>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                    <label style={labelStyle}>Colours used<textarea name="colourSummary" placeholder="CMYK, Pantone, vinyl colours, print colours" style={{ ...textareaStyle, minHeight: 72 }} /></label>
-                    <label style={labelStyle}>Sizes<textarea name="sizeSummary" placeholder="S1 - 1200 x 600mm, S2 - 600 x 400mm" style={{ ...textareaStyle, minHeight: 72 }} /></label>
-                    <label style={labelStyle}>Substrate / stock<textarea name="substrateSummary" placeholder="3mm ACM white, 250gsm satin, acrylic clear etc" style={{ ...textareaStyle, minHeight: 72 }} /></label>
-                    <label style={labelStyle}>Install / finishing<textarea name="installSummary" placeholder="Wall mounted, holes, tape, laminate, trimming, folds" style={{ ...textareaStyle, minHeight: 72 }} /></label>
-                  </div>
-                  <label style={labelStyle}>Small format details<textarea name="smallFormatSummary" placeholder="Cards/brochures/books/NCR details: sides, cello, folds, pages, cover colour, tape colour, numbering" style={{ ...textareaStyle, minHeight: 72 }} /></label>
-                  <label style={labelStyle}>Notes for client / production<textarea name="notes" placeholder="Any extra notes for this proof page" style={{ ...textareaStyle, minHeight: 72 }} /></label>
-                  <button type="submit" style={buttonStyle}>Add proof page</button>
-                </form>
-              </section>
 
-              <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 14 }}>
-                  <div>
-                    <h2 style={{ margin: 0 }}>Proof preview</h2>
-                    <p style={{ margin: "5px 0 0", color: "#667085", fontSize: 13 }}>The public client page uses this same structure: large artwork preview, white background, no cropping.</p>
-                  </div>
-                  <span style={{ borderRadius: 999, background: "#f5f3ff", color: "#6d28d9", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>{proofPages.length} pages</span>
+                <div style={{ borderTop: "1px solid #e4e7ec", borderBottom: "1px solid #e4e7ec", padding: "11px 18px", display: "flex", justifyContent: "space-between", gap: 12, overflowX: "auto", background: "#fbfcfe" }}>
+                  <WorkflowStep label="Quote approved" done={quoteAccepted} active={!quoteAccepted} />
+                  <WorkflowStep label="Proofs ready" done={readyToSend} active={quoteAccepted && !readyToSend} />
+                  <WorkflowStep label="Sent" done={sent} active={readyToSend && !sent} />
+                  <WorkflowStep label="Viewed" done={viewed} active={sent && !viewed} />
+                  <WorkflowStep label="Approved" done={approved} active={viewed && !approved} />
                 </div>
-                <div style={{ display: "grid", gap: 16 }}>
-                  {proofPages.map((page, index) => (
-                    <article key={page.id} style={{ border: "1px solid #cbd5e1", borderRadius: 22, background: "#fff", overflow: "hidden", display: "grid", gridTemplateColumns: "minmax(0, 1fr) 310px", minHeight: 520 }}>
-                      <div style={{ padding: 22, display: "grid", gridTemplateRows: "auto minmax(0, 1fr) auto", gap: 12 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                          <div>
-                            <p style={{ margin: 0, fontSize: 12, color: "#64748b", fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>{page.signCode || `S${index + 1}`} · {String(page.productionType || "signage").replace(/_/g, " ")}{page.sourceQuoteLineId ? " · from quote line" : ""}</p>
-                            <h3 style={{ margin: "4px 0 0", fontSize: 24 }}>{page.title}</h3>
-                            {page.description ? <p style={{ margin: "4px 0 0", color: "#667085" }}>{page.description}</p> : null}
-                          </div>
-                          <form action={removeArtworkApprovalPageFromPageAction}>
-                            <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                            <input type="hidden" name="pageId" value={page.id} />
-                            <button type="submit" style={{ ...secondaryButtonStyle, minHeight: 36, color: "#b42318" }}>Remove</button>
-                          </form>
-                        </div>
-                        <div style={{ border: "1px solid #e2e8f0", borderRadius: 18, background: "#fff", display: "grid", placeItems: "center", padding: 16, overflow: "hidden" }}>
-                          {proofArtworkPreview(page, 395)}
-                        </div>
-                        {page.notes ? <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap" }}>{page.notes}</p> : <span />}
-                      </div>
-                      <aside style={{ borderLeft: "1px solid #e2e8f0", background: "#f8fafc", padding: 18, display: "grid", alignContent: "space-between", gap: 14 }}>
-                        <div style={{ display: "grid", gap: 12 }}>
-                          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                            <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedApproval.clientName} size={42} radius={12} padding={4} />
-                            <span style={{ minWidth: 0 }}>
-                              <p style={{ margin: 0, color: "#64748b", fontSize: 12, fontWeight: 950, textTransform: "uppercase" }}>Client</p>
-                              <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "block" }}>{selectedApproval.clientName}</strong>
-                            </span>
-                          </div>
-                          {detailsList(page).map((row) => (
-                            <div key={row.label} style={{ borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
-                              <p style={{ margin: 0, color: "#64748b", fontSize: 12, fontWeight: 950 }}>{row.label}</p>
-                              <p style={{ margin: "4px 0 0", whiteSpace: "pre-wrap", color: "#1e293b" }}>{row.value}</p>
-                            </div>
-                          ))}
-                        </div>
-                        <form action={replaceArtworkApprovalPageProofAction} encType="multipart/form-data" style={{ borderTop: "1px solid #e2e8f0", paddingTop: 12, display: "grid", gap: 8 }}>
-                          <input type="hidden" name="approvalId" value={selectedApproval.id} />
-                          <input type="hidden" name="pageId" value={page.id} />
-                          <strong style={{ fontSize: 12 }}>Replace proof artwork</strong>
-                          <AutoSubmitProofInputs />
-                          <button type="submit" style={{ ...buttonStyle, minHeight: 38, fontSize: 12 }}>Update proof manually</button>
-                        </form>
-                        <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 12, fontSize: 12, color: "#64748b" }}>Page {index + 1} of {proofPages.length}</div>
-                      </aside>
-                    </article>
-                  ))}
-                  {proofPages.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No proof pages have been added yet.</p> : null}
+
+                <div className="artwork-metrics" style={{ padding: 14 }}>
+                  {[
+                    ["Revision", selectedApproval.revision || "A"],
+                    ["Proofs", `${realProofCount}/${activeProofPages.length || 0} ready`],
+                    ["Recipient", selectedApproval.email || "No email"],
+                    ["Sent", formatDate(selectedApproval.sentAt)],
+                    ["Viewed", formatDate(selectedApproval.viewedAt)]
+                  ].map(([k, v]) => <div key={k} style={{ background: "#f8fafc", borderRadius: 12, padding: "9px 10px", minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{k}</p><strong style={{ fontSize: 12, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 3 }}>{v}</strong></div>)}
                 </div>
               </section>
 
-              {selectedApproval.clientResponseNotes || selectedApproval.clientSignatoryName || selectedApproval.internallyApprovedAt ? (
-                <section style={{ ...cardStyle, display: "grid", gap: 10 }}>
-                  <h2 style={{ margin: 0 }}>Response / approval</h2>
-                  {selectedApproval.clientSignatoryName ? <p style={{ margin: 0 }}><strong>Approved by:</strong> {selectedApproval.clientSignatoryName}</p> : null}
-                  {selectedApproval.internallyApprovedAt ? <p style={{ margin: 0 }}><strong>Internally approved:</strong> {formatDate(selectedApproval.internallyApprovedAt)} by {selectedApproval.internallyApprovedBy ?? "staff"}</p> : null}
-                  {selectedApproval.clientResponseNotes ? <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap" }}>{selectedApproval.clientResponseNotes}</p> : null}
-                  {selectedApproval.clientSignatureDataUrl ? <img src={selectedApproval.clientSignatureDataUrl} alt="Client signature" style={{ width: 260, maxWidth: "100%", border: "1px solid #dbe4f0", borderRadius: 14, background: "#fff" }} /> : null}
+              {changesRequested ? (
+                <section style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 18, padding: 14, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+                  <div><strong style={{ color: "#c2410c" }}>Client requested changes</strong><p style={{ margin: "4px 0 0", color: "#7c2d12", whiteSpace: "pre-wrap" }}>{selectedApproval.clientResponseNotes || "Review the proof changes, upload the new artwork, then start a new revision."}</p></div>
+                  <form action={startArtworkApprovalRevisionAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...primaryButton, background: "#c2410c" }}>Start next revision</button></form>
                 </section>
               ) : null}
+
+              <div className="artwork-detail-grid">
+                <div style={{ display: "grid", gap: 14 }}>
+                  <section style={{ ...card, padding: 16, display: "grid", gap: 12 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12, flexWrap: "wrap" }}>
+                      <div>
+                        <h2 style={{ margin: 0, fontSize: 21 }}>Proofs</h2>
+                        <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 12 }}>One proof slot per approved artwork line. Replace the placeholder with the finished proof; production details remain tied to the quote line.</p>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                        {missingLinePages.length ? <span style={{ color: "#b54708", fontSize: 12, fontWeight: 900 }}>{missingLinePages.length} missing slot{missingLinePages.length === 1 ? "" : "s"}</span> : null}
+                        <form action={prefillArtworkApprovalPagesFromQuoteAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...secondaryButton, background: missingLinePages.length ? "#fffaeb" : "#fff" }}>Sync quote lines</button></form>
+                      </div>
+                    </div>
+
+                    <div style={{ display: "grid", gap: 10 }}>
+                      {activeProofPages.map((page, index) => {
+                        const placeholder = isPlaceholderProof(page);
+                        const currentProof = isProofReadyForRevision(page, currentRevision);
+                        const needsRevision = !placeholder && !currentProof;
+                        return (
+                          <article key={page.id} className="artwork-proof-row" style={{ border: currentProof ? "1px solid #d0d5dd" : "1px solid #fdb022", borderRadius: 17, background: "#fff" }}>
+                            <div className="proof-preview" style={{ background: "#f8fafc", borderRight: "1px solid #e4e7ec", padding: 10, display: "grid", placeItems: "center", minHeight: 188 }}>{proofArtworkPreview(page, 190)}</div>
+                            <div style={{ padding: 13, minWidth: 0 }}>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                                <span style={{ borderRadius: 999, background: currentProof ? "#ecfdf3" : "#fffaeb", color: currentProof ? "#067647" : "#b54708", padding: "4px 7px", fontSize: 10, fontWeight: 950 }}>{placeholder ? "PROOF NEEDED" : needsRevision ? `UPDATE FOR REV ${currentRevision || ""}` : "READY"}</span>
+                                <span style={{ color: "#667085", fontSize: 11, fontWeight: 900 }}>{page.signCode || `S${index + 1}`}</span>
+                              </div>
+                              <h3 style={{ margin: "7px 0 4px", fontSize: 18 }}>{page.title}</h3>
+                              {page.description ? <p style={{ margin: "0 0 9px", color: "#667085", fontSize: 12, lineHeight: 1.4 }}>{page.description}</p> : null}
+                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "7px 12px" }}>
+                                {detailsList(page).map((row) => <div key={row.label}><span style={{ display: "block", color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><span style={{ display: "block", color: "#344054", fontSize: 11, whiteSpace: "pre-wrap", marginTop: 2 }}>{row.value}</span></div>)}
+                              </div>
+                            </div>
+                            <div className="proof-actions" style={{ borderLeft: "1px solid #e4e7ec", background: "#fcfcfd", padding: 11, display: "grid", alignContent: "center", gap: 8 }}>
+                              <strong style={{ fontSize: 12 }}>{placeholder ? "Upload finished proof" : needsRevision ? `Upload revision ${currentRevision || ""}` : "Replace proof"}</strong>
+                              <form action={replaceArtworkApprovalPageProofAction} encType="multipart/form-data" style={{ display: "grid", gap: 7 }}>
+                                <input type="hidden" name="approvalId" value={selectedApproval.id} /><input type="hidden" name="pageId" value={page.id} />
+                                <AutoSubmitProofInputs />
+                              </form>
+                              {!placeholder ? <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ ...secondaryButton, minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontSize: 11 }}>Open full size</a> : null}
+                              <form action={removeArtworkApprovalPageFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><input type="hidden" name="pageId" value={page.id} /><button type="submit" style={{ ...secondaryButton, minHeight: 32, width: "100%", color: "#b42318", fontSize: 11 }}>Remove page</button></form>
+                            </div>
+                          </article>
+                        );
+                      })}
+                      {!activeProofPages.length ? <div style={{ border: "1px dashed #cbd5e1", borderRadius: 16, padding: 30, textAlign: "center", color: "#667085" }}>No proof slots yet. Use <strong>Sync quote lines</strong> to create them from the approved quote scope.</div> : null}
+                    </div>
+
+                    {outOfScopePages.length ? <details><summary style={{ cursor: "pointer", color: "#667085", fontSize: 12, fontWeight: 900 }}>{outOfScopePages.length} out-of-scope / cancelled proof page{outOfScopePages.length === 1 ? "" : "s"}</summary><p style={{ color: "#667085", fontSize: 12 }}>These pages are preserved for history but are not counted as required artwork for this approval.</p></details> : null}
+                  </section>
+
+                  <details style={{ ...card, padding: 14 }}>
+                    <summary style={{ cursor: "pointer", fontWeight: 950 }}>Add an extra proof page</summary>
+                    <form action={addArtworkApprovalPageFromPageAction} encType="multipart/form-data" style={{ display: "grid", gap: 10, marginTop: 12 }}>
+                      <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                      <div style={{ display: "grid", gridTemplateColumns: "90px 1fr 100px 150px", gap: 8 }}>
+                        <label style={label}>Item<input name="signCode" defaultValue={nextSignCode} style={input} /></label>
+                        <label style={label}>Title<input name="title" placeholder="Extra proof page" style={input} /></label>
+                        <label style={label}>Qty<input name="quantity" defaultValue="1" style={input} /></label>
+                        <label style={label}>Type<select name="productionType" defaultValue="signage" style={input}><option value="signage">Signage</option><option value="small_format">Small format</option><option value="plan_printing">Plan printing</option><option value="poster_printing">Poster printing</option></select></label>
+                      </div>
+                      <AutoSubmitProofInputs autoSubmit={false} />
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>
+                        <label style={label}>Description<textarea name="description" style={textarea} /></label><label style={label}>Size<textarea name="sizeSummary" style={textarea} /></label>
+                        <label style={label}>Stock<textarea name="substrateSummary" style={textarea} /></label><label style={label}>Finishing<textarea name="installSummary" style={textarea} /></label>
+                      </div>
+                      <button type="submit" style={primaryButton}>Add proof page</button>
+                    </form>
+                  </details>
+                </div>
+
+                <aside style={{ display: "grid", gap: 12, position: "sticky", top: 16 }}>
+                  <section style={{ ...card, padding: 14, display: "grid", gap: 12 }}>
+                    <div><h2 style={{ margin: 0, fontSize: 18 }}>Send / release</h2><p style={{ margin: "4px 0 0", color: "#667085", fontSize: 11 }}>The client link stays the same through revisions.</p></div>
+                    {!readyToSend && selectedApproval.status !== "deleted" ? <div style={{ border: "1px solid #fedf89", background: "#fffaeb", borderRadius: 12, padding: 10, color: "#93370d", fontSize: 11 }}><strong>Not ready to send.</strong> Upload every required proof and sync any missing quote lines first.</div> : null}
+                    {selectedApproval.status !== "deleted" ? (
+                      <>
+                        <form action={sendArtworkApprovalFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...primaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Mark sent to client</button></form>
+                        {publicUrl && selectedApproval.email ? <a href={`mailto:${selectedApproval.email}?subject=${encodeURIComponent(`Artwork proof approval - ${selectedApproval.projectName || selectedApproval.clientName}`)}&body=${encodeURIComponent(`Hi ${selectedApproval.contactName || selectedApproval.clientName},\n\nPlease review the artwork proof using the link below:\n\n${publicUrl}\n\nThanks`)}`} style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Email client link</a> : null}
+                        <form action={directApproveArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", color: "#067647", opacity: !readyToSend || approved ? 0.45 : 1 }}>Approve internally</button></form>
+                      </>
+                    ) : <form action={restoreArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...primaryButton, width: "100%", background: "#067647" }}>Restore approval</button></form>}
+                  </section>
+
+                  <section style={{ ...card, padding: 14 }}>
+                    <details open={!selectedApproval.projectName || !selectedApproval.email}>
+                      <summary style={{ cursor: "pointer", fontWeight: 950 }}>Approval details</summary>
+                      <form action={saveArtworkApprovalDetailsAction} style={{ display: "grid", gap: 9, marginTop: 12 }}>
+                        <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                        <label style={label}>Client<input name="clientName" defaultValue={selectedApproval.clientName} style={input} /></label>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}><label style={label}>Contact<input name="contactName" defaultValue={selectedApproval.contactName ?? ""} style={input} /></label><label style={label}>Email<input name="email" type="email" defaultValue={selectedApproval.email ?? ""} style={input} /></label></div>
+                        <label style={label}>Project / job name<input name="projectName" defaultValue={selectedApproval.projectName ?? ""} style={input} /></label>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 100px", gap: 8 }}><label style={label}>Drawing / proof title<input name="drawingTitle" defaultValue={selectedApproval.drawingTitle ?? ""} style={input} /></label><label style={label}>Revision<input name="revision" defaultValue={selectedApproval.revision ?? "A"} style={input} /></label></div>
+                        <label style={label}>Drawing number<input name="drawingNumber" defaultValue={selectedApproval.drawingNumber ?? "S1"} style={input} /></label>
+                        <label style={label}>Revision note<input name="revisionNote" defaultValue={selectedApproval.revisionNote ?? "Issued for approval"} style={input} /></label>
+                        <label style={label}>Client message<textarea name="clientMessage" defaultValue={selectedApproval.clientMessage ?? "Please review the proof pages below."} style={textarea} /></label>
+                        <details><summary style={{ cursor: "pointer", fontSize: 11, fontWeight: 900, color: "#667085" }}>More details</summary><div style={{ display: "grid", gap: 8, marginTop: 8 }}><label style={label}>Designer<input name="designerName" defaultValue={selectedApproval.designerName ?? user.email ?? ""} style={input} /></label><label style={label}>Site / delivery<textarea name="siteAddress" defaultValue={selectedApproval.siteAddress ?? ""} style={textarea} /></label><label style={label}>Internal notes<textarea name="internalNotes" defaultValue={selectedApproval.internalNotes ?? ""} style={textarea} /></label></div></details>
+                        <button type="submit" style={{ ...primaryButton, width: "100%" }}>Save details</button>
+                      </form>
+                    </details>
+                  </section>
+
+                  {(selectedApproval.clientResponseNotes || selectedApproval.clientSignatoryName || selectedApproval.internallyApprovedAt) ? <section style={{ ...card, padding: 14, display: "grid", gap: 7 }}><strong>Latest response</strong>{selectedApproval.clientSignatoryName ? <span style={{ fontSize: 12 }}>Approved by <strong>{selectedApproval.clientSignatoryName}</strong></span> : null}{selectedApproval.internallyApprovedAt ? <span style={{ fontSize: 12 }}>Internally approved {formatDate(selectedApproval.internallyApprovedAt)} by {selectedApproval.internallyApprovedBy ?? "staff"}</span> : null}{selectedApproval.clientResponseNotes ? <p style={{ margin: 0, fontSize: 12, color: "#475467", whiteSpace: "pre-wrap" }}>{selectedApproval.clientResponseNotes}</p> : null}{selectedApproval.clientSignatureDataUrl ? <img src={selectedApproval.clientSignatureDataUrl} alt="Client signature" style={{ width: 210, maxWidth: "100%", border: "1px solid #e4e7ec", borderRadius: 10 }} /> : null}</section> : null}
+
+                  <details style={{ ...card, padding: 14 }}><summary style={{ cursor: "pointer", color: "#b42318", fontWeight: 900, fontSize: 12 }}>Danger zone</summary><div style={{ marginTop: 10 }}><form action={deleteArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...secondaryButton, width: "100%", color: "#b42318" }}>Delete approval</button></form></div></details>
+                </aside>
+              </div>
             </>
           ) : (
-            <section style={{ ...cardStyle, minHeight: 420, display: "grid", placeItems: "center", textAlign: "center" }}>
-              <div style={{ maxWidth: 460 }}>
-                <h2 style={{ margin: 0 }}>No artwork approval selected</h2>
-                <p style={{ color: "#667085", lineHeight: 1.6 }}>Create an approval pack from a quote, then add proof pages and send the client approval link.</p>
-              </div>
+            <section style={{ ...card, minHeight: 520, display: "grid", placeItems: "center", padding: 30, textAlign: "center" }}>
+              <div style={{ maxWidth: 560 }}><h2 style={{ margin: 0, fontSize: 28 }}>Start an artwork approval</h2><p style={{ color: "#667085", lineHeight: 1.6 }}>Select an existing approval job from the left, or create one from a quote. Approved quote lines become proof slots automatically, so there is no need to retype the job specification.</p></div>
             </section>
           )}
-        </div>
+        </main>
+      </div>
     </div>
   );
 }
