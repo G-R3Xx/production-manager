@@ -12,7 +12,7 @@ import {
   upsertMyobOauthTokenByTenantId
 } from "@/server/integrations";
 import { env } from "@/lib/env";
-import { upsertImportedCustomer } from "@/server/customers";
+import { getCustomerById, upsertImportedCustomer, type CustomerRecord } from "@/server/customers";
 import { upsertImportedProduct } from "@/server/products";
 
 export type MyobReadOnlySyncSummary = {
@@ -481,7 +481,7 @@ async function sendMyobJson(accessToken: string, companyFileId: string, endpoint
     throw new Error(`${response.status}: ${detail}`);
   }
 
-  return { url: url.toString(), data: parsed };
+  return { url: url.toString(), data: parsed, location: response.headers.get("location") };
 }
 
 function numberValue(value: string | null | undefined): number {
@@ -504,6 +504,274 @@ function readMyobNumber(value: unknown): string | null {
   if (!value || typeof value !== "object") return null;
   const record = value as Record<string, unknown>;
   return textOrNull(record.Number) ?? textOrNull(record.OrderNumber) ?? textOrNull(record.DisplayID) ?? textOrNull(record.UID);
+}
+
+function myobCollectionRecords(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)));
+  if (!data || typeof data !== "object" || Array.isArray(data)) return [];
+  const record = data as Record<string, unknown>;
+  const items = Array.isArray(record.Items) ? record.Items : [];
+  return items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)));
+}
+
+function odataString(value: string): string {
+  return value.replace(/'/g, "''");
+}
+
+function customerAddressRecords(customer: Record<string, unknown>): Record<string, unknown>[] {
+  const value = customer.Addresses;
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+}
+
+function customerExactEmail(customer: Record<string, unknown>, email: string): boolean {
+  const wanted = email.trim().toLowerCase();
+  if (!wanted) return false;
+  return customerAddressRecords(customer).some((address) => String(address.Email ?? "").trim().toLowerCase() === wanted);
+}
+
+function customerExactCompany(customer: Record<string, unknown>, company: string): boolean {
+  const wanted = company.trim().toLowerCase();
+  return Boolean(wanted && String(customer.CompanyName ?? "").trim().toLowerCase() === wanted);
+}
+
+function customerExactPerson(customer: Record<string, unknown>, firstName: string, lastName: string): boolean {
+  const wantedFirst = firstName.trim().toLowerCase();
+  const wantedLast = lastName.trim().toLowerCase();
+  if (!wantedLast) return false;
+  return String(customer.LastName ?? "").trim().toLowerCase() === wantedLast
+    && (!wantedFirst || String(customer.FirstName ?? "").trim().toLowerCase() === wantedFirst);
+}
+
+function generatedMyobCustomerDisplayId(customerId: string): string {
+  const compact = customerId.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return `PM${compact.slice(0, 12)}`.slice(0, 15);
+}
+
+function localCustomerContactName(customer: CustomerRecord): string {
+  return [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim() || customer.displayName;
+}
+
+function buildMyobCustomerPayload(customer: CustomerRecord): Record<string, unknown> {
+  const companyName = String(customer.companyName ?? "").trim();
+  const firstName = String(customer.firstName ?? "").trim();
+  const lastName = String(customer.lastName ?? "").trim();
+  const isIndividual = !companyName && Boolean(firstName || lastName);
+  const address = String(customer.payloadJson?.billingAddress ?? customer.payloadJson?.defaultSiteAddress ?? "").trim();
+  const email = String(customer.email ?? "").trim();
+  const phone = String(customer.phone ?? "").trim();
+  const contactName = localCustomerContactName(customer).slice(0, 25);
+  const addressRecord: Record<string, unknown> = { Location: 1 };
+  if (address) addressRecord.Street = address.slice(0, 255);
+  if (email) addressRecord.Email = email.slice(0, 255);
+  if (phone) addressRecord.Phone1 = phone.slice(0, 21);
+  if (contactName) addressRecord.ContactName = contactName;
+
+  const payload: Record<string, unknown> = {
+    DisplayID: generatedMyobCustomerDisplayId(customer.id),
+    IsIndividual: isIndividual,
+    IsActive: true,
+    Notes: "Created by Production Manager"
+  };
+
+  if (isIndividual) {
+    payload.LastName = (lastName || customer.displayName || "Customer").slice(0, 30);
+    if (firstName) payload.FirstName = firstName.slice(0, 20);
+  } else {
+    payload.CompanyName = (companyName || customer.displayName || "Customer").slice(0, 50);
+  }
+
+  if (Object.keys(addressRecord).length > 1) payload.Addresses = [addressRecord];
+  return payload;
+}
+
+async function exactMyobCustomerMatches(
+  accessToken: string,
+  companyFileId: string,
+  customer: CustomerRecord
+): Promise<Record<string, unknown>[]> {
+  const email = String(customer.email ?? "").trim();
+  const companyName = String(customer.companyName ?? "").trim();
+  const firstName = String(customer.firstName ?? "").trim();
+  const lastName = String(customer.lastName ?? "").trim();
+  const endpoints: string[] = [];
+
+  if (email) endpoints.push(`/Contact/Customer?$filter=Addresses/any(x: x/Email eq '${odataString(email)}')&$top=20`);
+  if (companyName) endpoints.push(`/Contact/Customer?$filter=CompanyName eq '${odataString(companyName)}'&$top=20`);
+  if (!companyName && lastName) endpoints.push(`/Contact/Customer?$filter=LastName eq '${odataString(lastName)}'&$top=20`);
+
+  const byUid = new Map<string, Record<string, unknown>>();
+  for (const endpoint of endpoints) {
+    const result = await fetchMyobJson(accessToken, companyFileId, endpoint);
+    for (const candidate of myobCollectionRecords(result.data)) {
+      const uid = textOrNull(candidate.UID);
+      if (!uid) continue;
+      const matches = customerExactEmail(candidate, email)
+        || customerExactCompany(candidate, companyName)
+        || customerExactPerson(candidate, firstName, lastName);
+      if (matches) byUid.set(uid, candidate);
+    }
+  }
+
+  return Array.from(byUid.values());
+}
+
+async function saveLocalCustomerMyobLink(
+  tenantId: string,
+  customer: CustomerRecord,
+  myobCustomer: Record<string, unknown>,
+  match: string
+): Promise<void> {
+  const uid = textOrNull(myobCustomer.UID);
+  if (!uid) throw new Error("MYOB customer response did not include a UID.");
+  const displayName = normaliseCustomerDisplayName(myobCustomer);
+  const displayId = textOrNull(myobCustomer.DisplayID);
+  const existing = await pool.query<{ id: string }>(`
+    SELECT id
+    FROM app.customers
+    WHERE tenant_id = $1::uuid AND myob_uid = $2::varchar
+    LIMIT 1
+  `, [tenantId, uid]);
+  const canUsePrimaryUid = !existing.rows[0] || existing.rows[0].id === customer.id;
+
+  await pool.query(`
+    UPDATE app.customers
+    SET
+      myob_uid = CASE WHEN $4::boolean THEN $3::varchar ELSE myob_uid END,
+      payload_json = COALESCE(payload_json, '{}'::jsonb) || $5::jsonb,
+      is_active = true,
+      updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [
+    tenantId,
+    customer.id,
+    uid,
+    canUsePrimaryUid,
+    JSON.stringify({
+      myobUid: uid,
+      myobDisplayName: displayName,
+      myobDisplayId: displayId,
+      myobMatch: match,
+      myobLinkedAt: new Date().toISOString()
+    })
+  ]);
+
+  await upsertExternalMappingByTenantId(tenantId, {
+    entityType: "customer",
+    localId: customer.id,
+    externalId: uid,
+    syncState: "synced",
+    lastSyncedAt: new Date().toISOString(),
+    payloadJson: { displayName, displayId, match }
+  });
+}
+
+function readUidFromLocation(location: string | null): string | null {
+  if (!location) return null;
+  const match = location.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
+  return match?.[0] ?? null;
+}
+
+export type MyobCustomerCreateResult = {
+  uid: string;
+  displayName: string;
+  displayId: string | null;
+  created: boolean;
+  matchedExisting: boolean;
+};
+
+export async function createMyobCustomerFromLocalClientForTenant(
+  tenantId: string,
+  customerId: string
+): Promise<MyobCustomerCreateResult> {
+  const customer = await getCustomerById(tenantId, customerId);
+  if (!customer) throw new Error("Production Manager client could not be found.");
+
+  const alreadyLinkedUid = customer.myobUid && !customer.myobUid.startsWith("manual-")
+    ? customer.myobUid
+    : typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-")
+      ? customer.payloadJson.myobUid
+      : null;
+  if (alreadyLinkedUid) {
+    return {
+      uid: alreadyLinkedUid,
+      displayName: String(customer.payloadJson?.myobDisplayName ?? customer.displayName),
+      displayId: typeof customer.payloadJson?.myobDisplayId === "string" ? customer.payloadJson.myobDisplayId : null,
+      created: false,
+      matchedExisting: true
+    };
+  }
+
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") {
+    throw new Error("MYOB is not connected. Connect MYOB before creating a customer.");
+  }
+
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const matches = await exactMyobCustomerMatches(accessToken, connection.companyFileId, customer);
+  if (matches.length > 1) {
+    const names = matches.slice(0, 4).map((item) => `${normaliseCustomerDisplayName(item)}${textOrNull(item.DisplayID) ? ` (${textOrNull(item.DisplayID)})` : ""}`).join(", ");
+    throw new Error(`More than one exact MYOB customer match was found: ${names}. Link the correct existing MYOB customer instead of creating a duplicate.`);
+  }
+  if (matches.length === 1) {
+    const matched = matches[0];
+    if (matched.IsActive === false) {
+      throw new Error(`A matching MYOB customer already exists (${normaliseCustomerDisplayName(matched)}) but is inactive. Reactivate it in MYOB or choose another existing customer.`);
+    }
+    await saveLocalCustomerMyobLink(tenantId, customer, matched, "create_button_exact_match");
+    return {
+      uid: String(matched.UID),
+      displayName: normaliseCustomerDisplayName(matched),
+      displayId: textOrNull(matched.DisplayID),
+      created: false,
+      matchedExisting: true
+    };
+  }
+
+  const payload = buildMyobCustomerPayload(customer);
+  const endpoint = "/Contact/Customer";
+  const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload);
+  let created = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+    ? result.data as Record<string, unknown>
+    : null;
+  let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
+
+  if (!uid) {
+    const displayId = String(payload.DisplayID ?? "").trim();
+    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`);
+    created = myobCollectionRecords(lookup.data).find((candidate) => String(candidate.DisplayID ?? "").trim().toLowerCase() === displayId.toLowerCase()) ?? null;
+    uid = readMyobUid(created);
+  }
+  if (!uid) throw new Error("MYOB accepted the customer create request but Production Manager could not read the new customer UID. Refresh MYOB customers before trying again.");
+
+  const createdRecord: Record<string, unknown> = {
+    ...(created ?? {}),
+    UID: uid,
+    DisplayID: textOrNull(created?.DisplayID) ?? String(payload.DisplayID ?? ""),
+    CompanyName: textOrNull(created?.CompanyName) ?? textOrNull(payload.CompanyName),
+    FirstName: textOrNull(created?.FirstName) ?? textOrNull(payload.FirstName),
+    LastName: textOrNull(created?.LastName) ?? textOrNull(payload.LastName),
+    IsActive: created?.IsActive ?? true
+  };
+  await saveLocalCustomerMyobLink(tenantId, customer, createdRecord, "created_from_production_manager");
+
+  await createSyncRunForTenant(tenantId, "incremental_import", "success", {
+    source: "createMyobCustomerFromLocalClientForTenant",
+    customerId: customer.id,
+    customerName: customer.displayName,
+    myobCustomerUid: uid,
+    myobDisplayId: textOrNull(createdRecord.DisplayID),
+    endpoint: result.url
+  }, null);
+
+  return {
+    uid,
+    displayName: normaliseCustomerDisplayName(createdRecord),
+    displayId: textOrNull(createdRecord.DisplayID),
+    created: true,
+    matchedExisting: false
+  };
 }
 
 function buildOrderLineDescription(line: import("@/server/quotes").QuoteLineRecord, customerMaterialNames: Map<string, string> = new Map()): string {
@@ -537,7 +805,6 @@ async function resolveMyobCustomerUid(tenantId: string, quote: import("@/server/
     return { uid: null, source: "quote-not-linked-to-client" };
   }
 
-  const { getCustomerById } = await import("@/server/customers");
   const customer = await getCustomerById(tenantId, quote.linkedCustomerId);
   if (!customer) return { uid: null, source: "linked-client-not-found" };
 

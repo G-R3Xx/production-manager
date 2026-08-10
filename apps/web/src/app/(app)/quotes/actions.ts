@@ -22,7 +22,7 @@ import {
 } from "@/server/quotes";
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
-import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
+import { createMyobCustomerFromLocalClientForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 import { getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
 
 async function requireTenant() {
@@ -798,6 +798,60 @@ export async function linkQuoteClientToMyobAction(formData: FormData): Promise<v
   }
 
   redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`MYOB customer linked: ${myobCustomer.displayName}`)}`);
+}
+
+
+export async function createQuoteClientInMyobAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const sendNow = String(formData.get("sendNow") ?? "") === "1";
+  if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20first");
+
+  const quote = await getQuoteDraftById(activeTenant.tenantId, quoteId);
+  if (!quote?.linkedCustomerId) {
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("This quote is not linked to a Production Manager client.")}`);
+  }
+
+  let result: Awaited<ReturnType<typeof createMyobCustomerFromLocalClientForTenant>> | null = null;
+  let createError = "";
+  try {
+    result = await createMyobCustomerFromLocalClientForTenant(activeTenant.tenantId, quote.linkedCustomerId);
+  } catch (error) {
+    createError = error instanceof Error ? error.message : String(error);
+  }
+  if (createError || !result) {
+    redirect(`/quotes?selected=${quoteId}&myobLink=required&error=${encodeURIComponent(createError || "Could not create the MYOB customer.")}`);
+  }
+
+  await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {
+    status: quote.status === "accepted" ? "ready_to_sync" : "not_synced",
+    error: null,
+    payloadJson: {
+      customerLinkedAt: new Date().toISOString(),
+      linkedCustomerId: quote.linkedCustomerId,
+      myobCustomerUid: result.uid,
+      myobCustomerName: result.displayName,
+      myobCustomerDisplayId: result.displayId,
+      customerCreatedInMyob: result.created
+    }
+  });
+
+  if (sendNow && quote.status === "accepted") {
+    let sendError = "";
+    try {
+      await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    } catch (error) {
+      sendError = error instanceof Error ? error.message : String(error);
+    }
+    if (sendError) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(sendError)}`);
+    const verb = result.created ? "Created" : "Found and linked";
+    redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`${verb} MYOB customer ${result.displayName} and sent the accepted quote to MYOB.`)}`);
+  }
+
+  const message = result.created
+    ? `MYOB customer created and linked: ${result.displayName}`
+    : `Matching MYOB customer found and linked: ${result.displayName}. No duplicate was created.`;
+  redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(message)}`);
 }
 
 
