@@ -74,6 +74,7 @@ export type QuickQuoteSnapshot = {
   ink?: string;
   sides?: string;
   printDirection?: string;
+  backingId?: string;
   laminateId?: string;
   laminateMinutes?: string;
   finishings?: string[];
@@ -118,6 +119,7 @@ export type QuickQuoteSnapshot = {
   materialSnapshots?: {
     main?: SnapshotMaterial | null;
     media?: SnapshotMaterial | null;
+    backing?: SnapshotMaterial | null;
     laminate?: SnapshotMaterial | null;
     smallStock?: SnapshotMaterial | null;
     smallCoating?: SnapshotMaterial | null;
@@ -239,6 +241,7 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
     materialSnapshots: {
       main: snapshotMaterial(materialData.main),
       media: snapshotMaterial(materialData.media),
+      backing: snapshotMaterial(materialData.backing),
       laminate: snapshotMaterial(materialData.laminate),
       smallStock: snapshotMaterial(materialData.smallStock),
       smallCoating: snapshotMaterial(materialData.smallCoating),
@@ -253,6 +256,7 @@ export function materialsFromSnapshot(snapshot: QuickQuoteSnapshot | null | unde
   const values = [
     snapshot.materialSnapshots.main,
     snapshot.materialSnapshots.media,
+    snapshot.materialSnapshots.backing,
     snapshot.materialSnapshots.laminate,
     snapshot.materialSnapshots.smallStock,
     snapshot.materialSnapshots.smallCoating,
@@ -401,6 +405,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
     ink,
     sides,
     printDirection: normalise(directionDetail).includes("reverse") ? "reverse" : directionDetail ? "positive" : "",
+    backingId: "",
     laminateId: normalise(laminateName) === "none" ? "none" : laminate?.id ?? "",
     laminateMinutes: "",
     finishings: finishing.finishings,
@@ -422,6 +427,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
     materialSnapshots: {
       main: flowType === "signage" ? mainMaterial ?? null : null,
       smallStock: smallStock ?? null,
+      backing: null,
       laminate: laminate ?? null,
       smallCoating: laminate ?? null,
       componentParts: []
@@ -438,6 +444,7 @@ export function stepForQuoteSummaryRow(label: string, value: string, snapshot: Q
   if (labelKey === "substrate" || labelKey === "stock" || labelKey === "material") return flowType === "signage" ? "thickness" : "small_stock";
   if (labelKey === "finished size" || labelKey === "size") return flowType === "signage" ? "size" : "small_size";
   if (labelKey === "artwork" || valueKey.startsWith("artwork")) return "artwork";
+  if (labelKey === "backing") return flowType === "signage" ? "laminate" : null;
   if (labelKey === "laminate" || labelKey === "coating") return flowType === "signage" ? "laminate" : "small_coating";
   if (labelKey === "finishing") return flowType === "signage" ? "finishing" : "small_finishing";
   if (labelKey === "dispatch" || valueKey.startsWith("pickup") || valueKey.startsWith("delivery") || valueKey.startsWith("install")) return "dispatch";

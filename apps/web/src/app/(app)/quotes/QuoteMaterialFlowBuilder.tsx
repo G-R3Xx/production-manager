@@ -977,6 +977,45 @@ function customerMaterialName(material: QuoteMaterial | null | undefined): strin
   return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
 }
 
+type RollChoiceGroup = {
+  key: string;
+  label: string;
+  materials: QuoteMaterial[];
+  representative: QuoteMaterial;
+};
+
+function rollChoiceGroups(materials: QuoteMaterial[]): RollChoiceGroup[] {
+  const groups = new Map<string, QuoteMaterial[]>();
+  for (const material of materials) {
+    const label = customerMaterialName(material) || material.name || material.id;
+    const key = label.trim().toLowerCase();
+    const current = groups.get(key) ?? [];
+    current.push(material);
+    groups.set(key, current);
+  }
+  return Array.from(groups.entries())
+    .map(([key, groupedMaterials]) => ({
+      key,
+      label: customerMaterialName(groupedMaterials[0]) || groupedMaterials[0].name,
+      materials: groupedMaterials,
+      representative: groupedMaterials[0]
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
+function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, heightMm: number, pieces: number): QuoteMaterial | undefined {
+  if (!materials.length) return undefined;
+  return [...materials].sort((a, b) => {
+    const aUse = roundedRollMetresForQuantity(widthMm, heightMm, a, pieces);
+    const bUse = roundedRollMetresForQuantity(widthMm, heightMm, b, pieces);
+    const aCost = aUse.amount * rollRate(a).rate;
+    const bCost = bUse.amount * rollRate(b).rate;
+    if (Math.abs(aCost - bCost) > 0.000001) return aCost - bCost;
+    if (Math.abs(aUse.amount - bUse.amount) > 0.000001) return aUse.amount - bUse.amount;
+    return numberValue(a.rollWidthMm, 0) - numberValue(b.rollWidthMm, 0);
+  })[0];
+}
+
 export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [], editingLine = null, editingStep = null }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const materialPool = useMemo(() => {
@@ -1020,6 +1059,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [ink, setInk] = useState<InkChoice>(snapshotString(initialSnapshot, "ink") as InkChoice);
   const [sides, setSides] = useState<SidesChoice>(snapshotString(initialSnapshot, "sides") as SidesChoice);
   const [printDirection, setPrintDirection] = useState<PrintDirection>(snapshotString(initialSnapshot, "printDirection") as PrintDirection);
+  const [backingId, setBackingId] = useState(snapshotString(initialSnapshot, "backingId"));
   const [laminateId, setLaminateId] = useState(snapshotString(initialSnapshot, "laminateId"));
   const [laminateMinutes, setLaminateMinutes] = useState(snapshotString(initialSnapshot, "laminateMinutes"));
   const [finishings, setFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "finishings"));
@@ -1162,8 +1202,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const ncrCopiesCount = ncrCopyCount(ncrCopies);
   const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
   const isClearAcrylic = baseType === "acrylic" && colour.toLowerCase() === "clear";
-  const selectedReversePrintableRoll = Boolean((isRollStockBase ? selectedMainMaterial : selectedMedia)?.reversePrintable);
+  const primaryRollMaterial = isRollStockBase ? selectedMainMaterial : selectedMedia;
+  const selectedReversePrintableRoll = Boolean(primaryRollMaterial?.reversePrintable);
   const canChooseReversePrint = isClearAcrylic || selectedReversePrintableRoll;
+  const primaryRollCustomerName = customerMaterialName(primaryRollMaterial).trim().toLowerCase();
+  const backingMaterials = useMemo(() => rollMedia.filter((material) => {
+    if (material.id === primaryRollMaterial?.id) return false;
+    const label = customerMaterialName(material).trim().toLowerCase();
+    return !primaryRollCustomerName || label !== primaryRollCustomerName;
+  }), [rollMedia, primaryRollMaterial?.id, primaryRollCustomerName]);
+  const backingGroups = useMemo(() => rollChoiceGroups(backingMaterials), [backingMaterials]);
+  const selectedBackingGroup = backingGroups.find((group) => group.materials.some((material) => material.id === backingId));
+  const backingApplicable = canChooseReversePrint && printDirection === "reverse";
   const resolvedPrintMethod: PrintMethod = isRollStockBase ? "roll_stock" : printMethod;
   const printed = resolvedPrintMethod !== "" && resolvedPrintMethod !== "no_print";
   const needsMediaStep = isRollStockBase || resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl";
@@ -1174,6 +1224,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const areaSqm = width > 0 && height > 0 ? (width / 1000) * (height / 1000) : 0;
   const sideMultiplier = sides === "double" ? 2 : 1;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
+  const selectedBacking = useMemo(() => selectedBackingGroup
+    ? bestRollMaterialForGroup(selectedBackingGroup.materials, width, height, quantityNumber)
+    : undefined, [selectedBackingGroup, width, height, quantityNumber]);
+  const backingSelectValue = backingId === "none" ? "none" : selectedBackingGroup?.representative.id ?? backingId;
   const pricedComponentParts = componentParts.filter((part) => {
     const qty = numberValue(part.qty, 0);
     const material = materialPool.find((item) => item.id === part.materialId);
@@ -1249,15 +1303,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       next.push({ key: "print", label: isRollStockBase ? "Print setup" : "Print method", complete: Boolean(resolvedPrintMethod), icon: "7" });
       if (!isRollStockBase && needsMediaStep) next.push({ key: "media", label: resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
       if (needsInkStep) next.push({ key: "ink", label: "Ink", complete: Boolean(ink), icon: "9" });
-      if (printed) next.push({ key: "sides", label: isClearAcrylic ? "Sides / direction" : "Sides", complete: Boolean(sides && (!isClearAcrylic || printDirection)), icon: "•" });
-      if (printed) next.push({ key: "laminate", label: "Laminate", complete: Boolean(laminateId), icon: "•" });
+      if (printed) next.push({ key: "sides", label: canChooseReversePrint ? "Sides / direction" : "Sides", complete: Boolean(sides && (!canChooseReversePrint || printDirection)), icon: "•" });
+      if (printed) next.push({ key: "laminate", label: backingApplicable ? "Backing / laminate" : "Laminate", complete: Boolean(laminateId && (!backingApplicable || backingId)), icon: "•" });
       next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
       next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
       next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && serviceType), icon: "✓" });
     }
 
     return next;
-  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, resolvedPrintMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, isRollStockBase, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
+  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, resolvedPrintMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, isRollStockBase, canChooseReversePrint, backingApplicable, backingId, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
 
   const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
   const nextStep = steps[activeStepIndex + 1]?.key;
@@ -1298,6 +1352,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setInk("");
     setSides("");
     setPrintDirection("");
+    setBackingId("");
     setLaminateId("");
     setLaminateMinutes("");
     setSmallPrintColour("");
@@ -1337,6 +1392,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setInk("");
     setSides("");
     setPrintDirection("");
+    setBackingId("");
     setLaminateId("");
     setLaminateMinutes("");
     setFinishings([]);
@@ -1365,6 +1421,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (nextMethod === "no_print") {
       setSides("");
       setPrintDirection("");
+      setBackingId("");
       setLaminateId("none");
       setLaminateMinutes("");
       setActiveStep("finishing");
@@ -1493,6 +1550,26 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         if (ink === "white" || ink === "both") {
           rows.push({ label: "White ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
         }
+      }
+
+      if (backingApplicable && selectedBacking && backingId !== "none" && areaSqm > 0) {
+        const lm = roundedRollMetresForQuantity(width, height, selectedBacking, quantityNumber);
+        const rate = rollRate(selectedBacking);
+        const amount = quantityNumber > 0 ? lm.amount / quantityNumber : lm.amount;
+        rows.push({
+          label: "Backing film",
+          detail: selectedBacking.name,
+          amount,
+          unit: "lm",
+          rate: rate.rate,
+          cost: amount * rate.rate,
+          note: [
+            selectedBackingGroup && selectedBackingGroup.materials.length > 1 ? `${selectedBackingGroup.label}: auto-selected ${selectedBacking.rollWidthMm || "best"}mm stock` : null,
+            lm.note,
+            quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null,
+            rate.note
+          ].filter(Boolean).join(" · ") || undefined
+        });
       }
 
       if (selectedLaminate && laminateId !== "none" && areaSqm > 0) {
@@ -1724,7 +1801,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1750,6 +1827,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
   const selectedMediaName = isRollStockBase ? "" : customerMaterialName(selectedMedia);
+  const selectedBackingName = backingApplicable ? (backingId === "none" ? "None" : selectedBackingGroup?.label ?? customerMaterialName(selectedBacking)) : "";
   const selectedLaminateName = laminateId === "none" ? "None" : customerMaterialName(selectedLaminate);
   const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : customerMaterialName(selectedSmallCoating);
   const dispatchCosts = useMemo<CostRow[]>(() => {
@@ -1897,7 +1975,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       selectedMediaName || null,
       inkChoices.find((item) => item.key === ink)?.label,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
-      printDirection ? `${printDirection === "reverse" ? "Reverse" : "Positive"} print` : null,
+      printDirection ? `${printDirection === "reverse" ? "Reverse" : (selectedReversePrintableRoll && !isClearAcrylic ? "Standard" : "Positive")} print` : null,
+      backingApplicable && selectedBackingName ? `Backing: ${selectedBackingName}` : null,
       selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null,
       finishingSummary ? `Finishing: ${finishingSummary}` : null,
       dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
@@ -1913,7 +1992,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
       : flowType === "small_format"
         ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
-        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!isClearAcrylic || !printed || printDirection) && (!printed || Boolean(laminateId)) && dispatchComplete);
+        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!canChooseReversePrint || !printed || printDirection) && (!backingApplicable || Boolean(backingId)) && (!printed || Boolean(laminateId)) && dispatchComplete);
 
   const configurationSnapshot: QuickQuoteSnapshot = {
     version: 1,
@@ -1936,6 +2015,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ink,
     sides,
     printDirection,
+    backingId: backingId === "none" ? "none" : selectedBacking?.id ?? backingId,
     laminateId,
     laminateMinutes,
     finishings,
@@ -1980,6 +2060,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     materialSnapshots: {
       main: snapshotMaterialForSave(selectedMainMaterial),
       media: snapshotMaterialForSave(isRollStockBase ? undefined : selectedMedia),
+      backing: snapshotMaterialForSave(backingApplicable && backingId !== "none" ? selectedBacking : undefined),
       laminate: snapshotMaterialForSave(selectedLaminate),
       smallStock: snapshotMaterialForSave(selectedSmallStock),
       smallCoating: snapshotMaterialForSave(selectedSmallCoating),
@@ -2202,7 +2283,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
                 <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => event.target.value === "install_only" ? chooseInstallOnly() : resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option><option value="install_only">Install only — client-supplied signage</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
                 {isRollStockBase ? (
-                  <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
+                  <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
                 ) : (
                   <label style={{ display: "grid", gap: 6 }}><b>Thickness / stock</b><select value={thickness} onChange={(event) => { setThickness(event.target.value); setColour(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose thickness</option>{thicknessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
                 )}
@@ -2212,10 +2293,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
                 {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes (optional)</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no setup charge. Entered minutes are priced at {money(labourRate)}/hr.</small></label> : null}
-                {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
+                {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => setInk(event.target.value as InkChoice)} style={inputStyle}><option value="">Choose ink</option>{inkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
-                {canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => setPrintDirection(event.target.value as PrintDirection)} style={inputStyle}><option value="">Choose direction</option><option value="positive">Positive / face print</option><option value="reverse">Reverse print</option></select></label> : null}
+                {canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => { const value = event.target.value as PrintDirection; setPrintDirection(value); if (value !== "reverse") setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose direction</option><option value="positive">{selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive / face print"}</option><option value="reverse">Reverse print</option></select></label> : null}
+                {backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}{group.materials.length > 1 ? ` (auto-select ${group.materials.length} widths)` : ""}</option>)}</select><small style={{ color: "#64748b" }}>Shown because Reverse print is selected. Matching stock widths are chosen automatically by finished size and cost.</small></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour minutes (optional)</b><input value={laminateMinutes} onChange={(event) => setLaminateMinutes(event.target.value)} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /></label> : null}
               </div>
@@ -2740,7 +2822,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             {rollMedia.map((material) => {
               const rate = rollRate(material);
               return (
-                <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setUnitPriceOverridden(false); setActiveStep(isRollStockBase ? "size" : resolvedPrintMethod === "cut_vinyl" ? "sides" : "ink"); }} style={cardButtonStyle(mediaId === material.id, "#ea580c")}>
+                <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); setActiveStep(isRollStockBase ? "size" : resolvedPrintMethod === "cut_vinyl" ? "sides" : "ink"); }} style={cardButtonStyle(mediaId === material.id, "#ea580c")}>
                   <span style={{ fontSize: 28 }}>↻</span>
                   <strong>{material.name}</strong>
                   <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
@@ -2781,7 +2863,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <strong>{isClearAcrylic ? "Clear acrylic print direction" : "Print direction"}</strong>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
                 {[{ key: "positive", label: selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive print", note: "Print/read from the front." }, { key: "reverse", label: "Reverse print", note: isClearAcrylic ? "Reverse printed for viewing through clear acrylic." : "Reverse printed for viewing through the clear media." }].map((choice) => (
-                  <button key={choice.key} type="button" onClick={() => { setPrintDirection(choice.key as PrintDirection); setActiveStep("laminate"); }} style={cardButtonStyle(printDirection === choice.key, "#7c3aed")}>
+                  <button key={choice.key} type="button" onClick={() => { const direction = choice.key as PrintDirection; setPrintDirection(direction); if (direction !== "reverse") setBackingId(""); setUnitPriceOverridden(false); setActiveStep("laminate"); }} style={cardButtonStyle(printDirection === choice.key, "#7c3aed")}>
                     <span style={{ fontSize: 30 }}>{choice.key === "reverse" ? "⇄" : "→"}</span>
                     <strong>{choice.label}</strong>
                     <span style={{ color: "#64748b" }}>{choice.note}</span>
@@ -2798,9 +2880,25 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       const laminateSelected = Boolean(laminateId && laminateId !== "none");
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title="Choose laminate" text="Choose None or select an actual laminate material from Materials. Laminate labour is optional and may be left blank or set to 0." />
+          <StepIntro icon="•" title={backingApplicable ? "Choose backing and laminate" : "Choose laminate"} text={backingApplicable ? "Reverse print is selected. Choose the optional backing film, then choose laminate independently." : "Choose None or select an actual laminate material from Materials. Laminate labour is optional and may be left blank or set to 0."} />
+          {backingApplicable ? <div style={{ display: "grid", gap: 10, padding: 14, border: "1px solid #bae6fd", borderRadius: 18, background: "#f0f9ff" }}>
+            <strong>Backing film</strong>
+            <span style={{ color: "#475569", fontSize: 13 }}>Choose No backing or the film applied behind the reverse print. Same customer-facing stock names are grouped and the best width is selected automatically.</span>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
+              <button type="button" onClick={() => { setBackingId("none"); setUnitPriceOverridden(false); }} style={cardButtonStyle(backingId === "none", "#0284c7")}>
+                <span style={{ fontSize: 28 }}>—</span><strong>No backing</strong><span style={{ color: "#64748b" }}>Reverse print only, with no backing film.</span>
+              </button>
+              {backingGroups.map((group) => {
+                const widths = group.materials.map((material) => numberValue(material.rollWidthMm, 0)).filter((value) => value > 0);
+                return <button key={group.key} type="button" onClick={() => { setBackingId(group.representative.id); setUnitPriceOverridden(false); }} style={cardButtonStyle(Boolean(selectedBackingGroup?.key === group.key), "#0284c7")}>
+                  <span style={{ fontSize: 28 }}>▰</span><strong>{group.label}</strong><span style={{ color: "#64748b" }}>{widths.length > 1 ? `Auto-select ${widths.join(" / ")}mm widths` : widths.length === 1 ? `${widths[0]}mm roll` : "Roll backing film"}</span>
+                </button>;
+              })}
+            </div>
+            {!backingId ? <span style={{ color: "#9a3412", fontWeight: 800 }}>Choose a backing option before continuing.</span> : null}
+          </div> : null}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            <button type="button" onClick={() => { setLaminateId("none"); setLaminateMinutes(""); setActiveStep("finishing"); }} style={cardButtonStyle(laminateId === "none", "#64748b")}>
+            <button type="button" onClick={() => { setLaminateId("none"); setLaminateMinutes(""); if (!backingApplicable || backingId) setActiveStep("finishing"); }} style={cardButtonStyle(laminateId === "none", "#64748b")}>
               <span style={{ fontSize: 30 }}>—</span>
               <strong>None</strong>
               <span style={{ color: "#64748b" }}>No laminate added.</span>
@@ -2818,7 +2916,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             })}
           </div>
           {laminateSelected ? (
-            <LabourPrompt label="Laminate application minutes" value={laminateMinutes} onChange={setLaminateMinutes} onContinue={() => setActiveStep("finishing")} labourRate={labourRate} />
+            <LabourPrompt label="Laminate application minutes" value={laminateMinutes} onChange={setLaminateMinutes} onContinue={() => { if (!backingApplicable || backingId) setActiveStep("finishing"); }} labourRate={labourRate} />
           ) : null}
         </div>
       );
@@ -3221,6 +3319,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />
                 {!isRollStockBase ? <SummaryRow label="Media" value={selectedMedia?.name} /> : null}
                 <SummaryRow label="Ink" value={inkChoices.find((item) => item.key === ink)?.label} />
+                {canChooseReversePrint ? <SummaryRow label="Print direction" value={printDirection ? (printDirection === "reverse" ? "Reverse print" : selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive print") : undefined} /> : null}
+                {backingApplicable ? <SummaryRow label="Backing" value={selectedBackingName || "Choose backing"} /> : null}
                 <SummaryRow label="Laminate" value={selectedLaminateName || undefined} />
                 <SummaryRow label="Finishing" value={finishingSummary || undefined} />
               </>
