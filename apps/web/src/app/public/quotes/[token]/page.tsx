@@ -303,49 +303,84 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   return (
     <main className="quote-print-page" style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
-      <style>{`@media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } }`}</style>
+      <style>{`@media (max-width: 760px) { .quote-header-grid { grid-template-columns: 1fr !important; } .quote-header-client, .quote-header-meta { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-right: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } } @media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } }`}</style>
       <div className="quote-print-wrap" style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
-        <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 18 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 28, alignItems: "start" }}>
-            <div style={{ display: "grid", gap: 12, minWidth: 0 }}>
-              <img src={companyLogoUrl} alt={`${companyName} logo`} style={{ width: 230, maxWidth: "100%", maxHeight: 105, height: "auto", objectFit: "contain", objectPosition: "left center", borderRadius: 14, background: "#fff" }} />
-              <div style={{ display: "grid", gap: 5, maxWidth: 420 }}>
+        <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 0 }}>
+          <div
+            className="quote-header-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "minmax(210px, 0.95fr) minmax(270px, 1.15fr) minmax(250px, 1fr)",
+              gap: 0,
+              alignItems: "start"
+            }}
+          >
+            <div style={{ display: "grid", gap: 12, minWidth: 0, paddingRight: 20 }}>
+              <img
+                src={companyLogoUrl}
+                alt={`${companyName} logo`}
+                style={{ width: 230, maxWidth: "100%", maxHeight: 96, height: "auto", objectFit: "contain", objectPosition: "left center", borderRadius: 14, background: "#fff" }}
+              />
+              <div style={{ display: "grid", gap: 5 }}>
                 {legalName ? <strong style={{ color: "#111827", fontSize: 14 }}>{legalName}</strong> : null}
                 {companySettings?.abn ? <span style={{ color: "#475467", fontSize: 13 }}>ABN {companySettings.abn}</span> : null}
                 {[companySettings?.phone, companySettings?.email].filter(Boolean).length ? <span style={{ color: "#475467", fontSize: 13 }}>{[companySettings?.phone, companySettings?.email].filter(Boolean).join(" · ")}</span> : null}
                 {companySettings?.address ? <span style={{ color: "#475467", fontSize: 13, whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{companySettings.address}</span> : null}
               </div>
             </div>
-            <div style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 10, minWidth: 235 }}>
-              <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{quote.status.replace(/_/g, " ")}</span>
-              <div style={{ display: "grid", gap: 5 }}>
+
+            <div
+              className="quote-header-client"
+              style={{
+                minWidth: 0,
+                borderLeft: "1px solid #e4e7ec",
+                paddingLeft: 20,
+                paddingRight: 20,
+                display: "grid",
+                gap: 12
+              }}
+            >
+              <strong style={{ fontSize: 16 }}>Client details</strong>
+              <div style={{ display: "grid", gridTemplateColumns: clientLogoUrl ? "64px minmax(0, 1fr)" : "1fr", gap: 12, alignItems: "start" }}>
+                {clientLogoUrl ? <img src={clientLogoUrl} alt={`${quote.clientName} logo`} style={{ width: 58, height: 58, objectFit: "contain", borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff", padding: 4 }} /> : null}
+                <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
+                  <span style={{ color: "#111827", fontWeight: 850 }}>{quote.clientName}</span>
+                  {quote.contactName ? <span style={{ color: "#475467" }}>Contact: {quote.contactName}</span> : null}
+                  {clientEmail ? <span style={{ color: "#475467", overflowWrap: "anywhere" }}>Email: {clientEmail}</span> : null}
+                  {clientPhone ? <span style={{ color: "#475467" }}>Phone: {clientPhone}</span> : null}
+                  {clientAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Address: {String(clientAddress)}</span> : null}
+                </div>
+              </div>
+            </div>
+
+            <div
+              className="quote-header-meta"
+              style={{
+                minWidth: 0,
+                borderLeft: "1px solid #e4e7ec",
+                paddingLeft: 20,
+                display: "grid",
+                gap: 14
+              }}
+            >
+              <div style={{ textAlign: "right", display: "grid", justifyItems: "stretch", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "flex-end" }}>
+                  <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{quote.status.replace(/_/g, " ")}</span>
+                </div>
                 <span style={{ color: "#667085", fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>Quote number</span>
-                <h1 style={{ margin: 0, fontSize: 30, letterSpacing: "-0.04em" }}>{quote.quoteNumber ?? "Quote"}</h1>
+                <h1 style={{ margin: 0, fontSize: 28, letterSpacing: "-0.04em" }}>{quote.quoteNumber ?? "Quote"}</h1>
                 <span style={{ color: "#667085", fontSize: 13 }}>Issued {formatDate(quote.sentAt ?? quote.createdAt)}</span>
                 <PrintQuoteButton />
               </div>
-            </div>
-          </div>
 
-          <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))", gap: 16 }}>
-            <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gridTemplateColumns: clientLogoUrl ? "72px 1fr" : "1fr", gap: 12, alignItems: "start" }}>
-              {clientLogoUrl ? <img src={clientLogoUrl} alt={`${quote.clientName} logo`} style={{ width: 64, height: 64, objectFit: "contain", borderRadius: 14, border: "1px solid #e5e7eb", background: "#fff", padding: 4 }} /> : null}
-              <div style={{ display: "grid", gap: 7 }}>
-                <strong style={{ fontSize: 16 }}>Client details</strong>
-                <span style={{ color: "#111827", fontWeight: 850 }}>{quote.clientName}</span>
-                {quote.contactName ? <span style={{ color: "#475467" }}>Contact: {quote.contactName}</span> : null}
-                {clientEmail ? <span style={{ color: "#475467" }}>Email: {clientEmail}</span> : null}
-                {clientPhone ? <span style={{ color: "#475467" }}>Phone: {clientPhone}</span> : null}
-                {clientAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Address: {String(clientAddress)}</span> : null}
+              <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 12, display: "grid", gap: 6 }}>
+                <strong style={{ fontSize: 16 }}>Job / quote details</strong>
+                <span style={{ color: "#111827", fontWeight: 850 }}>{jobName}</span>
+                <span style={{ color: "#475467" }}>Reference: {quote.quoteNumber ?? "Quote"}</span>
+                {clientPurchaseOrderNumber ? <span style={{ color: "#475467" }}>Client PO: <strong>{clientPurchaseOrderNumber}</strong></span> : null}
+                {siteAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Site: {String(siteAddress)}</span> : null}
               </div>
-            </div>
-            <div style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 7 }}>
-              <strong style={{ fontSize: 16 }}>Job / quote details</strong>
-              <span style={{ color: "#111827", fontWeight: 850 }}>{jobName}</span>
-              <span style={{ color: "#475467" }}>Reference: {quote.quoteNumber ?? "Quote"}</span>
-              {clientPurchaseOrderNumber ? <span style={{ color: "#475467" }}>Client PO: <strong>{clientPurchaseOrderNumber}</strong></span> : null}
-              {siteAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Site: {String(siteAddress)}</span> : null}
             </div>
           </div>
         </section>
