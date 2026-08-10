@@ -345,7 +345,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           widthMm: material.widthMm,
           lengthMm: material.lengthMm,
           rollWidthMm: material.rollWidthMm,
-          reversePrintable: material.reversePrintable
+          reversePrintable: material.reversePrintable,
+          usedForBacking: material.usedForBacking
         }))}
         processes={processes.filter((process) => process.active || currentProcessSteps.some((step) => step.processId === process.id)).map((process) => ({
           id: process.id,

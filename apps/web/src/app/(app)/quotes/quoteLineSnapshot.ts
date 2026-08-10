@@ -39,6 +39,7 @@ export type SnapshotMaterial = {
   minimumBillableSheetFraction?: string | null;
   rollBillingIncrementMetres?: string | null;
   reversePrintable?: boolean;
+  usedForBacking?: boolean;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -190,6 +191,7 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
     minimumBillableSheetFraction: stringValue(value.minimumBillableSheetFraction) || null,
     rollBillingIncrementMetres: stringValue(value.rollBillingIncrementMetres) || null,
     reversePrintable: value.reversePrintable === true || stringValue(value.reversePrintable).trim().toLowerCase() === "true",
+    usedForBacking: value.usedForBacking === true || stringValue(value.usedForBacking).trim().toLowerCase() === "true",
     supplierName: stringValue(value.supplierName) || null,
     sku: stringValue(value.sku) || null,
     stockUom: stringValue(value.stockUom) || null,

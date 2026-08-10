@@ -18,6 +18,7 @@ type MaterialOption = {
   lengthMm: string | null;
   rollWidthMm: string | null;
   reversePrintable: boolean;
+  usedForBacking: boolean;
 };
 
 type ProcessOption = {
@@ -426,7 +427,7 @@ export function ProductProductionFlowBuilder({
   }, [allMainMaterials, materialSearch]);
   const mainMaterialGroups = useMemo(() => autoMaterialGroups(mainMaterials, materialId), [mainMaterials, materialId]);
   const rollMediaMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
-  const vinylBackingMaterials = useMemo(() => materials.filter(isRollPrintMaterial), [materials]);
+  const vinylBackingMaterials = useMemo(() => materials.filter((material) => isRollPrintMaterial(material) && (material.usedForBacking === true || vinylBackingMaterialIds.includes(material.id) || material.id === defaultVinylBackingMaterialId)), [materials, vinylBackingMaterialIds, defaultVinylBackingMaterialId]);
   const laminateMaterials = useMemo(() => materials.filter(isLaminateMaterial), [materials]);
   const rollMediaGroups = useMemo(() => autoMaterialGroups(rollMediaMaterials, rollMediaId), [rollMediaMaterials, rollMediaId]);
   const vinylBackingGroups = useMemo(() => autoMaterialGroups(vinylBackingMaterials, defaultVinylBackingMaterialId), [vinylBackingMaterials, defaultVinylBackingMaterialId]);
@@ -849,7 +850,7 @@ export function ProductProductionFlowBuilder({
           {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label} — {autoGroupDescription(group)}</option>)}</select><small style={{ color: "#64748b", fontWeight: 650 }}>Roll stocks with the same customer-facing name are treated as width variants. Production Manager chooses the lowest-cost stock that fits the finished size.</small></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
           {reversePrintableApplicable ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfeff", color: "#155e75", border: "1px solid #a5f3fc" }}><b>Reverse print enabled.</b> This product will offer <b>Standard print</b> and <b>Reverse print</b>. Choosing Reverse print will reveal the backing-film choices below. Laminate options remain available in the normal Laminate step.</div> : null}
           {vinylBackingApplicable ? <div style={{ display: "grid", gap: 10, padding: 14, borderRadius: 14, background: "#f8fafc", border: "1px solid #dbe4f0" }}>
-            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.{reversePrintableApplicable && clearBaseMaterialLabels.length === 0 ? " On reverse-printable roll media this question only appears after Reverse print is selected." : baseMaterialMode === "option" && clearBaseMaterialLabels.length > 0 ? ` This question will only appear when the customer chooses ${clearBaseMaterialLabels.join(" or ")}.` : ""}</p></div>
+            <div><strong>Vinyl backing, optional</strong><p style={{ margin: "4px 0 0", color: "#64748b", fontSize: 13 }}>Choose the customer-facing backing choices. Only roll stocks marked Used for backing are offered here. Stocks with the same customer-facing name are grouped automatically, then the best width is selected from the finished size and cost.{reversePrintableApplicable && clearBaseMaterialLabels.length === 0 ? " On reverse-printable roll media this question only appears after Reverse print is selected." : baseMaterialMode === "option" && clearBaseMaterialLabels.length > 0 ? ` This question will only appear when the customer chooses ${clearBaseMaterialLabels.join(" or ")}.` : ""}</p></div>
             <button type="button" onClick={() => setDefaultVinylBacking("none")} style={{ ...choiceCardStyle(defaultVinylBackingMaterialId === "none"), minHeight: 58 }}><strong>No vinyl backing</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 4 }}>{defaultVinylBackingMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 9 }}>
               {vinylBackingGroups.map((group) => {

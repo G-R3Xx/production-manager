@@ -215,6 +215,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
           <div style={{ fontWeight: 800 }}>{material.name}</div>
           {material.customerFacingName ? <div style={{ marginTop: 3, color: "#0f766e", fontSize: 13, fontWeight: 750 }}>Client sees: {material.customerFacingName}</div> : null}
           {material.reversePrintable ? <div style={{ marginTop: 3, color: "#155e75", fontSize: 12, fontWeight: 800 }}>Reverse printable</div> : null}
+          {material.usedForBacking ? <div style={{ marginTop: 3, color: "#7c3aed", fontSize: 12, fontWeight: 800 }}>Used for backing</div> : null}
           <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{formatMaterialType(material.materialType)} · Stock {material.stockQuantity ?? "0"} {material.stockUom ?? "units"} · Cost ${material.purchaseCost ?? "0"}/{material.purchaseUom ?? "unit"}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>

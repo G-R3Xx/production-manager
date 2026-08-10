@@ -20,6 +20,7 @@ type MaterialFormRecord = {
   minimumBillableSheetFraction: string | null;
   rollBillingIncrementMetres: string | null;
   reversePrintable: boolean;
+  usedForBacking: boolean;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -370,6 +371,12 @@ function RollFields({ material, kind }: { material?: MaterialFormRecord; kind: M
           <label style={{ minHeight: 46, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", display: "flex", alignItems: "center", gap: 10, background: "#fff", fontWeight: 800 }}>
             <input type="checkbox" name="reversePrintable" defaultChecked={material?.reversePrintable === true} />
             Reverse printable
+          </label>
+        </Field> : null}
+        {kind === "roll_media" ? <Field label="Used for backing" helper="Enable this for white, frosted or other roll media that may be applied behind clear acrylic or reverse-printed clear media. Only marked stocks are offered in Backing selectors.">
+          <label style={{ minHeight: 46, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", display: "flex", alignItems: "center", gap: 10, background: "#fff", fontWeight: 800 }}>
+            <input type="checkbox" name="usedForBacking" defaultChecked={material?.usedForBacking === true} />
+            Used for backing
           </label>
         </Field> : null}
       </div>

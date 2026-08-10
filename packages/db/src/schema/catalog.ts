@@ -128,6 +128,7 @@ export const materials = catalogSchema.table("materials", {
     scale: 4
   }),
   reversePrintable: boolean("reverse_printable").notNull().default(false),
+  usedForBacking: boolean("used_for_backing").notNull().default(false),
   name: varchar("name", { length: 200 }).notNull(),
   customerFacingName: varchar("customer_facing_name", { length: 200 }),
   supplierId: uuid("supplier_id"),
