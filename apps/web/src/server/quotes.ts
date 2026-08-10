@@ -1123,18 +1123,20 @@ export async function countArtworkEligibleQuoteLines(quoteId: string): Promise<n
   return lines.filter((line) => artworkQuoteLineKind(line)).length;
 }
 
-export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string, approvalId: string): Promise<{ created: number; skipped: number }> {
+export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string, approvalId: string): Promise<{ created: number; updated: number; skipped: number; outOfScope: number }> {
   await ensureArtworkApprovalTables();
   const approval = await getArtworkApprovalById(tenantId, approvalId);
-  if (!approval) return { created: 0, skipped: 0 };
+  if (!approval) return { created: 0, updated: 0, skipped: 0, outOfScope: 0 };
 
   const [lines, existingPages] = await Promise.all([
     listQuoteLines(approval.quoteId),
     listArtworkApprovalPages(approval.id)
   ]);
-  const existingLineIds = new Set(existingPages.map((page) => page.sourceQuoteLineId).filter(Boolean));
+  const existingByLineId = new Map(existingPages.filter((page) => page.sourceQuoteLineId).map((page) => [page.sourceQuoteLineId as string, page]));
   const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
+  const activeLineIds = new Set<string>();
   let created = 0;
+  let updated = 0;
   let skipped = 0;
   let nextIndex = existingPages.length + 1;
 
@@ -1148,17 +1150,73 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
       skipped += 1;
       continue;
     }
-    if (existingLineIds.has(line.id)) {
-      skipped += 1;
+
+    activeLineIds.add(line.id);
+    const pageInput = buildArtworkPageFromQuoteLine(line, nextIndex, kind);
+    const existing = existingByLineId.get(line.id);
+    if (!existing) {
+      await addArtworkApprovalPageForTenant(tenantId, approval.id, pageInput);
+      created += 1;
+      nextIndex += 1;
       continue;
     }
 
-    await addArtworkApprovalPageForTenant(tenantId, approval.id, buildArtworkPageFromQuoteLine(line, nextIndex, kind));
-    created += 1;
-    nextIndex += 1;
+    const existingIsPlaceholder = existing.imageUrl.startsWith("data:image/svg+xml")
+      || (!existing.fileName && !existing.imageStoragePath && /auto-created from quote line/i.test(existing.notes ?? ""));
+
+    await pool.query(`
+      UPDATE sales.artwork_approval_pages p
+      SET title = $4::varchar,
+          sign_code = COALESCE(NULLIF(p.sign_code, ''), $5::varchar),
+          description = $6::text,
+          image_url = CASE WHEN $7::boolean THEN $8::text ELSE p.image_url END,
+          notes = CASE WHEN $7::boolean THEN $9::text ELSE p.notes END,
+          production_type = COALESCE(NULLIF($10::varchar, ''), 'signage'),
+          quantity = NULLIF($11::text, '')::numeric,
+          colour_summary = $12::text,
+          size_summary = $13::text,
+          substrate_summary = $14::text,
+          install_summary = $15::text,
+          small_format_summary = $16::text,
+          proof_revision = CASE WHEN $7::boolean THEN aa.revision ELSE p.proof_revision END,
+          updated_at = now()
+      FROM sales.artwork_approvals aa
+      WHERE p.approval_id = aa.id
+        AND aa.tenant_id = $1::uuid
+        AND p.approval_id = $2::uuid
+        AND p.id = $3::uuid
+    `, [
+      tenantId,
+      approval.id,
+      existing.id,
+      pageInput.title,
+      pageInput.signCode ?? null,
+      pageInput.description ?? null,
+      existingIsPlaceholder,
+      pageInput.imageUrl,
+      pageInput.notes ?? null,
+      pageInput.productionType ?? "signage",
+      normaliseMoney(pageInput.quantity, "1"),
+      nullableText(pageInput.colourSummary),
+      nullableText(pageInput.sizeSummary),
+      nullableText(pageInput.substrateSummary),
+      nullableText(pageInput.installSummary),
+      nullableText(pageInput.smallFormatSummary)
+    ]);
+    updated += 1;
   }
 
-  return { created, skipped };
+  const outOfScope = existingPages.filter((page) => page.sourceQuoteLineId && !activeLineIds.has(page.sourceQuoteLineId)).length;
+
+  // A manual sync is activity on this artwork job. Touch the parent so the job rail
+  // can keep the most recently worked-on approval at the top.
+  await pool.query(`
+    UPDATE sales.artwork_approvals
+    SET updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, approval.id]);
+
+  return { created, updated, skipped, outOfScope };
 }
 
 function artworkApprovalSelectSql(): string {

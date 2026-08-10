@@ -96,9 +96,10 @@ export async function prefillArtworkApprovalPagesFromQuoteAction(formData: FormD
   if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
 
   const result = await prefillArtworkApprovalPagesFromQuoteLines(activeTenant.tenantId, approvalId);
-  const message = result.created > 0
-    ? `${result.created} quote line${result.created === 1 ? "" : "s"} added as artwork page${result.created === 1 ? "" : "s"}`
-    : "No new sign or small-format quote lines to add";
+  const synced = result.created + result.updated;
+  const message = synced > 0
+    ? `Quote lines synced: ${result.created} added, ${result.updated} refreshed${result.outOfScope > 0 ? `, ${result.outOfScope} out of scope preserved` : ""}`
+    : "Quote lines synced: no approved artwork lines are currently in scope";
   redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 

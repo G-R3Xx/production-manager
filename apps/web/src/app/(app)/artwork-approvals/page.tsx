@@ -186,9 +186,8 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   ]);
 
   const deletedCount = allApprovals.filter((item) => item.status === "deleted").length;
-  const statusPriority: Record<string, number> = { changes_requested: 0, draft: 1, viewed: 2, sent: 3, approved: 4, deleted: 5 };
   const approvals = (filter === "deleted" ? allApprovals.filter((item) => item.status === "deleted") : allApprovals.filter((item) => item.status !== "deleted"))
-    .sort((a, b) => (statusPriority[a.status] ?? 9) - (statusPriority[b.status] ?? 9) || new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   const [quoteForCreate, existingForQuote] = quoteParam ? await Promise.all([
     getQuoteDraftById(activeTenant.tenantId, quoteParam),
     getArtworkApprovalForQuote(activeTenant.tenantId, quoteParam)
@@ -354,7 +353,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         {missingLinePages.length ? <span style={{ color: "#b54708", fontSize: 12, fontWeight: 900 }}>{missingLinePages.length} missing slot{missingLinePages.length === 1 ? "" : "s"}</span> : null}
-                        <form action={prefillArtworkApprovalPagesFromQuoteAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...secondaryButton, background: missingLinePages.length ? "#fffaeb" : "#fff" }}>Sync quote lines</button></form>
+                        <form action={prefillArtworkApprovalPagesFromQuoteAction} style={{ display: "grid", gap: 3 }}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...secondaryButton, background: missingLinePages.length ? "#fffaeb" : "#fff" }}>Sync quote lines</button><span style={{ color: "#98a2b3", fontSize: 9, textAlign: "right" }}>Refreshes approved scope + production details</span></form>
                       </div>
                     </div>
 
