@@ -6,8 +6,8 @@ import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
-import { acceptQuoteAction, declineQuoteAction, requestQuoteChangesAction } from "./actions";
 import { PrintQuoteButton } from "./PrintQuoteButton";
+import { QuoteLineResponseControls } from "./QuoteLineResponseControls";
 
 type PageProps = {
   params: Promise<{ token: string }>;
@@ -279,7 +279,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   const sourceEnquiryId = quote.enquiryId || sourceSurvey?.enquiryId || null;
   const sourceEnquiry = sourceEnquiryId ? await getEnquiryById(quote.tenantId, sourceEnquiryId) : null;
-  const subtotal = lines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
+  const subtotal = lines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
@@ -293,17 +293,18 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   const sourceSiteAddress = sourceSurvey?.siteAddress || sourceEnquiry?.siteAddress || linkedClient?.payloadJson.defaultSiteAddress || null;
   const siteAddress = sourceSiteAddress && sourceSiteAddress !== clientAddress ? sourceSiteAddress : null;
   const jobName = deriveJobName(quote, lines, sourceEnquiry?.requestSummary || sourceSurvey?.notes || sourceSurvey?.surveyDetails);
-  const responseStatus = quote.acceptedAt || quote.status === "accepted" || quote.status === "approved"
+  const responseStatus = quote.status === "accepted" || quote.status === "approved"
     ? "accepted"
-    : quote.declinedAt || quote.status === "declined"
+    : quote.status === "declined"
       ? "declined"
-      : quote.changesRequestedAt || quote.status === "changes_requested"
+      : quote.status === "changes_requested"
         ? "changes requested"
         : null;
+  const lineResponsesLocked = quote.status === "accepted" || quote.status === "declined";
 
   return (
     <main className="quote-print-page" style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
-      <style>{`@media (max-width: 760px) { .quote-header-top, .quote-header-info { grid-template-columns: 1fr !important; } .quote-header-meta { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-job { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-client { padding-left: 0 !important; } .quote-company-row { grid-template-columns: 1fr !important; } } @media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } }`}</style>
+      <style>{`@media (max-width: 760px) { .quote-header-top, .quote-header-info { grid-template-columns: 1fr !important; } .quote-header-meta { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-job { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-client { padding-left: 0 !important; } .quote-company-row { grid-template-columns: 1fr !important; } .quote-line-grid { grid-template-columns: 1fr !important; } .quote-line-price { text-align: left !important; justify-items: start !important; } .quote-line-actions { justify-items: start !important; } } @media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } .quote-line-grid { grid-template-columns: minmax(0,1fr) auto !important; } }`}</style>
       <div className="quote-print-wrap" style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
         <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 0 }}>
@@ -408,15 +409,36 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
             {lines.map((line) => {
               const clientLine = quoteLineForClient(line);
               return (
-                <div key={line.id} className="quote-print-line" style={{ border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "1fr auto", gap: 12, background: "#fbfdff" }}>
-                  <div style={{ display: "grid", gap: 5 }}>
-                    <strong>{clientLine.title}</strong>
+                <div
+                  key={line.id}
+                  className="quote-print-line quote-line-grid"
+                  style={{
+                    border: "1px solid #e4e7ec",
+                    borderRadius: 18,
+                    padding: 14,
+                    display: "grid",
+                    gridTemplateColumns: "minmax(0, 1fr) minmax(125px, auto) minmax(245px, auto)",
+                    gap: 14,
+                    alignItems: "center",
+                    background: line.clientResponseStatus === "cancelled" ? "#fff8f7" : "#fbfdff",
+                    opacity: line.clientResponseStatus === "cancelled" ? 0.82 : 1
+                  }}
+                >
+                  <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
+                    <strong style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}>{clientLine.title}</strong>
                     {clientLine.detail ? <span style={{ color: "#667085", fontSize: 13 }}>{clientLine.detail}</span> : null}
                   </div>
-                  <div style={{ textAlign: "right", display: "grid", gap: 4 }}>
+                  <div className="quote-line-price" style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 4, minWidth: 0 }}>
                     <strong>{formatMoney(parseMoney(line.lineTotal))}</strong>
-                    <span style={{ color: "#667085", fontSize: 13 }}>Qty {line.quantity} · {formatMoney(parseMoney(line.unitPrice))} ea</span>
+                    <span style={{ color: "#667085", fontSize: 13, whiteSpace: "nowrap" }}>Qty {line.quantity} · {formatMoney(parseMoney(line.unitPrice))} ea</span>
                   </div>
+                  <QuoteLineResponseControls
+                    token={token}
+                    lineId={line.id}
+                    status={line.clientResponseStatus}
+                    notes={line.clientResponseNotes}
+                    locked={lineResponsesLocked}
+                  />
                 </div>
               );
             })}
@@ -433,27 +455,19 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
         {quote.notes ? <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 8 }}><h2 style={{ margin: 0 }}>Notes</h2><p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>{quote.notes}</p></section> : null}
 
-        {responseStatus ? (
-          <section className="quote-print-hide" style={{ ...cardStyle, display: "grid", gap: 10, borderColor: quote.status === "accepted" ? "#abefc6" : "#fed7aa" }}>
-            <h2 style={{ margin: 0 }}>Response received</h2>
-            <p style={{ margin: 0, color: "#475467" }}>This quote has been marked as <strong>{responseStatus}</strong>. Tender Edge has received the response.</p>
-            {quote.clientResponseNotes ? <p style={{ margin: 0, color: "#667085", whiteSpace: "pre-wrap", lineHeight: 1.55 }}>Notes: {quote.clientResponseNotes}</p> : null}
-          </section>
-        ) : (
-          <section className="quote-print-hide" style={{ ...cardStyle, display: "grid", gap: 14 }}>
-            <h2 style={{ margin: 0 }}>Respond to quote</h2>
-            <p style={{ margin: 0, color: "#667085" }}>Accept this quote, request changes, or decline. Your response goes straight back to Production Manager.</p>
-            <form action={acceptQuoteAction} style={{ display: "grid", gap: 10 }}>
-              <input type="hidden" name="token" value={token} />
-              <textarea name="notes" placeholder="Optional notes" style={textareaStyle} />
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Accept quote</button>
-                <button formAction={requestQuoteChangesAction} type="submit" style={{ ...buttonStyle, background: "#c2410c" }}>Request changes</button>
-                <button formAction={declineQuoteAction} type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Decline</button>
-              </div>
-            </form>
-          </section>
-        )}
+        <section className="quote-print-hide" style={{ ...cardStyle, display: "grid", gap: 8, borderColor: responseStatus === "accepted" ? "#abefc6" : responseStatus === "declined" ? "#fecaca" : responseStatus === "changes requested" ? "#fed7aa" : "#dfe7f2" }}>
+          <h2 style={{ margin: 0 }}>{responseStatus ? "Quote response" : "Respond to each item"}</h2>
+          {responseStatus === "accepted" ? (
+            <p style={{ margin: 0, color: "#067647" }}>Response complete. Approved items are accepted and cancelled items have been removed from the quote total.</p>
+          ) : responseStatus === "declined" ? (
+            <p style={{ margin: 0, color: "#b42318" }}>All quote items have been cancelled.</p>
+          ) : responseStatus === "changes requested" ? (
+            <p style={{ margin: 0, color: "#9a3412" }}>Changes have been requested on one or more items. Tender Edge can see the affected line and the change note.</p>
+          ) : (
+            <p style={{ margin: 0, color: "#667085" }}>Use Approve, Request changes or Cancel beside each quote line. The quote is accepted once every remaining item has been approved or cancelled.</p>
+          )}
+          {quote.clientResponseNotes ? <p style={{ margin: 0, color: "#667085", whiteSpace: "pre-wrap" }}>Quote note: {quote.clientResponseNotes}</p> : null}
+        </section>
       </div>
     </main>
   );

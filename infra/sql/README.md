@@ -39,3 +39,5 @@ pnpm db:studio
 - 014_suppliers_legacy_columns_fix.sql — repair migration for older app.suppliers tables missing contact/email/phone/status/notes fields.
 
 - `038_wordpress_product_publishing.sql` — adds website publishing fields to products, tenant-scoped WordPress API connections, and idempotent WooCommerce order tracking.
+
+- `039_quote_line_client_responses.sql` — adds persistent per-line client quote response status, notes and timestamps for approve/change/cancel workflows.

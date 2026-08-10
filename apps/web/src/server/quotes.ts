@@ -48,6 +48,9 @@ export type QuoteLineRecord = {
   lineTotal: string;
   notes: string | null;
   configurationSnapshot: Record<string, unknown>;
+  clientResponseStatus: "pending" | "approved" | "changes_requested" | "cancelled" | string;
+  clientResponseNotes: string | null;
+  clientRespondedAt: string | null;
   createdAt: string;
 };
 
@@ -188,6 +191,20 @@ async function ensureQuoteLineConfigurationColumn(): Promise<void> {
   await pool.query(`
     ALTER TABLE sales.quote_lines
       ADD COLUMN IF NOT EXISTS configuration_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb
+  `);
+}
+
+async function ensureQuoteLineClientResponseColumns(): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  await pool.query(`
+    ALTER TABLE sales.quote_lines
+      ADD COLUMN IF NOT EXISTS client_response_status varchar(32) NOT NULL DEFAULT 'pending',
+      ADD COLUMN IF NOT EXISTS client_response_notes text,
+      ADD COLUMN IF NOT EXISTS client_responded_at timestamptz
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS quote_lines_client_response_idx
+      ON sales.quote_lines (quote_id, client_response_status)
   `);
 }
 
@@ -358,6 +375,7 @@ export async function getQuoteDraftByPublicToken(token: string): Promise<QuoteDr
 
 
 export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<string, number>> {
+  await ensureQuoteLineClientResponseColumns();
   const uniqueIds = Array.from(new Set(quoteIds.filter(Boolean)));
   if (!uniqueIds.length) return new Map();
 
@@ -367,6 +385,7 @@ export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<strin
       COALESCE(SUM(line_total), 0)::text as total
     FROM sales.quote_lines
     WHERE quote_id = ANY($1::uuid[])
+      AND COALESCE(client_response_status, 'pending') <> 'cancelled'
     GROUP BY quote_id
   `, [uniqueIds]);
 
@@ -374,6 +393,8 @@ export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<strin
 }
 
 export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]> {
+  await ensureQuoteLineConfigurationColumn();
+  await ensureQuoteLineClientResponseColumns();
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       id,
@@ -386,6 +407,9 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]
       line_total::text as "lineTotal",
       notes,
       configuration_snapshot as "configurationSnapshot",
+      COALESCE(client_response_status, 'pending') as "clientResponseStatus",
+      client_response_notes as "clientResponseNotes",
+      client_responded_at as "clientRespondedAt",
       created_at as "createdAt"
     FROM sales.quote_lines
     WHERE quote_id = $1::uuid
@@ -482,6 +506,7 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
   configurationSnapshot?: Record<string, unknown> | null;
 }): Promise<void> {
   await ensureQuoteLineConfigurationColumn();
+  await ensureQuoteLineClientResponseColumns();
   await pool.query(`
     UPDATE sales.quote_lines ql
     SET product_name = $4::varchar,
@@ -491,6 +516,9 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
         line_total = ($6::numeric * $7::numeric),
         notes = $8::text,
         configuration_snapshot = COALESCE($9::jsonb, ql.configuration_snapshot),
+        client_response_status = 'pending',
+        client_response_notes = NULL,
+        client_responded_at = NULL,
         updated_at = now()
     FROM sales.quote_drafts qd
     WHERE ql.quote_id = qd.id
@@ -511,6 +539,8 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
 }
 
 export async function getQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<QuoteLineRecord | null> {
+  await ensureQuoteLineConfigurationColumn();
+  await ensureQuoteLineClientResponseColumns();
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       ql.id,
@@ -523,6 +553,9 @@ export async function getQuoteLineForTenant(tenantId: string, quoteId: string, l
       ql.line_total::text as "lineTotal",
       ql.notes,
       ql.configuration_snapshot as "configurationSnapshot",
+      COALESCE(ql.client_response_status, 'pending') as "clientResponseStatus",
+      ql.client_response_notes as "clientResponseNotes",
+      ql.client_responded_at as "clientRespondedAt",
       ql.created_at as "createdAt"
     FROM sales.quote_lines ql
     JOIN sales.quote_drafts qd ON qd.id = ql.quote_id
@@ -560,12 +593,27 @@ export async function linkQuoteLineToProductForTenant(
 
 export async function markQuoteSentForTenant(tenantId: string, quoteId: string): Promise<void> {
   await ensureQuoteLifecycleColumns();
+  await ensureQuoteLineClientResponseColumns();
+  const previous = await pool.query<{ status: string }>(`
+    SELECT status FROM sales.quote_drafts WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1
+  `, [tenantId, quoteId]);
+  if (previous.rows[0]?.status === "changes_requested") {
+    await pool.query(`
+      UPDATE sales.quote_lines
+      SET client_response_status = 'pending', client_response_notes = NULL, client_responded_at = NULL, updated_at = now()
+      WHERE quote_id = $1::uuid
+    `, [quoteId]);
+  }
   await pool.query(`
     UPDATE sales.quote_drafts
     SET status = 'sent',
         public_token = COALESCE(public_token, $3),
         quote_number = COALESCE(quote_number, 'Q-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(id::text, '-', ''), 1, 5))),
         sent_at = COALESCE(sent_at, now()),
+        accepted_at = NULL,
+        declined_at = NULL,
+        changes_requested_at = NULL,
+        myob_order_status = CASE WHEN myob_order_status = 'synced' THEN myob_order_status ELSE 'not_synced' END,
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, quoteId, makePublicToken()]);
@@ -644,6 +692,7 @@ async function updateQuoteReadyForMyobByToken(token: string): Promise<void> {
 
 export async function respondToQuoteByToken(token: string, response: "accepted" | "changes_requested" | "declined", notes: string | null): Promise<void> {
   await ensureQuoteLifecycleColumns();
+  await ensureQuoteLineClientResponseColumns();
 
   const timestampColumn = response === "accepted" ? "accepted_at" : response === "declined" ? "declined_at" : "changes_requested_at";
 
@@ -661,9 +710,126 @@ export async function respondToQuoteByToken(token: string, response: "accepted" 
     throw new Error("Quote response could not be saved because the public quote token was not found.");
   }
 
+  if (response === "accepted" || response === "declined") {
+    await pool.query(`
+      UPDATE sales.quote_lines ql
+      SET client_response_status = $2::varchar,
+          client_response_notes = $3::text,
+          client_responded_at = now(),
+          updated_at = now()
+      FROM sales.quote_drafts qd
+      WHERE ql.quote_id = qd.id
+        AND qd.public_token = $1
+    `, [token, response === "accepted" ? "approved" : "cancelled", notes]);
+  }
+
   if (response === "accepted") {
     await updateQuoteReadyForMyobByToken(token);
   }
+}
+
+export type QuoteLineClientResponse = "approved" | "changes_requested" | "cancelled";
+
+export async function respondToQuoteLineByToken(
+  token: string,
+  lineId: string,
+  response: QuoteLineClientResponse,
+  notes: string | null
+): Promise<{ quoteStatus: string; lineStatus: QuoteLineClientResponse }> {
+  await ensureQuoteLifecycleColumns();
+  await ensureQuoteLineClientResponseColumns();
+
+  const client = await pool.connect();
+  let tenantId = "";
+  let quoteId = "";
+  let quoteNumber = "Quote";
+  let productName = "Quote line";
+  let overallStatus = "viewed";
+  try {
+    await client.query("BEGIN");
+    const quoteResult = await client.query<{ id: string; tenantId: string; quoteNumber: string | null; status: string }>(`
+      SELECT id::text, tenant_id::text as "tenantId", quote_number as "quoteNumber", status
+      FROM sales.quote_drafts
+      WHERE public_token = $1 AND status <> 'deleted'
+      FOR UPDATE
+    `, [token]);
+    const quote = quoteResult.rows[0];
+    if (!quote) throw new Error("Quote not found.");
+    tenantId = quote.tenantId;
+    quoteId = quote.id;
+    quoteNumber = quote.quoteNumber ?? "Quote";
+
+    if (quote.status === "accepted" || quote.status === "declined") {
+      throw new Error("This quote has already been finalised.");
+    }
+
+    const lineResult = await client.query<{ productName: string }>(`
+      UPDATE sales.quote_lines
+      SET client_response_status = $3::varchar,
+          client_response_notes = $4::text,
+          client_responded_at = now(),
+          updated_at = now()
+      WHERE quote_id = $1::uuid AND id = $2::uuid
+      RETURNING product_name as "productName"
+    `, [quote.id, lineId, response, notes]);
+    if (!lineResult.rowCount) throw new Error("Quote line not found.");
+    productName = lineResult.rows[0]?.productName ?? productName;
+
+    const summary = await client.query<{ total: string; approved: string; requested: string; cancelled: string; pending: string }>(`
+      SELECT
+        count(*)::text as total,
+        count(*) FILTER (WHERE client_response_status = 'approved')::text as approved,
+        count(*) FILTER (WHERE client_response_status = 'changes_requested')::text as requested,
+        count(*) FILTER (WHERE client_response_status = 'cancelled')::text as cancelled,
+        count(*) FILTER (WHERE COALESCE(client_response_status, 'pending') = 'pending')::text as pending
+      FROM sales.quote_lines
+      WHERE quote_id = $1::uuid
+    `, [quote.id]);
+    const counts = summary.rows[0];
+    const total = Number(counts?.total ?? 0);
+    const approved = Number(counts?.approved ?? 0);
+    const requested = Number(counts?.requested ?? 0);
+    const cancelled = Number(counts?.cancelled ?? 0);
+    const pending = Number(counts?.pending ?? 0);
+
+    if (requested > 0) overallStatus = "changes_requested";
+    else if (total > 0 && pending === 0 && approved > 0 && approved + cancelled === total) overallStatus = "accepted";
+    else if (total > 0 && cancelled === total) overallStatus = "declined";
+    else overallStatus = "viewed";
+
+    await client.query(`
+      UPDATE sales.quote_drafts
+      SET status = $2::varchar,
+          accepted_at = CASE WHEN $2 = 'accepted' THEN COALESCE(accepted_at, now()) ELSE NULL END,
+          declined_at = CASE WHEN $2 = 'declined' THEN COALESCE(declined_at, now()) ELSE NULL END,
+          changes_requested_at = CASE WHEN $2 = 'changes_requested' THEN COALESCE(changes_requested_at, now()) ELSE NULL END,
+          myob_order_status = CASE
+            WHEN $2 = 'accepted' AND myob_order_status <> 'synced' THEN 'ready_to_sync'
+            WHEN $2 <> 'accepted' AND myob_order_status IN ('not_synced','ready_to_sync','error') THEN 'not_synced'
+            ELSE myob_order_status
+          END,
+          updated_at = now()
+      WHERE id = $1::uuid
+    `, [quote.id, overallStatus]);
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  const responseLabel = response === "approved" ? "approved" : response === "cancelled" ? "cancelled" : "requested changes to";
+  await createNotificationForTenant(tenantId, {
+    eventType: "quote_line_response",
+    title: `Client ${responseLabel} a quote line`,
+    message: `${quoteNumber}: ${productName}${notes ? ` — ${notes}` : ""}`,
+    href: `/quotes?quote=${quoteId}`,
+    payloadJson: { quoteId, lineId, response, notes }
+  }).catch((error) => console.error("Quote line response saved, but notification failed", error));
+
+  return { quoteStatus: overallStatus, lineStatus: response };
 }
 
 export async function createArtworkApprovalForAcceptedQuoteToken(token: string): Promise<{ id: string } | null> {
@@ -920,6 +1086,10 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
   let nextIndex = existingPages.length + 1;
 
   for (const line of lines) {
+    if (line.clientResponseStatus === "cancelled") {
+      skipped += 1;
+      continue;
+    }
     const kind = artworkQuoteLineKind(line);
     if (!kind) {
       skipped += 1;

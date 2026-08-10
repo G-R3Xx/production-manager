@@ -269,7 +269,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     : null;
   const editingStep = editStepParam ? editStepParam as QuickQuoteStep : null;
 
-  const quoteSubtotal = quoteLines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
+  const quoteSubtotal = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
   const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
   const linkedClientLogoUrl = customerLogoUrl(linkedClient);
@@ -523,8 +523,23 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                       <summary style={{ listStyle: "none", cursor: "pointer", padding: 14 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                           <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
-                            <strong>{line.productName}</strong>
+                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                              <strong style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}>{line.productName}</strong>
+                              {line.clientResponseStatus !== "pending" ? (
+                                <span style={{
+                                  borderRadius: 999,
+                                  padding: "4px 8px",
+                                  fontSize: 11,
+                                  fontWeight: 950,
+                                  background: line.clientResponseStatus === "approved" ? "#dcfae6" : line.clientResponseStatus === "cancelled" ? "#fee4e2" : "#ffedd5",
+                                  color: line.clientResponseStatus === "approved" ? "#067647" : line.clientResponseStatus === "cancelled" ? "#b42318" : "#c2410c"
+                                }}>
+                                  {line.clientResponseStatus === "approved" ? "Client approved" : line.clientResponseStatus === "cancelled" ? "Client cancelled" : "Changes requested"}
+                                </span>
+                              ) : null}
+                            </div>
                             <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
+                            {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
                           <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
                         </div>

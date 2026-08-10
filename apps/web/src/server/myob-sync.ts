@@ -636,9 +636,13 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
     throw new Error(message);
   }
 
-  const lines = await listQuoteLines(quoteId);
+  const allLines = await listQuoteLines(quoteId);
+  const hasExplicitLineResponses = allLines.some((line) => line.clientResponseStatus !== "pending");
+  const lines = hasExplicitLineResponses
+    ? allLines.filter((line) => line.clientResponseStatus === "approved")
+    : allLines;
   if (!lines.length) {
-    const message = "This quote has no quote lines to send to MYOB.";
+    const message = "This quote has no approved quote lines to send to MYOB.";
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, { status: "error", error: message, payloadJson: { attemptedAt: new Date().toISOString(), stage: "quote-lines" } });
     throw new Error(message);
   }
