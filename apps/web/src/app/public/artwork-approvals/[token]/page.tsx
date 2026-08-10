@@ -2,7 +2,7 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { artworkQuoteLineKind, getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, listQuoteLines, markArtworkApprovalViewedByToken, type ArtworkApprovalPageRecord } from "@/server/quotes";
+import { artworkQuoteLineInScope, getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, listQuoteLines, markArtworkApprovalViewedByToken, quoteUsesLineResponses, type ArtworkApprovalPageRecord } from "@/server/quotes";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
@@ -96,13 +96,10 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
     getQuoteDraftById(approval.tenantId, approval.quoteId),
     listQuoteLines(approval.quoteId)
   ]);
-  const usesLineResponses = sourceLines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
-  const inScopeLineIds = new Set(sourceLines.filter((line) => {
-    if (!artworkQuoteLineKind(line)) return false;
-    if (line.clientResponseStatus === "cancelled") return false;
-    if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
-    return true;
-  }).map((line) => line.id));
+  const usesLineResponses = quoteUsesLineResponses(sourceLines);
+  const inScopeLineIds = new Set(sourceLines
+    .filter((line) => artworkQuoteLineInScope(line, sourceQuote?.status, usesLineResponses))
+    .map((line) => line.id));
   const pages = allPages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
   const [linkedClient, sourceEnquiry] = await Promise.all([
     sourceQuote?.linkedCustomerId ? getCustomerById(approval.tenantId, sourceQuote.linkedCustomerId) : Promise.resolve(null),

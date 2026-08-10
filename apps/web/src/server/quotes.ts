@@ -975,6 +975,33 @@ export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" |
   return null;
 }
 
+function normalisedQuoteLineResponseStatus(line: Pick<QuoteLineRecord, "clientResponseStatus">): string {
+  return String(line.clientResponseStatus ?? "pending").trim().toLowerCase() || "pending";
+}
+
+export function quoteUsesLineResponses(lines: Array<Pick<QuoteLineRecord, "clientResponseStatus">>): boolean {
+  return lines.some((line) => normalisedQuoteLineResponseStatus(line) !== "pending");
+}
+
+export function artworkQuoteLineInScope(
+  line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes" | "clientResponseStatus">,
+  quoteStatus: string | null | undefined,
+  usesLineResponses: boolean
+): boolean {
+  if (!artworkQuoteLineKind(line)) return false;
+
+  const lineStatus = normalisedQuoteLineResponseStatus(line);
+  if (lineStatus === "cancelled") return false;
+
+  // An accepted quote is final accepted scope. This covers both whole-quote and
+  // per-line acceptance, including older records where an accepted quote may
+  // still contain a stale pending line status.
+  if (String(quoteStatus ?? "").trim().toLowerCase() === "accepted") return true;
+
+  if (usesLineResponses && lineStatus !== "approved") return false;
+  return true;
+}
+
 function extractFirstMatch(source: string, patterns: RegExp[]): string | null {
   for (const pattern of patterns) {
     const match = source.match(pattern);
@@ -1123,17 +1150,18 @@ export async function countArtworkEligibleQuoteLines(quoteId: string): Promise<n
   return lines.filter((line) => artworkQuoteLineKind(line)).length;
 }
 
-export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string, approvalId: string): Promise<{ created: number; updated: number; skipped: number; outOfScope: number }> {
+export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string, approvalId: string): Promise<{ created: number; updated: number; skipped: number; outOfScope: number; eligible: number; total: number; approved: number; cancelled: number; pending: number; quoteStatus: string; quoteNumber: string | null }> {
   await ensureArtworkApprovalTables();
   const approval = await getArtworkApprovalById(tenantId, approvalId);
-  if (!approval) return { created: 0, updated: 0, skipped: 0, outOfScope: 0 };
+  if (!approval) return { created: 0, updated: 0, skipped: 0, outOfScope: 0, eligible: 0, total: 0, approved: 0, cancelled: 0, pending: 0, quoteStatus: "", quoteNumber: null };
 
-  const [lines, existingPages] = await Promise.all([
+  const [lines, existingPages, quote] = await Promise.all([
     listQuoteLines(approval.quoteId),
-    listArtworkApprovalPages(approval.id)
+    listArtworkApprovalPages(approval.id),
+    getQuoteDraftById(tenantId, approval.quoteId)
   ]);
   const existingByLineId = new Map(existingPages.filter((page) => page.sourceQuoteLineId).map((page) => [page.sourceQuoteLineId as string, page]));
-  const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
+  const usesLineResponses = quoteUsesLineResponses(lines);
   const activeLineIds = new Set<string>();
   let created = 0;
   let updated = 0;
@@ -1141,7 +1169,7 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
   let nextIndex = existingPages.length + 1;
 
   for (const line of lines) {
-    if (line.clientResponseStatus === "cancelled" || (usesLineResponses && line.clientResponseStatus !== "approved")) {
+    if (!artworkQuoteLineInScope(line, quote?.status, usesLineResponses)) {
       skipped += 1;
       continue;
     }
@@ -1207,16 +1235,24 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
   }
 
   const outOfScope = existingPages.filter((page) => page.sourceQuoteLineId && !activeLineIds.has(page.sourceQuoteLineId)).length;
+  const statuses = lines.map((line) => normalisedQuoteLineResponseStatus(line));
+  const approved = statuses.filter((status) => status === "approved").length;
+  const cancelled = statuses.filter((status) => status === "cancelled").length;
+  const pending = statuses.filter((status) => status === "pending").length;
 
-  // A manual sync is activity on this artwork job. Touch the parent so the job rail
-  // can keep the most recently worked-on approval at the top.
-  await pool.query(`
-    UPDATE sales.artwork_approvals
-    SET updated_at = now()
-    WHERE tenant_id = $1::uuid AND id = $2::uuid
-  `, [tenantId, approval.id]);
-
-  return { created, updated, skipped, outOfScope };
+  return {
+    created,
+    updated,
+    skipped,
+    outOfScope,
+    eligible: activeLineIds.size,
+    total: lines.length,
+    approved,
+    cancelled,
+    pending,
+    quoteStatus: quote?.status ?? "",
+    quoteNumber: quote?.quoteNumber ?? null
+  };
 }
 
 function artworkApprovalSelectSql(): string {

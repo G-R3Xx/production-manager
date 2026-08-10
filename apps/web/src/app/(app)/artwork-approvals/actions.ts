@@ -7,9 +7,11 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   addArtworkApprovalPageForTenant,
-  artworkQuoteLineKind,
+  artworkQuoteLineInScope,
+  quoteUsesLineResponses,
   createArtworkApprovalFromQuote,
   getArtworkApprovalById,
+  getQuoteDraftById,
   listArtworkApprovalPages,
   listQuoteLines,
   markArtworkApprovalInternallyApprovedForTenant,
@@ -97,9 +99,10 @@ export async function prefillArtworkApprovalPagesFromQuoteAction(formData: FormD
 
   const result = await prefillArtworkApprovalPagesFromQuoteLines(activeTenant.tenantId, approvalId);
   const synced = result.created + result.updated;
+  const quoteLabel = result.quoteNumber || "Source quote";
   const message = synced > 0
-    ? `Quote lines synced: ${result.created} added, ${result.updated} refreshed${result.outOfScope > 0 ? `, ${result.outOfScope} out of scope preserved` : ""}`
-    : "Quote lines synced: no approved artwork lines are currently in scope";
+    ? `${quoteLabel} synced: ${result.created} added, ${result.updated} refreshed${result.outOfScope > 0 ? `, ${result.outOfScope} out of scope preserved` : ""}`
+    : `${quoteLabel}: 0 artwork lines synced (${result.total} quote lines; ${result.approved} approved, ${result.cancelled} cancelled, ${result.pending} pending; quote status ${result.quoteStatus || "unknown"}).`;
   redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 
@@ -171,14 +174,15 @@ export async function sendArtworkApprovalFromPageAction(formData: FormData): Pro
 
   const approval = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   if (!approval) return redirect("/artwork-approvals?error=Artwork%20approval%20not%20found");
-  const [pages, lines] = await Promise.all([listArtworkApprovalPages(approvalId), listQuoteLines(approval.quoteId)]);
-  const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
-  const inScopeLineIds = new Set(lines.filter((line) => {
-    if (!artworkQuoteLineKind(line)) return false;
-    if (line.clientResponseStatus === "cancelled") return false;
-    if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
-    return true;
-  }).map((line) => line.id));
+  const [pages, lines, sourceQuote] = await Promise.all([
+    listArtworkApprovalPages(approvalId),
+    listQuoteLines(approval.quoteId),
+    getQuoteDraftById(activeTenant.tenantId, approval.quoteId)
+  ]);
+  const usesLineResponses = quoteUsesLineResponses(lines);
+  const inScopeLineIds = new Set(lines
+    .filter((line) => artworkQuoteLineInScope(line, sourceQuote?.status, usesLineResponses))
+    .map((line) => line.id));
   const requiredPages = pages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
   const missingProof = requiredPages.some((page) => page.imageUrl.startsWith("data:image/svg+xml") || (!page.fileName && !page.imageStoragePath && /auto-created from quote line/i.test(page.notes ?? "")) || (approval.revision && page.proofRevision !== approval.revision));
   const missingSlots = [...inScopeLineIds].some((lineId) => !pages.some((page) => page.sourceQuoteLineId === lineId));
@@ -212,14 +216,15 @@ export async function directApproveArtworkApprovalAction(formData: FormData): Pr
 
   const approval = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   if (!approval) return redirect("/artwork-approvals?error=Artwork%20approval%20not%20found");
-  const [pages, lines] = await Promise.all([listArtworkApprovalPages(approvalId), listQuoteLines(approval.quoteId)]);
-  const usesLineResponses = lines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
-  const inScopeLineIds = new Set(lines.filter((line) => {
-    if (!artworkQuoteLineKind(line)) return false;
-    if (line.clientResponseStatus === "cancelled") return false;
-    if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
-    return true;
-  }).map((line) => line.id));
+  const [pages, lines, sourceQuote] = await Promise.all([
+    listArtworkApprovalPages(approvalId),
+    listQuoteLines(approval.quoteId),
+    getQuoteDraftById(activeTenant.tenantId, approval.quoteId)
+  ]);
+  const usesLineResponses = quoteUsesLineResponses(lines);
+  const inScopeLineIds = new Set(lines
+    .filter((line) => artworkQuoteLineInScope(line, sourceQuote?.status, usesLineResponses))
+    .map((line) => line.id));
   const requiredPages = pages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
   const missingProof = requiredPages.some((page) => page.imageUrl.startsWith("data:image/svg+xml") || (!page.fileName && !page.imageStoragePath && /auto-created from quote line/i.test(page.notes ?? "")) || (approval.revision && page.proofRevision !== approval.revision));
   const missingSlots = [...inScopeLineIds].some((lineId) => !pages.some((page) => page.sourceQuoteLineId === lineId));

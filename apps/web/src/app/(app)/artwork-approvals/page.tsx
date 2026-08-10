@@ -3,7 +3,8 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
-  artworkQuoteLineKind,
+  artworkQuoteLineInScope,
+  quoteUsesLineResponses,
   getArtworkApprovalById,
   getArtworkApprovalForQuote,
   getQuoteDraftById,
@@ -143,11 +144,8 @@ function detailsList(page: ArtworkApprovalPageRecord): Array<{ label: string; va
   ].filter((row) => String(row.value ?? "").trim());
 }
 
-function lineIsInArtworkScope(line: QuoteLineRecord, usesLineResponses: boolean): boolean {
-  if (!artworkQuoteLineKind(line)) return false;
-  if (line.clientResponseStatus === "cancelled") return false;
-  if (usesLineResponses && line.clientResponseStatus !== "approved") return false;
-  return true;
+function lineIsInArtworkScope(line: QuoteLineRecord, quoteStatus: string | null | undefined, usesLineResponses: boolean): boolean {
+  return artworkQuoteLineInScope(line, quoteStatus, usesLineResponses);
 }
 
 const card = { border: "1px solid #dbe4f0", borderRadius: 22, background: "#fff", boxShadow: "0 12px 34px rgba(15,23,42,0.05)" } as const;
@@ -186,8 +184,15 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   ]);
 
   const deletedCount = allApprovals.filter((item) => item.status === "deleted").length;
+  const quoteById = new Map(quoteDrafts.map((quote) => [quote.id, quote]));
   const approvals = (filter === "deleted" ? allApprovals.filter((item) => item.status === "deleted") : allApprovals.filter((item) => item.status !== "deleted"))
-    .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime() || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+    .sort((a, b) => {
+      const aQuote = quoteById.get(a.quoteId);
+      const bQuote = quoteById.get(b.quoteId);
+      const aTime = new Date(aQuote?.createdAt ?? a.createdAt).getTime();
+      const bTime = new Date(bQuote?.createdAt ?? b.createdAt).getTime();
+      return bTime - aTime || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+    });
   const [quoteForCreate, existingForQuote] = quoteParam ? await Promise.all([
     getQuoteDraftById(activeTenant.tenantId, quoteParam),
     getArtworkApprovalForQuote(activeTenant.tenantId, quoteParam)
@@ -208,8 +213,12 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   };
 
   const selectedLogo = logoForQuote(selectedQuote);
-  const usesLineResponses = quoteLines.some((line) => line.clientResponseStatus && line.clientResponseStatus !== "pending");
-  const inScopeLines = quoteLines.filter((line) => lineIsInArtworkScope(line, usesLineResponses));
+  const usesLineResponses = quoteUsesLineResponses(quoteLines);
+  const lineStatus = (line: QuoteLineRecord) => String(line.clientResponseStatus ?? "pending").trim().toLowerCase() || "pending";
+  const approvedLineCount = quoteLines.filter((line) => lineStatus(line) === "approved").length;
+  const cancelledLineCount = quoteLines.filter((line) => lineStatus(line) === "cancelled").length;
+  const pendingLineCount = quoteLines.filter((line) => lineStatus(line) === "pending").length;
+  const inScopeLines = quoteLines.filter((line) => lineIsInArtworkScope(line, selectedQuote?.status, usesLineResponses));
   const inScopeLineIds = new Set(inScopeLines.map((line) => line.id));
   const linkedPages = new Map(proofPages.filter((page) => page.sourceQuoteLineId).map((page) => [page.sourceQuoteLineId as string, page]));
   const activeProofPages = proofPages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
@@ -276,7 +285,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     <span style={{ color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName || "Artwork"}</span>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
                       <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "3px 7px", fontSize: 10, fontWeight: 950 }}>{approval.status.replace(/_/g, " ")}</span>
-                      <span style={{ color: "#98a2b3", fontSize: 10 }}>{formatDate(approval.updatedAt, "")}</span>
+                      <span style={{ color: "#98a2b3", fontSize: 10 }}>{formatDate(quote?.createdAt ?? approval.createdAt, "")}</span>
                     </div>
                   </div>
                 </Link>
@@ -350,6 +359,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                       <div>
                         <h2 style={{ margin: 0, fontSize: 21 }}>Proofs</h2>
                         <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 12 }}>One proof slot per approved artwork line. Replace the placeholder with the finished proof; production details remain tied to the quote line.</p>
+                        <p style={{ margin: "6px 0 0", color: "#475467", fontSize: 11, fontWeight: 800 }}>Source {selectedQuote?.quoteNumber ?? "quote"} · {selectedQuote?.status ?? "unknown"} · {quoteLines.length} line{quoteLines.length === 1 ? "" : "s"} · {approvedLineCount} approved · {cancelledLineCount} cancelled · {pendingLineCount} pending · {inScopeLines.length} artwork line{inScopeLines.length === 1 ? "" : "s"} in scope</p>
                       </div>
                       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                         {missingLinePages.length ? <span style={{ color: "#b54708", fontSize: 12, fontWeight: 900 }}>{missingLinePages.length} missing slot{missingLinePages.length === 1 ? "" : "s"}</span> : null}
