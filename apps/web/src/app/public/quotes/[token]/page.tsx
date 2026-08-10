@@ -303,7 +303,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   return (
     <main className="quote-print-page" style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
-      <style>{`@media (max-width: 760px) { .quote-header-top, .quote-header-info { grid-template-columns: 1fr !important; } .quote-header-meta { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-job { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-company-row { grid-template-columns: 1fr !important; } } @media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } }`}</style>
+      <style>{`@media (max-width: 760px) { .quote-header-top, .quote-header-info { grid-template-columns: 1fr !important; } .quote-header-meta { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-job { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-client { padding-left: 0 !important; } .quote-company-row { grid-template-columns: 1fr !important; } } @media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } }`}</style>
       <div className="quote-print-wrap" style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
         <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 0 }}>
@@ -372,8 +372,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                 alignItems: "start"
               }}
             >
-              <div style={{ minWidth: 0, paddingRight: 22, display: "grid", gap: 10 }}>
-                <strong style={{ fontSize: 16 }}>Client details</strong>
+              <div className="quote-header-client" style={{ minWidth: 0, paddingLeft: 16, paddingRight: 28, display: "grid", gap: 10 }}>
                 <div style={{ display: "grid", gridTemplateColumns: clientLogoUrl ? "64px minmax(0, 1fr)" : "1fr", gap: 12, alignItems: "start" }}>
                   {clientLogoUrl ? <img src={clientLogoUrl} alt={`${quote.clientName} logo`} style={{ width: 58, height: 58, objectFit: "contain", borderRadius: 12, border: "1px solid #e5e7eb", background: "#fff", padding: 4 }} /> : null}
                   <div style={{ display: "grid", gap: 6, minWidth: 0 }}>
@@ -396,18 +395,15 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                   gap: 6
                 }}
               >
-                <strong style={{ fontSize: 16 }}>Job / quote details</strong>
                 <span style={{ color: "#111827", fontWeight: 850 }}>{jobName}</span>
                 <span style={{ color: "#475467" }}>Reference: {quote.quoteNumber ?? "Quote"}</span>
                 {clientPurchaseOrderNumber ? <span style={{ color: "#475467" }}>Client PO: <strong>{clientPurchaseOrderNumber}</strong></span> : null}
                 {siteAddress ? <span style={{ color: "#475467", whiteSpace: "pre-wrap" }}>Site: {String(siteAddress)}</span> : null}
               </div>
             </div>
-          </div>
-        </section>
 
-        <section className="quote-print-card" style={{ ...cardStyle, display: "grid", gap: 12 }}>
-          <h2 style={{ margin: 0 }}>Quote details</h2>
+            <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 18, display: "grid", gap: 12 }}>
+              <h2 style={{ margin: 0 }}>Quote details</h2>
           <div style={{ display: "grid", gap: 10 }}>
             {lines.map((line) => {
               const clientLine = quoteLineForClient(line);
@@ -430,6 +426,8 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
             <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10 }}><span>Subtotal</span><strong style={{ textAlign: "right" }}>{formatMoney(subtotal)}</strong></div>
             <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10 }}><span>GST</span><strong style={{ textAlign: "right" }}>{formatMoney(gst)}</strong></div>
             <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10, fontSize: 22 }}><span>Total</span><strong style={{ textAlign: "right" }}>{formatMoney(total)}</strong></div>
+          </div>
+            </div>
           </div>
         </section>
 
