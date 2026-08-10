@@ -15,7 +15,7 @@ export function PrintQuoteButton() {
         fontWeight: 900,
         cursor: "pointer",
         padding: "0 14px",
-        marginTop: 4
+        marginTop: 0
       }}
     >
       Print
