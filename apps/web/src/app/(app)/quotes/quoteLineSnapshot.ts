@@ -1,4 +1,5 @@
 export type QuickQuoteFlowType = "" | "signage" | "plan_printing" | "poster_printing" | "small_format" | "service" | "component";
+export type QuickQuoteLabourBasis = "per_item" | "line_total";
 export type QuickQuoteStep =
   | "flow"
   | "base"
@@ -72,6 +73,7 @@ export type QuickQuoteSnapshot = {
   artworkMinutes?: string;
   printMethod?: string;
   printSetupMinutes?: string;
+  printSetupLabourBasis?: QuickQuoteLabourBasis;
   mediaId?: string;
   ink?: string;
   sides?: string;
@@ -79,8 +81,10 @@ export type QuickQuoteSnapshot = {
   backingId?: string;
   laminateId?: string;
   laminateMinutes?: string;
+  laminateLabourBasis?: QuickQuoteLabourBasis;
   finishings?: string[];
   finishingMinutes?: Record<string, string>;
+  finishingLabourBasis?: Record<string, QuickQuoteLabourBasis>;
   eyeletPresetLabel?: string;
   customEyeletQty?: string;
   smallType?: string;
@@ -101,6 +105,7 @@ export type QuickQuoteSnapshot = {
   smallCoatingId?: string;
   smallFinishings?: string[];
   smallFinishingMinutes?: Record<string, string>;
+  smallFinishingLabourBasis?: Record<string, QuickQuoteLabourBasis>;
   serviceType?: string;
   deliveryCharge?: string;
   installCrewSize?: string;
@@ -156,6 +161,20 @@ function stringValue(value: unknown, fallback = ""): string {
 function recordOfStrings(value: unknown): Record<string, string> {
   if (!isRecord(value)) return {};
   return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, stringValue(item)]));
+}
+
+function labourBasisValue(value: unknown): QuickQuoteLabourBasis | undefined {
+  return value === "per_item" || value === "line_total" ? value : undefined;
+}
+
+function recordOfLabourBasis(value: unknown): Record<string, QuickQuoteLabourBasis> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, QuickQuoteLabourBasis> = {};
+  for (const [key, item] of Object.entries(value)) {
+    const basis = labourBasisValue(item);
+    if (basis) result[key] = basis;
+  }
+  return result;
 }
 
 function stringArray(value: unknown): string[] {
@@ -230,11 +249,15 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
     version: 1,
     source,
     flowType: stringValue(sourceValue.flowType, "signage") as QuickQuoteFlowType,
+    printSetupLabourBasis: labourBasisValue(sourceValue.printSetupLabourBasis),
+    laminateLabourBasis: labourBasisValue(sourceValue.laminateLabourBasis),
     finishings: stringArray(sourceValue.finishings),
     finishingMinutes: recordOfStrings(sourceValue.finishingMinutes),
+    finishingLabourBasis: recordOfLabourBasis(sourceValue.finishingLabourBasis),
     ncrPageColours: stringArray(sourceValue.ncrPageColours),
     smallFinishings: stringArray(sourceValue.smallFinishings),
     smallFinishingMinutes: recordOfStrings(sourceValue.smallFinishingMinutes),
+    smallFinishingLabourBasis: recordOfLabourBasis(sourceValue.smallFinishingLabourBasis),
     serviceFixings: stringArray(sourceValue.serviceFixings),
     serviceFixingQty: recordOfStrings(sourceValue.serviceFixingQty),
     serviceFixingRate: recordOfStrings(sourceValue.serviceFixingRate),
@@ -405,14 +428,17 @@ export function inferLegacyQuickQuoteSnapshot(input: {
     artworkMinutes: minutesFrom(artworkDetail),
     printMethod,
     printSetupMinutes: minutesFrom(setupDetail),
+    printSetupLabourBasis: "line_total",
     ink,
     sides,
     printDirection: normalise(directionDetail).includes("reverse") ? "reverse" : directionDetail ? "positive" : "",
     backingId: "",
     laminateId: normalise(laminateName) === "none" ? "none" : laminate?.id ?? "",
     laminateMinutes: "",
+    laminateLabourBasis: "line_total",
     finishings: finishing.finishings,
     finishingMinutes: {},
+    finishingLabourBasis: {},
     eyeletPresetLabel: finishing.eyeletPresetLabel,
     customEyeletQty: finishing.customEyeletQty,
     smallType,
@@ -420,6 +446,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
     smallPrintColour: ink === "cmyk" ? "cmyk" : ink ? "special" : "",
     smallCoatingId: normalise(laminateName) === "none" ? "none" : laminate?.id ?? "",
     smallFinishings: [],
+    smallFinishingLabourBasis: {},
     serviceType,
     installCrewSize: dispatchValue.match(/(\d+)\s+installer/i)?.[1] ?? "1",
     installMinutes: minutesFrom(dispatchValue),

@@ -157,6 +157,7 @@ type InkChoice = "" | "none" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
 type PrintDirection = "" | "positive" | "reverse";
 type ArtworkChoice = "" | "required" | "client_supplied";
+type LabourBasis = "per_item" | "line_total";
 type SmallPrintColour = "" | "mono" | "cmyk" | "special";
 type StepKey = QuickQuoteStep;
 
@@ -345,7 +346,27 @@ function minutesLabel(value: string | number | null | undefined): string {
   const minutes = numberValue(value, 0);
   if (minutes <= 0) return "";
   const roundedMinutes = Math.round(minutes * 100) / 100;
+  if (roundedMinutes < 1) return `${Math.round(roundedMinutes * 60)} sec`;
   return `${roundedMinutes}min`;
+}
+
+function labourBasisValue(value: unknown, fallback: LabourBasis = "line_total"): LabourBasis {
+  return value === "per_item" || value === "line_total" ? value : fallback;
+}
+
+function labourBasisRecord(value: Record<string, string>, fallback: LabourBasis = "line_total"): Record<string, LabourBasis> {
+  return Object.fromEntries(Object.entries(value).map(([key, basis]) => [key, labourBasisValue(basis, fallback)]));
+}
+
+function labourMinutesPerUnit(minutes: number, basis: LabourBasis, quantity: number): number {
+  if (basis === "per_item") return minutes;
+  return minutes / Math.max(1, quantity);
+}
+
+function labourChargeNote(minutes: number, basis: LabourBasis, labourRate: number, perItemLabel = "per item"): string {
+  return basis === "per_item"
+    ? `${minutesLabel(minutes)} ${perItemLabel} · ${money(labourRate)}/hr`
+    : `${minutesLabel(minutes)} total for quote line · ${money(labourRate)}/hr`;
 }
 
 function multiplierValue(value: string | number | null | undefined, fallback: number): number {
@@ -1058,6 +1079,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [artworkMinutes, setArtworkMinutes] = useState(snapshotString(initialSnapshot, "artworkMinutes"));
   const [printMethod, setPrintMethod] = useState<PrintMethod>(snapshotString(initialSnapshot, "printMethod") as PrintMethod);
   const [printSetupMinutes, setPrintSetupMinutes] = useState(snapshotString(initialSnapshot, "printSetupMinutes"));
+  const [printSetupLabourBasis, setPrintSetupLabourBasis] = useState<LabourBasis>(labourBasisValue(initialSnapshot?.printSetupLabourBasis, "line_total"));
   const [mediaId, setMediaId] = useState(snapshotString(initialSnapshot, "mediaId"));
   const [ink, setInk] = useState<InkChoice>(snapshotString(initialSnapshot, "ink") as InkChoice);
   const [sides, setSides] = useState<SidesChoice>(snapshotString(initialSnapshot, "sides") as SidesChoice);
@@ -1065,8 +1087,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [backingId, setBackingId] = useState(snapshotString(initialSnapshot, "backingId"));
   const [laminateId, setLaminateId] = useState(snapshotString(initialSnapshot, "laminateId"));
   const [laminateMinutes, setLaminateMinutes] = useState(snapshotString(initialSnapshot, "laminateMinutes"));
+  const [laminateLabourBasis, setLaminateLabourBasis] = useState<LabourBasis>(labourBasisValue(initialSnapshot?.laminateLabourBasis, "line_total"));
   const [finishings, setFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "finishings"));
   const [finishingMinutes, setFinishingMinutes] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "finishingMinutes"));
+  const [finishingLabourBasis, setFinishingLabourBasis] = useState<Record<string, LabourBasis>>(labourBasisRecord(snapshotStringRecord(initialSnapshot, "finishingLabourBasis"), "line_total"));
   const [eyeletPresetLabel, setEyeletPresetLabel] = useState(snapshotString(initialSnapshot, "eyeletPresetLabel", eyeletPresets[0]?.label ?? ""));
   const [customEyeletQty, setCustomEyeletQty] = useState(snapshotString(initialSnapshot, "customEyeletQty"));
 
@@ -1088,6 +1112,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [smallCoatingId, setSmallCoatingId] = useState(snapshotString(initialSnapshot, "smallCoatingId"));
   const [smallFinishings, setSmallFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "smallFinishings"));
   const [smallFinishingMinutes, setSmallFinishingMinutes] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "smallFinishingMinutes"));
+  const [smallFinishingLabourBasis, setSmallFinishingLabourBasis] = useState<Record<string, LabourBasis>>(labourBasisRecord(snapshotStringRecord(initialSnapshot, "smallFinishingLabourBasis"), "line_total"));
+  const legacySmallFinishingPerItem = Boolean(
+    initialSnapshot?.flowType === "small_format"
+      && Object.keys(initialSnapshot.smallFinishingMinutes ?? {}).length > 0
+      && Object.keys(initialSnapshot.smallFinishingLabourBasis ?? {}).length === 0
+  );
+  const smallFinishingDefaultBasis: LabourBasis = legacySmallFinishingPerItem ? "per_item" : "line_total";
 
   const [serviceType, setServiceType] = useState<ServiceType>(snapshotString(initialSnapshot, "serviceType") as ServiceType);
   const [deliveryCharge, setDeliveryCharge] = useState(snapshotString(initialSnapshot, "deliveryCharge"));
@@ -1365,6 +1396,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setArtworkMinutes("");
     setPrintMethod("");
     setPrintSetupMinutes("");
+    setPrintSetupLabourBasis("line_total");
     setMediaId("");
     setInk("");
     setSides("");
@@ -1372,6 +1404,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setBackingId("");
     setLaminateId("");
     setLaminateMinutes("");
+    setLaminateLabourBasis("line_total");
+    setFinishingLabourBasis({});
+    setSmallFinishingLabourBasis({});
     setSmallPrintColour("");
     setSmallCoatingId("");
     setFinishings([]);
@@ -1406,6 +1441,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setArtworkMinutes("");
     setPrintMethod(rollStockBase ? "roll_stock" : "");
     setPrintSetupMinutes("");
+    setPrintSetupLabourBasis("line_total");
     setMediaId("");
     setInk("");
     setSides("");
@@ -1413,7 +1449,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setBackingId("");
     setLaminateId("");
     setLaminateMinutes("");
+    setLaminateLabourBasis("line_total");
     setFinishings([]);
+    setFinishingLabourBasis({});
     setUnitPriceOverridden(false);
     setActiveStep(rollStockBase ? "media" : "thickness");
   }
@@ -1536,7 +1574,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         const minutes = numberValue(printSetupMinutes, 0);
         const methodLabel = printMethods.find((item) => item.key === resolvedPrintMethod)?.label ?? "Print";
         if (minutes > 0) {
-          const amount = minutes / quantityNumber;
+          const amount = labourMinutesPerUnit(minutes, printSetupLabourBasis, quantityNumber);
           const rate = labourRate / 60;
           rows.push({
             label: "Print setup labour",
@@ -1545,7 +1583,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             unit: "min",
             rate,
             cost: amount * rate,
-            note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr`
+            note: labourChargeNote(minutes, printSetupLabourBasis, labourRate)
           });
         }
       }
@@ -1625,9 +1663,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         });
         const minutes = numberValue(laminateMinutes, 0);
         if (minutes > 0) {
-          const amount = minutes / quantityNumber;
+          const amount = labourMinutesPerUnit(minutes, laminateLabourBasis, quantityNumber);
           const rate = labourRate / 60;
-          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, laminateLabourBasis, labourRate) });
         }
       }
 
@@ -1642,17 +1680,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           }
           const eyeletMinutes = numberValue(finishingMinutes[item.key], 0);
           if (qty > 0 && eyeletMinutes > 0) {
-            const amount = qty * eyeletMinutes;
+            const basis = finishingLabourBasis[item.key] ?? "per_item";
+            const amount = basis === "per_item"
+              ? qty * eyeletMinutes
+              : labourMinutesPerUnit(eyeletMinutes, "line_total", quantityNumber);
             const rate = labourRate / 60;
-            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: `${minutesLabel(eyeletMinutes)} each · ${money(labourRate)}/hr` });
+            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(eyeletMinutes, basis, labourRate, "per eyelet") });
           }
           continue;
         }
         const minutes = numberValue(finishingMinutes[item.key], 0);
         if (minutes > 0) {
-          const amount = minutes / quantityNumber;
+          const basis = finishingLabourBasis[item.key] ?? "line_total";
+          const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
           const rate = labourRate / 60;
-          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
         }
       }
     }
@@ -1720,9 +1762,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         if (!smallFinishings.includes(item.key)) continue;
         const minutes = numberValue(smallFinishingMinutes[item.key], 0);
         if (minutes > 0) {
-          const amount = minutes / quantityNumber;
+          const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
+          const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
           const rate = labourRate / 60;
-          rows.push({ label: item.label, detail: "Finishing labour", amount, unit: "min", rate, cost: amount * rate, note: quantityNumber > 1 ? `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr` : `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+          rows.push({ label: item.label, detail: "Finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
         }
       }
     }
@@ -1774,8 +1817,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         if (!smallFinishings.includes(item.key)) continue;
         const minutes = numberValue(smallFinishingMinutes[item.key], 0);
         if (minutes > 0) {
+          const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
+          const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
           const rate = labourRate / 60;
-          rows.push({ label: item.label, detail: "Bindery / finishing labour", amount: minutes, unit: "min", rate, cost: minutes * rate, note: `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+          rows.push({ label: item.label, detail: "Bindery / finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
         }
       }
     }
@@ -1838,7 +1883,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -2049,6 +2094,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     artworkMinutes,
     printMethod: resolvedPrintMethod,
     printSetupMinutes,
+    printSetupLabourBasis,
     mediaId,
     ink,
     sides,
@@ -2056,8 +2102,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     backingId: backingId === "none" ? "none" : selectedBacking?.id ?? backingId,
     laminateId,
     laminateMinutes,
+    laminateLabourBasis,
     finishings,
     finishingMinutes,
+    finishingLabourBasis,
     eyeletPresetLabel,
     customEyeletQty,
     smallType,
@@ -2078,6 +2126,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     smallCoatingId,
     smallFinishings,
     smallFinishingMinutes,
+    smallFinishingLabourBasis,
     serviceType,
     deliveryCharge,
     installCrewSize,
@@ -2331,14 +2380,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
                 {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
-                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes (optional)</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no setup charge. Entered minutes are priced at {money(labourRate)}/hr.</small></label> : null}
+                {printed ? <InlineLabourField label="Print setup labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }} labourRate={labourRate} quantity={quantityNumber} /> : null}
                 {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "roll_stock" ? "Print / Ink" : "Ink"}</b><select value={ink} onChange={(event) => chooseInk(event.target.value as InkChoice)} style={inputStyle}><option value="">{resolvedPrintMethod === "roll_stock" ? "Choose print / ink" : "Choose ink"}</option>{availableInkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
                 {canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => { const value = event.target.value as PrintDirection; setPrintDirection(value); if (value !== "reverse") setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose direction</option><option value="positive">{selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive / face print"}</option><option value="reverse">Reverse print</option></select></label> : null}
                 {backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}{group.materials.length > 1 ? ` (auto-select ${group.materials.length} widths)` : ""}</option>)}</select><small style={{ color: "#64748b" }}>Shown because Reverse print is selected. Only Materials marked Used for backing are listed; matching widths are chosen automatically by finished size and cost.</small></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
-                {printed && laminateId && laminateId !== "none" ? <label style={{ display: "grid", gap: 6 }}><b>Laminate labour minutes (optional)</b><input value={laminateMinutes} onChange={(event) => setLaminateMinutes(event.target.value)} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /></label> : null}
+                {printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); setUnitPriceOverridden(false); }} labourRate={labourRate} quantity={quantityNumber} /> : null}
               </div>
             ) : null}
 
@@ -2377,7 +2426,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
                   {finishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleFinishing(item.key)} style={cardButtonStyle(finishings.includes(item.key), "#0f766e")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
                 </div>
-                <SelectedLabourMinutes options={finishingOptions.filter((item) => item.key !== "eyelets")} selected={finishings} values={finishingMinutes} onChange={setFinishingMinutes} labourRate={labourRate} />
+                <SelectedLabourMinutes options={finishingOptions.filter((item) => item.key !== "eyelets")} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis="line_total" labourRate={labourRate} quantity={quantityNumber} />
                 {finishings.includes("eyelets") ? <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><label style={{ display: "grid", gap: 6 }}><b>Eyelet placement</b><select value={eyeletPresetLabel} onChange={(event) => setEyeletPresetLabel(event.target.value)} style={inputStyle}>{eyeletPresets.map((preset) => <option key={preset.label} value={preset.label}>{preset.label}</option>)}</select></label>{eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} type="number" min="0" step="1" style={inputStyle} /></label> : null}</div> : null}
               </div>
             ) : null}
@@ -2388,7 +2437,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
                   {smallFinishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleSmallFinishing(item.key)} style={cardButtonStyle(smallFinishings.includes(item.key), "#7c3aed")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
                 </div>
-                <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} onChange={setSmallFinishingMinutes} labourRate={labourRate} />
+                <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} quantity={quantityNumber} />
               </div>
             ) : null}
 
@@ -2821,11 +2870,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <div style={{ display: "grid", gap: 16 }}>
             <StepIntro icon="7" title="Roll stock print setup" text="The selected product is already roll stock, so there is no separate print-method choice." />
             <LabourPrompt
-              label="Print setup labour minutes"
+              label="Print setup labour"
               value={printSetupMinutes}
+              basis={printSetupLabourBasis}
               onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
+              onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }}
               onContinue={() => setActiveStep("ink")}
               labourRate={labourRate}
+              quantity={quantityNumber}
             />
           </div>
         );
@@ -2845,11 +2897,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           </div>
           {printed ? (
             <LabourPrompt
-              label="Print setup labour minutes"
+              label="Print setup labour"
               value={printSetupMinutes}
+              basis={printSetupLabourBasis}
               onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
+              onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }}
               onContinue={() => setActiveStep(nextStepAfterPrint(resolvedPrintMethod))}
               labourRate={labourRate}
+              quantity={quantityNumber}
             />
           ) : null}
         </div>
@@ -2959,7 +3014,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             })}
           </div>
           {laminateSelected ? (
-            <LabourPrompt label="Laminate application minutes" value={laminateMinutes} onChange={setLaminateMinutes} onContinue={() => { if (!backingApplicable || backingId) setActiveStep("finishing"); }} labourRate={labourRate} />
+            <LabourPrompt label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); setUnitPriceOverridden(false); }} onContinue={() => { if (!backingApplicable || backingId) setActiveStep("finishing"); }} labourRate={labourRate} quantity={quantityNumber} />
           ) : null}
         </div>
       );
@@ -2989,7 +3044,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} placeholder="Custom eyelet quantity" type="number" min="0" step="1" style={inputStyle} /> : null}
             </div>
           ) : null}
-          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} onChange={setFinishingMinutes} eachLabelFor="eyelets" labourRate={labourRate} />
+          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} quantity={quantityNumber} />
           <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review quote line</button>
         </div>
       );
@@ -3196,7 +3251,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               </button>
             ))}
           </div>
-          <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} onChange={setSmallFinishingMinutes} labourRate={labourRate} />
+          <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} quantity={quantityNumber} />
           <button type="button" onClick={() => setActiveStep("small_quantity")} style={primaryButton}>Continue to quantity</button>
         </div>
       );
@@ -3432,16 +3487,37 @@ function SummaryRow({ label, value }: { label: string; value?: string | null }) 
   );
 }
 
-function LabourPrompt({ label, value, onChange, onContinue, labourRate }: { label: string; value: string; onChange: (value: string) => void; onContinue: () => void; labourRate: number }) {
-  const enteredMinutes = numberValue(value, 0);
-  const labourCost = enteredMinutes * (labourRate / 60);
+function labourPreviewText(minutes: number, basis: LabourBasis, labourRate: number, quantity: number, perItemLabel = "per item"): string {
+  if (minutes <= 0) return "Leave blank or enter 0 to add no labour charge.";
+  const totalMinutes = basis === "per_item" ? minutes * Math.max(1, quantity) : minutes;
+  const totalCost = totalMinutes * (labourRate / 60);
+  return basis === "per_item"
+    ? `${minutesLabel(minutes)} ${perItemLabel} × qty ${usage(Math.max(1, quantity))} = ${minutesLabel(totalMinutes)} total · ${money(totalCost)} labour`
+    : `${minutesLabel(minutes)} for the whole line · ${money(totalCost)} labour`;
+}
 
+function InlineLabourField({ label, value, basis, onChange, onBasisChange, labourRate, quantity, perItemLabel = "Per item" }: { label: string; value: string; basis: LabourBasis; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void; labourRate: number; quantity: number; perItemLabel?: string }) {
+  const enteredMinutes = numberValue(value, 0);
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <b>{label} (optional)</b>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 170px", gap: 8 }}>
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Minutes, eg 0.5" type="number" min="0" step="0.5" style={inputStyle} />
+        <select value={basis} onChange={(event) => onBasisChange(event.target.value as LabourBasis)} style={inputStyle}>
+          <option value="line_total">Total line item</option>
+          <option value="per_item">{perItemLabel}</option>
+        </select>
+      </div>
+      <small style={{ color: "#64748b" }}>{labourPreviewText(enteredMinutes, basis, labourRate, quantity, perItemLabel.toLowerCase())}</small>
+    </div>
+  );
+}
+
+function LabourPrompt({ label, value, basis, onChange, onBasisChange, onContinue, labourRate, quantity, perItemLabel = "Per item" }: { label: string; value: string; basis: LabourBasis; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void; onContinue: () => void; labourRate: number; quantity: number; perItemLabel?: string }) {
   return (
     <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 14, background: "#f0fdf4", display: "grid", gap: 10 }}>
-      <label style={{ display: "grid", gap: 6 }}><b>{label} (optional)</b><input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /></label>
-      <span style={{ color: "#475467", fontSize: 13 }}>
-        {enteredMinutes > 0 ? `${minutesLabel(enteredMinutes)} at ${money(labourRate)}/hr = ${money(labourCost)} labour` : "Leave blank or enter 0 to add no labour charge."}
-      </span>
+      <InlineLabourField label={label} value={value} basis={basis} onChange={onChange} onBasisChange={onBasisChange} labourRate={labourRate} quantity={quantity} perItemLabel={perItemLabel} />
+      <span style={{ color: "#475467", fontSize: 13 }}>0.5 minutes = 30 seconds. Choose Total line item when the entered time covers the complete quantity.</span>
       <button type="button" onClick={onContinue} style={primaryButton}>Continue</button>
     </div>
   );
@@ -3461,21 +3537,34 @@ function SidesCards({ sides, setSides, onComplete }: { sides: SidesChoice; setSi
   );
 }
 
-function SelectedLabourMinutes<T extends { key: string; label: string }>({ options, selected, values, onChange, eachLabelFor, labourRate }: { options: T[]; selected: string[]; values: Record<string, string>; onChange: (value: Record<string, string>) => void; eachLabelFor?: string; labourRate: number }) {
+function SelectedLabourMinutes<T extends { key: string; label: string }>({ options, selected, values, bases, onChange, onBasesChange, defaultBasis, eachLabelFor, labourRate, quantity }: { options: T[]; selected: string[]; values: Record<string, string>; bases: Record<string, LabourBasis>; onChange: (value: Record<string, string>) => void; onBasesChange: (value: Record<string, LabourBasis>) => void; defaultBasis: LabourBasis; eachLabelFor?: string; labourRate: number; quantity: number }) {
   const chosen = options.filter((item) => selected.includes(item.key));
   if (chosen.length === 0) return null;
   return (
     <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 14, background: "#f8fbff", display: "grid", gap: 10 }}>
-      <strong>Labour minutes for selected finishing</strong>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-        {chosen.map((item) => (
-          <label key={item.key} style={{ display: "grid", gap: 6 }}>
-            <b>{item.label} {item.key === eachLabelFor ? "minutes each" : "minutes"}</b>
-            <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder={item.key === eachLabelFor ? "eg 2" : "eg 15"} type="number" min="0" step="1" style={inputStyle} />
-          </label>
-        ))}
+      <strong>Labour for selected finishing</strong>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
+        {chosen.map((item) => {
+          const isEach = item.key === eachLabelFor;
+          const basis = bases[item.key] ?? (isEach ? "per_item" : defaultBasis);
+          const enteredMinutes = numberValue(values[item.key], 0);
+          const perItemLabel = isEach ? "Per eyelet" : "Per item";
+          return (
+            <div key={item.key} style={{ display: "grid", gap: 6 }}>
+              <b>{item.label} labour</b>
+              <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 155px", gap: 8 }}>
+                <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder="Minutes, eg 0.5" type="number" min="0" step="0.5" style={inputStyle} />
+                <select value={basis} onChange={(event) => onBasesChange({ ...bases, [item.key]: event.target.value as LabourBasis })} style={inputStyle}>
+                  <option value="line_total">Total line item</option>
+                  <option value="per_item">{perItemLabel}</option>
+                </select>
+              </div>
+              <small style={{ color: "#64748b" }}>{isEach && basis === "per_item" ? `${minutesLabel(enteredMinutes)} per eyelet; multiplied by eyelet count and quote quantity.` : labourPreviewText(enteredMinutes, basis, labourRate, quantity, "per item")}</small>
+            </div>
+          );
+        })}
       </div>
-      <span style={{ color: "#475467", fontSize: 13 }}>Enter normal minutes. The system converts them to labour at {money(labourRate)}/hr before global markup and profit.</span>
+      <span style={{ color: "#475467", fontSize: 13 }}>Decimal minutes are supported: 0.5 = 30 seconds. Total line item charges the entered time once for the complete quantity.</span>
     </div>
   );
 }
