@@ -1053,6 +1053,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [colour, setColour] = useState(snapshotString(initialSnapshot, "colour"));
   const [widthMm, setWidthMm] = useState(snapshotString(initialSnapshot, "widthMm"));
   const [heightMm, setHeightMm] = useState(snapshotString(initialSnapshot, "heightMm"));
+  const [bleedSpacingMm, setBleedSpacingMm] = useState(snapshotString(initialSnapshot, "bleedSpacingMm"));
   const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>(snapshotString(initialSnapshot, "artworkChoice") as ArtworkChoice);
   const [artworkMinutes, setArtworkMinutes] = useState(snapshotString(initialSnapshot, "artworkMinutes"));
   const [printMethod, setPrintMethod] = useState<PrintMethod>(snapshotString(initialSnapshot, "printMethod") as PrintMethod);
@@ -1227,12 +1228,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const needsAdditionalMediaCost = !isRollStockBase && (resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl");
   const width = numberValue(widthMm, 0);
   const height = numberValue(heightMm, 0);
+  const bleedSpacingPerSideMm = Math.max(0, numberValue(bleedSpacingMm, 0));
+  const usageWidth = width > 0 ? width + bleedSpacingPerSideMm * 2 : width;
+  const usageHeight = height > 0 ? height + bleedSpacingPerSideMm * 2 : height;
+  const nestingFootprintLabel = bleedSpacingPerSideMm > 0 && usageWidth > 0 && usageHeight > 0
+    ? `${dimensionMm(usageWidth)} × ${dimensionMm(usageHeight)}mm calc footprint`
+    : "";
+  const spacingUsageNote = bleedSpacingPerSideMm > 0
+    ? `${dimensionMm(bleedSpacingPerSideMm)}mm bleed / spacing each side · ${nestingFootprintLabel}`
+    : "";
   const areaSqm = width > 0 && height > 0 ? (width / 1000) * (height / 1000) : 0;
   const sideMultiplier = printed && sides === "double" ? 2 : 1;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
   const selectedBacking = useMemo(() => selectedBackingGroup
-    ? bestRollMaterialForGroup(selectedBackingGroup.materials, width, height, quantityNumber)
-    : undefined, [selectedBackingGroup, width, height, quantityNumber]);
+    ? bestRollMaterialForGroup(selectedBackingGroup.materials, usageWidth, usageHeight, quantityNumber)
+    : undefined, [selectedBackingGroup, usageWidth, usageHeight, quantityNumber]);
   const backingSelectValue = backingId === "none" ? "none" : selectedBackingGroup?.representative.id ?? backingId;
   const pricedComponentParts = componentParts.filter((part) => {
     const qty = numberValue(part.qty, 0);
@@ -1350,6 +1360,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setNcrTapeColour("");
     setWidthMm("");
     setHeightMm("");
+    setBleedSpacingMm("");
     setArtworkChoice("");
     setArtworkMinutes("");
     setPrintMethod("");
@@ -1390,6 +1401,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setColour("");
     setWidthMm("");
     setHeightMm("");
+    setBleedSpacingMm("");
     setArtworkChoice("");
     setArtworkMinutes("");
     setPrintMethod(rollStockBase ? "roll_stock" : "");
@@ -1487,7 +1499,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (flowType === "signage") {
       if (selectedMainMaterial && areaSqm > 0) {
         if (isRollMaterial(selectedMainMaterial) && !isSheetMaterial(selectedMainMaterial)) {
-          const lm = roundedRollMetresForQuantity(width, height, selectedMainMaterial, quantityNumber);
+          const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedMainMaterial, quantityNumber);
           const rate = rollRate(selectedMainMaterial);
           const amount = lm.amount / quantityNumber;
           rows.push({
@@ -1498,15 +1510,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             rate: rate.rate,
             cost: amount * rate.rate,
             note: [
+              spacingUsageNote || null,
               lm.note,
               quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null,
               rate.note
             ].filter(Boolean).join(" · ") || undefined
           });
         } else {
-          const sheetUse = sheetUsageForQuoteLine(selectedMainMaterial, width, height, quantityNumber);
+          const sheetUse = sheetUsageForQuoteLine(selectedMainMaterial, usageWidth, usageHeight, quantityNumber);
           const rate = sheetUnitRate(selectedMainMaterial);
-          rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: sheetUse.amount, unit: "sheet", rate: rate.rate, cost: sheetUse.amount * rate.rate, note: [sheetUse.note, rate.note].filter(Boolean).join(" · ") || undefined });
+          rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: sheetUse.amount, unit: "sheet", rate: rate.rate, cost: sheetUse.amount * rate.rate, note: [spacingUsageNote || null, sheetUse.note, rate.note].filter(Boolean).join(" · ") || undefined });
         }
       }
 
@@ -1539,7 +1552,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (selectedMedia && needsAdditionalMediaCost && areaSqm > 0) {
         const mediaFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
-        const lm = roundedRollMetresForQuantity(width, height, selectedMedia, mediaFaces);
+        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedMedia, mediaFaces);
         const rate = rollRate(selectedMedia);
         const amount = lm.amount / quantityNumber;
         rows.push({
@@ -1550,6 +1563,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           rate: rate.rate,
           cost: amount * rate.rate,
           note: [
+            spacingUsageNote || null,
             lm.note,
             sides === "double" ? "double sided" : null,
             quantityNumber > 1 || sideMultiplier > 1 ? `${usage(lm.amount)}lm total for ${usage(mediaFaces)} face${mediaFaces === 1 ? "" : "s"}` : null,
@@ -1562,7 +1576,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         const inkRollMaterial = isRollStockBase ? selectedMainMaterial : needsAdditionalMediaCost ? selectedMedia : undefined;
         const inkRollPieces = isRollStockBase ? quantityNumber : quantityNumber * sideMultiplier;
         const inkRollUse = inkRollMaterial
-          ? roundedRollMetresForQuantity(width, height, inkRollMaterial, inkRollPieces)
+          ? roundedRollMetresForQuantity(usageWidth, usageHeight, inkRollMaterial, inkRollPieces)
           : null;
         const inkUse = roundedInkSquareMetresForQuoteLine(areaSqm, sideMultiplier, quantityNumber, inkRollUse, inkBillingIncrementSqm);
         const inkNote = [inkUse.note, sides === "double" ? "double sided" : null].filter(Boolean).join(" · ") || undefined;
@@ -1575,7 +1589,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (backingApplicable && selectedBacking && backingId !== "none" && areaSqm > 0) {
-        const lm = roundedRollMetresForQuantity(width, height, selectedBacking, quantityNumber);
+        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedBacking, quantityNumber);
         const rate = rollRate(selectedBacking);
         const amount = quantityNumber > 0 ? lm.amount / quantityNumber : lm.amount;
         rows.push({
@@ -1587,6 +1601,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           cost: amount * rate.rate,
           note: [
             selectedBackingGroup && selectedBackingGroup.materials.length > 1 ? `${selectedBackingGroup.label}: auto-selected ${selectedBacking.rollWidthMm || "best"}mm stock` : null,
+            spacingUsageNote || null,
             lm.note,
             quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null,
             rate.note
@@ -1596,7 +1611,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (selectedLaminate && laminateId !== "none" && areaSqm > 0) {
         const laminateFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
-        const lm = roundedRollMetresForQuantity(width, height, selectedLaminate, laminateFaces);
+        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedLaminate, laminateFaces);
         const rate = rollRate(selectedLaminate);
         const amount = quantityNumber > 0 ? lm.amount / quantityNumber : lm.amount;
         rows.push({
@@ -1606,7 +1621,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           unit: "lm",
           rate: rate.rate,
           cost: amount * rate.rate,
-          note: [lm.note, sides === "double" ? "double sided" : null, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
+          note: [spacingUsageNote || null, lm.note, sides === "double" ? "double sided" : null, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
         });
         const minutes = numberValue(laminateMinutes, 0);
         if (minutes > 0) {
@@ -1646,7 +1661,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       const itemArea = areaSqm;
       if (selectedSmallStock && itemArea > 0 && quantityNumber > 0) {
         if (isRollMaterial(selectedSmallStock)) {
-          const lm = roundedRollMetresForQuantity(width, height, selectedSmallStock, quantityNumber);
+          const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedSmallStock, quantityNumber);
           const rate = rollRate(selectedSmallStock);
           const amount = lm.amount / quantityNumber;
           rows.push({
@@ -1656,13 +1671,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             unit: "lm",
             rate: rate.rate,
             cost: amount * rate.rate,
-            note: [lm.note, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
+            note: [spacingUsageNote || null, lm.note, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
           });
         } else {
           const stockDimensions = bestSheetDimensions(selectedSmallStock);
           const parentWidth = stockDimensions?.width ?? 0;
           const parentHeight = stockDimensions?.length ?? 0;
-          const perSheet = piecesPerSheet(parentWidth, parentHeight, width, height);
+          const perSheet = piecesPerSheet(parentWidth, parentHeight, usageWidth, usageHeight);
           const requiredPieces = quantityNumber;
           const sheets = perSheet > 0 ? Math.ceil(requiredPieces / perSheet) : requiredPieces;
           const rate = sheetUnitRate(selectedSmallStock);
@@ -1674,7 +1689,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             unit: "sheet",
             rate: rate.rate,
             cost: amount * rate.rate,
-            note: perSheet > 0 ? `${perSheet} up per parent sheet · ${sheets} sheet${sheets === 1 ? "" : "s"} total for qty ${usage(quantityNumber)}` : rate.note ?? "parent sheet size missing"
+            note: [spacingUsageNote || null, perSheet > 0 ? `${perSheet} up per parent sheet · ${sheets} sheet${sheets === 1 ? "" : "s"} total for qty ${usage(quantityNumber)}` : rate.note ?? "parent sheet size missing"].filter(Boolean).join(" · ")
           });
         }
       }
@@ -1718,13 +1733,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         const stockDimensions = bestSheetDimensions(selectedSmallStock);
         const parentWidth = stockDimensions?.width ?? 0;
         const parentHeight = stockDimensions?.length ?? 0;
-        const perSheet = piecesPerSheet(parentWidth, parentHeight, width, height);
+        const perSheet = piecesPerSheet(parentWidth, parentHeight, usageWidth, usageHeight);
         const setsPerBook = isDuplicateBook ? Math.max(1, numberValue(ncrSetsPerBook, 1)) : 1;
         const copiesPerSet = isDuplicateBook ? Math.max(1, ncrCopiesCount || 1) : 1;
         const requiredPieces = quantityNumber * setsPerBook * copiesPerSet;
         const sheets = perSheet > 0 ? Math.ceil(requiredPieces / perSheet) : requiredPieces;
         const rate = sheetUnitRate(selectedSmallStock);
-        rows.push({ label: isDuplicateBook ? "Carbon/NCR stock" : "Paper / card stock", detail: selectedSmallStock.name, amount: sheets, unit: "sheet", rate: rate.rate, cost: sheets * rate.rate, note: isDuplicateBook ? `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies · ${perSheet > 0 ? `${perSheet} up per parent sheet` : "parent sheet size missing"}` : perSheet > 0 ? `${perSheet} up per parent sheet` : rate.note ?? "parent sheet size missing" });
+        rows.push({ label: isDuplicateBook ? "Carbon/NCR stock" : "Paper / card stock", detail: selectedSmallStock.name, amount: sheets, unit: "sheet", rate: rate.rate, cost: sheets * rate.rate, note: [spacingUsageNote || null, isDuplicateBook ? `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies · ${perSheet > 0 ? `${perSheet} up per parent sheet` : "parent sheet size missing"}` : perSheet > 0 ? `${perSheet} up per parent sheet` : rate.note ?? "parent sheet size missing"].filter(Boolean).join(" · ") });
       }
 
       if (artworkChoice === "required") {
@@ -1823,7 +1838,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, finishings, finishingMinutes, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -2029,6 +2044,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     colour,
     widthMm,
     heightMm,
+    bleedSpacingMm,
     artworkChoice,
     artworkMinutes,
     printMethod: resolvedPrintMethod,
@@ -2313,6 +2329,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 6000" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
                 {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Print setup labour minutes (optional)</b><input value={printSetupMinutes} onChange={(event) => { setPrintSetupMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="Optional, eg 15" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no setup charge. Entered minutes are priced at {money(labourRate)}/hr.</small></label> : null}
                 {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
@@ -2333,6 +2350,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => { setSides(event.target.value as SidesChoice); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder={flowType === "plan_printing" ? "eg 841" : "eg 600"} type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder={flowType === "plan_printing" ? "eg 1189" : "eg 900"} type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => { setSmallPrintColour(event.target.value as SmallPrintColour); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose print colour</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Coating / laminate</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose coating</option><option value="none">No coating</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
               </div>
@@ -2347,6 +2365,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 90" type="number" min="0" step="1" style={inputStyle} /></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 55" type="number" min="0" step="1" style={inputStyle} /></label>
+                <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => setSmallPrintColour(event.target.value as SmallPrintColour)} style={inputStyle}><option value="">Choose print colour</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>
                 <label style={{ display: "grid", gap: 6 }}><b>Coating / laminate</b><select value={smallCoatingId} onChange={(event) => setSmallCoatingId(event.target.value)} style={inputStyle}><option value="">Choose coating</option><option value="none">No coating</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
               </div>
@@ -2401,6 +2420,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {flowType === "signage" && inkUseLabel ? <SummaryRow label="Ink use" value={inkUseLabel} /> : null}
               {flowType === "small_format" || isPrintDepartment ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
+              <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
               <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `${minutesLabel(artworkMinutes)} required` : "Artwork required" : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
               <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
             </div>
@@ -2770,7 +2790,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "size") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="5" title="Enter sign size" text="The finished size drives sheet usage, roll length, ink and laminate area." />
+          <StepIntro icon="5" title="Enter sign size" text="Finished size stays client-facing. Optional bleed / spacing enlarges each item in both directions for material nesting and yield." />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
             {signageSizePresets.map((preset) => {
               const selected = widthMm === preset.width && heightMm === preset.height;
@@ -2783,9 +2803,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               );
             })}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "end" }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 600" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 900" style={inputStyle} /></label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
+            <label style={{ display: "grid", gap: 6 }}><b>Custom width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 600" style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Custom height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 900" style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `${nestingFootprintLabel} for material yield` : "Optional"}</small></label>
             <button type="button" onClick={() => setActiveStep("artwork")} style={primaryButton}>Continue</button>
           </div>
         </div>
@@ -3081,7 +3102,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (activeStep === "small_size") {
       return (
         <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon={isDuplicateBook ? "5" : "4"} title="Choose finished size" text={isDuplicateBook ? "Choose the finished form size. The book details decide how many copies/sheets are required." : "Finished size calculates paper/card usage and print area."} />
+          <StepIntro icon={isDuplicateBook ? "5" : "4"} title="Choose finished size" text={isDuplicateBook ? "Choose the finished form size. The book details decide how many copies/sheets are required." : "Finished size stays client-facing. Optional bleed / spacing enlarges each item in both directions for material nesting and yield."} />
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
             {smallSizePresets.map((preset) => {
               const selected = widthMm === preset.width && heightMm === preset.height;
@@ -3094,9 +3115,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               );
             })}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 12, alignItems: "end" }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 90" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 55" style={inputStyle} /></label>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
+            <label style={{ display: "grid", gap: 6 }}><b>Custom width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 90" style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Custom height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 55" style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `${nestingFootprintLabel} for material yield` : "Optional"}</small></label>
             <button type="button" onClick={() => setActiveStep("artwork")} style={primaryButton}>Continue</button>
           </div>
         </div>
@@ -3324,6 +3346,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 {isDuplicateBook ? <SummaryRow label="Page colours" value={ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : undefined} /> : null}
                 {isDuplicateBook ? <SummaryRow label="Cover / tape" value={ncrCoverColour && ncrTapeColour ? `${ncrCoverColour} cover · ${ncrTapeColour} tape` : undefined} /> : null}
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
+                <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? minutesLabel(artworkMinutes) : "Required" : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 {!isDuplicateBook ? <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} /> : null}
                 {!isDuplicateBook ? <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} /> : null}
@@ -3336,6 +3359,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 <SummaryRow label="Material" value={selectedMainMaterial?.name} />
                 <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
                 <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
+                <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
                 <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? minutesLabel(artworkMinutes) : "Required" : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
                 {!isRollStockBase ? <SummaryRow label="Print" value={printMethods.find((item) => item.key === resolvedPrintMethod)?.label} /> : null}
                 <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />

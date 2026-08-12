@@ -67,6 +67,7 @@ export type QuickQuoteSnapshot = {
   colour?: string;
   widthMm?: string;
   heightMm?: string;
+  bleedSpacingMm?: string;
   artworkChoice?: string;
   artworkMinutes?: string;
   printMethod?: string;
