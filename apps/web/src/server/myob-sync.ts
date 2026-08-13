@@ -165,6 +165,8 @@ type MyobRequestMethod = "GET" | "POST" | "PUT";
 
 const MYOB_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const MAX_MYOB_REDIRECTS = 4;
+const MYOB_READ_TIMEOUT_MS = 45_000;
+const MYOB_WRITE_TIMEOUT_MS = 60_000;
 
 // AccountRight company files can live on MYOB shard hosts (for example arl2.api.myob.com).
 // Native fetch follows cross-origin redirects but deliberately strips sensitive headers such
@@ -213,14 +215,25 @@ async function fetchMyobWithTrustedRedirects(input: {
     if (input.companyFileAuthToken) headers["x-myobapi-cftoken"] = input.companyFileAuthToken;
     if (input.method !== "GET") headers["Content-Type"] = "application/json";
 
-    const response = await fetch(currentUrl.toString(), {
-      method: input.method,
-      headers,
-      body: input.method === "GET" ? undefined : JSON.stringify(input.body ?? {}),
-      cache: "no-store",
-      redirect: "manual",
-      signal: AbortSignal.timeout(20000)
-    });
+    const timeoutMs = input.method === "GET" ? MYOB_READ_TIMEOUT_MS : MYOB_WRITE_TIMEOUT_MS;
+    let response: Response;
+    try {
+      response = await fetch(currentUrl.toString(), {
+        method: input.method,
+        headers,
+        body: input.method === "GET" ? undefined : JSON.stringify(input.body ?? {}),
+        cache: "no-store",
+        redirect: "manual",
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+    } catch (error) {
+      const name = error && typeof error === "object" && "name" in error ? String((error as { name?: unknown }).name ?? "") : "";
+      const message = error instanceof Error ? error.message : String(error ?? "");
+      if (name === "TimeoutError" || name === "AbortError" || /aborted due to timeout|timed out/i.test(message)) {
+        throw new Error(`MYOB API ${input.method} request timed out after ${Math.round(timeoutMs / 1000)} seconds: ${currentUrl.pathname}${currentUrl.search}`);
+      }
+      throw error;
+    }
 
     if (!MYOB_REDIRECT_STATUSES.has(response.status)) {
       return { response, finalUrl: currentUrl, redirectCount };
@@ -1014,6 +1027,26 @@ function buildMyobCustomerPayload(customer: CustomerRecord, salesTaxCode?: MyobT
   return payload;
 }
 
+function exactMyobCustomerMatchesFromRecords(
+  customer: CustomerRecord,
+  records: Record<string, unknown>[]
+): Record<string, unknown>[] {
+  const email = String(customer.email ?? "").trim();
+  const companyName = String(customer.companyName ?? "").trim();
+  const firstName = String(customer.firstName ?? "").trim();
+  const lastName = String(customer.lastName ?? "").trim();
+  const byUid = new Map<string, Record<string, unknown>>();
+  for (const candidate of records) {
+    const uid = textOrNull(candidate.UID);
+    if (!uid) continue;
+    const matches = customerExactEmail(candidate, email)
+      || customerExactCompany(candidate, companyName)
+      || customerExactPerson(candidate, firstName, lastName);
+    if (matches) byUid.set(uid, candidate);
+  }
+  return Array.from(byUid.values());
+}
+
 async function exactMyobCustomerMatches(
   tenantId: string,
   accessToken: string,
@@ -1022,7 +1055,6 @@ async function exactMyobCustomerMatches(
 ): Promise<Record<string, unknown>[]> {
   const email = String(customer.email ?? "").trim();
   const companyName = String(customer.companyName ?? "").trim();
-  const firstName = String(customer.firstName ?? "").trim();
   const lastName = String(customer.lastName ?? "").trim();
   const endpoints: string[] = [];
 
@@ -1030,20 +1062,25 @@ async function exactMyobCustomerMatches(
   if (companyName) endpoints.push(`/Contact/Customer?$filter=CompanyName eq '${odataString(companyName)}'&$top=20`);
   if (!companyName && lastName) endpoints.push(`/Contact/Customer?$filter=LastName eq '${odataString(lastName)}'&$top=20`);
 
-  const byUid = new Map<string, Record<string, unknown>>();
-  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint, tenantId)));
-  for (const result of results) {
-    for (const candidate of myobCollectionRecords(result.data)) {
-      const uid = textOrNull(candidate.UID);
-      if (!uid) continue;
-      const matches = customerExactEmail(candidate, email)
-        || customerExactCompany(candidate, companyName)
-        || customerExactPerson(candidate, firstName, lastName);
-      if (matches) byUid.set(uid, candidate);
-    }
+  try {
+    const records: Record<string, unknown>[] = [];
+    const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint, tenantId)));
+    for (const result of results) records.push(...myobCollectionRecords(result.data));
+    return exactMyobCustomerMatchesFromRecords(customer, records);
+  } catch (error) {
+    if (!shouldFallbackToUnfilteredMyobRead(error)) throw error;
+    // Some AccountRight files are much slower applying OData contact filters than
+    // returning a normal paged contact collection. A failed filtered lookup must not
+    // turn into a duplicate create or a dead repair path: page the collection and
+    // perform the same exact comparison locally instead.
+    const fallback = await fetchAllMyobCollectionRecords(
+      accessToken,
+      companyFileId,
+      `/Contact/Customer?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    );
+    return exactMyobCustomerMatchesFromRecords(customer, fallback.records);
   }
-
-  return Array.from(byUid.values());
 }
 
 async function saveLocalCustomerMyobLink(
@@ -1139,6 +1176,12 @@ function isMyobNotFoundError(error: unknown): boolean {
   return error instanceof Error && /^404:\s/.test(error.message);
 }
 
+function shouldFallbackToUnfilteredMyobRead(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return /timed out|aborted due to timeout/i.test(error.message)
+    || /^(500|502|503|504):\s/.test(error.message);
+}
+
 export type MyobCustomerCreateResult = {
   uid: string;
   displayName: string;
@@ -1155,18 +1198,23 @@ async function recoverLinkedMyobCustomer(
 ): Promise<Record<string, unknown> | null> {
   // V26.08.13.10/.11 could store businessId as the customer UID when MYOB returned
   // an empty POST body and the created UID had to be read from the Location header.
-  // Prefer the generated/display ID we already saved because it is exact and unique.
+  // Recovery is a one-off path, so deliberately use the same paged customer read that
+  // has already proved reliable in the read-only sync rather than another OData filter.
+  // This avoids MYOB sandbox/company files where DisplayID or Addresses/any filters can
+  // exceed the request timeout even though the normal customer collection is healthy.
+  const response = await fetchAllMyobCollectionRecords(
+    accessToken,
+    companyFileId,
+    `/Contact/Customer?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+    tenantId
+  );
+  const records = response.records;
+
   const displayId = typeof customer.payloadJson?.myobDisplayId === "string"
     ? customer.payloadJson.myobDisplayId.trim()
     : "";
   if (displayId) {
-    const lookup = await fetchMyobJson(
-      accessToken,
-      companyFileId,
-      `/Contact/Customer?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`,
-      tenantId
-    );
-    const found = myobCollectionRecords(lookup.data).filter(
+    const found = records.filter(
       (candidate) => String(candidate.DisplayID ?? "").trim().toLowerCase() === displayId.toLowerCase()
     );
     if (found.length === 1) return found[0];
@@ -1175,7 +1223,7 @@ async function recoverLinkedMyobCustomer(
     }
   }
 
-  const exactMatches = await exactMyobCustomerMatches(tenantId, accessToken, companyFileId, customer);
+  const exactMatches = exactMyobCustomerMatchesFromRecords(customer, records);
   if (exactMatches.length === 1) return exactMatches[0];
   if (exactMatches.length > 1) {
     const names = exactMatches.slice(0, 4).map((item) => `${normaliseCustomerDisplayName(item)}${textOrNull(item.DisplayID) ? ` (${textOrNull(item.DisplayID)})` : ""}`).join(", ");
@@ -1627,22 +1675,39 @@ function buildMyobSupplierPayload(supplier: SupplierRecord): Record<string, unkn
   };
 }
 
+function exactMyobSupplierMatchesFromRecords(supplier: SupplierRecord, records: Record<string, unknown>[]): Record<string, unknown>[] {
+  const email = String(supplier.email ?? "").trim();
+  const company = supplier.displayName.trim();
+  const byUid = new Map<string, Record<string, unknown>>();
+  for (const candidate of records) {
+    const uid = textOrNull(candidate.UID);
+    if (!uid) continue;
+    if (supplierExactEmail(candidate, email) || supplierExactCompany(candidate, company)) byUid.set(uid, candidate);
+  }
+  return [...byUid.values()];
+}
+
 async function exactMyobSupplierMatches(tenantId: string, accessToken: string, companyFileId: string, supplier: SupplierRecord): Promise<Record<string, unknown>[]> {
   const endpoints: string[] = [];
   const email = String(supplier.email ?? "").trim();
   const company = supplier.displayName.trim();
   if (email) endpoints.push(`/Contact/Supplier?$filter=Addresses/any(x: x/Email eq '${odataString(email)}')&$top=20`);
   if (company) endpoints.push(`/Contact/Supplier?$filter=CompanyName eq '${odataString(company)}'&$top=20`);
-  const byUid = new Map<string, Record<string, unknown>>();
-  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint, tenantId).catch(() => ({ data: null }))));
-  for (const result of results) {
-    for (const candidate of myobCollectionRecords(result.data)) {
-      const uid = textOrNull(candidate.UID);
-      if (!uid) continue;
-      if (supplierExactEmail(candidate, email) || supplierExactCompany(candidate, company)) byUid.set(uid, candidate);
-    }
+  try {
+    const records: Record<string, unknown>[] = [];
+    const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint, tenantId)));
+    for (const result of results) records.push(...myobCollectionRecords(result.data));
+    return exactMyobSupplierMatchesFromRecords(supplier, records);
+  } catch (error) {
+    if (!shouldFallbackToUnfilteredMyobRead(error)) throw error;
+    const fallback = await fetchAllMyobCollectionRecords(
+      accessToken,
+      companyFileId,
+      `/Contact/Supplier?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    );
+    return exactMyobSupplierMatchesFromRecords(supplier, fallback.records);
   }
-  return [...byUid.values()];
 }
 
 async function saveLocalSupplierMyobLink(tenantId: string, supplier: SupplierRecord, myobSupplier: Record<string, unknown>, match: string): Promise<void> {
@@ -1909,8 +1974,19 @@ function buildMyobMaterialPayload(material: MaterialRecord, refs: Awaited<Return
 
 async function exactMyobItemMatches(tenantId: string, accessToken: string, companyFileId: string, material: MaterialRecord): Promise<Record<string, unknown>[]> {
   const number = generatedMyobMaterialNumber(material);
-  const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item?$filter=Number eq '${odataString(number)}'&$top=20`, tenantId);
-  return myobCollectionRecords(response.data).filter((row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase());
+  try {
+    const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item?$filter=Number eq '${odataString(number)}'&$top=20`, tenantId);
+    return myobCollectionRecords(response.data).filter((row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase());
+  } catch (error) {
+    if (!shouldFallbackToUnfilteredMyobRead(error)) throw error;
+    const fallback = await fetchAllMyobCollectionRecords(
+      accessToken,
+      companyFileId,
+      `/Inventory/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    );
+    return fallback.records.filter((row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase());
+  }
 }
 
 async function saveMaterialLink(tenantId: string, material: MaterialRecord, item: Record<string, unknown>, refs: Awaited<ReturnType<typeof materialPurchaseReferences>>, match: string): Promise<void> {
