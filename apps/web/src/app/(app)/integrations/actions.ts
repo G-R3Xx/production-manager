@@ -115,6 +115,8 @@ export async function importMyobCustomersAction() {
 
   revalidatePath("/integrations");
   revalidatePath("/dashboard");
+  revalidatePath("/clients");
+  revalidatePath("/quotes");
 }
 
 

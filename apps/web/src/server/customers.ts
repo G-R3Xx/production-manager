@@ -10,6 +10,9 @@ export type ClientDiscountRule = {
   note?: string;
 };
 
+export const MYOB_PRICE_LEVELS = ["Level A", "Level B", "Level C", "Level D", "Level E", "Level F"] as const;
+export type MyobPriceLevel = (typeof MYOB_PRICE_LEVELS)[number];
+
 export type CustomerPayload = {
   source?: string;
   abn?: string;
@@ -20,6 +23,9 @@ export type CustomerPayload = {
   logoStoragePath?: string;
   defaultDiscountPercent?: number;
   discountRules?: ClientDiscountRule[];
+  myobItemPriceLevel?: MyobPriceLevel | string;
+  myobPriceLevelName?: string;
+  myobPriceLevelNames?: Partial<Record<MyobPriceLevel, string>>;
   archivedAt?: string;
   deletedAt?: string;
   deletedReason?: string;
@@ -45,6 +51,37 @@ export type CustomerRecord = {
 function parseJsonObject(value: unknown): CustomerPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as CustomerPayload;
+}
+
+
+export function normaliseMyobPriceLevel(value: unknown): MyobPriceLevel | null {
+  const text = String(value ?? "").trim();
+  return (MYOB_PRICE_LEVELS as readonly string[]).includes(text) ? text as MyobPriceLevel : null;
+}
+
+export function customerMyobPriceLevel(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): MyobPriceLevel | null {
+  return normaliseMyobPriceLevel(customer?.payloadJson?.myobItemPriceLevel);
+}
+
+export function customerMyobPriceLevelName(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): string {
+  const level = customerMyobPriceLevel(customer);
+  if (!level) return "";
+  const direct = String(customer?.payloadJson?.myobPriceLevelName ?? "").trim();
+  if (direct) return direct;
+  const names = customer?.payloadJson?.myobPriceLevelNames;
+  const named = names && typeof names === "object" ? String((names as Record<string, unknown>)[level] ?? "").trim() : "";
+  return named || level;
+}
+
+export function customerMyobPriceLevelNames(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): Partial<Record<MyobPriceLevel, string>> {
+  const value = customer?.payloadJson?.myobPriceLevelNames;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const result: Partial<Record<MyobPriceLevel, string>> = {};
+  for (const level of MYOB_PRICE_LEVELS) {
+    const name = String((value as Record<string, unknown>)[level] ?? "").trim();
+    if (name) result[level] = name;
+  }
+  return result;
 }
 
 export function isDeletedCustomer(customer: Pick<CustomerRecord, "payloadJson">): boolean {

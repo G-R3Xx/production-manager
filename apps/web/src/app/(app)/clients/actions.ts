@@ -6,7 +6,7 @@ import { z } from "zod";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getCustomerById, type ClientDiscountRule, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
+import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, normaliseMyobPriceLevel, type ClientDiscountRule, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
 
 const clientSchema = z.object({
   displayName: z.string().min(1).max(255),
@@ -21,7 +21,8 @@ const clientSchema = z.object({
   notes: z.string().max(4000).optional().or(z.literal("")),
   logoUrl: z.string().url("Logo URL must be a valid URL.").optional().or(z.literal("")),
   defaultDiscountPercent: z.string().optional().or(z.literal("")),
-  discountRulesText: z.string().max(4000).optional().or(z.literal(""))
+  discountRulesText: z.string().max(4000).optional().or(z.literal("")),
+  myobPriceLevel: z.string().optional().or(z.literal(""))
 });
 
 function nullable(value: string | undefined): string | null {
@@ -101,7 +102,8 @@ function payloadFromParsed(parsed: z.infer<typeof clientSchema>, extra?: { logoU
     logoUrl: extra?.logoUrl ?? nullable(parsed.logoUrl) ?? undefined,
     logoStoragePath: extra?.logoStoragePath ?? undefined,
     defaultDiscountPercent: numberOrZero(parsed.defaultDiscountPercent),
-    discountRules: parseDiscountRules(parsed.discountRulesText)
+    discountRules: parseDiscountRules(parsed.discountRulesText),
+    myobItemPriceLevel: normaliseMyobPriceLevel(parsed.myobPriceLevel) ?? "Level A"
   };
 }
 
@@ -112,10 +114,14 @@ async function requestedMyobMapping(tenantId: string, formData: FormData): Promi
   if (!selected || !selected.myobUid || selected.myobUid.startsWith("manual-")) {
     throw new Error("Please select a valid customer imported from MYOB.");
   }
+  const level = customerMyobPriceLevel(selected) ?? "Level A";
   return {
     myobUid: selected.myobUid,
     myobDisplayName: selected.displayName,
-    myobMatch: "manual_selection"
+    myobMatch: "manual_selection",
+    myobItemPriceLevel: level,
+    myobPriceLevelName: customerMyobPriceLevelName(selected) || level,
+    myobPriceLevelNames: customerMyobPriceLevelNames(selected)
   };
 }
 
@@ -134,7 +140,8 @@ export async function createClientAction(formData: FormData): Promise<void> {
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
     defaultDiscountPercent: String(formData.get("defaultDiscountPercent") || ""),
-    discountRulesText: String(formData.get("discountRulesText") || "")
+    discountRulesText: String(formData.get("discountRulesText") || ""),
+    myobPriceLevel: String(formData.get("myobPriceLevel") || "Level A")
   });
 
   if (!parsed.success) {
@@ -191,7 +198,8 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
     defaultDiscountPercent: String(formData.get("defaultDiscountPercent") || ""),
-    discountRulesText: String(formData.get("discountRulesText") || "")
+    discountRulesText: String(formData.get("discountRulesText") || ""),
+    myobPriceLevel: String(formData.get("myobPriceLevel") || "Level A")
   });
 
   if (!parsed.success || !customerId) {
@@ -218,6 +226,17 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(message)}`);
   }
 
+  const existingLinkedMyobUid = !existing.myobUid.startsWith("manual-")
+    ? existing.myobUid
+    : typeof existing.payloadJson?.myobUid === "string" && !existing.payloadJson.myobUid.startsWith("manual-")
+      ? existing.payloadJson.myobUid
+      : "";
+  const selectedMappingUid = typeof myobMapping.myobUid === "string" ? myobMapping.myobUid : "";
+  const isNewMyobMapping = Boolean(selectedMappingUid && selectedMappingUid !== existingLinkedMyobUid);
+  const formPriceLevel = normaliseMyobPriceLevel(parsed.data.myobPriceLevel) ?? "Level A";
+  const mappedPriceLevel = normaliseMyobPriceLevel(myobMapping.myobItemPriceLevel);
+  const desiredPriceLevel = isNewMyobMapping ? (mappedPriceLevel ?? formPriceLevel) : formPriceLevel;
+
   await updateCustomerForTenant(activeTenant.tenantId, customerId, {
     displayName: parsed.data.displayName.trim(),
     companyName: nullable(parsed.data.companyName),
@@ -228,11 +247,25 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     payloadJson: {
       ...payloadFromParsed(parsed.data, uploadedLogo.logoUrl ? uploadedLogo : { logoUrl: nullable(parsed.data.logoUrl) ?? existing.payloadJson.logoUrl, logoStoragePath: existing.payloadJson.logoStoragePath }),
       ...myobMapping,
+      myobItemPriceLevel: desiredPriceLevel,
+      myobPriceLevelName: isNewMyobMapping ? myobMapping.myobPriceLevelName : existing.payloadJson.myobPriceLevelName,
       deletedAt: undefined,
       archivedAt: existing.isActive ? undefined : existing.payloadJson.archivedAt
     },
     isActive: existing.isActive
   });
+
+  const existingPriceLevel = customerMyobPriceLevel(existing);
+  const linkedMyobUid = selectedMappingUid || existingLinkedMyobUid;
+  if (linkedMyobUid && !isNewMyobMapping && desiredPriceLevel !== existingPriceLevel) {
+    try {
+      const { updateMyobCustomerPriceLevelForTenant } = await import("@/server/myob-sync");
+      await updateMyobCustomerPriceLevelForTenant(activeTenant.tenantId, customerId, desiredPriceLevel);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(`Client saved locally, but MYOB price level was not updated: ${message}`)}`);
+    }
+  }
 
   redirect(`/clients?selected=${customerId}&message=Client%20updated`);
 }

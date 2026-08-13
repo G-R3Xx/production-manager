@@ -24,7 +24,7 @@ import {
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
 import { createMyobCustomerFromLocalClientForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
-import { getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
+import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -768,10 +768,14 @@ export async function linkQuoteClientToMyobAction(formData: FormData): Promise<v
     redirect(`/quotes?selected=${quoteId}&myobLink=required&error=${encodeURIComponent("Choose a customer imported from MYOB.")}`);
   }
 
+  const linkedPriceLevel = customerMyobPriceLevel(myobCustomer) ?? "Level A";
   await updateCustomerPayloadForTenant(activeTenant.tenantId, localClient.id, {
     myobUid: myobCustomer.myobUid,
     myobDisplayName: myobCustomer.displayName,
-    myobMatch: "quote_manual_selection"
+    myobMatch: "quote_manual_selection",
+    myobItemPriceLevel: linkedPriceLevel,
+    myobPriceLevelName: customerMyobPriceLevelName(myobCustomer) || linkedPriceLevel,
+    myobPriceLevelNames: customerMyobPriceLevelNames(myobCustomer)
   }, true);
 
   await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {

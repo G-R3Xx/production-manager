@@ -12,7 +12,7 @@ import {
   upsertMyobOauthTokenByTenantId
 } from "@/server/integrations";
 import { env } from "@/lib/env";
-import { getCustomerById, upsertImportedCustomer, type CustomerRecord } from "@/server/customers";
+import { MYOB_PRICE_LEVELS, getCustomerById, normaliseMyobPriceLevel, updateCustomerPayloadForTenant, upsertImportedCustomer, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { upsertImportedProduct } from "@/server/products";
 
 export type MyobReadOnlySyncSummary = {
@@ -238,6 +238,47 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
 }
 
 
+export type MyobPriceLevelNames = Record<MyobPriceLevel, string>;
+
+function defaultMyobPriceLevelNames(): MyobPriceLevelNames {
+  return Object.fromEntries(MYOB_PRICE_LEVELS.map((level) => [level, level])) as MyobPriceLevelNames;
+}
+
+function priceLevelFromSellingDetails(customer: Record<string, unknown>): MyobPriceLevel | null {
+  const selling = customer.SellingDetails;
+  if (!selling || typeof selling !== "object" || Array.isArray(selling)) return null;
+  return normaliseMyobPriceLevel((selling as Record<string, unknown>).ItemPriceLevel);
+}
+
+function parseMyobPriceLevelDetail(data: unknown): MyobPriceLevelNames {
+  const names = defaultMyobPriceLevelNames();
+  const records = myobCollectionRecords(data);
+  for (const item of records) {
+    const key = String(item.Name ?? "").trim();
+    const value = String(item.Value ?? "").trim();
+    const match = key.match(/^PriceLevel([A-F1-6])$/i);
+    if (!match || !value) continue;
+    const suffix = match[1].toUpperCase();
+    const index = /^[1-6]$/.test(suffix) ? Number(suffix) - 1 : suffix.charCodeAt(0) - 65;
+    const level = MYOB_PRICE_LEVELS[index];
+    if (level) names[level] = value;
+  }
+  return names;
+}
+
+export async function fetchMyobPriceLevelNamesForTenant(tenantId: string): Promise<MyobPriceLevelNames> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") return defaultMyobPriceLevelNames();
+  try {
+    const { accessToken } = await getValidAccessToken(tenantId);
+    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Inventory/PriceLevelDetail");
+    return parseMyobPriceLevelDetail(result.data);
+  } catch (error) {
+    console.warn("Could not read MYOB custom price-level names; using Level A-F labels.", error);
+    return defaultMyobPriceLevelNames();
+  }
+}
+
 export type MyobCustomerImportSummary = {
   importedCount: number;
   mappedCount: number;
@@ -262,6 +303,9 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
 
   const companyFileId = connection.companyFileId;
   const { accessToken } = await getValidAccessToken(tenantId);
+  const priceLevelNames = await fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail")
+    .then((response) => parseMyobPriceLevelDetail(response.data))
+    .catch(() => defaultMyobPriceLevelNames());
   const result = await fetchMyobJson(accessToken, companyFileId, "/Contact/Customer?$top=50");
   const payload = result.data as Record<string, unknown> | null;
   const customers = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? result.data as unknown[] : [];
@@ -284,6 +328,7 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
       ? String((customer.Phone1 as Record<string, unknown>).Number ?? "") || null
       : null;
     const isActive = customer.IsActive !== false;
+    const myobItemPriceLevel = priceLevelFromSellingDetails(customer);
 
     const saved = await upsertImportedCustomer(tenantId, {
       myobUid,
@@ -294,7 +339,13 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
       email,
       phone,
       isActive,
-      payloadJson: customer
+      payloadJson: {
+        ...customer,
+        myobItemPriceLevel: myobItemPriceLevel ?? undefined,
+        myobPriceLevelName: myobItemPriceLevel ? priceLevelNames[myobItemPriceLevel] : undefined,
+        myobPriceLevelNames: priceLevelNames,
+        myobPriceLevelSyncedAt: new Date().toISOString()
+      }
     });
 
     await upsertExternalMappingByTenantId(tenantId, {
@@ -303,7 +354,12 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
       externalId: myobUid,
       syncState: "synced",
       lastSyncedAt: new Date().toISOString(),
-      payloadJson: { displayName, companyName }
+      payloadJson: {
+        displayName,
+        companyName,
+        myobItemPriceLevel: myobItemPriceLevel ?? undefined,
+        myobPriceLevelName: myobItemPriceLevel ? priceLevelNames[myobItemPriceLevel] : undefined
+      }
     });
 
     imported.push({ myobUid, displayName, localId: saved.id });
@@ -374,9 +430,19 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
 
   const companyFileId = connection.companyFileId;
   const { accessToken } = await getValidAccessToken(tenantId);
-  const result = await fetchMyobJson(accessToken, companyFileId, "/Inventory/Item?$top=50");
+  const [result, matrixResult, priceLevelResult] = await Promise.all([
+    fetchMyobJson(accessToken, companyFileId, "/Inventory/Item?$top=50"),
+    fetchMyobJson(accessToken, companyFileId, "/Inventory/ItemPriceMatrix?$top=50").catch(() => ({ data: null })),
+    fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail").catch(() => ({ data: null }))
+  ]);
   const payload = result.data as Record<string, unknown> | null;
   const items = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? (result.data as unknown[]) : [];
+  const priceLevelNames = parseMyobPriceLevelDetail(priceLevelResult.data);
+  const priceMatrixByUid = new Map<string, Record<string, unknown>>();
+  for (const matrix of myobCollectionRecords(matrixResult.data)) {
+    const uid = textOrNull(matrix.UID) ?? (matrix.Item && typeof matrix.Item === "object" ? textOrNull((matrix.Item as Record<string, unknown>).UID) : null);
+    if (uid) priceMatrixByUid.set(uid, matrix);
+  }
   const imported: Array<{ myobUid: string; name: string; sku: string | null; localId: string }> = [];
 
   for (const raw of items) {
@@ -399,7 +465,12 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
       department: "general",
       productFamily: "general",
       calculatorType: "configurator_template",
-      payloadJson: item
+      payloadJson: {
+        ...item,
+        myobPriceMatrix: priceMatrixByUid.get(myobUid) ?? undefined,
+        myobPriceLevelNames: priceLevelNames,
+        myobPriceMatrixSyncedAt: new Date().toISOString()
+      }
     });
 
     await upsertExternalMappingByTenantId(tenantId, {
@@ -586,6 +657,8 @@ function buildMyobCustomerPayload(customer: CustomerRecord): Record<string, unkn
   }
 
   if (Object.keys(addressRecord).length > 1) payload.Addresses = [addressRecord];
+  const itemPriceLevel = normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A";
+  payload.SellingDetails = { ItemPriceLevel: itemPriceLevel };
   return payload;
 }
 
@@ -630,6 +703,8 @@ async function saveLocalCustomerMyobLink(
   if (!uid) throw new Error("MYOB customer response did not include a UID.");
   const displayName = normaliseCustomerDisplayName(myobCustomer);
   const displayId = textOrNull(myobCustomer.DisplayID);
+  const myobItemPriceLevel = priceLevelFromSellingDetails(myobCustomer);
+  const priceLevelNames = await fetchMyobPriceLevelNamesForTenant(tenantId);
   const existing = await pool.query<{ id: string }>(`
     SELECT id
     FROM app.customers
@@ -656,6 +731,9 @@ async function saveLocalCustomerMyobLink(
       myobDisplayName: displayName,
       myobDisplayId: displayId,
       myobMatch: match,
+      myobItemPriceLevel: myobItemPriceLevel ?? normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A",
+      myobPriceLevelName: priceLevelNames[myobItemPriceLevel ?? normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A"],
+      myobPriceLevelNames: priceLevelNames,
       myobLinkedAt: new Date().toISOString()
     })
   ]);
@@ -666,7 +744,13 @@ async function saveLocalCustomerMyobLink(
     externalId: uid,
     syncState: "synced",
     lastSyncedAt: new Date().toISOString(),
-    payloadJson: { displayName, displayId, match }
+    payloadJson: {
+      displayName,
+      displayId,
+      match,
+      myobItemPriceLevel: myobItemPriceLevel ?? normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A",
+      myobPriceLevelName: priceLevelNames[myobItemPriceLevel ?? normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A"]
+    }
   });
 }
 
@@ -755,6 +839,7 @@ export async function createMyobCustomerFromLocalClientForTenant(
     CompanyName: textOrNull(created?.CompanyName) ?? textOrNull(payload.CompanyName),
     FirstName: textOrNull(created?.FirstName) ?? textOrNull(payload.FirstName),
     LastName: textOrNull(created?.LastName) ?? textOrNull(payload.LastName),
+    SellingDetails: created?.SellingDetails ?? payload.SellingDetails,
     IsActive: created?.IsActive ?? true
   };
   await saveLocalCustomerMyobLink(tenantId, customer, createdRecord, "created_from_production_manager");
@@ -775,6 +860,70 @@ export async function createMyobCustomerFromLocalClientForTenant(
     created: true,
     matchedExisting: false
   };
+}
+
+function stripMyobReadOnlyFields(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripMyobReadOnlyFields);
+  if (!value || typeof value !== "object") return value;
+  const blocked = new Set(["URI", "PhotoURI", "LastModified", "CurrentBalance", "Available", "PastDue"]);
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    if (blocked.has(key)) continue;
+    out[key] = stripMyobReadOnlyFields(child);
+  }
+  return out;
+}
+
+export async function updateMyobCustomerPriceLevelForTenant(
+  tenantId: string,
+  customerId: string,
+  requestedLevel: MyobPriceLevel
+): Promise<{ level: MyobPriceLevel; name: string }> {
+  const customer = await getCustomerById(tenantId, customerId);
+  if (!customer) throw new Error("Production Manager client could not be found.");
+  const uid = customer.myobUid && !customer.myobUid.startsWith("manual-")
+    ? customer.myobUid
+    : typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-")
+      ? customer.payloadJson.myobUid
+      : null;
+  if (!uid) {
+    const names = await fetchMyobPriceLevelNamesForTenant(tenantId);
+    await updateCustomerPayloadForTenant(tenantId, customerId, {
+      myobItemPriceLevel: requestedLevel,
+      myobPriceLevelName: names[requestedLevel],
+      myobPriceLevelNames: names
+    });
+    return { level: requestedLevel, name: names[requestedLevel] };
+  }
+
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") {
+    throw new Error("MYOB is not connected, so the customer price level could not be updated in MYOB.");
+  }
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${uid}`);
+  if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) {
+    throw new Error("MYOB did not return the customer record needed to update its price level.");
+  }
+  const current = currentResponse.data as Record<string, unknown>;
+  const currentSelling = current.SellingDetails && typeof current.SellingDetails === "object" && !Array.isArray(current.SellingDetails)
+    ? current.SellingDetails as Record<string, unknown>
+    : {};
+  const updatePayload = stripMyobReadOnlyFields({
+    ...current,
+    UID: uid,
+    SellingDetails: { ...currentSelling, ItemPriceLevel: requestedLevel }
+  }) as Record<string, unknown>;
+
+  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${uid}`, "PUT", updatePayload);
+  const names = await fetchMyobPriceLevelNamesForTenant(tenantId);
+  await updateCustomerPayloadForTenant(tenantId, customerId, {
+    myobItemPriceLevel: requestedLevel,
+    myobPriceLevelName: names[requestedLevel],
+    myobPriceLevelNames: names,
+    myobPriceLevelSyncedAt: new Date().toISOString()
+  });
+  return { level: requestedLevel, name: names[requestedLevel] };
 }
 
 function buildOrderLineDescription(line: import("@/server/quotes").QuoteLineRecord, customerMaterialNames: Map<string, string> = new Map()): string {

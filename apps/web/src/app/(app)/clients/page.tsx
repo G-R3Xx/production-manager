@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, isDeletedCustomer, listCustomersForTenant, type CustomerRecord } from "@/server/customers";
+import { MYOB_PRICE_LEVELS, customerDefaultDiscount, customerDiscountRules, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, isDeletedCustomer, listCustomersForTenant, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, updateClientAction } from "./actions";
 import { ClientDiscountRulesEditor } from "./ClientDiscountRulesEditor";
 
@@ -82,13 +82,13 @@ function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; sel
           <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 11, fontWeight: 950, ...statusStyle(client) }}>{statusLabel(client)}</span>
         </div>
         <span style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[client.companyName, client.email, client.phone].filter(Boolean).join(" · ") || "No contact details yet"}</span>
-        <span style={{ color: "#475467", fontSize: 12 }}>{customerDefaultDiscount(client) ? `${customerDefaultDiscount(client)}% default discount` : "No default discount"}{discountCount ? ` · ${discountCount} qty rule${discountCount === 1 ? "" : "s"}` : ""}</span>
+        <span style={{ color: "#475467", fontSize: 12 }}>{customerDefaultDiscount(client) ? `${customerDefaultDiscount(client)}% default discount` : "No default discount"}{discountCount ? ` · ${discountCount} qty rule${discountCount === 1 ? "" : "s"}` : ""}{customerMyobPriceLevel(client) ? ` · MYOB ${customerMyobPriceLevelName(client)}` : ""}</span>
       </div>
     </a>
   );
 }
 
-function ClientEditor({ client, myobCustomers }: { client: CustomerRecord | null; myobCustomers: CustomerRecord[] }) {
+function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: CustomerRecord | null; myobCustomers: CustomerRecord[]; priceLevelNames: Partial<Record<MyobPriceLevel, string>> }) {
   const isNew = !client;
   const active = client?.isActive ?? true;
   const deleted = client ? isDeletedCustomer(client) : false;
@@ -98,6 +98,7 @@ function ClientEditor({ client, myobCustomers }: { client: CustomerRecord | null
     ? client.myobUid
     : typeof payload.myobUid === "string" ? payload.myobUid : "";
   const mappedCustomer = myobCustomers.find((candidate) => candidate.myobUid === currentMyobUid) ?? null;
+  const currentPriceLevel = customerMyobPriceLevel(client) ?? "Level A";
 
   return (
     <section style={{ ...panelStyle(), display: "grid", gap: 18 }}>
@@ -138,6 +139,18 @@ function ClientEditor({ client, myobCustomers }: { client: CustomerRecord | null
             ))}
           </select>
           {mappedCustomer ? <span style={{ color: "#067647", fontSize: 12, fontWeight: 800 }}>Current MYOB customer: {mappedCustomer.displayName}</span> : null}
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 360px) 1fr", gap: 12, alignItems: "end", marginTop: 4 }}>
+            <label style={{ display: "grid", gap: 6 }}>
+              <b>MYOB price level</b>
+              <select name="myobPriceLevel" defaultValue={currentPriceLevel} style={inputStyle}>
+                {MYOB_PRICE_LEVELS.map((level) => {
+                  const customName = String(priceLevelNames[level] ?? level).trim() || level;
+                  return <option key={level} value={level}>{customName === level ? level : `${customName} (${level})`}</option>;
+                })}
+              </select>
+            </label>
+            <span style={{ color: "#667085", fontSize: 12, lineHeight: 1.5 }}>Synced with MYOB customer Selling Details. Changing this on a linked client updates MYOB; unlinked clients keep the level ready for when they are created in MYOB.</span>
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
@@ -201,6 +214,13 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
   const filter = readParam(params, "filter") || "active";
   const clients = await listCustomersForTenant(activeTenant.tenantId, { includeDeleted: true });
   const myobCustomers = clients.filter((client) => Boolean(client.myobUid) && !client.myobUid.startsWith("manual-") && client.isActive && !isDeletedCustomer(client));
+  const priceLevelNames: Partial<Record<MyobPriceLevel, string>> = {};
+  for (const source of myobCustomers) {
+    const names = customerMyobPriceLevelNames(source);
+    for (const level of MYOB_PRICE_LEVELS) {
+      if (!priceLevelNames[level] && names[level]) priceLevelNames[level] = names[level];
+    }
+  }
 
   const visibleClients = clients.filter((client) => {
     if (filter === "archived") return !client.isActive && !isDeletedCustomer(client);
@@ -249,7 +269,7 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
           </div>
         </section>
 
-        <ClientEditor client={selectedClient} myobCustomers={myobCustomers} />
+        <ClientEditor client={selectedClient} myobCustomers={myobCustomers} priceLevelNames={priceLevelNames} />
       </div>
     </div>
   );

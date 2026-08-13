@@ -6,7 +6,7 @@ import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
-import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
@@ -486,7 +486,7 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                           <div style={{ display: "grid", gap: 4 }}>
                             <strong>MYOB open job / order</strong>
                             <span style={{ fontSize: 13 }}>Accepted quotes become open MYOB Orders. Drafts, enquiries and surveys stay in Production Manager only.</span>
-                            {linkedClient ? <span style={{ fontSize: 13 }}>Client: <strong>{linkedClient.displayName}</strong> · MYOB: <strong>{linkedMyobCustomer ? linkedMyobCustomer.displayName : "Not linked"}</strong></span> : null}
+                            {linkedClient ? <span style={{ fontSize: 13 }}>Client: <strong>{linkedClient.displayName}</strong> · MYOB: <strong>{linkedMyobCustomer ? linkedMyobCustomer.displayName : "Not linked"}</strong>{customerMyobPriceLevel(linkedClient) ? <> · Price level: <strong>{customerMyobPriceLevelName(linkedClient)} ({customerMyobPriceLevel(linkedClient)})</strong></> : null}</span> : null}
                             {selectedQuote.myobOrderNumber ? <span style={{ fontSize: 13 }}>Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · synced ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</span> : null}
                             {selectedQuote.myobOrderSyncError && !needsMyobLink ? <span style={{ fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</span> : null}
                           </div>
