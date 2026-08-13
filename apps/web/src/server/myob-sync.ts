@@ -305,6 +305,58 @@ export async function fetchMyobJson(accessToken: string, companyFileId: string, 
   return performMyobRequest({ tenantId, accessToken, companyFileId, endpoint, method: "GET" });
 }
 
+// MYOB's /Info endpoint is global to the AccountRight API service:
+//   https://api.myob.com/accountright/Info
+// It is NOT a company-file resource and must not be prefixed with businessId/cf_uri.
+// Keep this separate from performMyobRequest so company-file authentication is only sent
+// to company-file scoped endpoints.
+async function fetchMyobGlobalJson(accessToken: string, endpoint: string, tenantId: string) {
+  const baseUrl = `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`;
+  const url = new URL(endpoint.replace(/^\//, ""), baseUrl);
+
+  const doFetch = async (token: string) => fetchMyobWithTrustedRedirects({
+    initialUrl: url,
+    accessToken: token,
+    companyFileAuthToken: null,
+    method: "GET"
+  });
+
+  let requestResult = await doFetch(accessToken);
+  let response = requestResult.response;
+  let retriedAfterRefresh = false;
+
+  if (response.status === 401) {
+    const refreshedAccessToken = await refreshAccessTokenForTenant(tenantId, accessToken);
+    requestResult = await doFetch(refreshedAccessToken);
+    response = requestResult.response;
+    retriedAfterRefresh = true;
+  }
+
+  const text = await response.text();
+  let parsed: unknown = null;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    parsed = null;
+  }
+
+  if (!response.ok) {
+    const detail = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : text || response.statusText;
+    const authHint = response.status === 401
+      ? ` MYOB rejected the correctly-scoped global ${endpoint} request even after an automatic token refresh. No company-file GUID or x-myobapi-cftoken was added to this request. Check that MYOB_CLIENT_ID is the registered API Key for the same app that issued the OAuth token. Final MYOB host: ${requestResult.finalUrl.host}.`
+      : "";
+    throw new Error(`${response.status}: ${detail}${authHint}`);
+  }
+
+  return {
+    url: requestResult.finalUrl.toString(),
+    data: parsed,
+    location: response.headers.get("location"),
+    retriedAfterRefresh,
+    redirectCount: requestResult.redirectCount
+  };
+}
+
 function countCollection(data: unknown) {
   if (Array.isArray(data)) return data.length;
   if (data && typeof data === "object") {
@@ -337,12 +389,14 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
   };
 
   try {
-    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Info", tenantId);
+    const result = await fetchMyobGlobalJson(accessToken, "/Info", tenantId);
     const data = result.data as Record<string, unknown> | null;
     summary.companyInfo = {
       ok: true,
       endpoint: result.url,
-      displayName: typeof data?.Name === "string" ? data.Name : typeof data?.CompanyName === "string" ? data.CompanyName : null,
+      // /Info returns API build/resource information, not company identity. The company
+      // name is already supplied by MYOB in the OAuth callback alongside businessId.
+      displayName: connection.companyName,
       rawKeys: data ? Object.keys(data).slice(0, 10) : []
     };
   } catch (error) {
