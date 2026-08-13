@@ -155,6 +155,17 @@ export async function ensurePurchasingSchema(): Promise<void> {
       ON purchasing.purchase_orders (tenant_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS purchase_order_lines_order_idx
       ON purchasing.purchase_order_lines (tenant_id, purchase_order_id, sort_order, created_at);
+
+    -- V26.08.14.03: purchase orders created/synced before the explicit sync-status
+    -- columns existed already have a MYOB UID, but PostgreSQL gave the new status
+    -- column its default of 'not_synced'. Backfill only that legacy/default state;
+    -- never overwrite a real pending/failed state.
+    UPDATE purchasing.purchase_orders
+    SET myob_sync_status='synced',
+        myob_synced_at=COALESCE(myob_synced_at,updated_at),
+        updated_at=updated_at
+    WHERE myob_uid IS NOT NULL
+      AND myob_sync_status='not_synced';
   `);
   purchasingSchemaReady = true;
 }
@@ -225,7 +236,8 @@ export async function listPurchaseOrders(tenantId: string): Promise<PurchaseOrde
   const result=await pool.query<PurchaseOrderRecord>(`
     SELECT po.id,po.tenant_id AS "tenantId",po.po_number AS "poNumber",po.supplier_id AS "supplierId",
       s.display_name AS "supplierName",po.status,po.myob_uid AS "myobUid",po.myob_number AS "myobNumber",
-      po.myob_sync_status AS "myobSyncStatus",po.myob_last_error AS "myobLastError",po.myob_synced_at AS "myobSyncedAt",
+      CASE WHEN po.myob_sync_status='not_synced' AND po.myob_uid IS NOT NULL THEN 'synced' ELSE po.myob_sync_status END AS "myobSyncStatus",
+      po.myob_last_error AS "myobLastError",po.myob_synced_at AS "myobSyncedAt",
       po.email_to AS "emailTo",po.email_status AS "emailStatus",po.email_sent_at AS "emailSentAt",
       po.email_last_error AS "emailLastError",po.email_message_id AS "emailMessageId",po.sent_at AS "sentAt",
       po.order_date::text AS "orderDate",po.promised_date::text AS "promisedDate",po.ship_to_address AS "shipToAddress",

@@ -27,6 +27,7 @@ async function tenant() {
 }
 function err(e: unknown) { return e instanceof Error ? e.message : String(e); }
 function target(poId: string, kind: "message"|"error", text: string) { return `/purchasing?selected=${encodeURIComponent(poId)}&${kind}=${encodeURIComponent(text)}`; }
+function refreshPurchasing() { revalidatePath("/purchasing"); }
 
 export async function startPurchaseOrderAction(formData: FormData) {
   const active = await tenant();
@@ -96,6 +97,7 @@ export async function sendPurchaseOrderToMyobAction(formData: FormData) {
     errorMessage = err(e);
     await markPurchaseOrderMyobFailed(active.tenantId, poId, errorMessage).catch(()=>undefined);
   }
+  refreshPurchasing();
   redirect(target(poId, errorMessage ? "error" : "message", errorMessage || `MYOB synced${result?.number ? ` as ${result.number}` : ""}`));
 }
 
@@ -105,6 +107,7 @@ export async function emailPurchaseOrderOnlyAction(formData: FormData) {
   let result: {recipient:string}|null=null, errorMessage="";
   try { result = await sendPurchaseOrderEmailForTenant(active.tenantId, poId); }
   catch (e) { errorMessage = err(e); }
+  refreshPurchasing();
   redirect(target(poId, errorMessage ? "error" : "message", errorMessage || `Purchase order emailed to ${result?.recipient ?? "supplier"}`));
 }
 
@@ -137,6 +140,7 @@ export async function sendPurchaseOrderAction(formData: FormData) {
   }
 
   const summary = `${emailOk ? "✓" : "✕"} ${emailMessage} · ${myobOk ? "✓" : "✕"} ${myobMessage}`;
+  refreshPurchasing();
   redirect(target(poId, myobOk && emailOk ? "message" : "error", summary));
 }
 

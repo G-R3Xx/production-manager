@@ -1,8 +1,8 @@
 import "server-only";
 
-import { randomUUID } from "node:crypto";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { getSupplierById } from "@/server/suppliers";
+import { sendOutboundEmail } from "@/server/outbound-email";
 import {
   archivePurchaseOrderPdf,
   getPurchaseOrder,
@@ -284,56 +284,34 @@ export async function sendPurchaseOrderEmailForTenant(tenantId: string, purchase
   }
 
   await markPurchaseOrderEmailPending(tenantId, purchaseOrderId, recipient);
-  const apiKey = process.env.RESEND_API_KEY?.trim();
   const fromEmail = process.env.PURCHASE_ORDER_FROM_EMAIL?.trim() || document.company?.email?.trim() || "";
-  if (!apiKey || !fromEmail) {
-    const message = "Purchase-order email is not configured. Add RESEND_API_KEY and PURCHASE_ORDER_FROM_EMAIL to the Production Manager deployment. MYOB sync can still run independently.";
+  if (!process.env.RESEND_API_KEY?.trim() || !fromEmail) {
+    const message = "Purchase-order email is not configured. Add RESEND_API_KEY and a verified PURCHASE_ORDER_FROM_EMAIL to the Production Manager deployment. MYOB sync can still run independently.";
     await markPurchaseOrderEmailFailed(tenantId, purchaseOrderId, { emailTo: recipient, errorMessage: message });
     throw new Error(message);
   }
 
   const fromName = document.company?.tradingName || document.company?.companyLegalName || document.company?.tenantName || "Production Manager";
   const replyTo = process.env.PURCHASE_ORDER_REPLY_TO?.trim() || document.company?.email?.trim() || undefined;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 30000);
-  let response: Response;
+  let messageId: string | null = null;
   try {
-    response = await fetch("https://api.resend.com/emails", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "Idempotency-Key": `pm-po-${purchaseOrderId}-${randomUUID()}`
-      },
-      body: JSON.stringify({
-        from: `${fromName} <${fromEmail}>`,
-        to: [recipient],
-        subject: document.subject,
-        html: document.html,
-        ...(replyTo ? { reply_to: replyTo } : {}),
-        attachments: [{ filename: document.fileName, content: Buffer.from(document.bytes).toString("base64") }],
-        tags: [{ name: "purchase_order", value: document.order.poNumber.replace(/[^a-zA-Z0-9_-]/g, "_") }]
-      }),
-      signal: controller.signal
+    const sent = await sendOutboundEmail({
+      fromName,
+      fromEmail,
+      to: recipient,
+      subject: document.subject,
+      html: document.html,
+      replyTo,
+      attachments: [{ fileName: document.fileName, content: document.bytes }],
+      tags: [{ name: "purchase_order", value: document.order.poNumber.replace(/[^a-zA-Z0-9_-]/g, "_") }]
     });
+    messageId = sent.messageId;
   } catch (error) {
-    const message = error instanceof Error && error.name === "AbortError" ? "Purchase-order email timed out after 30 seconds." : `Purchase-order email failed: ${error instanceof Error ? error.message : String(error)}`;
+    const message = error instanceof Error ? error.message : String(error);
     await markPurchaseOrderEmailFailed(tenantId, purchaseOrderId, { emailTo: recipient, errorMessage: message });
-    throw new Error(message);
-  } finally {
-    clearTimeout(timeout);
+    throw error instanceof Error ? error : new Error(message);
   }
 
-  const responseText = await response.text();
-  let payload: Record<string, unknown> = {};
-  try { payload = responseText ? JSON.parse(responseText) as Record<string, unknown> : {}; } catch { payload = {}; }
-  if (!response.ok) {
-    const providerMessage = typeof payload.message === "string" ? payload.message : responseText || `${response.status} ${response.statusText}`;
-    const message = `Purchase-order email failed (${response.status}): ${providerMessage}`;
-    await markPurchaseOrderEmailFailed(tenantId, purchaseOrderId, { emailTo: recipient, errorMessage: message });
-    throw new Error(message);
-  }
-  const messageId = typeof payload.id === "string" ? payload.id : null;
   await archivePurchaseOrderPdf(tenantId, purchaseOrderId, {
     fileName: document.fileName,
     bytes: document.bytes,
