@@ -25,6 +25,12 @@ const companySchema = z.object({
   quoteInkRatePerSqm: z.string().optional().or(z.literal("")),
   quoteInkBillingIncrementSqm: z.string().optional().or(z.literal("")),
   quoteMonoRatePerSqm: z.string().optional().or(z.literal("")),
+  myobPriceLevelFactorA: z.string().optional().or(z.literal("")),
+  myobPriceLevelFactorB: z.string().optional().or(z.literal("")),
+  myobPriceLevelFactorC: z.string().optional().or(z.literal("")),
+  myobPriceLevelFactorD: z.string().optional().or(z.literal("")),
+  myobPriceLevelFactorE: z.string().optional().or(z.literal("")),
+  myobPriceLevelFactorF: z.string().optional().or(z.literal("")),
   quoteSignageSizePresetsText: z.string().optional().or(z.literal("")),
   quoteSmallSizePresetsText: z.string().optional().or(z.literal("")),
   quoteTerms: z.string().optional().or(z.literal("")),
@@ -78,6 +84,13 @@ function normalNumber(value: string | undefined, fallback: string): string {
   const amount = Number(cleaned);
   if (!Number.isFinite(amount) || amount <= 0) return fallback;
   return String(amount);
+}
+
+function priceLevelFactorFromPercent(value: string | undefined): string {
+  const cleaned = String(value ?? "").replace(/[%x,]/gi, "").trim();
+  const percent = cleaned ? Number(cleaned) : 100;
+  if (!Number.isFinite(percent) || percent < 0 || percent > 1000) return "1";
+  return String(percent / 100);
 }
 
 function parseSizePresetLines(value: string | undefined, fallback: typeof defaultSignageSizePresets): typeof defaultSignageSizePresets {
@@ -136,6 +149,12 @@ export async function saveCompanySettingsAction(formData: FormData): Promise<voi
     quoteInkRatePerSqm: String(formData.get("quoteInkRatePerSqm") || "10"),
     quoteInkBillingIncrementSqm: String(formData.get("quoteInkBillingIncrementSqm") ?? "0.5"),
     quoteMonoRatePerSqm: String(formData.get("quoteMonoRatePerSqm") || "4"),
+    myobPriceLevelFactorA: String(formData.get("myobPriceLevelFactorA") || "100"),
+    myobPriceLevelFactorB: String(formData.get("myobPriceLevelFactorB") || "100"),
+    myobPriceLevelFactorC: String(formData.get("myobPriceLevelFactorC") || "100"),
+    myobPriceLevelFactorD: String(formData.get("myobPriceLevelFactorD") || "100"),
+    myobPriceLevelFactorE: String(formData.get("myobPriceLevelFactorE") || "100"),
+    myobPriceLevelFactorF: String(formData.get("myobPriceLevelFactorF") || "100"),
     quoteSignageSizePresetsText: String(formData.get("quoteSignageSizePresetsText") || ""),
     quoteSmallSizePresetsText: String(formData.get("quoteSmallSizePresetsText") || ""),
     quoteTerms: String(formData.get("quoteTerms") || ""),
@@ -178,6 +197,14 @@ export async function saveCompanySettingsAction(formData: FormData): Promise<voi
     quoteInkRatePerSqm: normalNumber(parsed.data.quoteInkRatePerSqm, "10"),
     quoteInkBillingIncrementSqm: String(Math.max(0, Number(parsed.data.quoteInkBillingIncrementSqm || "0.5") || 0)),
     quoteMonoRatePerSqm: normalNumber(parsed.data.quoteMonoRatePerSqm, "4"),
+    myobPriceLevelFactors: {
+      "Level A": priceLevelFactorFromPercent(parsed.data.myobPriceLevelFactorA),
+      "Level B": priceLevelFactorFromPercent(parsed.data.myobPriceLevelFactorB),
+      "Level C": priceLevelFactorFromPercent(parsed.data.myobPriceLevelFactorC),
+      "Level D": priceLevelFactorFromPercent(parsed.data.myobPriceLevelFactorD),
+      "Level E": priceLevelFactorFromPercent(parsed.data.myobPriceLevelFactorE),
+      "Level F": priceLevelFactorFromPercent(parsed.data.myobPriceLevelFactorF)
+    },
     quoteSignageSizePresets: parseSizePresetLines(parsed.data.quoteSignageSizePresetsText, defaultSignageSizePresets),
     quoteSmallSizePresets: parseSizePresetLines(parsed.data.quoteSmallSizePresetsText, defaultSmallSizePresets),
     quoteTerms: nullable(parsed.data.quoteTerms),

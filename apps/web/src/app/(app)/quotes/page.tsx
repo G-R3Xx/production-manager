@@ -6,7 +6,7 @@ import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
-import { customerDefaultDiscount, customerDiscountRules, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
+import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
@@ -223,6 +223,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         sku: product.sku,
         department: product.department,
         productFamily: product.productFamily,
+        myobUid: product.myobUid,
+        myobPriceMatrix: product.payloadJson?.myobPriceMatrix && typeof product.payloadJson.myobPriceMatrix === "object" && !Array.isArray(product.payloadJson.myobPriceMatrix)
+          ? product.payloadJson.myobPriceMatrix as Record<string, unknown>
+          : null,
         fields,
         components
       };
@@ -295,8 +299,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const linkedClientLogoUrl = customerLogoUrl(linkedClient);
   const sourceLogoUrl = sourceEnquiry?.clientLogoUrl || linkedClientLogoUrl;
   const selectedQuoteLogoUrl = selectedQuoteSourceEnquiry?.clientLogoUrl || linkedClientLogoUrl;
-  const linkedClientDefaultDiscount = customerDefaultDiscount(linkedClient);
-  const linkedClientDiscountRules = customerDiscountRules(linkedClient);
+  const linkedClientPriceLevel = customerMyobPriceLevel(linkedClient) ?? "Level A";
+  const linkedClientPriceLevelName = customerMyobPriceLevelName(linkedClient) || linkedClientPriceLevel;
+  const linkedClientPriceFactor = companySettings?.myobPriceLevelFactors?.[linkedClientPriceLevel] ?? "1";
   const surveyPhotos = extractSurveyPhotos(survey?.installSchedulerPayload);
   const defaultQuoteNotes = buildSurveyQuoteNotes({
     enquirySummary: sourceEnquiry?.requestSummary ?? null,
@@ -315,7 +320,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       email: client.email,
       phone: client.phone,
       logoUrl: customerLogoUrl(client),
-      defaultDiscountPercent: customerDefaultDiscount(client),
       isActive: client.isActive
     }));
   const linkedClientContactName = linkedClient ? [linkedClient.firstName, linkedClient.lastName].filter(Boolean).join(" ").trim() : "";
@@ -373,7 +377,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={linkedClient.displayName} size={56} radius={14} padding={5} />
                 <div style={{ display: "grid", gap: 4 }}>
                   <strong>{linkedClient.displayName}</strong>
-                  <span style={{ color: "#667085", fontSize: 13 }}>{linkedClientDefaultDiscount ? `${linkedClientDefaultDiscount}% default discount` : "No default discount"}{linkedClientDiscountRules.length ? ` · ${linkedClientDiscountRules.length} qty discount rule${linkedClientDiscountRules.length === 1 ? "" : "s"}` : ""}</span>
+                  <span style={{ color: "#667085", fontSize: 13 }}>MYOB price level: <strong>{linkedClientPriceLevelName}</strong> ({linkedClientPriceLevel}) · PM calculated work ×{Number(linkedClientPriceFactor || 1).toFixed(2)}</span>
                 </div>
               </section>
             ) : null}
@@ -392,7 +396,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               contactName: initialDraftContactName,
               phone: sourcePhone || linkedClient?.phone || "",
               email: sourceEmail || linkedClient?.email || "",
-              discountPercent: String(linkedClientDefaultDiscount || 0),
+              discountPercent: "0",
               notes: defaultQuoteNotes
             }}
           />
@@ -412,7 +416,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   </div>
                   <span style={{ flex: "0 0 auto", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>{quote.status}</span>
                 </div>
-                <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
+                <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Manual discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
               </a>
             );
           })}
@@ -440,6 +444,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}><strong>{quoteLines.length}</strong> line item{quoteLines.length === 1 ? "" : "s"}</span>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Total: <strong>{formatMoney(quoteSubtotal)}</strong></span>
+                    <span style={{ border: "1px solid #bfdbfe", borderRadius: 999, padding: "7px 11px", background: "#eff6ff", color: "#1d4ed8", fontSize: 12 }}>Price level: <strong>{linkedClientPriceLevelName}</strong>{linkedClientPriceLevelName !== linkedClientPriceLevel ? ` (${linkedClientPriceLevel})` : ""}</span>
+                    {Number(selectedQuote.discountPercent || 0) > 0 ? <span style={{ border: "1px solid #fed7aa", borderRadius: 999, padding: "7px 11px", background: "#fff7ed", color: "#c2410c", fontSize: 12 }}>Manual quote discount: <strong>{selectedQuote.discountPercent}%</strong></span> : null}
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Client: <strong>{selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</strong></span>
                   </div>
 
@@ -561,8 +567,10 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                     monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
                     signageSizePresets: companySettings?.quoteSignageSizePresets,
                     smallSizePresets: companySettings?.quoteSmallSizePresets,
-                    clientDefaultDiscountPercent: linkedClientDefaultDiscount,
-                    clientDiscountRules: linkedClientDiscountRules
+                    priceLevelFactor: linkedClientPriceFactor,
+                    priceLevelName: linkedClientPriceLevelName,
+                    priceLevelCode: linkedClientPriceLevel,
+                    manualQuoteDiscountPercent: selectedQuote.discountPercent
                   }}
                 />
               ) : (
@@ -620,7 +628,11 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                           materials={activeMaterials}
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
-                            profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2"
+                            profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                            priceLevelFactor: linkedClientPriceFactor,
+                            priceLevelName: linkedClientPriceLevelName,
+                            priceLevelCode: linkedClientPriceLevel,
+                            manualQuoteDiscountPercent: selectedQuote.discountPercent
                           }}
                         />
 

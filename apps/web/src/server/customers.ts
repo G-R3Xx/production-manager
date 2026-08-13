@@ -2,14 +2,6 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 
-export type ClientDiscountRule = {
-  productType: string;
-  minQty: number;
-  maxQty: number | null;
-  discountPercent: number;
-  note?: string;
-};
-
 export const MYOB_PRICE_LEVELS = ["Level A", "Level B", "Level C", "Level D", "Level E", "Level F"] as const;
 export type MyobPriceLevel = (typeof MYOB_PRICE_LEVELS)[number];
 
@@ -21,8 +13,6 @@ export type CustomerPayload = {
   notes?: string;
   logoUrl?: string;
   logoStoragePath?: string;
-  defaultDiscountPercent?: number;
-  discountRules?: ClientDiscountRule[];
   myobItemPriceLevel?: MyobPriceLevel | string;
   myobPriceLevelName?: string;
   myobPriceLevelNames?: Partial<Record<MyobPriceLevel, string>>;
@@ -51,6 +41,22 @@ export type CustomerRecord = {
 function parseJsonObject(value: unknown): CustomerPayload {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   return value as CustomerPayload;
+}
+
+let legacyClientPricingPayloadRetired = false;
+
+async function retireLegacyClientPricingPayload(): Promise<void> {
+  if (legacyClientPricingPayloadRetired) return;
+  await pool.query(`
+    UPDATE app.customers
+    SET payload_json = COALESCE(payload_json, '{}'::jsonb)
+      - 'defaultDiscountPercent'
+      - 'discountRules'
+      - 'discountRulesText',
+        updated_at = now()
+    WHERE COALESCE(payload_json, '{}'::jsonb) ?| ARRAY['defaultDiscountPercent', 'discountRules', 'discountRulesText']
+  `);
+  legacyClientPricingPayloadRetired = true;
 }
 
 
@@ -93,29 +99,8 @@ export function customerLogoUrl(customer: Pick<CustomerRecord, "payloadJson"> | 
   return typeof value === "string" ? value.trim() : "";
 }
 
-export function customerDefaultDiscount(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): number {
-  const value = customer?.payloadJson?.defaultDiscountPercent;
-  const parsed = typeof value === "number" ? value : Number(value ?? 0);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-export function customerDiscountRules(customer: Pick<CustomerRecord, "payloadJson"> | null | undefined): ClientDiscountRule[] {
-  const value = customer?.payloadJson?.discountRules;
-  if (!Array.isArray(value)) return [];
-  return value.filter((rule): rule is ClientDiscountRule => {
-    if (!rule || typeof rule !== "object") return false;
-    const candidate = rule as Partial<ClientDiscountRule>;
-    return Boolean(candidate.productType && Number(candidate.minQty) >= 0 && Number(candidate.discountPercent) > 0);
-  }).map((rule) => ({
-    productType: String(rule.productType),
-    minQty: Number(rule.minQty),
-    maxQty: rule.maxQty == null ? null : Number(rule.maxQty),
-    discountPercent: Number(rule.discountPercent),
-    note: rule.note ? String(rule.note) : undefined
-  }));
-}
-
 export async function listCustomersForTenant(tenantId: string, options?: { includeDeleted?: boolean }): Promise<CustomerRecord[]> {
+  await retireLegacyClientPricingPayload();
   const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`
     SELECT
       id,
@@ -157,6 +142,7 @@ export async function listCustomerLogoSummariesForTenant(
 
 export async function getCustomerById(tenantId: string, customerId: string | null | undefined): Promise<CustomerRecord | null> {
   if (!customerId) return null;
+  await retireLegacyClientPricingPayload();
   const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`
     SELECT
       id,

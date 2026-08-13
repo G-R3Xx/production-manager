@@ -8,6 +8,19 @@ export type QuoteSizePreset = {
   height: string;
 };
 
+export const PM_MYOB_PRICE_LEVELS = ["Level A", "Level B", "Level C", "Level D", "Level E", "Level F"] as const;
+export type PmMyobPriceLevel = (typeof PM_MYOB_PRICE_LEVELS)[number];
+export type MyobPriceLevelFactorMap = Record<PmMyobPriceLevel, string>;
+
+export const defaultMyobPriceLevelFactors: MyobPriceLevelFactorMap = {
+  "Level A": "1",
+  "Level B": "1",
+  "Level C": "1",
+  "Level D": "1",
+  "Level E": "1",
+  "Level F": "1"
+};
+
 export const defaultSignageSizePresets: QuoteSizePreset[] = [
   { label: "450 × 600 mm", width: "450", height: "600" },
   { label: "600 × 900 mm", width: "600", height: "900" },
@@ -43,6 +56,7 @@ export type CompanySettingsRecord = {
   quoteInkRatePerSqm: string;
   quoteInkBillingIncrementSqm: string;
   quoteMonoRatePerSqm: string;
+  myobPriceLevelFactors: MyobPriceLevelFactorMap;
   quoteSignageSizePresets: QuoteSizePreset[];
   quoteSmallSizePresets: QuoteSizePreset[];
   quoteTerms: string | null;
@@ -52,6 +66,15 @@ export type CompanySettingsRecord = {
 
 function sizePresetDefaultSql(presets: QuoteSizePreset[]): string {
   return JSON.stringify(presets).replace(/'/g, "''");
+}
+
+function normaliseMyobPriceLevelFactors(value: unknown): MyobPriceLevelFactorMap {
+  const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  return Object.fromEntries(PM_MYOB_PRICE_LEVELS.map((level) => {
+    const parsed = Number(source[level] ?? defaultMyobPriceLevelFactors[level]);
+    const factor = Number.isFinite(parsed) && parsed >= 0 ? parsed : Number(defaultMyobPriceLevelFactors[level]);
+    return [level, String(factor)];
+  })) as MyobPriceLevelFactorMap;
 }
 
 function normaliseSizePresetArray(value: unknown, fallback: QuoteSizePreset[]): QuoteSizePreset[] {
@@ -84,6 +107,7 @@ async function ensurePricingSettingsColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS quote_ink_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 10,
       ADD COLUMN IF NOT EXISTS quote_ink_billing_increment_sqm numeric(6,4) NOT NULL DEFAULT 0.5,
       ADD COLUMN IF NOT EXISTS quote_mono_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 4,
+      ADD COLUMN IF NOT EXISTS myob_price_level_factors_json jsonb NOT NULL DEFAULT '{"Level A":"1","Level B":"1","Level C":"1","Level D":"1","Level E":"1","Level F":"1"}'::jsonb,
       ADD COLUMN IF NOT EXISTS company_logo_url text,
       ADD COLUMN IF NOT EXISTS company_logo_storage_path text,
       ADD COLUMN IF NOT EXISTS quote_signage_size_presets_json jsonb NOT NULL DEFAULT '${sizePresetDefaultSql(defaultSignageSizePresets)}'::jsonb,
@@ -119,6 +143,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
         COALESCE(ts.quote_ink_rate_per_sqm, 10)::text AS "quoteInkRatePerSqm",
         COALESCE(ts.quote_ink_billing_increment_sqm, 0.5)::text AS "quoteInkBillingIncrementSqm",
         COALESCE(ts.quote_mono_rate_per_sqm, 4)::text AS "quoteMonoRatePerSqm",
+        COALESCE(ts.myob_price_level_factors_json, '{"Level A":"1","Level B":"1","Level C":"1","Level D":"1","Level E":"1","Level F":"1"}'::jsonb) AS "myobPriceLevelFactors",
         COALESCE(ts.quote_signage_size_presets_json, '${sizePresetDefaultSql(defaultSignageSizePresets)}'::jsonb) AS "quoteSignageSizePresets",
         COALESCE(ts.quote_small_size_presets_json, '${sizePresetDefaultSql(defaultSmallSizePresets)}'::jsonb) AS "quoteSmallSizePresets",
         ts.quote_terms AS "quoteTerms",
@@ -137,6 +162,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
 
   return {
     ...row,
+    myobPriceLevelFactors: normaliseMyobPriceLevelFactors(row.myobPriceLevelFactors),
     quoteSignageSizePresets: normaliseSizePresetArray(row.quoteSignageSizePresets, defaultSignageSizePresets),
     quoteSmallSizePresets: normaliseSizePresetArray(row.quoteSmallSizePresets, defaultSmallSizePresets)
   };
@@ -171,13 +197,14 @@ export async function updateCompanySettingsByTenantId(
         quote_ink_rate_per_sqm,
         quote_ink_billing_increment_sqm,
         quote_mono_rate_per_sqm,
+        myob_price_level_factors_json,
         quote_signage_size_presets_json,
         quote_small_size_presets_json,
         quote_terms,
         proof_terms,
         job_terms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,$17::jsonb,$18::jsonb,$19,$20,$21)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,$17::jsonb,$18::jsonb,$19::jsonb,$20,$21,$22)
       ON CONFLICT (tenant_id)
       DO UPDATE SET
         company_legal_name = EXCLUDED.company_legal_name,
@@ -195,6 +222,7 @@ export async function updateCompanySettingsByTenantId(
         quote_ink_rate_per_sqm = EXCLUDED.quote_ink_rate_per_sqm,
         quote_ink_billing_increment_sqm = EXCLUDED.quote_ink_billing_increment_sqm,
         quote_mono_rate_per_sqm = EXCLUDED.quote_mono_rate_per_sqm,
+        myob_price_level_factors_json = EXCLUDED.myob_price_level_factors_json,
         quote_signage_size_presets_json = EXCLUDED.quote_signage_size_presets_json,
         quote_small_size_presets_json = EXCLUDED.quote_small_size_presets_json,
         quote_terms = EXCLUDED.quote_terms,
@@ -219,6 +247,7 @@ export async function updateCompanySettingsByTenantId(
       input.quoteInkRatePerSqm || "10",
       input.quoteInkBillingIncrementSqm ?? "0.5",
       input.quoteMonoRatePerSqm || "4",
+      JSON.stringify(normaliseMyobPriceLevelFactors(input.myobPriceLevelFactors)),
       JSON.stringify(normaliseSizePresetArray(input.quoteSignageSizePresets, defaultSignageSizePresets)),
       JSON.stringify(normaliseSizePresetArray(input.quoteSmallSizePresets, defaultSmallSizePresets)),
       input.quoteTerms,

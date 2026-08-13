@@ -13,7 +13,6 @@ export type QuoteDraftClientOption = {
   email: string | null;
   phone: string | null;
   logoUrl: string;
-  defaultDiscountPercent: number;
   isActive: boolean;
 };
 
@@ -125,7 +124,6 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
     setContactName(contactNameForClient(client));
     setPhone(client.phone || "");
     setEmail(client.email || "");
-    setDiscountPercent(String(client.defaultDiscountPercent || 0));
   }
 
   function chooseMode(mode: "existing" | "manual") {
@@ -238,17 +236,20 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
         />
         <input name="phone" value={phone} onChange={(event) => setPhone(event.currentTarget.value)} placeholder="Phone" style={inputStyle} />
         <input name="email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="Email" type="email" style={inputStyle} />
-        <input
-          name="discountPercent"
-          value={discountPercent}
-          onChange={(event) => setDiscountPercent(event.currentTarget.value)}
-          placeholder="Client discount %"
-          type="number"
-          min="0"
-          max="100"
-          step="0.01"
-          style={inputStyle}
-        />
+        <label style={{ display: "grid", gap: 4 }}>
+          <input
+            name="discountPercent"
+            value={discountPercent}
+            onChange={(event) => setDiscountPercent(event.currentTarget.value)}
+            placeholder="Manual quote discount %"
+            type="number"
+            min="0"
+            max="100"
+            step="0.01"
+            style={inputStyle}
+          />
+          <small style={{ color: "#667085" }}>Optional one-off discount for this quote only. Customer pricing comes from the MYOB price level.</small>
+        </label>
       </div>
       <textarea name="notes" defaultValue={initialValues.notes} placeholder="Quote notes" style={textareaStyle} />
       <button type="submit" style={{ ...buttonStyle, width: "fit-content" }}>Create draft quote</button>

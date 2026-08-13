@@ -142,6 +142,10 @@ export type QuickQuoteSnapshot = {
     monoRatePerSqm?: number;
     rawCost?: number;
     autoUnitPrice?: number;
+    priceLevelCode?: string;
+    priceLevelName?: string;
+    priceLevelFactor?: number;
+    manualQuoteDiscountPercent?: number;
     pricingBreakdown?: Array<Record<string, unknown>>;
   };
 };

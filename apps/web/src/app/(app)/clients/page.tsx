@@ -1,9 +1,8 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { MYOB_PRICE_LEVELS, customerDefaultDiscount, customerDiscountRules, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, isDeletedCustomer, listCustomersForTenant, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
+import { MYOB_PRICE_LEVELS, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, isDeletedCustomer, listCustomersForTenant, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, updateClientAction } from "./actions";
-import { ClientDiscountRulesEditor } from "./ClientDiscountRulesEditor";
 
 type ClientsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -23,12 +22,6 @@ const inputStyle = { minHeight: 44, borderRadius: 14, border: "1px solid #cfd9e8
 const textareaStyle = { minHeight: 96, borderRadius: 14, border: "1px solid #cfd9e8", padding: "12px 14px", width: "100%", boxSizing: "border-box", background: "#fff", fontFamily: "inherit" } as const;
 const darkButton = { minHeight: 44, borderRadius: 14, border: "none", background: "#111827", color: "#fff", fontWeight: 900, cursor: "pointer", padding: "0 16px" } as const;
 const ghostButton = { minHeight: 40, borderRadius: 12, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 850, cursor: "pointer", padding: "0 14px" } as const;
-
-function discountLines(client: CustomerRecord): string {
-  return customerDiscountRules(client)
-    .map((rule) => [rule.productType, rule.minQty, rule.discountPercent, rule.maxQty ?? "", rule.note ?? ""].join(" | ").replace(/( \|\s*)+$/g, ""))
-    .join("\n");
-}
 
 function statusLabel(client: CustomerRecord): string {
   if (isDeletedCustomer(client)) return "Deleted";
@@ -72,7 +65,6 @@ function ClientLogo({ client }: { client: CustomerRecord }) {
 
 function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; selectedId: string }) {
   const selected = client.id === selectedId;
-  const discountCount = customerDiscountRules(client).length;
   return (
     <a href={`/clients?selected=${client.id}`} style={{ textDecoration: "none", color: "inherit", border: selected ? "2px solid #2563eb" : "1px solid #e5e7eb", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "auto 1fr", gap: 12, background: selected ? "#eff6ff" : "#fbfdff" }}>
       <ClientLogo client={client} />
@@ -82,7 +74,7 @@ function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; sel
           <span style={{ borderRadius: 999, padding: "4px 9px", fontSize: 11, fontWeight: 950, ...statusStyle(client) }}>{statusLabel(client)}</span>
         </div>
         <span style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[client.companyName, client.email, client.phone].filter(Boolean).join(" · ") || "No contact details yet"}</span>
-        <span style={{ color: "#475467", fontSize: 12 }}>{customerDefaultDiscount(client) ? `${customerDefaultDiscount(client)}% default discount` : "No default discount"}{discountCount ? ` · ${discountCount} qty rule${discountCount === 1 ? "" : "s"}` : ""}{customerMyobPriceLevel(client) ? ` · MYOB ${customerMyobPriceLevelName(client)}` : ""}</span>
+        <span style={{ color: "#475467", fontSize: 12 }}>{customerMyobPriceLevel(client) ? `Price level: ${customerMyobPriceLevelName(client)} (${customerMyobPriceLevel(client)})` : "Price level: Level A"}</span>
       </div>
     </a>
   );
@@ -106,7 +98,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
         <div style={{ display: "grid", gap: 6 }}>
           <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: isNew ? "#2563eb" : "#475467" }}>{isNew ? "New client" : "Client setup"}</p>
           <h2 style={{ margin: 0 }}>{isNew ? "Add client details" : client.displayName}</h2>
-          <p style={{ margin: 0, color: "#667085", lineHeight: 1.55 }}>Client details, logos and discounts are used throughout enquiries, survey requests, quotes and install handoff.</p>
+          <p style={{ margin: 0, color: "#667085", lineHeight: 1.55 }}>Client details, MYOB price level and logo are used throughout enquiries, survey requests, quotes and install handoff.</p>
         </div>
         {client ? <ClientLogo client={client} /> : null}
       </div>
@@ -151,6 +143,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
             </label>
             <span style={{ color: "#667085", fontSize: 12, lineHeight: 1.5 }}>Synced with MYOB customer Selling Details. Changing this on a linked client updates MYOB; unlinked clients keep the level ready for when they are created in MYOB.</span>
           </div>
+          <div style={{ borderTop: "1px solid #bbf7d0", paddingTop: 9, color: "#475467", fontSize: 12, lineHeight: 1.5 }}>Permanent client discounts and quantity discount rules have been retired. Customer pricing now follows this single MYOB price level; one-off exceptions are applied on the quote instead.</div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
@@ -158,10 +151,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
           <label style={{ display: "grid", gap: 6 }}><b>Phone</b><input name="phone" defaultValue={client?.phone ?? ""} style={inputStyle} /></label>
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}><b>ABN / account reference</b><input name="abn" defaultValue={String(payload.abn ?? "")} style={inputStyle} /></label>
-          <label style={{ display: "grid", gap: 6 }}><b>Default quote discount %</b><input name="defaultDiscountPercent" defaultValue={String(payload.defaultDiscountPercent ?? "")} type="number" min="0" step="0.01" placeholder="eg 10" style={inputStyle} /></label>
-        </div>
+        <label style={{ display: "grid", gap: 6 }}><b>ABN / account reference</b><input name="abn" defaultValue={String(payload.abn ?? "")} style={inputStyle} /></label>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}><b>Billing address</b><textarea name="billingAddress" defaultValue={String(payload.billingAddress ?? "")} style={textareaStyle} /></label>
@@ -175,8 +165,6 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
           <input type="file" name="logoFile" accept="image/*" style={{ ...inputStyle, paddingTop: 10 }} />
           <input name="logoUrl" defaultValue={logoUrl} placeholder="or paste logo URL" style={inputStyle} />
         </div>
-
-        <ClientDiscountRulesEditor initialRulesText={client ? discountLines(client) : "Signage | 10 | 5\nSmall format | 250 | 7.5"} />
 
         <label style={{ display: "grid", gap: 6 }}><b>Internal notes</b><textarea name="notes" defaultValue={String(payload.notes ?? "")} style={textareaStyle} /></label>
 
@@ -241,7 +229,7 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
       <section style={{ ...panelStyle(), background: "linear-gradient(135deg,#ffffff 0%,#f8fbff 55%,#eef6ff 100%)" }}>
         <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: "#2563eb" }}>Clients</p>
         <h1 style={{ marginTop: 10, marginBottom: 10, fontSize: 36, letterSpacing: "-0.04em" }}>Client setup</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Manage client details, logos, archived clients and pricing/discount rules for <strong>{activeTenant.tenantName}</strong>.</p>
+        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Manage client details, logos, archived clients and MYOB price levels for <strong>{activeTenant.tenantName}</strong>.</p>
       </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "410px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>

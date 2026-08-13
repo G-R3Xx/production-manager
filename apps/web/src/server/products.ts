@@ -49,9 +49,10 @@ export type ProductSummaryRecord = Pick<
 
 export type QuoteProductRecord = Pick<
   ProductRecord,
-  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId"
+  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId" | "myobUid"
 > & {
   definitionJson: Record<string, unknown>;
+  payloadJson: Record<string, unknown>;
 };
 
 export type ProductCreateInput = {
@@ -197,7 +198,9 @@ export async function listQuoteProductsForTenant(tenantId: string): Promise<Quot
         p.product_family AS "productFamily",
         p.status::text AS status,
         p.default_template_id AS "defaultTemplateId",
-        COALESCE(ct.definition_json, '{}'::jsonb) AS "definitionJson"
+        p.myob_uid AS "myobUid",
+        COALESCE(ct.definition_json, '{}'::jsonb) AS "definitionJson",
+        COALESCE(p.payload_json, '{}'::jsonb) AS "payloadJson"
       FROM catalog.products p
       LEFT JOIN catalog.configurator_templates ct
         ON ct.id = p.default_template_id

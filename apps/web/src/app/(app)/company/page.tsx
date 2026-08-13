@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { defaultSignageSizePresets, defaultSmallSizePresets, getCompanySettingsByTenantId, type QuoteSizePreset } from "@/server/company";
+import { defaultSignageSizePresets, defaultSmallSizePresets, getCompanySettingsByTenantId, PM_MYOB_PRICE_LEVELS, type QuoteSizePreset } from "@/server/company";
+import { fetchMyobPriceLevelNamesForTenant } from "@/server/myob-sync";
 import { getEmailDomain, getTenantDomainAccessSettingsByTenantId } from "@/server/auth/domainJoin";
 import { saveCompanySettingsAction } from "./actions";
 
@@ -18,6 +19,11 @@ function readParam(
   return value ?? "";
 }
 
+function factorPercent(value: string | number | null | undefined): string {
+  const factor = Number(value ?? 1);
+  return String(Math.round((Number.isFinite(factor) ? factor : 1) * 10000) / 100);
+}
+
 function sizePresetText(presets: QuoteSizePreset[] | null | undefined, fallback: QuoteSizePreset[]): string {
   const list = presets && presets.length > 0 ? presets : fallback;
   return list.map((preset) => `${preset.label} | ${preset.width} | ${preset.height}`).join("\n");
@@ -31,9 +37,12 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
     redirect("/bootstrap");
   }
 
-  const [settings, teamDomainAccess] = await Promise.all([
+  const [settings, teamDomainAccess, myobPriceLevelNames] = await Promise.all([
     getCompanySettingsByTenantId(activeTenant.tenantId),
-    getTenantDomainAccessSettingsByTenantId(activeTenant.tenantId)
+    getTenantDomainAccessSettingsByTenantId(activeTenant.tenantId),
+    fetchMyobPriceLevelNamesForTenant(activeTenant.tenantId).catch(() => ({
+      "Level A": "Level A", "Level B": "Level B", "Level C": "Level C", "Level D": "Level D", "Level E": "Level E", "Level F": "Level F"
+    }))
   ]);
   const defaultTeamDomain =
     teamDomainAccess?.emailDomain ||
@@ -197,6 +206,32 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
               <input name="globalProfitMultiplier" defaultValue={settings?.globalProfitMultiplier ?? "1.2"} placeholder="eg 1.2" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
               <small style={{ color: "#475467" }}>Example: x1.2 adds your profit after markup. x1.5 × x1.2 = x1.8 total.</small>
             </label>
+          </div>
+
+          <div style={{ border: "1px solid #bae6fd", borderRadius: 16, padding: 14, background: "#f8fcff", display: "grid", gap: 12 }}>
+            <div>
+              <strong style={{ display: "block", color: "#075985" }}>MYOB price levels → Production Manager calculated work</strong>
+              <p style={{ margin: "5px 0 0", color: "#475467", fontSize: 13, lineHeight: 1.55 }}>
+                These percentages apply after PM calculates cost × markup × profit. They use the same MYOB customer Level A–F assignment, so there is only one permanent customer pricing class. MYOB inventory-item price matrices remain untouched and authoritative for MYOB items.
+              </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+              {PM_MYOB_PRICE_LEVELS.map((level, index) => {
+                const letter = String.fromCharCode(65 + index);
+                const customName = String(myobPriceLevelNames[level as keyof typeof myobPriceLevelNames] ?? level).trim() || level;
+                const factor = settings?.myobPriceLevelFactors?.[level] ?? "1";
+                return (
+                  <label key={level} style={{ display: "grid", gap: 6 }}>
+                    <span style={{ fontWeight: 700 }}>{customName === level ? level : `${customName} (${level})`}</span>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr auto", alignItems: "center", gap: 8 }}>
+                      <input name={`myobPriceLevelFactor${letter}`} defaultValue={factorPercent(factor)} type="number" min="0" max="1000" step="0.01" inputMode="decimal" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #7dd3fc", padding: "0 12px", fontSize: 15, width: "100%", boxSizing: "border-box" }} />
+                      <strong style={{ color: "#075985" }}>%</strong>
+                    </div>
+                  </label>
+                );
+              })}
+            </div>
+            <small style={{ color: "#475467" }}>Example: 90% means a PM-calculated $100 standard sell price becomes $90 for customers assigned to that MYOB price level. Set 100% for no adjustment.</small>
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>

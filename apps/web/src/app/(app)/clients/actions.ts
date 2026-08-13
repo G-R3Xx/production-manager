@@ -6,7 +6,7 @@ import { z } from "zod";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, normaliseMyobPriceLevel, type ClientDiscountRule, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
+import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, normaliseMyobPriceLevel, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
 
 const clientSchema = z.object({
   displayName: z.string().min(1).max(255),
@@ -20,45 +20,12 @@ const clientSchema = z.object({
   defaultSiteAddress: z.string().max(2000).optional().or(z.literal("")),
   notes: z.string().max(4000).optional().or(z.literal("")),
   logoUrl: z.string().url("Logo URL must be a valid URL.").optional().or(z.literal("")),
-  defaultDiscountPercent: z.string().optional().or(z.literal("")),
-  discountRulesText: z.string().max(4000).optional().or(z.literal("")),
   myobPriceLevel: z.string().optional().or(z.literal(""))
 });
 
 function nullable(value: string | undefined): string | null {
   const trimmed = (value ?? "").trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function numberOrZero(value: string | undefined): number {
-  const parsed = Number(String(value ?? "").replace(/[^0-9.-]/g, ""));
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
-}
-
-function parseDiscountRules(value: string | undefined): ClientDiscountRule[] {
-  const lines = String(value ?? "")
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  return lines.flatMap((line) => {
-    const parts = line.split("|").map((part) => part.trim());
-    const productType = parts[0] ?? "";
-    const minQty = Number(parts[1] ?? "0");
-    const discountPercent = Number(parts[2] ?? "0");
-    const maxQtyRaw = parts[3] ?? "";
-    const maxQty = maxQtyRaw ? Number(maxQtyRaw) : null;
-    const note = parts.slice(4).join(" | ").trim();
-
-    if (!productType || !Number.isFinite(minQty) || !Number.isFinite(discountPercent) || discountPercent <= 0) return [];
-    return [{
-      productType,
-      minQty: Math.max(0, minQty),
-      maxQty: maxQty != null && Number.isFinite(maxQty) && maxQty > 0 ? maxQty : null,
-      discountPercent,
-      note: note || undefined
-    }];
-  });
 }
 
 async function requireTenant() {
@@ -101,8 +68,6 @@ function payloadFromParsed(parsed: z.infer<typeof clientSchema>, extra?: { logoU
     notes: nullable(parsed.notes) ?? undefined,
     logoUrl: extra?.logoUrl ?? nullable(parsed.logoUrl) ?? undefined,
     logoStoragePath: extra?.logoStoragePath ?? undefined,
-    defaultDiscountPercent: numberOrZero(parsed.defaultDiscountPercent),
-    discountRules: parseDiscountRules(parsed.discountRulesText),
     myobItemPriceLevel: normaliseMyobPriceLevel(parsed.myobPriceLevel) ?? "Level A"
   };
 }
@@ -139,8 +104,6 @@ export async function createClientAction(formData: FormData): Promise<void> {
     defaultSiteAddress: String(formData.get("defaultSiteAddress") || ""),
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
-    defaultDiscountPercent: String(formData.get("defaultDiscountPercent") || ""),
-    discountRulesText: String(formData.get("discountRulesText") || ""),
     myobPriceLevel: String(formData.get("myobPriceLevel") || "Level A")
   });
 
@@ -197,8 +160,6 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     defaultSiteAddress: String(formData.get("defaultSiteAddress") || ""),
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
-    defaultDiscountPercent: String(formData.get("defaultDiscountPercent") || ""),
-    discountRulesText: String(formData.get("discountRulesText") || ""),
     myobPriceLevel: String(formData.get("myobPriceLevel") || "Level A")
   });
 

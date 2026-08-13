@@ -110,6 +110,8 @@ export type QuoteProduct = {
   sku?: string | null;
   department?: string | null;
   productFamily?: string | null;
+  myobUid?: string | null;
+  myobPriceMatrix?: Record<string, unknown> | null;
   fields: QuoteQuestion[];
   components: QuoteComponent[];
 };
@@ -129,6 +131,10 @@ export type CostBreakdownItem = {
 export type PricingSettings = {
   markupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
+  priceLevelFactor?: string | number | null;
+  priceLevelName?: string | null;
+  priceLevelCode?: string | null;
+  manualQuoteDiscountPercent?: string | number | null;
 };
 
 type QuoteLineBuilderProps = {
@@ -207,6 +213,12 @@ function numberValue(value: string | number | null | undefined, fallback = 0): n
 function multiplierValue(value: string | number | null | undefined, fallback: number): number {
   const amount = numberValue(value, fallback);
   return Number.isFinite(amount) && amount > 0 ? amount : fallback;
+}
+
+function discountPercentValue(value: string | number | null | undefined): number {
+  const amount = numberValue(value, 0);
+  if (!Number.isFinite(amount)) return 0;
+  return Math.min(100, Math.max(0, amount));
 }
 
 function moneyInput(value: number): string {
@@ -1187,6 +1199,26 @@ function missingLinkedMaterialRows(product: QuoteProduct | undefined, answers: R
     .filter((component) => !component.materialId);
 }
 
+function myobMatrixPriceFor(product: QuoteProduct | undefined, priceLevelCode: string | null | undefined, quantity: number): { unitPrice: number; quantityOver: number; levelKey: string } | null {
+  if (!product?.myobUid || !product.myobPriceMatrix || typeof product.myobPriceMatrix !== "object") return null;
+  const levelMatch = String(priceLevelCode ?? "Level A").trim().match(/^Level\s+([A-F])$/i);
+  const levelKey = `Level${(levelMatch?.[1] ?? "A").toUpperCase()}`;
+  const sellingPrices = Array.isArray(product.myobPriceMatrix.SellingPrices) ? product.myobPriceMatrix.SellingPrices : [];
+  const eligible = sellingPrices
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    .map((row) => ({ row, quantityOver: Math.max(0, Number(row.QuantityOver ?? 0) || 0) }))
+    .filter(({ quantityOver }) => quantityOver === 0 || Math.max(0, quantity) > quantityOver)
+    .sort((a, b) => b.quantityOver - a.quantityOver);
+  for (const candidate of eligible) {
+    const levels = candidate.row.Levels;
+    if (!levels || typeof levels !== "object" || Array.isArray(levels)) continue;
+    const raw = (levels as Record<string, unknown>)[levelKey];
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed) && parsed >= 0) return { unitPrice: parsed, quantityOver: candidate.quantityOver, levelKey };
+  }
+  return null;
+}
+
 export type QuoteProductPricing = {
   materialBreakdown: CostBreakdownItem[];
   missingMaterials: QuoteComponent[];
@@ -1196,6 +1228,11 @@ export type QuoteProductPricing = {
   markupMultiplier: number;
   profitMultiplier: number;
   sellMultiplier: number;
+  priceLevelFactor: number;
+  manualQuoteDiscountPercent: number;
+  pricingSource: "pm_calculated" | "myob_item_matrix";
+  myobMatrixBaseUnitPrice: number | null;
+  myobMatrixQuantityOver: number | null;
 };
 
 export function calculateQuoteProductPricing(
@@ -1210,19 +1247,30 @@ export function calculateQuoteProductPricing(
   const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
   const sellMultiplier = markupMultiplier * profitMultiplier;
+  const priceLevelFactor = Math.max(0, numberValue(pricingSettings?.priceLevelFactor, 1));
+  const manualQuoteDiscountPercent = discountPercentValue(pricingSettings?.manualQuoteDiscountPercent);
+  const manualDiscountMultiplier = Math.max(0, 1 - manualQuoteDiscountPercent / 100);
   const materialBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers, quoteQuantity);
   const unitCost = materialBreakdown.reduce((total, item) => total + item.cost, 0);
   const markedUpUnitCost = unitCost * markupMultiplier;
+  const myobMatrix = myobMatrixPriceFor(product, pricingSettings?.priceLevelCode, quoteQuantity);
 
   return {
     materialBreakdown,
     missingMaterials: missingLinkedMaterialRows(product, answers),
     unitCost,
     markedUpUnitCost,
-    unitPrice: markedUpUnitCost * profitMultiplier,
+    unitPrice: myobMatrix
+      ? myobMatrix.unitPrice * manualDiscountMultiplier
+      : markedUpUnitCost * profitMultiplier * priceLevelFactor * manualDiscountMultiplier,
     markupMultiplier,
     profitMultiplier,
-    sellMultiplier
+    sellMultiplier,
+    priceLevelFactor,
+    manualQuoteDiscountPercent,
+    pricingSource: myobMatrix ? "myob_item_matrix" : "pm_calculated",
+    myobMatrixBaseUnitPrice: myobMatrix?.unitPrice ?? null,
+    myobMatrixQuantityOver: myobMatrix?.quantityOver ?? null
   };
 }
 
@@ -1317,6 +1365,11 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const markupMultiplier = autoPricing.markupMultiplier;
   const profitMultiplier = autoPricing.profitMultiplier;
   const sellMultiplier = autoPricing.sellMultiplier;
+  const priceLevelFactor = autoPricing.priceLevelFactor;
+  const manualQuoteDiscountPercent = autoPricing.manualQuoteDiscountPercent;
+  const pricingSource = autoPricing.pricingSource;
+  const myobMatrixBaseUnitPrice = autoPricing.myobMatrixBaseUnitPrice;
+  const myobMatrixQuantityOver = autoPricing.myobMatrixQuantityOver;
   const autoLineTotal = autoUnitPrice * quantityNumber;
   const autoLineCost = autoUnitCost * quantityNumber;
 
@@ -1447,7 +1500,14 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         materialBreakdown,
         unitCost: autoUnitCost,
         unitPrice: autoUnitPrice,
-        quantity: quantityNumber
+        quantity: quantityNumber,
+        pricingSource,
+        myobPriceLevelCode: pricingSettings?.priceLevelCode ?? "Level A",
+        myobPriceLevelName: pricingSettings?.priceLevelName ?? pricingSettings?.priceLevelCode ?? "Level A",
+        myobPriceLevelFactor: priceLevelFactor,
+        myobMatrixBaseUnitPrice,
+        myobMatrixQuantityOver,
+        manualQuoteDiscountPercent
       })} />
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
 
@@ -1654,8 +1714,20 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
           <strong>{formatMoney(autoUnitPrice)} sell price per unit · {formatMoney(autoLineTotal)} line total at qty {formatUsage(quantityNumber)}</strong>
           <div style={{ display: "grid", gap: 4, color: "#344054", fontSize: 13 }}>
             <div><b>Cost before markup:</b> {formatMoney(autoUnitCost)} per unit · {formatMoney(autoLineCost)} line cost</div>
-            <div><b>Global markup:</b> ×{formatUsage(markupMultiplier)} = {formatMoney(markedUpUnitCost)} per unit</div>
-            <div><b>Global profit:</b> ×{formatUsage(profitMultiplier)} · total multiplier ×{formatUsage(sellMultiplier)}</div>
+            {pricingSource === "myob_item_matrix" ? (
+              <>
+                <div><b>MYOB item price matrix:</b> {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"}{pricingSettings?.priceLevelCode && pricingSettings?.priceLevelName !== pricingSettings?.priceLevelCode ? ` (${pricingSettings.priceLevelCode})` : ""} · {formatMoney(myobMatrixBaseUnitPrice ?? 0)} per unit</div>
+                <div><b>MYOB quantity break:</b> {myobMatrixQuantityOver && myobMatrixQuantityOver > 0 ? `quantity over ${formatUsage(myobMatrixQuantityOver)}` : "base quantity break"}</div>
+                <div style={{ color: "#475467" }}>PM markup, profit and PM price-level factor are not layered onto a MYOB matrix price.</div>
+              </>
+            ) : (
+              <>
+                <div><b>Global markup:</b> ×{formatUsage(markupMultiplier)} = {formatMoney(markedUpUnitCost)} per unit</div>
+                <div><b>Global profit:</b> ×{formatUsage(profitMultiplier)} · base multiplier ×{formatUsage(sellMultiplier)}</div>
+                <div><b>MYOB price level:</b> {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"}{pricingSettings?.priceLevelCode && pricingSettings?.priceLevelName !== pricingSettings?.priceLevelCode ? ` (${pricingSettings.priceLevelCode})` : ""} · PM calculated-work factor ×{formatUsage(priceLevelFactor)}</div>
+              </>
+            )}
+            {manualQuoteDiscountPercent > 0 ? <div><b>Manual quote discount:</b> -{formatUsage(manualQuoteDiscountPercent)}%</div> : null}
           </div>
           {materialBreakdown.length > 0 ? (
             <div style={{ display: "grid", gap: 6 }}>
@@ -1666,6 +1738,8 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                 </div>
               ))}
             </div>
+          ) : pricingSource === "myob_item_matrix" ? (
+            <span style={{ color: "#667085", fontSize: 13 }}>Sell price comes directly from the imported MYOB item price matrix for this customer and quantity.</span>
           ) : (
             <span style={{ color: "#667085", fontSize: 13 }}>No automatic price yet. Add answer lines on the Products page with material usage or simple charges such as ink at dollars per m².</span>
           )}
