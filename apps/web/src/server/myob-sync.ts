@@ -1675,6 +1675,41 @@ function buildMyobSupplierPayload(supplier: SupplierRecord): Record<string, unkn
   };
 }
 
+async function buildMyobSupplierCreatePayload(tenantId: string, supplier: SupplierRecord): Promise<Record<string, unknown>> {
+  const payload = buildMyobSupplierPayload(supplier);
+  const defaults = await getPurchasingDefaults(tenantId);
+  let expenseAccountUid = defaults.expenseAccountUid;
+  let taxCodeUid = defaults.taxCodeUid;
+
+  if (!expenseAccountUid || !taxCodeUid) {
+    const refs = await fetchMyobPurchasingReferenceDataForTenant(tenantId);
+    if (!taxCodeUid) {
+      taxCodeUid = refs.taxCodes.find((row) => row.code.trim().toUpperCase() === "GST")?.uid ?? null;
+    }
+    if (!expenseAccountUid && refs.accounts.length === 1) expenseAccountUid = refs.accounts[0].uid;
+  }
+
+  if (!expenseAccountUid) {
+    throw new Error("MYOB supplier creation needs a default purchase Expense / Cost of Sales account. Open Purchasing and save the MYOB purchasing defaults first.");
+  }
+  if (!taxCodeUid) {
+    throw new Error("MYOB supplier creation needs a default purchase tax code. Open Purchasing and save the MYOB purchasing defaults first.");
+  }
+
+  // MYOB requires BuyingDetails when a supplier is created. Keep PM's supplier defaults
+  // aligned with the Purchasing setup instead of inventing a separate account/tax policy.
+  payload.BuyingDetails = {
+    PurchaseLayout: "Item",
+    PurchaseOrderDelivery: "Print",
+    ExpenseAccount: { UID: expenseAccountUid },
+    TaxCode: { UID: taxCodeUid },
+    FreightTaxCode: { UID: taxCodeUid },
+    UseSupplierTaxCode: true,
+    IsReportable: false
+  };
+  return payload;
+}
+
 function exactMyobSupplierMatchesFromRecords(supplier: SupplierRecord, records: Record<string, unknown>[]): Record<string, unknown>[] {
   const email = String(supplier.email ?? "").trim();
   const company = supplier.displayName.trim();
@@ -1790,7 +1825,7 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
       await saveLocalSupplierMyobLink(tenantId, supplier, matches[0], "exact_match");
       return { uid: String(matches[0].UID), created: false, matchedExisting: true };
     }
-    const payload = buildMyobSupplierPayload(supplier);
+    const payload = await buildMyobSupplierCreatePayload(tenantId, supplier);
     const result = await sendMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier", "POST", payload, tenantId);
     const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
     let uid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
