@@ -1107,10 +1107,36 @@ async function saveLocalCustomerMyobLink(
   });
 }
 
-function readUidFromLocation(location: string | null): string | null {
+const MYOB_GUID_PATTERN = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/ig;
+
+function normaliseGuid(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLowerCase();
+}
+
+function readUidFromLocation(location: string | null, companyFileId?: string | null): string | null {
   if (!location) return null;
-  const match = location.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
-  return match?.[0] ?? null;
+
+  // Online AccountRight Location headers include the company-file GUID before the
+  // created resource GUID, for example:
+  //   /accountright/{businessId}/Contact/Customer/{customerUid}
+  // Taking the first GUID therefore stores businessId as the resource UID and the
+  // next GET/PUT becomes /Contact/Customer/{businessId} -> 404. Always choose the
+  // final resource GUID and explicitly discard the company-file GUID if it appears.
+  let candidateText = location;
+  try {
+    candidateText = new URL(location, "https://api.myob.com").pathname;
+  } catch {
+    // Fall back to the raw Location value if MYOB ever returns a non-standard URI.
+  }
+
+  const matches = candidateText.match(MYOB_GUID_PATTERN) ?? [];
+  const companyGuid = normaliseGuid(companyFileId);
+  const resourceMatches = matches.filter((value) => normaliseGuid(value) !== companyGuid);
+  return resourceMatches.at(-1) ?? null;
+}
+
+function isMyobNotFoundError(error: unknown): boolean {
+  return error instanceof Error && /^404:\s/.test(error.message);
 }
 
 export type MyobCustomerCreateResult = {
@@ -1121,6 +1147,43 @@ export type MyobCustomerCreateResult = {
   matchedExisting: boolean;
 };
 
+async function recoverLinkedMyobCustomer(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string,
+  customer: CustomerRecord
+): Promise<Record<string, unknown> | null> {
+  // V26.08.13.10/.11 could store businessId as the customer UID when MYOB returned
+  // an empty POST body and the created UID had to be read from the Location header.
+  // Prefer the generated/display ID we already saved because it is exact and unique.
+  const displayId = typeof customer.payloadJson?.myobDisplayId === "string"
+    ? customer.payloadJson.myobDisplayId.trim()
+    : "";
+  if (displayId) {
+    const lookup = await fetchMyobJson(
+      accessToken,
+      companyFileId,
+      `/Contact/Customer?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`,
+      tenantId
+    );
+    const found = myobCollectionRecords(lookup.data).filter(
+      (candidate) => String(candidate.DisplayID ?? "").trim().toLowerCase() === displayId.toLowerCase()
+    );
+    if (found.length === 1) return found[0];
+    if (found.length > 1) {
+      throw new Error(`More than one MYOB customer uses DisplayID ${displayId}. Link the correct customer manually before syncing.`);
+    }
+  }
+
+  const exactMatches = await exactMyobCustomerMatches(tenantId, accessToken, companyFileId, customer);
+  if (exactMatches.length === 1) return exactMatches[0];
+  if (exactMatches.length > 1) {
+    const names = exactMatches.slice(0, 4).map((item) => `${normaliseCustomerDisplayName(item)}${textOrNull(item.DisplayID) ? ` (${textOrNull(item.DisplayID)})` : ""}`).join(", ");
+    throw new Error(`The saved MYOB customer link is stale and more than one exact replacement match was found: ${names}. Choose the correct MYOB customer in Client setup.`);
+  }
+  return null;
+}
+
 export async function createMyobCustomerFromLocalClientForTenant(
   tenantId: string,
   customerId: string
@@ -1128,12 +1191,17 @@ export async function createMyobCustomerFromLocalClientForTenant(
   const customer = await getCustomerById(tenantId, customerId);
   if (!customer) throw new Error("Production Manager client could not be found.");
 
-  const alreadyLinkedUid = customer.myobUid && !customer.myobUid.startsWith("manual-")
-    ? customer.myobUid
-    : typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-")
-      ? customer.payloadJson.myobUid
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") {
+    throw new Error("MYOB is not connected. Connect MYOB before creating a customer.");
+  }
+
+  const alreadyLinkedUid = typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-")
+    ? customer.payloadJson.myobUid
+    : customer.myobUid && !customer.myobUid.startsWith("manual-")
+      ? customer.myobUid
       : null;
-  if (alreadyLinkedUid) {
+  if (alreadyLinkedUid && normaliseGuid(alreadyLinkedUid) !== normaliseGuid(connection.companyFileId)) {
     return {
       uid: alreadyLinkedUid,
       displayName: String(customer.payloadJson?.myobDisplayName ?? customer.displayName),
@@ -1141,11 +1209,6 @@ export async function createMyobCustomerFromLocalClientForTenant(
       created: false,
       matchedExisting: true
     };
-  }
-
-  const connection = await getMyobConnectionByTenantId(tenantId);
-  if (!connection?.companyFileId || connection.status !== "connected") {
-    throw new Error("MYOB is not connected. Connect MYOB before creating a customer.");
   }
 
   const { accessToken } = await getValidAccessToken(tenantId);
@@ -1176,7 +1239,7 @@ export async function createMyobCustomerFromLocalClientForTenant(
   let created = result.data && typeof result.data === "object" && !Array.isArray(result.data)
     ? result.data as Record<string, unknown>
     : null;
-  let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
+  let uid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
 
   if (!uid) {
     const displayId = String(payload.DisplayID ?? "").trim();
@@ -1653,7 +1716,8 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
   const { accessToken } = await getValidAccessToken(tenantId);
-  const linkedUid = supplier.myobUid && !supplier.myobUid.startsWith("manual-") ? supplier.myobUid : null;
+  let linkedUid = supplier.myobUid && !supplier.myobUid.startsWith("manual-") ? supplier.myobUid : null;
+  if (linkedUid && normaliseGuid(linkedUid) === normaliseGuid(connection.companyFileId)) linkedUid = null;
   if (!linkedUid) {
     const matches = await exactMyobSupplierMatches(tenantId, accessToken, connection.companyFileId, supplier);
     if (matches.length > 1) throw new Error("More than one matching MYOB supplier was found. Link the correct supplier before syncing.");
@@ -1664,7 +1728,7 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
     const payload = buildMyobSupplierPayload(supplier);
     const result = await sendMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier", "POST", payload, tenantId);
     const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
-    let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
+    let uid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
     if (!uid) {
       const displayId = String(payload.DisplayID ?? "");
       const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`, tenantId);
@@ -1702,16 +1766,41 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
 export async function syncLocalCustomerToMyobForTenant(tenantId: string, customerId: string): Promise<MyobCustomerCreateResult> {
   const customer = await getCustomerById(tenantId, customerId);
   if (!customer) throw new Error("Production Manager client could not be found.");
-  const linkedUid = customer.myobUid && !customer.myobUid.startsWith("manual-")
-    ? customer.myobUid
-    : typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-") ? customer.payloadJson.myobUid : null;
+  let linkedUid = typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-")
+    ? customer.payloadJson.myobUid
+    : customer.myobUid && !customer.myobUid.startsWith("manual-")
+      ? customer.myobUid
+      : null;
   if (!linkedUid) return createMyobCustomerFromLocalClientForTenant(tenantId, customerId);
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
   const { accessToken } = await getValidAccessToken(tenantId);
-  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`, tenantId);
-  if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked customer.");
-  const current = currentResponse.data as Record<string, unknown>;
+
+  let current: Record<string, unknown> | null = null;
+  const linkedUidIsCompanyFile = normaliseGuid(linkedUid) === normaliseGuid(connection.companyFileId);
+  if (!linkedUidIsCompanyFile) {
+    try {
+      const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`, tenantId);
+      if (currentResponse.data && typeof currentResponse.data === "object" && !Array.isArray(currentResponse.data)) {
+        current = currentResponse.data as Record<string, unknown>;
+      }
+    } catch (error) {
+      if (!isMyobNotFoundError(error)) throw error;
+    }
+  }
+
+  if (!current) {
+    const recovered = await recoverLinkedMyobCustomer(tenantId, accessToken, connection.companyFileId, customer);
+    if (!recovered) {
+      throw new Error("The MYOB customer previously linked to this Production Manager client can no longer be found. Choose the matching MYOB customer in Client setup, then sync again.");
+    }
+    const recoveredUid = readMyobUid(recovered);
+    if (!recoveredUid) throw new Error("MYOB returned the replacement customer without a UID.");
+    linkedUid = recoveredUid;
+    current = recovered;
+    await saveLocalCustomerMyobLink(tenantId, customer, recovered, linkedUidIsCompanyFile ? "repaired_location_header_uid" : "repaired_stale_uid");
+  }
+
   const local = buildMyobCustomerPayload(customer);
   const mergedAddresses = mergeMyobAddresses(current.Addresses, local.Addresses);
   const currentSelling = current.SellingDetails && typeof current.SellingDetails === "object" && !Array.isArray(current.SellingDetails) ? current.SellingDetails as Record<string, unknown> : {};
@@ -1840,6 +1929,7 @@ export async function syncLocalMaterialToMyobForTenant(tenantId: string, materia
   const { accessToken } = await getValidAccessToken(tenantId);
   const refs = await materialPurchaseReferences(tenantId, material);
   let linkedUid = material.myobUid;
+  if (linkedUid && normaliseGuid(linkedUid) === normaliseGuid(connection.companyFileId)) linkedUid = null;
   if (!linkedUid) {
     const matches = await exactMyobItemMatches(tenantId, accessToken, connection.companyFileId, material);
     if (matches.length > 1) throw new Error(`More than one MYOB item uses material number ${generatedMyobMaterialNumber(material)}.`);
@@ -1850,7 +1940,7 @@ export async function syncLocalMaterialToMyobForTenant(tenantId: string, materia
     const payload = buildMyobMaterialPayload(material, refs);
     const result = await sendMyobJson(accessToken, connection.companyFileId, "/Inventory/Item", "POST", payload, tenantId);
     const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
-    linkedUid = readMyobUid(created) ?? readUidFromLocation(result.location);
+    linkedUid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
     if (!linkedUid) {
       const matchesAfter = await exactMyobItemMatches(tenantId, accessToken, connection.companyFileId, material);
       linkedUid = readMyobUid(matchesAfter[0]);
@@ -1878,11 +1968,25 @@ export async function syncLocalMaterialToMyobForTenant(tenantId: string, materia
 export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchaseOrderId: string): Promise<{ uid: string; number: string | null }> {
   const order = await getPurchaseOrder(tenantId, purchaseOrderId);
   if (!order) throw new Error("Purchase order could not be found.");
-  if (order.myobUid) return { uid: order.myobUid, number: order.myobNumber };
-  const supplierSync = await syncLocalSupplierToMyobForTenant(tenantId, order.supplierId);
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
+  if (order.myobUid && normaliseGuid(order.myobUid) !== normaliseGuid(connection.companyFileId)) {
+    return { uid: order.myobUid, number: order.myobNumber };
+  }
   const { accessToken } = await getValidAccessToken(tenantId);
+  if (order.myobUid && normaliseGuid(order.myobUid) === normaliseGuid(connection.companyFileId)) {
+    const poNumber = order.poNumber.slice(0, 13);
+    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(poNumber)}'&$top=10`, tenantId);
+    const found = myobCollectionRecords(lookup.data).find((row) => String(row.Number ?? "") === poNumber);
+    const repairedUid = readMyobUid(found);
+    if (repairedUid) {
+      const repairedNumber = textOrNull(found?.Number) ?? poNumber;
+      await markPurchaseOrderMyobSynced(tenantId, purchaseOrderId, { myobUid: repairedUid, myobNumber: repairedNumber });
+      await upsertExternalMappingByTenantId(tenantId, { entityType: "purchase_order", localId: purchaseOrderId, externalId: repairedUid, syncState: "synced", lastSyncedAt: new Date().toISOString(), payloadJson: { number: repairedNumber, repairedFromLocationHeaderUid: true } });
+      return { uid: repairedUid, number: repairedNumber };
+    }
+  }
+  const supplierSync = await syncLocalSupplierToMyobForTenant(tenantId, order.supplierId);
   let lines = await listPurchaseOrderLines(tenantId, purchaseOrderId);
   if (!lines.length) throw new Error("Add at least one material before sending the PO to MYOB.");
   for (const line of lines) {
@@ -1915,7 +2019,7 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
   if (order.promisedDate) payload.PromisedDate = `${order.promisedDate} 00:00:00`;
   const result = await sendMyobJson(accessToken, connection.companyFileId, "/Purchase/Order/Item", "POST", payload, tenantId);
   let created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
-  let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
+  let uid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
   if (!uid) {
     const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(order.poNumber.slice(0,13))}'&$top=10`, tenantId);
     const found = myobCollectionRecords(lookup.data).find((row) => String(row.Number ?? "") === order.poNumber.slice(0,13));
