@@ -174,8 +174,11 @@ export default async function IntegrationsPage({
           </div>
           <h2 style={{ margin: "8px 0 0" }}>Exchange tokens and capture company file</h2>
           <p style={{ margin: "8px 0 0", color: "#667085", lineHeight: 1.6 }}>
-            Start MYOB OAuth now performs a real authorization-code redirect. After MYOB redirects back, the callback exchanges the code for tokens and stores the selected company file returned by businessId and businessName.
+            Start MYOB OAuth opens MYOB&apos;s secure sign-in and consent flow. Complete MYOB login and 2FA there first; MYOB then returns the authorised company file as businessId. Production Manager never receives or validates your authenticator code.
           </p>
+          <div style={{ marginTop: 12, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1e3a8a", borderRadius: 12, padding: "12px 14px", lineHeight: 1.55 }}>
+            <b>If MYOB rejects the authenticator code:</b> check the authenticator entry is for the same MYOB login email, use the newest 30-second code, or choose <b>Try another method</b> / a recovery code. You will not see company-file selection until MYOB sign-in succeeds.
+          </div>
         </div>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>

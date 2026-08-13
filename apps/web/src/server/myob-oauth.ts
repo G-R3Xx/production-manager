@@ -5,6 +5,9 @@ import { env } from "@/lib/env";
 
 export const MYOB_OAUTH_STATE_COOKIE = "pm_myob_oauth_state";
 
+const MYOB_AUTHORIZE_URL = "https://secure.myob.com/oauth2/account/authorize";
+const MYOB_TOKEN_URL = "https://secure.myob.com/oauth2/v1/authorize";
+
 export type MyobOauthStartResult =
   | { ok: true; authorizeUrl: string }
   | { ok: false; reason: string };
@@ -37,11 +40,11 @@ export async function createMyobOauthStartUrl(input: {
   tenantId: string;
   environment: "sandbox" | "live";
 }): Promise<MyobOauthStartResult> {
-  if (!env.MYOB_CLIENT_ID || !env.MYOB_REDIRECT_URI || !env.MYOB_API_BASE_URL) {
+  if (!env.MYOB_CLIENT_ID || !env.MYOB_REDIRECT_URI) {
     return {
       ok: false,
       reason:
-        "MYOB OAuth environment variables are not configured yet. Add MYOB_CLIENT_ID, MYOB_REDIRECT_URI, and MYOB_API_BASE_URL before starting the real connect flow."
+        "MYOB OAuth environment variables are not configured yet. Add MYOB_CLIENT_ID and MYOB_REDIRECT_URI before starting the real connect flow."
     };
   }
 
@@ -60,8 +63,7 @@ export async function createMyobOauthStartUrl(input: {
     maxAge: 60 * 10
   });
 
-  const baseUrl = new URL(env.MYOB_API_BASE_URL);
-  const authorizeUrl = new URL("oauth2/account/authorize", baseUrl);
+  const authorizeUrl = new URL(MYOB_AUTHORIZE_URL);
   authorizeUrl.searchParams.set("client_id", env.MYOB_CLIENT_ID);
   authorizeUrl.searchParams.set("redirect_uri", env.MYOB_REDIRECT_URI);
   authorizeUrl.searchParams.set("response_type", "code");
@@ -78,17 +80,17 @@ export async function createMyobOauthStartUrl(input: {
 export async function exchangeMyobAuthorizationCode(
   code: string
 ): Promise<MyobTokenExchangeResponse> {
-  if (!env.MYOB_CLIENT_ID || !env.MYOB_CLIENT_SECRET || !env.MYOB_REDIRECT_URI || !env.MYOB_API_BASE_URL) {
+  if (!env.MYOB_CLIENT_ID || !env.MYOB_CLIENT_SECRET || !env.MYOB_REDIRECT_URI) {
     throw new Error("MYOB OAuth environment variables are not fully configured.");
   }
 
-  const baseUrl = new URL(env.MYOB_API_BASE_URL);
-  const tokenUrl = new URL("oauth2/v1/authorize", baseUrl);
+  const tokenUrl = new URL(MYOB_TOKEN_URL);
   const body = new URLSearchParams({
     client_id: env.MYOB_CLIENT_ID,
     client_secret: env.MYOB_CLIENT_SECRET,
     code,
     redirect_uri: env.MYOB_REDIRECT_URI,
+    scope: getMyobScopes(),
     grant_type: "authorization_code"
   });
 
@@ -98,7 +100,8 @@ export async function exchangeMyobAuthorizationCode(
       "Content-Type": "application/x-www-form-urlencoded"
     },
     body,
-    cache: "no-store"
+    cache: "no-store",
+    signal: AbortSignal.timeout(20000)
   });
 
   const text = await response.text();

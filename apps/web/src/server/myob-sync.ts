@@ -52,11 +52,11 @@ function normaliseExpiresAt(expiresIn?: number) {
 }
 
 async function refreshMyobAccessToken(refreshToken: string) {
-  if (!env.MYOB_CLIENT_ID || !env.MYOB_CLIENT_SECRET || !env.MYOB_API_BASE_URL) {
+  if (!env.MYOB_CLIENT_ID || !env.MYOB_CLIENT_SECRET) {
     throw new Error("MYOB OAuth environment variables are not fully configured for token refresh.");
   }
 
-  const tokenUrl = new URL("oauth2/v1/authorize", env.MYOB_API_BASE_URL);
+  const tokenUrl = new URL("https://secure.myob.com/oauth2/v1/authorize");
   const body = new URLSearchParams({
     client_id: env.MYOB_CLIENT_ID,
     client_secret: env.MYOB_CLIENT_SECRET,
