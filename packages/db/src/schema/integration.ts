@@ -26,7 +26,9 @@ export const externalEntityTypeEnum = pgEnum("external_entity_type", [
   "tax_code",
   "account",
   "quote",
-  "order"
+  "order",
+  "material",
+  "purchase_order"
 ]);
 export const syncStateEnum = pgEnum("sync_state", ["pending", "synced", "stale", "error"]);
 export const syncRunJobTypeEnum = pgEnum("sync_run_job_type", [

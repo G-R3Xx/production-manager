@@ -27,6 +27,10 @@ export type MaterialRecord = {
   rollWidthMm: string | null;
   gsm: string | null;
   notes: string | null;
+  myobUid: string | null;
+  myobDisplayId: string | null;
+  myobSyncState: string | null;
+  myobPayloadJson: Record<string, unknown>;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -75,7 +79,11 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS roll_billing_increment_metres numeric(6, 4),
       ADD COLUMN IF NOT EXISTS reverse_printable boolean NOT NULL DEFAULT false,
       ADD COLUMN IF NOT EXISTS used_for_backing boolean NOT NULL DEFAULT false,
-      ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)
+      ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200),
+      ADD COLUMN IF NOT EXISTS myob_uid varchar(255),
+      ADD COLUMN IF NOT EXISTS myob_display_id varchar(30),
+      ADD COLUMN IF NOT EXISTS myob_sync_state varchar(30),
+      ADD COLUMN IF NOT EXISTS myob_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
 }
 
@@ -167,6 +175,10 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.roll_width_mm::text AS "rollWidthMm",
       m.gsm::text AS gsm,
       m.notes,
+      m.myob_uid AS "myobUid",
+      m.myob_display_id AS "myobDisplayId",
+      m.myob_sync_state AS "myobSyncState",
+      m.myob_payload_json AS "myobPayloadJson",
       m.active,
       m.created_at AS "createdAt",
       m.updated_at AS "updatedAt"
@@ -177,7 +189,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
     ORDER BY m.name ASC, m.created_at DESC
   `, [tenantId]);
 
-  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType) }));
+  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType), myobPayloadJson: row.myobPayloadJson && typeof row.myobPayloadJson === "object" ? row.myobPayloadJson : {} }));
 }
 
 export async function getDashboardMaterialSummary(tenantId: string): Promise<{
@@ -213,10 +225,10 @@ export async function getDashboardMaterialSummary(tenantId: string): Promise<{
   };
 }
 
-export async function createMaterial(input: CreateMaterialInput): Promise<void> {
+export async function createMaterial(input: CreateMaterialInput): Promise<{ id: string }> {
   await ensureMaterialPricingColumns();
 
-  await pool.query(`
+  const result = await pool.query<{ id: string }>(`
     INSERT INTO catalog.materials (
       tenant_id,
       supplier_id,
@@ -270,6 +282,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
       now(),
       now()
     )
+    RETURNING id
   `, [
     input.tenantId,
     input.supplierId,
@@ -294,6 +307,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<void> 
     input.gsm,
     input.notes
   ]);
+  return result.rows[0];
 }
 
 export async function updateMaterial(input: UpdateMaterialInput): Promise<void> {
@@ -361,4 +375,23 @@ export async function setMaterialActive(tenantId: string, materialId: string, ac
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
   `, [materialId, tenantId, active]);
+}
+
+
+export async function getMaterialById(tenantId: string, materialId: string | null | undefined): Promise<MaterialRecord | null> {
+  if (!materialId) return null;
+  const rows = await listMaterialsForTenant(tenantId);
+  return rows.find((row) => row.id === materialId) ?? null;
+}
+
+export async function updateMaterialMyobLink(tenantId: string, materialId: string, input: {
+  myobUid: string; myobDisplayId?: string | null; myobSyncState?: string | null; myobPayloadJson?: Record<string, unknown>;
+}): Promise<void> {
+  await ensureMaterialPricingColumns();
+  await pool.query(`
+    UPDATE catalog.materials
+    SET myob_uid=$3::varchar, myob_display_id=$4::varchar, myob_sync_state=$5::varchar,
+        myob_payload_json=COALESCE(myob_payload_json,'{}'::jsonb)||$6::jsonb, updated_at=now()
+    WHERE tenant_id=$1::uuid AND id=$2::uuid
+  `,[tenantId,materialId,input.myobUid,input.myobDisplayId??null,input.myobSyncState??"synced",JSON.stringify(input.myobPayloadJson??{})]);
 }

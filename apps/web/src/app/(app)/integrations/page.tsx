@@ -5,7 +5,9 @@ import {
   runMyobReadOnlySyncAction,
   saveMyobConnectionAction,
   importMyobCustomersAction,
-  importMyobItemsAction
+  importMyobItemsAction,
+  importMyobSuppliersAction,
+  pushProductionManagerMasterDataToMyobAction
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
@@ -18,6 +20,8 @@ import {
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { listCustomersForTenant } from "@/server/customers";
 import { listProductsForTenant } from "@/server/products";
+import { listSuppliersForTenant } from "@/server/suppliers";
+import { listMaterialsForTenant } from "@/server/materials";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 
 function cardStyle() {
@@ -77,13 +81,15 @@ export default async function IntegrationsPage({
     );
   }
 
-  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts] = await Promise.all([
+  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts, localSuppliers, localMaterials] = await Promise.all([
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
     listExternalMappingsByTenantId(activeTenant.tenantId),
     listSyncRunsByTenantId(activeTenant.tenantId),
     listCustomersForTenant(activeTenant.tenantId),
-    listProductsForTenant(activeTenant.tenantId)
+    listProductsForTenant(activeTenant.tenantId),
+    listSuppliersForTenant(activeTenant.tenantId),
+    listMaterialsForTenant(activeTenant.tenantId)
   ]);
 
   return (
@@ -193,6 +199,24 @@ export default async function IntegrationsPage({
             </button>
           </form>
 
+          <form action={importMyobSuppliersAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
+              Import suppliers + create mappings
+            </button>
+          </form>
+
+          <form action={importMyobItemsAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #111827", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
+              Import MYOB items
+            </button>
+          </form>
+
+          <form action={pushProductionManagerMasterDataToMyobAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#0f766e", color: "#fff", fontWeight: 800, padding: "0 16px", cursor: "pointer" }}>
+              Push PM clients + suppliers + materials to MYOB
+            </button>
+          </form>
+
           <form action={queueMyobSyncAction}>
             <input type="hidden" name="jobType" value="incremental_import" />
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
@@ -275,10 +299,18 @@ export default async function IntegrationsPage({
           Customer import
         </div>
         <h2 style={{ marginTop: 10 }}>Local customer import + mapping</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
             <div style={{ fontWeight: 700 }}>Local customers</div>
             <div style={{ color: "#667085", marginTop: 6 }}>{localCustomers.length}</div>
+          </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Local suppliers</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localSuppliers.length}</div>
+          </div>
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
+            <div style={{ fontWeight: 700 }}>Local materials</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localMaterials.length}</div>
           </div>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
             <div style={{ fontWeight: 700 }}>Customer mappings</div>
@@ -298,7 +330,7 @@ export default async function IntegrationsPage({
           </div>
           <h2 style={{ marginTop: 10 }}>Local ↔ MYOB IDs</h2>
           <p style={{ color: "#667085", lineHeight: 1.6 }}>
-            These records will link local customers, suppliers, products, invoices, quotes, and orders to their MYOB equivalents.
+            These records link local customers, suppliers, materials, products, quotes, sales orders and purchase orders to their MYOB equivalents.
           </p>
           <div style={{ marginTop: 12, display: "grid", gap: 10 }}>
             {mappings.length === 0 ? (

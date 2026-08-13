@@ -40,7 +40,9 @@ export type ExternalMappingRecord = {
     | "tax_code"
     | "account"
     | "quote"
-    | "order";
+    | "order"
+    | "material"
+    | "purchase_order";
   localId: string;
   externalId: string;
   syncState: "pending" | "synced" | "stale" | "error";
@@ -444,7 +446,7 @@ export async function listSyncRunsForTenant(
 
 
 export async function upsertExternalMappingByTenantId(tenantId: string, input: {
-  entityType: "customer" | "supplier" | "product" | "invoice" | "tax_code" | "account" | "quote" | "order";
+  entityType: "customer" | "supplier" | "product" | "invoice" | "tax_code" | "account" | "quote" | "order" | "material" | "purchase_order";
   localId: string;
   externalId: string;
   syncState?: "pending" | "synced" | "stale" | "error";

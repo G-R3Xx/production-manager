@@ -14,6 +14,9 @@ import {
 import { env } from "@/lib/env";
 import { MYOB_PRICE_LEVELS, getCustomerById, normaliseMyobPriceLevel, updateCustomerPayloadForTenant, upsertImportedCustomer, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { upsertImportedProduct } from "@/server/products";
+import { getSupplierById, updateSupplierMyobLink, upsertImportedSupplier, type SupplierRecord } from "@/server/suppliers";
+import { getMaterialById, updateMaterialMyobLink, type MaterialRecord } from "@/server/materials";
+import { getPurchasingDefaults, getPurchaseOrder, listPurchaseOrderLines, markPurchaseOrderMyobSynced } from "@/server/purchasing";
 
 export type MyobReadOnlySyncSummary = {
   companyFileId: string;
@@ -1140,4 +1143,415 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
     }, message);
     throw new Error(`MYOB Order sync failed: ${message}`);
   }
+}
+
+// -----------------------------------------------------------------------------
+// Production Manager -> MYOB master-data sync and purchasing
+// -----------------------------------------------------------------------------
+
+function addressRecords(value: unknown): Record<string, unknown>[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+    : [];
+}
+
+function supplierDisplayName(record: Record<string, unknown>): string {
+  const company = textOrNull(record.CompanyName);
+  if (company) return company;
+  return [textOrNull(record.FirstName), textOrNull(record.LastName)].filter(Boolean).join(" ") || textOrNull(record.DisplayID) || "MYOB supplier";
+}
+
+function generatedMyobSupplierDisplayId(supplierId: string): string {
+  const compact = supplierId.replace(/[^a-z0-9]/gi, "").toUpperCase();
+  return `PMS${compact.slice(0, 11)}`.slice(0, 15);
+}
+
+function supplierExactEmail(record: Record<string, unknown>, email: string): boolean {
+  const wanted = email.trim().toLowerCase();
+  return Boolean(wanted && addressRecords(record.Addresses).some((address) => String(address.Email ?? "").trim().toLowerCase() === wanted));
+}
+
+function supplierExactCompany(record: Record<string, unknown>, name: string): boolean {
+  const wanted = name.trim().toLowerCase();
+  return Boolean(wanted && String(record.CompanyName ?? "").trim().toLowerCase() === wanted);
+}
+
+function buildMyobSupplierPayload(supplier: SupplierRecord): Record<string, unknown> {
+  const contact = String(supplier.contactName ?? "").trim();
+  const email = String(supplier.email ?? "").trim();
+  const phone = String(supplier.phone ?? "").trim();
+  const address: Record<string, unknown> = { Location: 1 };
+  if (email) address.Email = email.slice(0, 255);
+  if (phone) address.Phone1 = phone.slice(0, 21);
+  if (contact) address.ContactName = contact.slice(0, 25);
+  return {
+    DisplayID: generatedMyobSupplierDisplayId(supplier.id),
+    CompanyName: supplier.displayName.slice(0, 50),
+    IsIndividual: false,
+    IsActive: supplier.isActive !== false,
+    Addresses: Object.keys(address).length > 1 ? [address] : undefined,
+    Notes: String(supplier.notes ?? "Created by Production Manager").slice(0, 255)
+  };
+}
+
+async function exactMyobSupplierMatches(accessToken: string, companyFileId: string, supplier: SupplierRecord): Promise<Record<string, unknown>[]> {
+  const endpoints: string[] = [];
+  const email = String(supplier.email ?? "").trim();
+  const company = supplier.displayName.trim();
+  if (email) endpoints.push(`/Contact/Supplier?$filter=Addresses/any(x: x/Email eq '${odataString(email)}')&$top=20`);
+  if (company) endpoints.push(`/Contact/Supplier?$filter=CompanyName eq '${odataString(company)}'&$top=20`);
+  const byUid = new Map<string, Record<string, unknown>>();
+  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint).catch(() => ({ data: null }))));
+  for (const result of results) {
+    for (const candidate of myobCollectionRecords(result.data)) {
+      const uid = textOrNull(candidate.UID);
+      if (!uid) continue;
+      if (supplierExactEmail(candidate, email) || supplierExactCompany(candidate, company)) byUid.set(uid, candidate);
+    }
+  }
+  return [...byUid.values()];
+}
+
+async function saveLocalSupplierMyobLink(tenantId: string, supplier: SupplierRecord, myobSupplier: Record<string, unknown>, match: string): Promise<void> {
+  const uid = textOrNull(myobSupplier.UID);
+  if (!uid) throw new Error("MYOB supplier response did not include a UID.");
+  await updateSupplierMyobLink(tenantId, supplier.id, {
+    myobUid: uid,
+    payloadJson: {
+      ...myobSupplier,
+      myobUid: uid,
+      myobDisplayId: textOrNull(myobSupplier.DisplayID),
+      myobMatch: match,
+      myobSyncedAt: new Date().toISOString()
+    }
+  });
+  await upsertExternalMappingByTenantId(tenantId, {
+    entityType: "supplier",
+    localId: supplier.id,
+    externalId: uid,
+    syncState: "synced",
+    lastSyncedAt: new Date().toISOString(),
+    payloadJson: { displayName: supplierDisplayName(myobSupplier), displayId: textOrNull(myobSupplier.DisplayID), match }
+  });
+}
+
+export type MyobSupplierImportSummary = {
+  importedCount: number;
+  mappedCount: number;
+  sample: Array<{ myobUid: string; displayName: string; localId: string }>;
+};
+
+export async function importMyobSuppliersAndCreateMappings(tenantId: string): Promise<MyobSupplierImportSummary> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId) throw new Error("No MYOB company file is linked to this tenant yet.");
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const response = await fetchMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier?$top=1000");
+  const imported: MyobSupplierImportSummary["sample"] = [];
+  for (const supplier of myobCollectionRecords(response.data)) {
+    const uid = textOrNull(supplier.UID);
+    if (!uid) continue;
+    const firstAddress = addressRecords(supplier.Addresses)[0] ?? {};
+    const saved = await upsertImportedSupplier(tenantId, {
+      myobUid: uid,
+      displayName: supplierDisplayName(supplier),
+      contactName: textOrNull(firstAddress.ContactName),
+      email: textOrNull(firstAddress.Email),
+      phone: textOrNull(firstAddress.Phone1),
+      isActive: supplier.IsActive !== false,
+      notes: textOrNull(supplier.Notes),
+      payloadJson: { ...supplier, myobSyncedAt: new Date().toISOString() }
+    });
+    await upsertExternalMappingByTenantId(tenantId, {
+      entityType: "supplier", localId: saved.id, externalId: uid, syncState: "synced", lastSyncedAt: new Date().toISOString(),
+      payloadJson: { displayName: supplierDisplayName(supplier), displayId: textOrNull(supplier.DisplayID) }
+    });
+    imported.push({ myobUid: uid, displayName: supplierDisplayName(supplier), localId: saved.id });
+  }
+  await markMyobConnectionHealthy(tenantId, { environment: connection.environment, companyFileId: connection.companyFileId, companyName: connection.companyName, connectedAt: connection.connectedAt, lastSuccessfulSyncAt: new Date().toISOString() });
+  return { importedCount: imported.length, mappedCount: imported.length, sample: imported.slice(0, 5) };
+}
+
+export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplierId: string): Promise<{ uid: string; created: boolean; matchedExisting: boolean }> {
+  const supplier = await getSupplierById(tenantId, supplierId);
+  if (!supplier) throw new Error("Production Manager supplier could not be found.");
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const linkedUid = supplier.myobUid && !supplier.myobUid.startsWith("manual-") ? supplier.myobUid : null;
+  if (!linkedUid) {
+    const matches = await exactMyobSupplierMatches(accessToken, connection.companyFileId, supplier);
+    if (matches.length > 1) throw new Error("More than one matching MYOB supplier was found. Link the correct supplier before syncing.");
+    if (matches.length === 1) {
+      await saveLocalSupplierMyobLink(tenantId, supplier, matches[0], "exact_match");
+      return { uid: String(matches[0].UID), created: false, matchedExisting: true };
+    }
+    const payload = buildMyobSupplierPayload(supplier);
+    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier", "POST", payload);
+    const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
+    let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
+    if (!uid) {
+      const displayId = String(payload.DisplayID ?? "");
+      const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`);
+      const found = myobCollectionRecords(lookup.data).find((row) => String(row.DisplayID ?? "") === displayId);
+      uid = readMyobUid(found);
+      if (found) Object.assign(created, found);
+    }
+    if (!uid) throw new Error("MYOB accepted the supplier but did not return its UID.");
+    created.UID = uid;
+    created.DisplayID = textOrNull(created.DisplayID) ?? payload.DisplayID;
+    created.CompanyName = textOrNull(created.CompanyName) ?? payload.CompanyName;
+    await saveLocalSupplierMyobLink(tenantId, supplier, created, "created_from_production_manager");
+    return { uid, created: true, matchedExisting: false };
+  }
+
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier/${linkedUid}`);
+  if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked supplier.");
+  const current = currentResponse.data as Record<string, unknown>;
+  const local = buildMyobSupplierPayload(supplier);
+  const currentAddresses = addressRecords(current.Addresses);
+  const localAddress = addressRecords(local.Addresses)[0];
+  const mergedAddresses = localAddress ? [{ ...(currentAddresses[0] ?? { Location: 1 }), ...localAddress }, ...currentAddresses.slice(1)] : currentAddresses;
+  const updatePayload = stripMyobReadOnlyFields({
+    ...current,
+    UID: linkedUid,
+    CompanyName: local.CompanyName,
+    IsIndividual: false,
+    IsActive: current.IsActive !== false,
+    Notes: local.Notes,
+    Addresses: mergedAddresses
+  }) as Record<string, unknown>;
+  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier/${linkedUid}`, "PUT", updatePayload);
+  await saveLocalSupplierMyobLink(tenantId, supplier, { ...current, ...updatePayload, UID: linkedUid }, "updated_from_production_manager");
+  return { uid: linkedUid, created: false, matchedExisting: false };
+}
+
+export async function syncLocalCustomerToMyobForTenant(tenantId: string, customerId: string): Promise<MyobCustomerCreateResult> {
+  const customer = await getCustomerById(tenantId, customerId);
+  if (!customer) throw new Error("Production Manager client could not be found.");
+  const linkedUid = customer.myobUid && !customer.myobUid.startsWith("manual-")
+    ? customer.myobUid
+    : typeof customer.payloadJson?.myobUid === "string" && !customer.payloadJson.myobUid.startsWith("manual-") ? customer.payloadJson.myobUid : null;
+  if (!linkedUid) return createMyobCustomerFromLocalClientForTenant(tenantId, customerId);
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`);
+  if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked customer.");
+  const current = currentResponse.data as Record<string, unknown>;
+  const local = buildMyobCustomerPayload(customer);
+  const currentAddresses = addressRecords(current.Addresses);
+  const localAddress = addressRecords(local.Addresses)[0];
+  const mergedAddresses = localAddress ? [{ ...(currentAddresses[0] ?? { Location: 1 }), ...localAddress }, ...currentAddresses.slice(1)] : currentAddresses;
+  const currentSelling = current.SellingDetails && typeof current.SellingDetails === "object" && !Array.isArray(current.SellingDetails) ? current.SellingDetails as Record<string, unknown> : {};
+  const localSelling = local.SellingDetails && typeof local.SellingDetails === "object" && !Array.isArray(local.SellingDetails) ? local.SellingDetails as Record<string, unknown> : {};
+  const updatePayload = stripMyobReadOnlyFields({
+    ...current, UID: linkedUid, IsIndividual: local.IsIndividual, IsActive: current.IsActive !== false,
+    CompanyName: local.CompanyName, FirstName: local.FirstName, LastName: local.LastName,
+    Addresses: mergedAddresses, SellingDetails: { ...currentSelling, ...localSelling }
+  }) as Record<string, unknown>;
+  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`, "PUT", updatePayload);
+  await saveLocalCustomerMyobLink(tenantId, customer, { ...current, ...updatePayload, UID: linkedUid }, "updated_from_production_manager");
+  return { uid: linkedUid, displayName: normaliseCustomerDisplayName({ ...current, ...updatePayload }), displayId: textOrNull(current.DisplayID), created: false, matchedExisting: false };
+}
+
+export type MyobPurchasingReferenceData = {
+  accounts: Array<{ uid: string; name: string; displayId: string; classification: string }>;
+  taxCodes: Array<{ uid: string; code: string; description: string }>;
+};
+
+export async function fetchMyobPurchasingReferenceDataForTenant(tenantId: string): Promise<MyobPurchasingReferenceData> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") return { accounts: [], taxCodes: [] };
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const [accountsResponse, taxResponse] = await Promise.all([
+    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/Account?$top=1000"),
+    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/TaxCode?$top=1000")
+  ]);
+  const accounts = myobCollectionRecords(accountsResponse.data)
+    .filter((row) => row.IsActive !== false && ["Expense", "CostOfSales"].includes(String(row.Classification ?? "")))
+    .map((row) => ({ uid: String(row.UID), name: String(row.Name ?? ""), displayId: String(row.DisplayID ?? ""), classification: String(row.Classification ?? "") }))
+    .filter((row) => row.uid);
+  const taxCodes = myobCollectionRecords(taxResponse.data)
+    .filter((row) => row.IsActive !== false)
+    .map((row) => ({ uid: String(row.UID), code: String(row.Code ?? ""), description: String(row.Description ?? row.Name ?? "") }))
+    .filter((row) => row.uid && row.code);
+  return { accounts, taxCodes };
+}
+
+function generatedMyobMaterialNumber(material: MaterialRecord): string {
+  const sku = String(material.sku ?? "").trim();
+  if (sku) return sku.slice(0, 30);
+  return `PMM${material.id.replace(/[^a-z0-9]/gi, "").toUpperCase().slice(0, 20)}`.slice(0, 30);
+}
+
+function objectChild(value: unknown, key: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+  const child = (value as Record<string, unknown>)[key];
+  return child && typeof child === "object" && !Array.isArray(child) ? child as Record<string, unknown> : {};
+}
+
+async function materialPurchaseReferences(tenantId: string, material: MaterialRecord): Promise<{ expenseUid: string; expenseName?: string; expenseDisplayId?: string; taxUid: string; taxCode: string; supplierUid?: string }> {
+  const defaults = await getPurchasingDefaults(tenantId);
+  const supplier = material.supplierId ? await getSupplierById(tenantId, material.supplierId) : null;
+  let supplierUid = supplier?.myobUid && !supplier.myobUid.startsWith("manual-") ? supplier.myobUid : undefined;
+  if (supplier && !supplierUid) {
+    try { supplierUid = (await syncLocalSupplierToMyobForTenant(tenantId, supplier.id)).uid; } catch { /* surfaced via account fallback below if needed */ }
+  }
+  const buyingDetails = objectChild(supplier?.payloadJson, "BuyingDetails");
+  const supplierExpense = objectChild(buyingDetails, "ExpenseAccount");
+  let expenseUid = textOrNull(supplierExpense.UID) ?? defaults.expenseAccountUid;
+  let expenseName = textOrNull(supplierExpense.Name) ?? defaults.expenseAccountName ?? undefined;
+  let expenseDisplayId = textOrNull(supplierExpense.DisplayID) ?? defaults.expenseAccountDisplayId ?? undefined;
+  let taxUid = defaults.taxCodeUid;
+  let taxCode = defaults.taxCode;
+  if (!expenseUid || !taxUid) {
+    const refs = await fetchMyobPurchasingReferenceDataForTenant(tenantId);
+    if (!expenseUid && refs.accounts.length === 1) {
+      expenseUid = refs.accounts[0].uid; expenseName = refs.accounts[0].name; expenseDisplayId = refs.accounts[0].displayId;
+    }
+    if (!taxUid) {
+      const gst = refs.taxCodes.find((row) => row.code.toUpperCase() === "GST") ?? (refs.taxCodes.length === 1 ? refs.taxCodes[0] : undefined);
+      if (gst) { taxUid = gst.uid; taxCode = gst.code; }
+    }
+  }
+  if (!expenseUid) throw new Error("No MYOB purchase expense/Cost of Sales account is configured. Open Purchasing and choose the MYOB purchasing defaults first.");
+  if (!taxUid) throw new Error("No MYOB purchase tax code is configured. Open Purchasing and choose the MYOB purchasing defaults first.");
+  return { expenseUid, expenseName, expenseDisplayId, taxUid, taxCode: taxCode || "GST", supplierUid };
+}
+
+function buildMyobMaterialPayload(material: MaterialRecord, refs: Awaited<ReturnType<typeof materialPurchaseReferences>>, rowVersion?: unknown): Record<string, unknown> {
+  const number = generatedMyobMaterialNumber(material);
+  const fullName = material.name.trim() || number;
+  const restocking: Record<string, unknown> = {};
+  if (refs.supplierUid) restocking.Supplier = { UID: refs.supplierUid };
+  const payload: Record<string, unknown> = {
+    Number: number,
+    Name: fullName.slice(0, 30),
+    Description: fullName.slice(0, 255),
+    UseDescription: fullName.length > 30,
+    IsActive: true,
+    IsBought: true,
+    IsSold: false,
+    IsInventoried: false,
+    ExpenseAccount: { UID: refs.expenseUid },
+    BuyingDetails: {
+      StandardCost: numberValue(material.purchaseCost),
+      BuyingUnitOfMeasure: String(material.purchaseUom || material.stockUom || "each").slice(0, 20),
+      TaxCode: { UID: refs.taxUid },
+      ...(Object.keys(restocking).length ? { RestockingInformation: restocking } : {})
+    },
+    StandardCostTaxInclusive: false
+  };
+  if (rowVersion) payload.RowVersion = rowVersion;
+  return payload;
+}
+
+async function exactMyobItemMatches(accessToken: string, companyFileId: string, material: MaterialRecord): Promise<Record<string, unknown>[]> {
+  const number = generatedMyobMaterialNumber(material);
+  const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item?$filter=Number eq '${odataString(number)}'&$top=20`);
+  return myobCollectionRecords(response.data).filter((row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase());
+}
+
+async function saveMaterialLink(tenantId: string, material: MaterialRecord, item: Record<string, unknown>, refs: Awaited<ReturnType<typeof materialPurchaseReferences>>, match: string): Promise<void> {
+  const uid = textOrNull(item.UID);
+  if (!uid) throw new Error("MYOB material item response did not include a UID.");
+  const payload = { ...item, myobMatch: match, myobSyncedAt: new Date().toISOString(), purchaseTaxCodeUid: refs.taxUid, purchaseTaxCode: refs.taxCode, expenseAccountUid: refs.expenseUid };
+  await updateMaterialMyobLink(tenantId, material.id, { myobUid: uid, myobDisplayId: textOrNull(item.Number), myobSyncState: "synced", myobPayloadJson: payload });
+  await upsertExternalMappingByTenantId(tenantId, { entityType: "material", localId: material.id, externalId: uid, syncState: "synced", lastSyncedAt: new Date().toISOString(), payloadJson: { number: textOrNull(item.Number), name: textOrNull(item.Name), match } });
+}
+
+export async function syncLocalMaterialToMyobForTenant(tenantId: string, materialId: string): Promise<{ uid: string; number: string; created: boolean; matchedExisting: boolean }> {
+  const material = await getMaterialById(tenantId, materialId);
+  if (!material) throw new Error("Production Manager material could not be found.");
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const refs = await materialPurchaseReferences(tenantId, material);
+  let linkedUid = material.myobUid;
+  if (!linkedUid) {
+    const matches = await exactMyobItemMatches(accessToken, connection.companyFileId, material);
+    if (matches.length > 1) throw new Error(`More than one MYOB item uses material number ${generatedMyobMaterialNumber(material)}.`);
+    if (matches.length === 1) {
+      await saveMaterialLink(tenantId, material, matches[0], refs, "number_exact_match");
+      return { uid: String(matches[0].UID), number: String(matches[0].Number ?? generatedMyobMaterialNumber(material)), created: false, matchedExisting: true };
+    }
+    const payload = buildMyobMaterialPayload(material, refs);
+    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Inventory/Item", "POST", payload);
+    const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
+    linkedUid = readMyobUid(created) ?? readUidFromLocation(result.location);
+    if (!linkedUid) {
+      const matchesAfter = await exactMyobItemMatches(accessToken, connection.companyFileId, material);
+      linkedUid = readMyobUid(matchesAfter[0]);
+      if (matchesAfter[0]) Object.assign(created, matchesAfter[0]);
+    }
+    if (!linkedUid) throw new Error("MYOB accepted the material item but did not return its UID.");
+    created.UID = linkedUid;
+    created.Number = textOrNull(created.Number) ?? generatedMyobMaterialNumber(material);
+    created.Name = textOrNull(created.Name) ?? material.name.slice(0, 30);
+    created.BuyingDetails = created.BuyingDetails ?? payload.BuyingDetails;
+    await saveMaterialLink(tenantId, material, created, refs, "created_from_production_manager");
+    return { uid: linkedUid, number: String(created.Number), created: true, matchedExisting: false };
+  }
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${linkedUid}`);
+  if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked material item.");
+  const current = currentResponse.data as Record<string, unknown>;
+  const payload = buildMyobMaterialPayload(material, refs, current.RowVersion);
+  payload.UID = linkedUid;
+  payload.IsActive = current.IsActive !== false;
+  await sendMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${linkedUid}`, "PUT", payload);
+  await saveMaterialLink(tenantId, material, { ...current, ...payload, UID: linkedUid }, refs, "updated_from_production_manager");
+  return { uid: linkedUid, number: String(payload.Number), created: false, matchedExisting: false };
+}
+
+export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchaseOrderId: string): Promise<{ uid: string; number: string | null }> {
+  const order = await getPurchaseOrder(tenantId, purchaseOrderId);
+  if (!order) throw new Error("Purchase order could not be found.");
+  if (order.myobUid) return { uid: order.myobUid, number: order.myobNumber };
+  const supplierSync = await syncLocalSupplierToMyobForTenant(tenantId, order.supplierId);
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
+  const { accessToken } = await getValidAccessToken(tenantId);
+  let lines = await listPurchaseOrderLines(tenantId, purchaseOrderId);
+  if (!lines.length) throw new Error("Add at least one material before sending the PO to MYOB.");
+  for (const line of lines) {
+    if (!line.materialMyobUid) await syncLocalMaterialToMyobForTenant(tenantId, line.materialId);
+  }
+  lines = await listPurchaseOrderLines(tenantId, purchaseOrderId);
+  const defaults = await getPurchasingDefaults(tenantId);
+  const myobLines = lines.map((line) => {
+    if (!line.materialMyobUid) throw new Error(`${line.materialName} is not linked to a MYOB inventory item.`);
+    const buyingDetails = objectChild(line.materialMyobPayloadJson, "BuyingDetails");
+    const taxCode = objectChild(buyingDetails, "TaxCode");
+    const taxUid = textOrNull(taxCode.UID) ?? textOrNull(line.materialMyobPayloadJson.purchaseTaxCodeUid) ?? defaults.taxCodeUid;
+    if (!taxUid) throw new Error(`${line.materialName} has no MYOB purchase tax code.`);
+    const qty = numberValue(line.quantity);
+    const unitCost = numberValue(line.unitCost);
+    return { Type: "Transaction", Description: (line.description || line.materialName).slice(0, 1000), BillQuantity: qty, ReceivedQuantity: 0, UnitPrice: unitCost, DiscountPercent: 0, Total: Number((qty * unitCost).toFixed(2)), Item: { UID: line.materialMyobUid }, TaxCode: { UID: taxUid } };
+  });
+  const payload: Record<string, unknown> = {
+    Number: order.poNumber.slice(0, 13),
+    Date: `${order.orderDate} 00:00:00`,
+    Supplier: { UID: supplierSync.uid },
+    IsTaxInclusive: order.isTaxInclusive,
+    Lines: myobLines,
+    IsReportable: false,
+    Comment: String(order.notes ?? "").slice(0, 2000),
+    JournalMemo: `Purchase Order ${order.poNumber}`.slice(0, 255),
+    OrderDeliveryStatus: "Nothing"
+  };
+  if (order.shipToAddress) payload.ShipToAddress = order.shipToAddress.slice(0, 255);
+  if (order.promisedDate) payload.PromisedDate = `${order.promisedDate} 00:00:00`;
+  const result = await sendMyobJson(accessToken, connection.companyFileId, "/Purchase/Order/Item", "POST", payload);
+  let created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
+  let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
+  if (!uid) {
+    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(order.poNumber.slice(0,13))}'&$top=10`);
+    const found = myobCollectionRecords(lookup.data).find((row) => String(row.Number ?? "") === order.poNumber.slice(0,13));
+    uid = readMyobUid(found); if (found) created = found;
+  }
+  if (!uid) throw new Error("MYOB accepted the purchase order but did not return its UID.");
+  const number = textOrNull(created.Number) ?? order.poNumber.slice(0,13);
+  await markPurchaseOrderMyobSynced(tenantId, purchaseOrderId, { myobUid: uid, myobNumber: number });
+  await upsertExternalMappingByTenantId(tenantId, { entityType: "purchase_order", localId: purchaseOrderId, externalId: uid, syncState: "synced", lastSyncedAt: new Date().toISOString(), payloadJson: { number, supplierUid: supplierSync.uid } });
+  return { uid, number };
 }

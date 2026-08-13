@@ -7,6 +7,8 @@ import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, normaliseMyobPriceLevel, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
+import { getMyobConnectionByTenantId } from "@/server/integrations";
+import { syncLocalCustomerToMyobForTenant } from "@/server/myob-sync";
 
 const clientSchema = z.object({
   displayName: z.string().min(1).max(255),
@@ -34,7 +36,22 @@ async function requireTenant() {
   if (!activeTenant) {
     redirect("/bootstrap?error=Create%20or%20select%20a%20tenant%20first");
   }
-  return activeTenant;
+  return activeTenant!;
+}
+
+async function isMyobConnected(tenantId: string): Promise<boolean> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  return connection?.status === "connected" && Boolean(connection.companyFileId);
+}
+
+async function syncClientIfConnected(tenantId: string, customerId: string): Promise<string | null> {
+  if (!(await isMyobConnected(tenantId))) return null;
+  try {
+    await syncLocalCustomerToMyobForTenant(tenantId, customerId);
+    return null;
+  } catch (error) {
+    return error instanceof Error ? error.message : String(error);
+  }
 }
 
 async function uploadLogoIfPresent(tenantId: string, customerId: string, formData: FormData): Promise<{ logoUrl?: string; logoStoragePath?: string }> {
@@ -142,7 +159,11 @@ export async function createClientAction(formData: FormData): Promise<void> {
 
   await updateCustomerPayloadForTenant(activeTenant.tenantId, created.id, { ...payloadFromParsed(parsed.data, uploadedLogo), ...myobMapping }, true);
 
-  redirect(`/clients?selected=${created.id}&message=Client%20created`);
+  const syncWarning = await syncClientIfConnected(activeTenant.tenantId, created.id);
+  if (syncWarning) {
+    redirect(`/clients?selected=${created.id}&error=${encodeURIComponent(`Client created locally, but MYOB sync failed: ${syncWarning}`)}`);
+  }
+  redirect(`/clients?selected=${created.id}&message=${encodeURIComponent("Client created" + ((await isMyobConnected(activeTenant.tenantId)) ? " and synced to MYOB" : ""))}`);
 }
 
 export async function updateClientAction(formData: FormData): Promise<void> {
@@ -216,19 +237,27 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     isActive: existing.isActive
   });
 
-  const existingPriceLevel = customerMyobPriceLevel(existing);
-  const linkedMyobUid = selectedMappingUid || existingLinkedMyobUid;
-  if (linkedMyobUid && !isNewMyobMapping && desiredPriceLevel !== existingPriceLevel) {
-    try {
-      const { updateMyobCustomerPriceLevelForTenant } = await import("@/server/myob-sync");
-      await updateMyobCustomerPriceLevelForTenant(activeTenant.tenantId, customerId, desiredPriceLevel);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(`Client saved locally, but MYOB price level was not updated: ${message}`)}`);
-    }
+  const syncWarning = await syncClientIfConnected(activeTenant.tenantId, customerId);
+  if (syncWarning) {
+    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(`Client saved locally, but MYOB sync failed: ${syncWarning}`)}`);
   }
 
   redirect(`/clients?selected=${customerId}&message=Client%20updated`);
+}
+
+export async function syncClientToMyobAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const customerId = String(formData.get("customerId") || "").trim();
+  if (!customerId) redirect("/clients?error=Missing%20client%20id");
+  let message = "";
+  let errorMessage = "";
+  try {
+    await syncLocalCustomerToMyobForTenant(activeTenant.tenantId, customerId);
+    message = "Client synced to MYOB";
+  } catch (error) {
+    errorMessage = error instanceof Error ? error.message : String(error);
+  }
+  redirect(`/clients?selected=${customerId}&${errorMessage ? `error=${encodeURIComponent(errorMessage)}` : `message=${encodeURIComponent(message)}`}`);
 }
 
 export async function archiveClientAction(formData: FormData): Promise<void> {

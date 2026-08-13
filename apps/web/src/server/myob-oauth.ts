@@ -28,7 +28,8 @@ export function getMyobScopes() {
     "sme-contacts-supplier",
     "sme-inventory",
     "sme-sales",
-    "sme-purchases"
+    "sme-purchases",
+    "sme-general-ledger"
   ].join(" ");
 }
 

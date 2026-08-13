@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { MYOB_PRICE_LEVELS, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, isDeletedCustomer, listCustomersForTenant, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
-import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, updateClientAction } from "./actions";
+import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, syncClientToMyobAction, updateClientAction } from "./actions";
 
 type ClientsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -173,6 +173,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
 
       {!isNew && client ? (
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
+          {active && !deleted ? <form action={syncClientToMyobAction}><input type="hidden" name="customerId" value={client.id} /><button type="submit" style={{...ghostButton,borderColor:"#0f766e",color:"#0f766e"}}>Sync to MYOB</button></form> : null}
           {active && !deleted ? (
             <form action={archiveClientAction}><input type="hidden" name="customerId" value={client.id} /><button type="submit" style={ghostButton}>Archive</button></form>
           ) : null}
