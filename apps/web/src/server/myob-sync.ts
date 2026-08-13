@@ -162,6 +162,90 @@ export async function getValidAccessToken(tenantId: string) {
 
 type MyobRequestMethod = "GET" | "POST" | "PUT";
 
+const MYOB_REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+const MAX_MYOB_REDIRECTS = 4;
+
+// AccountRight company files can live on MYOB shard hosts (for example arl2.api.myob.com).
+// Native fetch follows cross-origin redirects but deliberately strips sensitive headers such
+// as Authorization. Follow trusted MYOB API redirects ourselves so the raw Bearer token, API
+// key and company-file token reach the actual company-file host.
+function isTrustedMyobBusinessApiUrl(url: URL): boolean {
+  const hostname = url.hostname.toLowerCase();
+  return url.protocol === "https:"
+    && (hostname === "api.myob.com" || hostname.endsWith(".api.myob.com"))
+    && (url.pathname === "/accountright" || url.pathname.startsWith("/accountright/"));
+}
+
+function assertRawMyobAccessToken(accessToken: string): string {
+  if (!accessToken) throw new Error("MYOB access token is empty.");
+  if (accessToken !== accessToken.trim()) {
+    throw new Error("Stored MYOB access token contains unexpected leading or trailing whitespace. Reconnect MYOB to replace the altered token.");
+  }
+  if (/^Bearer\s+/i.test(accessToken)) {
+    throw new Error("Stored MYOB access token incorrectly includes the Bearer prefix. Reconnect MYOB to replace the altered token.");
+  }
+  return accessToken;
+}
+
+async function fetchMyobWithTrustedRedirects(input: {
+  initialUrl: URL;
+  accessToken: string;
+  companyFileAuthToken: string | null;
+  method: MyobRequestMethod;
+  body?: Record<string, unknown>;
+}) {
+  const accessToken = assertRawMyobAccessToken(input.accessToken);
+  let currentUrl = new URL(input.initialUrl.toString());
+  let redirectCount = 0;
+
+  while (true) {
+    if (!isTrustedMyobBusinessApiUrl(currentUrl)) {
+      throw new Error(`Refusing to send MYOB credentials to an untrusted redirect target: ${currentUrl.origin}`);
+    }
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${accessToken}`,
+      Accept: "application/json",
+      "x-myobapi-key": env.MYOB_CLIENT_ID ?? "",
+      "x-myobapi-version": "v2"
+    };
+    if (input.companyFileAuthToken) headers["x-myobapi-cftoken"] = input.companyFileAuthToken;
+    if (input.method !== "GET") headers["Content-Type"] = "application/json";
+
+    const response = await fetch(currentUrl.toString(), {
+      method: input.method,
+      headers,
+      body: input.method === "GET" ? undefined : JSON.stringify(input.body ?? {}),
+      cache: "no-store",
+      redirect: "manual",
+      signal: AbortSignal.timeout(20000)
+    });
+
+    if (!MYOB_REDIRECT_STATUSES.has(response.status)) {
+      return { response, finalUrl: currentUrl, redirectCount };
+    }
+
+    const location = response.headers.get("location");
+    if (!location) {
+      throw new Error(`MYOB returned redirect status ${response.status} without a Location header.`);
+    }
+    if (redirectCount >= MAX_MYOB_REDIRECTS) {
+      throw new Error(`MYOB API exceeded ${MAX_MYOB_REDIRECTS} trusted redirects.`);
+    }
+
+    const nextUrl = new URL(location, currentUrl);
+    if (!isTrustedMyobBusinessApiUrl(nextUrl)) {
+      throw new Error(`MYOB attempted to redirect an authenticated API request outside trusted MYOB API hosts: ${nextUrl.origin}`);
+    }
+    if (response.status === 303 && input.method !== "GET") {
+      throw new Error("MYOB returned HTTP 303 for a write request; refusing to change the request method or replay the write as GET.");
+    }
+
+    currentUrl = nextUrl;
+    redirectCount += 1;
+  }
+}
+
 async function performMyobRequest(input: {
   tenantId: string;
   accessToken: string;
@@ -173,31 +257,22 @@ async function performMyobRequest(input: {
   const url = new URL(`${input.companyFileId}${input.endpoint}`, `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`);
   const companyFileAuthToken = await companyFileAuthTokenForTenant(input.tenantId);
 
-  const doFetch = async (accessToken: string) => {
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "x-myobapi-key": env.MYOB_CLIENT_ID ?? "",
-      "x-myobapi-version": "v2"
-    };
-    if (companyFileAuthToken) headers["x-myobapi-cftoken"] = companyFileAuthToken;
-    if (input.method !== "GET") headers["Content-Type"] = "application/json";
+  const doFetch = async (accessToken: string) => fetchMyobWithTrustedRedirects({
+    initialUrl: url,
+    accessToken,
+    companyFileAuthToken,
+    method: input.method,
+    body: input.body
+  });
 
-    return fetch(url.toString(), {
-      method: input.method,
-      headers,
-      body: input.method === "GET" ? undefined : JSON.stringify(input.body ?? {}),
-      cache: "no-store",
-      signal: AbortSignal.timeout(20000)
-    });
-  };
-
-  let response = await doFetch(input.accessToken);
+  let requestResult = await doFetch(input.accessToken);
+  let response = requestResult.response;
   let retriedAfterRefresh = false;
 
   if (response.status === 401) {
     const refreshedAccessToken = await refreshAccessTokenForTenant(input.tenantId, input.accessToken);
-    response = await doFetch(refreshedAccessToken);
+    requestResult = await doFetch(refreshedAccessToken);
+    response = requestResult.response;
     retriedAfterRefresh = true;
   }
 
@@ -212,16 +287,17 @@ async function performMyobRequest(input: {
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : text || response.statusText;
     const authHint = response.status === 401
-      ? ` MYOB rejected this request even after an automatic token refresh. This can mean the endpoint is outside the token's granted SME scopes, the API key does not match the token, or the OAuth token itself is invalid. Endpoint: ${input.endpoint}.`
+      ? ` MYOB rejected this request even after an automatic token refresh. Production Manager preserved the raw Bearer token and MYOB authentication headers across ${requestResult.redirectCount} trusted MYOB redirect(s). Check that the API key matches the OAuth token and that the token has the endpoint's SME scope. Endpoint: ${input.endpoint}. Final MYOB host: ${requestResult.finalUrl.host}.`
       : "";
     throw new Error(`${response.status}: ${detail}${authHint}`);
   }
 
   return {
-    url: url.toString(),
+    url: requestResult.finalUrl.toString(),
     data: parsed,
     location: response.headers.get("location"),
-    retriedAfterRefresh
+    retriedAfterRefresh,
+    redirectCount: requestResult.redirectCount
   };
 }
 
