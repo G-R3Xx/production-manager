@@ -1,5 +1,5 @@
-# Production Manager V26.08.06.05
+# Production Manager V26.08.14.02
 
-Production Manager prioritises fast internal quoting and production, with optional WordPress/WooCommerce publishing.
+Production Manager prioritises fast internal quoting and production, with optional WordPress/WooCommerce publishing and MYOB bidirectional integration.
 
-See `README-V26.08.06.05.md` for the latest changes.
+See `README-V26.08.14.02.md` for the latest changes.

@@ -13,6 +13,7 @@ const supplierSchema = z.object({
   displayName: z.string().min(1).max(255),
   contactName: z.string().max(255).optional().or(z.literal("")),
   email: z.string().email("Please enter a valid email.").optional().or(z.literal("")),
+  purchaseOrderEmail: z.string().email("Please enter a valid purchase order email.").optional().or(z.literal("")),
   phone: z.string().max(80).optional().or(z.literal("")),
   street: z.string().max(1000).optional().or(z.literal("")),
   city: z.string().max(255).optional().or(z.literal("")),
@@ -65,6 +66,7 @@ export async function createSupplierAction(formData: FormData): Promise<void> {
     displayName: String(formData.get("displayName") || ""),
     contactName: String(formData.get("contactName") || ""),
     email: String(formData.get("email") || ""),
+    purchaseOrderEmail: String(formData.get("purchaseOrderEmail") || ""),
     phone: String(formData.get("phone") || ""),
     street: String(formData.get("street") || ""),
     city: String(formData.get("city") || ""),
@@ -77,7 +79,7 @@ export async function createSupplierAction(formData: FormData): Promise<void> {
 
   const created = await createSupplierForTenant(activeTenant.tenantId, {
     displayName: parsed.data.displayName.trim(), contactName: nullable(parsed.data.contactName), email: nullable(parsed.data.email),
-    phone: nullable(parsed.data.phone), notes: nullable(parsed.data.notes), payloadJson: supplierAddressPayload(parsed.data)
+    purchaseOrderEmail: nullable(parsed.data.purchaseOrderEmail), phone: nullable(parsed.data.phone), notes: nullable(parsed.data.notes), payloadJson: supplierAddressPayload(parsed.data)
   });
   const sync = await syncIfConnected(activeTenant.tenantId, created.id);
   if (sync.error) redirect(`/suppliers?error=${encodeURIComponent(`Supplier created locally, but MYOB sync failed: ${sync.error}`)}`);
@@ -89,7 +91,7 @@ export async function updateSupplierAction(formData: FormData): Promise<void> {
   const supplierId = String(formData.get("supplierId") || "");
   const parsed = supplierSchema.safeParse({
     displayName: String(formData.get("displayName") || ""), contactName: String(formData.get("contactName") || ""),
-    email: String(formData.get("email") || ""), phone: String(formData.get("phone") || ""),
+    email: String(formData.get("email") || ""), purchaseOrderEmail: String(formData.get("purchaseOrderEmail") || ""), phone: String(formData.get("phone") || ""),
     street: String(formData.get("street") || ""), city: String(formData.get("city") || ""), state: String(formData.get("state") || ""),
     postcode: String(formData.get("postcode") || ""), country: String(formData.get("country") || "Australia"), notes: String(formData.get("notes") || "")
   });
@@ -97,7 +99,7 @@ export async function updateSupplierAction(formData: FormData): Promise<void> {
 
   await updateSupplierById(activeTenant.tenantId, supplierId, {
     displayName: parsed.data.displayName.trim(), contactName: nullable(parsed.data.contactName), email: nullable(parsed.data.email),
-    phone: nullable(parsed.data.phone), notes: nullable(parsed.data.notes), payloadJson: supplierAddressPayload(parsed.data)
+    purchaseOrderEmail: nullable(parsed.data.purchaseOrderEmail), phone: nullable(parsed.data.phone), notes: nullable(parsed.data.notes), payloadJson: supplierAddressPayload(parsed.data)
   });
   const sync = await syncIfConnected(activeTenant.tenantId, supplierId);
   if (sync.error) redirect(`/suppliers?error=${encodeURIComponent(`Supplier saved locally, but MYOB sync failed: ${sync.error}`)}`);

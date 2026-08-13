@@ -7,9 +7,11 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getMaterialById } from "@/server/materials";
 import {
   addPurchaseOrderLine, createPurchaseOrder, deletePurchaseOrderLine, getPurchaseOrder,
+  markPurchaseOrderMyobFailed, markPurchaseOrderMyobPending,
   savePurchasingDefaults, setPurchaseOrderStatus, updatePurchaseOrderHeader, updatePurchaseOrderLine
 } from "@/server/purchasing";
 import { fetchMyobPurchasingReferenceDataForTenant, pushPurchaseOrderToMyobForTenant } from "@/server/myob-sync";
+import { sendPurchaseOrderEmailForTenant } from "@/server/purchase-order-email";
 
 function str(fd: FormData, key: string) { return String(fd.get(key) ?? "").trim(); }
 function numberString(fd: FormData, key: string, fallback = "0") {
@@ -87,9 +89,55 @@ export async function sendPurchaseOrderToMyobAction(formData: FormData) {
   const active = await tenant(); const poId = str(formData, "purchaseOrderId");
   if (!poId) redirect("/purchasing?error=Missing%20purchase%20order");
   let result: {number:string|null}|null=null, errorMessage="";
-  try { result = await pushPurchaseOrderToMyobForTenant(active.tenantId, poId); }
+  try {
+    await markPurchaseOrderMyobPending(active.tenantId, poId);
+    result = await pushPurchaseOrderToMyobForTenant(active.tenantId, poId);
+  } catch (e) {
+    errorMessage = err(e);
+    await markPurchaseOrderMyobFailed(active.tenantId, poId, errorMessage).catch(()=>undefined);
+  }
+  redirect(target(poId, errorMessage ? "error" : "message", errorMessage || `MYOB synced${result?.number ? ` as ${result.number}` : ""}`));
+}
+
+export async function emailPurchaseOrderOnlyAction(formData: FormData) {
+  const active = await tenant(); const poId = str(formData, "purchaseOrderId");
+  if (!poId) redirect("/purchasing?error=Missing%20purchase%20order");
+  let result: {recipient:string}|null=null, errorMessage="";
+  try { result = await sendPurchaseOrderEmailForTenant(active.tenantId, poId); }
   catch (e) { errorMessage = err(e); }
-  redirect(target(poId, errorMessage ? "error" : "message", errorMessage || `Sent to MYOB${result?.number ? ` as ${result.number}` : ""}`));
+  redirect(target(poId, errorMessage ? "error" : "message", errorMessage || `Purchase order emailed to ${result?.recipient ?? "supplier"}`));
+}
+
+export async function sendPurchaseOrderAction(formData: FormData) {
+  const active = await tenant(); const poId = str(formData, "purchaseOrderId");
+  if (!poId) redirect("/purchasing?error=Missing%20purchase%20order");
+  const po = await getPurchaseOrder(active.tenantId, poId);
+  if (!po) redirect("/purchasing?error=Purchase%20order%20not%20found");
+
+  let myobMessage = "MYOB not attempted";
+  let emailMessage = "Email not attempted";
+  let myobOk = false;
+  let emailOk = false;
+  try {
+    await markPurchaseOrderMyobPending(active.tenantId, poId);
+    const result = await pushPurchaseOrderToMyobForTenant(active.tenantId, poId);
+    myobOk = true;
+    myobMessage = `MYOB synced${result.number ? ` as ${result.number}` : ""}`;
+  } catch (e) {
+    myobMessage = `MYOB sync failed: ${err(e)}`;
+    await markPurchaseOrderMyobFailed(active.tenantId, poId, err(e)).catch(()=>undefined);
+  }
+
+  try {
+    const result = await sendPurchaseOrderEmailForTenant(active.tenantId, poId);
+    emailOk = true;
+    emailMessage = `Email sent to ${result.recipient}`;
+  } catch (e) {
+    emailMessage = err(e);
+  }
+
+  const summary = `${emailOk ? "✓" : "✕"} ${emailMessage} · ${myobOk ? "✓" : "✕"} ${myobMessage}`;
+  redirect(target(poId, myobOk && emailOk ? "message" : "error", summary));
 }
 
 export async function savePurchasingDefaultsAction(formData: FormData) {
