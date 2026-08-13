@@ -1985,6 +1985,10 @@ function buildMyobMaterialPayload(material: MaterialRecord, refs: Awaited<Return
   const fullName = material.name.trim() || number;
   const restocking: Record<string, unknown> = {};
   if (refs.supplierUid) restocking.Supplier = { UID: refs.supplierUid };
+  // PM's SKU field is the supplier SKU. MYOB exposes this separately from the
+  // inventory Item Number and uses it on purchase-order/buying screens.
+  const supplierItemNumber = textOrNull(material.sku);
+  if (supplierItemNumber) restocking.SupplierItemNumber = supplierItemNumber.slice(0, 30);
   const payload: Record<string, unknown> = {
     Number: number,
     Name: fullName.slice(0, 30),
@@ -2081,30 +2085,85 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
   if (!order) throw new Error("Purchase order could not be found.");
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
-  if (order.myobUid && normaliseGuid(order.myobUid) !== normaliseGuid(connection.companyFileId)) {
-    return { uid: order.myobUid, number: order.myobNumber };
-  }
+
   const { accessToken } = await getValidAccessToken(tenantId);
-  if (order.myobUid && normaliseGuid(order.myobUid) === normaliseGuid(connection.companyFileId)) {
-    const poNumber = order.poNumber.slice(0, 13);
-    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(poNumber)}'&$top=10`, tenantId);
-    const found = myobCollectionRecords(lookup.data).find((row) => String(row.Number ?? "") === poNumber);
-    const repairedUid = readMyobUid(found);
-    if (repairedUid) {
-      const repairedNumber = textOrNull(found?.Number) ?? poNumber;
-      await markPurchaseOrderMyobSynced(tenantId, purchaseOrderId, { myobUid: repairedUid, myobNumber: repairedNumber });
-      await upsertExternalMappingByTenantId(tenantId, { entityType: "purchase_order", localId: purchaseOrderId, externalId: repairedUid, syncState: "synced", lastSyncedAt: new Date().toISOString(), payloadJson: { number: repairedNumber, repairedFromLocationHeaderUid: true } });
-      return { uid: repairedUid, number: repairedNumber };
+  const poNumber = order.poNumber.slice(0, 13);
+
+  // Existing PM purchase orders must remain updateable in MYOB. Older builds
+  // returned immediately once a MYOB UID existed, which prevented repairing an
+  // already-created order such as PO-00001.
+  let linkedPoUid = order.myobUid && normaliseGuid(order.myobUid) !== normaliseGuid(connection.companyFileId)
+    ? order.myobUid
+    : null;
+  let currentPo: Record<string, unknown> | null = null;
+
+  if (linkedPoUid) {
+    try {
+      const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item/${linkedPoUid}`, tenantId);
+      if (currentResponse.data && typeof currentResponse.data === "object" && !Array.isArray(currentResponse.data)) {
+        currentPo = currentResponse.data as Record<string, unknown>;
+      }
+    } catch (error) {
+      if (!isMyobNotFoundError(error)) throw error;
+      linkedPoUid = null;
     }
   }
+
+  if (!currentPo) {
+    // Recover old/bad Location-header mappings and deleted local links by the PM
+    // PO number. Use the proven paginated collection path rather than relying on
+    // a potentially slow OData filter.
+    const lookup = await fetchAllMyobCollectionRecords(
+      accessToken,
+      connection.companyFileId,
+      `/Purchase/Order/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    );
+    const found = lookup.records.find((row) => String(row.Number ?? "") === poNumber);
+    const recoveredUid = readMyobUid(found);
+    if (recoveredUid) {
+      linkedPoUid = recoveredUid;
+      const fullResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item/${recoveredUid}`, tenantId);
+      if (fullResponse.data && typeof fullResponse.data === "object" && !Array.isArray(fullResponse.data)) {
+        currentPo = fullResponse.data as Record<string, unknown>;
+      }
+    }
+  }
+
+  if (currentPo && String(currentPo.Status ?? "") === "ConvertedToBill") {
+    throw new Error(`${poNumber} has already been converted to a bill in MYOB and can no longer be updated.`);
+  }
+
   const supplierSync = await syncLocalSupplierToMyobForTenant(tenantId, order.supplierId);
   let lines = await listPurchaseOrderLines(tenantId, purchaseOrderId);
   if (!lines.length) throw new Error("Add at least one material before sending the PO to MYOB.");
+
+  // Make sure every material points at a real MYOB Item before constructing the
+  // PO. Also backfill the MYOB Supplier Item Number from PM's Supplier SKU for
+  // materials created by pre-.15 builds.
   for (const line of lines) {
-    if (!line.materialMyobUid) await syncLocalMaterialToMyobForTenant(tenantId, line.materialId);
+    const buyingDetails = objectChild(line.materialMyobPayloadJson, "BuyingDetails");
+    const restocking = objectChild(buyingDetails, "RestockingInformation");
+    const storedSupplierItemNumber = textOrNull(restocking.SupplierItemNumber);
+    const expectedSupplierItemNumber = textOrNull(line.materialSku)?.slice(0, 30) ?? null;
+    const needsSupplierSkuBackfill = Boolean(expectedSupplierItemNumber && storedSupplierItemNumber !== expectedSupplierItemNumber);
+
+    if (!line.materialMyobUid || needsSupplierSkuBackfill) {
+      await syncLocalMaterialToMyobForTenant(tenantId, line.materialId);
+      continue;
+    }
+
+    try {
+      await fetchMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${line.materialMyobUid}`, tenantId);
+    } catch (error) {
+      if (!isMyobNotFoundError(error)) throw error;
+      await syncLocalMaterialToMyobForTenant(tenantId, line.materialId);
+    }
   }
+
   lines = await listPurchaseOrderLines(tenantId, purchaseOrderId);
   const defaults = await getPurchasingDefaults(tenantId);
+  const desiredItemUids: string[] = [];
   const myobLines = lines.map((line) => {
     if (!line.materialMyobUid) throw new Error(`${line.materialName} is not linked to a MYOB inventory item.`);
     const buyingDetails = objectChild(line.materialMyobPayloadJson, "BuyingDetails");
@@ -2113,10 +2172,22 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
     if (!taxUid) throw new Error(`${line.materialName} has no MYOB purchase tax code.`);
     const qty = numberValue(line.quantity);
     const unitCost = numberValue(line.unitCost);
-    return { Type: "Transaction", Description: (line.description || line.materialName).slice(0, 1000), BillQuantity: qty, ReceivedQuantity: 0, UnitPrice: unitCost, DiscountPercent: 0, Total: Number((qty * unitCost).toFixed(2)), Item: { UID: line.materialMyobUid }, TaxCode: { UID: taxUid } };
+    desiredItemUids.push(line.materialMyobUid);
+    return {
+      Type: "Transaction",
+      Description: (line.description || line.materialName).slice(0, 1000),
+      BillQuantity: qty,
+      ReceivedQuantity: 0,
+      UnitPrice: unitCost,
+      DiscountPercent: 0,
+      Total: Number((qty * unitCost).toFixed(2)),
+      Item: { UID: line.materialMyobUid },
+      TaxCode: { UID: taxUid }
+    };
   });
+
   const payload: Record<string, unknown> = {
-    Number: order.poNumber.slice(0, 13),
+    Number: poNumber,
     Date: `${order.orderDate} 00:00:00`,
     Supplier: { UID: supplierSync.uid },
     IsTaxInclusive: order.isTaxInclusive,
@@ -2128,17 +2199,84 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
   };
   if (order.shipToAddress) payload.ShipToAddress = order.shipToAddress.slice(0, 255);
   if (order.promisedDate) payload.PromisedDate = `${order.promisedDate} 00:00:00`;
-  const result = await sendMyobJson(accessToken, connection.companyFileId, "/Purchase/Order/Item", "POST", payload, tenantId);
-  let created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
-  let uid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
-  if (!uid) {
-    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(order.poNumber.slice(0,13))}'&$top=10`, tenantId);
-    const found = myobCollectionRecords(lookup.data).find((row) => String(row.Number ?? "") === order.poNumber.slice(0,13));
-    uid = readMyobUid(found); if (found) created = found;
+
+  let uid: string | null = linkedPoUid;
+  let number: string | null = poNumber;
+
+  if (currentPo && linkedPoUid) {
+    const currentLines = Array.isArray(currentPo.Lines)
+      ? currentPo.Lines.filter((line): line is Record<string, unknown> => Boolean(line && typeof line === "object" && !Array.isArray(line) && String((line as Record<string, unknown>).Type ?? "") === "Transaction"))
+      : [];
+
+    if (currentLines.length !== myobLines.length) {
+      throw new Error(`${poNumber} has ${currentLines.length} MYOB item line(s) but ${myobLines.length} Production Manager line(s). To avoid deleting or duplicating MYOB lines automatically, make the line counts match before syncing again.`);
+    }
+
+    payload.UID = linkedPoUid;
+    payload.RowVersion = currentPo.RowVersion;
+    payload.Lines = myobLines.map((line, index) => {
+      const existing = currentLines[index] ?? {};
+      return {
+        ...line,
+        ...(existing.RowID !== undefined && existing.RowID !== null ? { RowID: existing.RowID } : {}),
+        ...(existing.RowVersion ? { RowVersion: existing.RowVersion } : {})
+      };
+    });
+
+    const freightTax = objectChild(currentPo, "FreightTaxCode");
+    if (currentPo.Freight !== undefined && currentPo.Freight !== null) payload.Freight = currentPo.Freight;
+    if (textOrNull(freightTax.UID)) payload.FreightTaxCode = { UID: textOrNull(freightTax.UID) };
+
+    await sendMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item/${linkedPoUid}`, "PUT", payload, tenantId);
+    number = textOrNull(currentPo.Number) ?? poNumber;
+  } else {
+    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Purchase/Order/Item", "POST", payload, tenantId);
+    let created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
+    uid = readMyobUid(created) ?? readUidFromLocation(result.location, connection.companyFileId);
+    if (!uid) {
+      const lookup = await fetchAllMyobCollectionRecords(
+        accessToken,
+        connection.companyFileId,
+        `/Purchase/Order/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+        tenantId
+      );
+      const found = lookup.records.find((row) => String(row.Number ?? "") === poNumber);
+      uid = readMyobUid(found);
+      if (found) created = found;
+    }
+    if (!uid) throw new Error("MYOB accepted the purchase order but did not return its UID.");
+    number = textOrNull(created.Number) ?? poNumber;
   }
-  if (!uid) throw new Error("MYOB accepted the purchase order but did not return its UID.");
-  const number = textOrNull(created.Number) ?? order.poNumber.slice(0,13);
+
+  if (!uid) throw new Error("MYOB purchase order UID is missing after sync.");
+
+  // Verify the saved MYOB order really contains Item foreign keys. This turns a
+  // visually ambiguous MYOB line into a deterministic integration check and
+  // prevents PM from reporting success on an account-only/manual line.
+  const verifiedResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item/${uid}`, tenantId);
+  if (!verifiedResponse.data || typeof verifiedResponse.data !== "object" || Array.isArray(verifiedResponse.data)) {
+    throw new Error("MYOB saved the purchase order but did not return it for verification.");
+  }
+  const verified = verifiedResponse.data as Record<string, unknown>;
+  const verifiedLines = Array.isArray(verified.Lines)
+    ? verified.Lines.filter((line): line is Record<string, unknown> => Boolean(line && typeof line === "object" && !Array.isArray(line) && String((line as Record<string, unknown>).Type ?? "") === "Transaction"))
+    : [];
+  const verifiedItemUids = verifiedLines.map((line) => textOrNull(objectChild(line, "Item").UID));
+  const itemLinksMatch = verifiedItemUids.length === desiredItemUids.length && desiredItemUids.every((expected, index) => normaliseGuid(verifiedItemUids[index]) === normaliseGuid(expected));
+  if (!itemLinksMatch) {
+    throw new Error(`MYOB saved ${poNumber}, but one or more purchase lines were not linked to the expected MYOB Item. No duplicate PO was created; check the material MYOB mappings and sync this PO again.`);
+  }
+
+  number = textOrNull(verified.Number) ?? number ?? poNumber;
   await markPurchaseOrderMyobSynced(tenantId, purchaseOrderId, { myobUid: uid, myobNumber: number });
-  await upsertExternalMappingByTenantId(tenantId, { entityType: "purchase_order", localId: purchaseOrderId, externalId: uid, syncState: "synced", lastSyncedAt: new Date().toISOString(), payloadJson: { number, supplierUid: supplierSync.uid } });
+  await upsertExternalMappingByTenantId(tenantId, {
+    entityType: "purchase_order",
+    localId: purchaseOrderId,
+    externalId: uid,
+    syncState: "synced",
+    lastSyncedAt: new Date().toISOString(),
+    payloadJson: { number, supplierUid: supplierSync.uid, itemUids: desiredItemUids, itemLinksVerified: true }
+  });
   return { uid, number };
 }
+
