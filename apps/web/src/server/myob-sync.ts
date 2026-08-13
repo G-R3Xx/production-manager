@@ -29,9 +29,9 @@ export type MyobReadOnlySyncSummary = {
     rawKeys?: string[];
     error?: string;
   };
-  customers: { ok: boolean; endpoint: string; count: number; error?: string };
-  suppliers: { ok: boolean; endpoint: string; count: number; error?: string };
-  items: { ok: boolean; endpoint: string; count: number; error?: string };
+  customers: { ok: boolean; endpoint: string; count: number; pages?: number; error?: string };
+  suppliers: { ok: boolean; endpoint: string; count: number; pages?: number; error?: string };
+  items: { ok: boolean; endpoint: string; count: number; pages?: number; error?: string };
 };
 
 type MyobTokenResponse = {
@@ -265,13 +265,14 @@ async function performMyobRequest(input: {
     body: input.body
   });
 
-  let requestResult = await doFetch(input.accessToken);
+  let requestAccessToken = input.accessToken;
+  let requestResult = await doFetch(requestAccessToken);
   let response = requestResult.response;
   let retriedAfterRefresh = false;
 
   if (response.status === 401) {
-    const refreshedAccessToken = await refreshAccessTokenForTenant(input.tenantId, input.accessToken);
-    requestResult = await doFetch(refreshedAccessToken);
+    requestAccessToken = await refreshAccessTokenForTenant(input.tenantId, input.accessToken);
+    requestResult = await doFetch(requestAccessToken);
     response = requestResult.response;
     retriedAfterRefresh = true;
   }
@@ -297,7 +298,8 @@ async function performMyobRequest(input: {
     data: parsed,
     location: response.headers.get("location"),
     retriedAfterRefresh,
-    redirectCount: requestResult.redirectCount
+    redirectCount: requestResult.redirectCount,
+    accessToken: requestAccessToken
   };
 }
 
@@ -357,16 +359,84 @@ async function fetchMyobGlobalJson(accessToken: string, endpoint: string, tenant
   };
 }
 
-function countCollection(data: unknown) {
-  if (Array.isArray(data)) return data.length;
-  if (data && typeof data === "object") {
-    const obj = data as Record<string, unknown>;
-    const items = obj.Items;
-    if (Array.isArray(items)) return items.length;
-    const values = Object.values(obj).find((value) => Array.isArray(value));
-    if (Array.isArray(values)) return values.length;
+const MYOB_COLLECTION_PAGE_SIZE = 1000;
+const MAX_MYOB_COLLECTION_PAGES = 10000;
+
+
+function myobNextPageLink(data: unknown): string | null {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return null;
+  const record = data as Record<string, unknown>;
+  const candidate = record.NextPageLink ?? record.nextPageLink ?? record.NextPageURL ?? record.nextPageUrl;
+  return typeof candidate === "string" && candidate.trim() ? candidate.trim() : null;
+}
+
+function endpointFromMyobNextPageLink(companyFileId: string, nextPageLink: string, currentUrl: string): string {
+  const nextUrl = new URL(nextPageLink, currentUrl);
+  if (!isTrustedMyobBusinessApiUrl(nextUrl)) {
+    throw new Error(`MYOB returned an untrusted NextPageLink: ${nextUrl.origin}`);
   }
-  return 0;
+
+  // Online MYOB paging links contain /accountright/{businessId}/... . Convert the
+  // absolute URI back to the company-file-relative endpoint expected by fetchMyobJson.
+  // Matching is case-insensitive because businessId is a GUID.
+  const marker = `/${companyFileId}/`;
+  const markerIndex = nextUrl.pathname.toLowerCase().indexOf(marker.toLowerCase());
+  if (markerIndex < 0) {
+    throw new Error(`MYOB NextPageLink did not remain inside company file ${companyFileId}.`);
+  }
+
+  const endpointPath = nextUrl.pathname.slice(markerIndex + 1 + companyFileId.length);
+  if (!endpointPath.startsWith("/")) {
+    throw new Error("MYOB NextPageLink could not be converted to a company-file endpoint.");
+  }
+  return `${endpointPath}${nextUrl.search}`;
+}
+
+type MyobPaginatedCollectionResult = {
+  records: Record<string, unknown>[];
+  pageCount: number;
+  firstUrl: string;
+  lastUrl: string;
+};
+
+async function fetchAllMyobCollectionRecords(
+  accessToken: string,
+  companyFileId: string,
+  initialEndpoint: string,
+  tenantId: string
+): Promise<MyobPaginatedCollectionResult> {
+  const records: Record<string, unknown>[] = [];
+  const seenPageLinks = new Set<string>();
+  let currentAccessToken = accessToken;
+  let endpoint = initialEndpoint;
+  let pageCount = 0;
+  let firstUrl = "";
+  let lastUrl = "";
+
+  while (true) {
+    if (pageCount >= MAX_MYOB_COLLECTION_PAGES) {
+      throw new Error(`MYOB pagination exceeded ${MAX_MYOB_COLLECTION_PAGES} pages for ${initialEndpoint}.`);
+    }
+
+    const result = await fetchMyobJson(currentAccessToken, companyFileId, endpoint, tenantId);
+    currentAccessToken = result.accessToken;
+    pageCount += 1;
+    if (!firstUrl) firstUrl = result.url;
+    lastUrl = result.url;
+    records.push(...myobCollectionRecords(result.data));
+
+    const nextPageLink = myobNextPageLink(result.data);
+    if (!nextPageLink) break;
+
+    const nextUrl = new URL(nextPageLink, result.url).toString();
+    if (seenPageLinks.has(nextUrl)) {
+      throw new Error(`MYOB returned a repeated NextPageLink while paging ${initialEndpoint}.`);
+    }
+    seenPageLinks.add(nextUrl);
+    endpoint = endpointFromMyobNextPageLink(companyFileId, nextPageLink, result.url);
+  }
+
+  return { records, pageCount, firstUrl, lastUrl };
 }
 
 export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnlySyncSummary> {
@@ -383,9 +453,9 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     companyName: connection.companyName,
     tokenRefreshed: refreshed,
     companyInfo: { ok: false, endpoint: "/Info" },
-    customers: { ok: false, endpoint: "/Contact/Customer?$top=50", count: 0 },
-    suppliers: { ok: false, endpoint: "/Contact/Supplier?$top=50", count: 0 },
-    items: { ok: false, endpoint: "/Inventory/Item?$top=50", count: 0 }
+    customers: { ok: false, endpoint: `/Contact/Customer?$top=${MYOB_COLLECTION_PAGE_SIZE}`, count: 0 },
+    suppliers: { ok: false, endpoint: `/Contact/Supplier?$top=${MYOB_COLLECTION_PAGE_SIZE}`, count: 0 },
+    items: { ok: false, endpoint: `/Inventory/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`, count: 0 }
   };
 
   try {
@@ -407,10 +477,14 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     };
   }
 
-  for (const [key, endpoint] of [["customers", "/Contact/Customer?$top=50"], ["suppliers", "/Contact/Supplier?$top=50"], ["items", "/Inventory/Item?$top=50"]] as const) {
+  for (const [key, endpoint] of [
+    ["customers", `/Contact/Customer?$top=${MYOB_COLLECTION_PAGE_SIZE}`],
+    ["suppliers", `/Contact/Supplier?$top=${MYOB_COLLECTION_PAGE_SIZE}`],
+    ["items", `/Inventory/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`]
+  ] as const) {
     try {
-      const result = await fetchMyobJson(accessToken, connection.companyFileId, endpoint, tenantId);
-      summary[key] = { ok: true, endpoint: result.url, count: countCollection(result.data) } as any;
+      const result = await fetchAllMyobCollectionRecords(accessToken, connection.companyFileId, endpoint, tenantId);
+      summary[key] = { ok: true, endpoint: result.firstUrl, count: result.records.length, pages: result.pageCount } as any;
     } catch (error) {
       summary[key] = { ok: false, endpoint, count: 0, error: error instanceof Error ? error.message : "Unknown error" } as any;
     }
@@ -518,9 +592,13 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
   const priceLevelNames = await fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail", tenantId)
     .then((response) => parseMyobPriceLevelDetail(response.data))
     .catch(() => defaultMyobPriceLevelNames());
-  const result = await fetchMyobJson(accessToken, companyFileId, "/Contact/Customer?$top=50", tenantId);
-  const payload = result.data as Record<string, unknown> | null;
-  const customers = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? result.data as unknown[] : [];
+  const result = await fetchAllMyobCollectionRecords(
+    accessToken,
+    companyFileId,
+    `/Contact/Customer?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+    tenantId
+  );
+  const customers = result.records;
   const imported: Array<{ myobUid: string; displayName: string; localId: string }> = [];
 
   for (const raw of customers) {
@@ -643,15 +721,24 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
   const companyFileId = connection.companyFileId;
   const { accessToken } = await getValidAccessToken(tenantId);
   const [result, matrixResult, priceLevelResult] = await Promise.all([
-    fetchMyobJson(accessToken, companyFileId, "/Inventory/Item?$top=50", tenantId),
-    fetchMyobJson(accessToken, companyFileId, "/Inventory/ItemPriceMatrix?$top=50", tenantId).catch(() => ({ data: null })),
+    fetchAllMyobCollectionRecords(
+      accessToken,
+      companyFileId,
+      `/Inventory/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    ),
+    fetchAllMyobCollectionRecords(
+      accessToken,
+      companyFileId,
+      `/Inventory/ItemPriceMatrix?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    ).catch(() => ({ records: [] as Record<string, unknown>[], pageCount: 0, firstUrl: "", lastUrl: "" })),
     fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail", tenantId).catch(() => ({ data: null }))
   ]);
-  const payload = result.data as Record<string, unknown> | null;
-  const items = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? (result.data as unknown[]) : [];
+  const items = result.records;
   const priceLevelNames = parseMyobPriceLevelDetail(priceLevelResult.data);
   const priceMatrixByUid = new Map<string, Record<string, unknown>>();
-  for (const matrix of myobCollectionRecords(matrixResult.data)) {
+  for (const matrix of matrixResult.records) {
     const uid = textOrNull(matrix.UID) ?? (matrix.Item && typeof matrix.Item === "object" ? textOrNull((matrix.Item as Record<string, unknown>).UID) : null);
     if (uid) priceMatrixByUid.set(uid, matrix);
   }
@@ -1427,9 +1514,14 @@ export async function importMyobSuppliersAndCreateMappings(tenantId: string): Pr
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId) throw new Error("No MYOB company file is linked to this tenant yet.");
   const { accessToken } = await getValidAccessToken(tenantId);
-  const response = await fetchMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier?$top=1000", tenantId);
+  const response = await fetchAllMyobCollectionRecords(
+    accessToken,
+    connection.companyFileId,
+    `/Contact/Supplier?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+    tenantId
+  );
   const imported: MyobSupplierImportSummary["sample"] = [];
-  for (const supplier of myobCollectionRecords(response.data)) {
+  for (const supplier of response.records) {
     const uid = textOrNull(supplier.UID);
     if (!uid) continue;
     const firstAddress = addressRecords(supplier.Addresses)[0] ?? {};
@@ -1546,14 +1638,14 @@ export async function fetchMyobPurchasingReferenceDataForTenant(tenantId: string
   if (!connection?.companyFileId || connection.status !== "connected") return { accounts: [], taxCodes: [] };
   const { accessToken } = await getValidAccessToken(tenantId);
   const [accountsResponse, taxResponse] = await Promise.all([
-    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/Account?$top=1000", tenantId),
-    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/TaxCode?$top=1000", tenantId)
+    fetchAllMyobCollectionRecords(accessToken, connection.companyFileId, `/GeneralLedger/Account?$top=${MYOB_COLLECTION_PAGE_SIZE}`, tenantId),
+    fetchAllMyobCollectionRecords(accessToken, connection.companyFileId, `/GeneralLedger/TaxCode?$top=${MYOB_COLLECTION_PAGE_SIZE}`, tenantId)
   ]);
-  const accounts = myobCollectionRecords(accountsResponse.data)
+  const accounts = accountsResponse.records
     .filter((row) => row.IsActive !== false && ["Expense", "CostOfSales"].includes(String(row.Classification ?? "")))
     .map((row) => ({ uid: String(row.UID), name: String(row.Name ?? ""), displayId: String(row.DisplayID ?? ""), classification: String(row.Classification ?? "") }))
     .filter((row) => row.uid);
-  const taxCodes = myobCollectionRecords(taxResponse.data)
+  const taxCodes = taxResponse.records
     .filter((row) => row.IsActive !== false)
     .map((row) => ({ uid: String(row.UID), code: String(row.Code ?? ""), description: String(row.Description ?? row.Name ?? "") }))
     .filter((row) => row.uid && row.code);
