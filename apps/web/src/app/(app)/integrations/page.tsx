@@ -159,6 +159,21 @@ export default async function IntegrationsPage({
             </label>
           </div>
 
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14 }}>
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Company file username</span>
+              <input name="companyFileUsername" defaultValue={connection?.companyFileUsername ?? (connection?.environment === "sandbox" ? "APIDeveloper" : "")} placeholder="APIDeveloper for MYOB shared sandbox" autoComplete="off" style={{ minHeight: 42, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 12px" }} />
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Company file password</span>
+              <input name="companyFilePassword" type="password" defaultValue="" placeholder={connection?.companyFileAuthToken ? "Stored — leave blank to keep it" : "Blank if the company-file user has no password"} autoComplete="new-password" style={{ minHeight: 42, borderRadius: 12, border: "1px solid #d0d5dd", padding: "0 12px" }} />
+            </label>
+          </div>
+          <div style={{ border: "1px solid #dbeafe", background: "#eff6ff", borderRadius: 12, padding: "10px 12px", color: "#1e3a8a", fontSize: 13, lineHeight: 1.5 }}>
+            MYOB requires company-file credentials as well as OAuth. Shared developer sandboxes normally use <b>APIDeveloper</b>; Production Manager supplies that sandbox default automatically. For your live company file, enter its company-file user/password here if required.
+          </div>
+
           <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
             <button type="submit" style={{ justifySelf: "start", minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
               Save connection metadata

@@ -8,6 +8,8 @@ export type MyobConnectionRecord = {
   environment: "sandbox" | "live";
   companyFileId: string | null;
   companyName: string | null;
+  companyFileUsername: string | null;
+  companyFileAuthToken: string | null;
   status: "disconnected" | "connected" | "error";
   connectedAt: string | null;
   disconnectedAt: string | null;
@@ -86,9 +88,35 @@ function toIsoOrNull(value: unknown): string | null {
   return String(value);
 }
 
+let myobConnectionAuthSchemaPromise: Promise<void> | null = null;
+
+async function ensureMyobConnectionAuthSchema(): Promise<void> {
+  if (!myobConnectionAuthSchemaPromise) {
+    myobConnectionAuthSchemaPromise = (async () => {
+      await pool.query(`
+        ALTER TABLE integration.myob_connections
+          ADD COLUMN IF NOT EXISTS company_file_username varchar(255),
+          ADD COLUMN IF NOT EXISTS company_file_auth_token text
+      `);
+      await pool.query(`
+        UPDATE integration.myob_connections
+        SET company_file_username = COALESCE(company_file_username, 'APIDeveloper'),
+            company_file_auth_token = COALESCE(company_file_auth_token, encode(convert_to('APIDeveloper:', 'UTF8'), 'base64'))
+        WHERE environment = 'sandbox'
+          AND company_file_auth_token IS NULL
+      `);
+    })().catch((error) => {
+      myobConnectionAuthSchemaPromise = null;
+      throw error;
+    });
+  }
+  return myobConnectionAuthSchemaPromise;
+}
+
 export async function getMyobConnectionByTenantId(
   tenantId: string
 ): Promise<MyobConnectionRecord | null> {
+  await ensureMyobConnectionAuthSchema();
   const result = await pool.query<MyobConnectionRecord>(
     `
       SELECT
@@ -97,6 +125,8 @@ export async function getMyobConnectionByTenantId(
         environment,
         company_file_id AS "companyFileId",
         company_name AS "companyName",
+        company_file_username AS "companyFileUsername",
+        company_file_auth_token AS "companyFileAuthToken",
         status,
         connected_at AS "connectedAt",
         disconnected_at AS "disconnectedAt",
@@ -130,12 +160,15 @@ export async function upsertMyobConnectionByTenantId(
     environment: "sandbox" | "live";
     companyFileId?: string | null;
     companyName?: string | null;
+    companyFileUsername?: string | null;
+    companyFileAuthToken?: string | null;
     status: "disconnected" | "connected" | "error";
     connectedAt?: string | null;
     disconnectedAt?: string | null;
     lastSuccessfulSyncAt?: string | null;
   }
 ): Promise<void> {
+  await ensureMyobConnectionAuthSchema();
   await pool.query(
     `
       INSERT INTO integration.myob_connections (
@@ -143,6 +176,8 @@ export async function upsertMyobConnectionByTenantId(
         environment,
         company_file_id,
         company_name,
+        company_file_username,
+        company_file_auth_token,
         status,
         connected_at,
         disconnected_at,
@@ -155,10 +190,12 @@ export async function upsertMyobConnectionByTenantId(
         $2::myob_environment,
         $3::varchar,
         $4::varchar,
-        $5::myob_connection_status,
-        $6::timestamptz,
-        $7::timestamptz,
+        $5::varchar,
+        $6::text,
+        $7::myob_connection_status,
         $8::timestamptz,
+        $9::timestamptz,
+        $10::timestamptz,
         now(),
         now()
       )
@@ -167,6 +204,8 @@ export async function upsertMyobConnectionByTenantId(
         environment = EXCLUDED.environment,
         company_file_id = EXCLUDED.company_file_id,
         company_name = EXCLUDED.company_name,
+        company_file_username = COALESCE(EXCLUDED.company_file_username, integration.myob_connections.company_file_username),
+        company_file_auth_token = COALESCE(EXCLUDED.company_file_auth_token, integration.myob_connections.company_file_auth_token),
         status = EXCLUDED.status,
         connected_at = EXCLUDED.connected_at,
         disconnected_at = EXCLUDED.disconnected_at,
@@ -178,6 +217,8 @@ export async function upsertMyobConnectionByTenantId(
       input.environment,
       input.companyFileId ?? null,
       input.companyName ?? null,
+      input.companyFileUsername ?? null,
+      input.companyFileAuthToken ?? null,
       input.status,
       input.connectedAt ?? null,
       input.disconnectedAt ?? null,

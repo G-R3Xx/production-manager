@@ -47,6 +47,8 @@ export const myobConnections = integrationSchema.table("myob_connections", {
   environment: myobEnvironmentEnum("environment").notNull().default("sandbox"),
   companyFileId: varchar("company_file_id", { length: 255 }),
   companyName: varchar("company_name", { length: 255 }),
+  companyFileUsername: varchar("company_file_username", { length: 255 }),
+  companyFileAuthToken: text("company_file_auth_token"),
   status: myobConnectionStatusEnum("status").notNull().default("disconnected"),
   connectedAt: timestamp("connected_at", { withTimezone: true }),
   disconnectedAt: timestamp("disconnected_at", { withTimezone: true }),

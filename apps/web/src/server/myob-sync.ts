@@ -46,9 +46,21 @@ function getBusinessApiBaseUrl() {
   return env.MYOB_BUSINESS_API_BASE_URL ?? "https://api.myob.com/accountright";
 }
 
-function normaliseExpiresAt(expiresIn?: number) {
-  if (!expiresIn || Number.isNaN(expiresIn)) return null;
-  return new Date(Date.now() + expiresIn * 1000).toISOString();
+function normaliseExpiresAt(expiresIn?: number | string) {
+  const seconds = Number(expiresIn ?? 0);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return new Date(Date.now() + seconds * 1000).toISOString();
+}
+
+function defaultSandboxCompanyFileAuthToken() {
+  return Buffer.from("APIDeveloper:", "utf8").toString("base64");
+}
+
+async function companyFileAuthTokenForTenant(tenantId: string): Promise<string | null> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection) return null;
+  if (connection.companyFileAuthToken) return connection.companyFileAuthToken;
+  return connection.environment === "sandbox" ? defaultSandboxCompanyFileAuthToken() : null;
 }
 
 async function refreshMyobAccessToken(refreshToken: string) {
@@ -94,6 +106,42 @@ async function refreshMyobAccessToken(refreshToken: string) {
   return tokenResponse as MyobTokenResponse;
 }
 
+const myobRefreshInFlight = new Map<string, Promise<string>>();
+
+async function refreshAccessTokenForTenant(tenantId: string, failedAccessToken?: string): Promise<string> {
+  const current = await getMyobOauthTokenByTenantId(tenantId);
+  if (!current) throw new Error("No stored MYOB OAuth token found for this tenant.");
+
+  // Another request may already have refreshed the token after this request failed.
+  if (failedAccessToken && current.accessToken !== failedAccessToken) return current.accessToken;
+
+  const inFlight = myobRefreshInFlight.get(tenantId);
+  if (inFlight) return inFlight;
+
+  const refreshPromise = (async () => {
+    const latest = await getMyobOauthTokenByTenantId(tenantId);
+    if (!latest) throw new Error("No stored MYOB OAuth token found for this tenant.");
+    if (failedAccessToken && latest.accessToken !== failedAccessToken) return latest.accessToken;
+
+    const refreshed = await refreshMyobAccessToken(latest.refreshToken);
+    await upsertMyobOauthTokenByTenantId(tenantId, {
+      accessToken: refreshed.access_token,
+      refreshToken: refreshed.refresh_token ?? latest.refreshToken,
+      tokenType: refreshed.token_type ?? latest.tokenType,
+      scope: refreshed.scope ?? latest.scope,
+      expiresAt: normaliseExpiresAt(refreshed.expires_in)
+    });
+    return refreshed.access_token;
+  })();
+
+  myobRefreshInFlight.set(tenantId, refreshPromise);
+  try {
+    return await refreshPromise;
+  } finally {
+    if (myobRefreshInFlight.get(tenantId) === refreshPromise) myobRefreshInFlight.delete(tenantId);
+  }
+}
+
 export async function getValidAccessToken(tenantId: string) {
   const token = await getMyobOauthTokenByTenantId(tenantId);
 
@@ -108,31 +156,50 @@ export async function getValidAccessToken(tenantId: string) {
     return { accessToken: token.accessToken, refreshed: false };
   }
 
-  const refreshed = await refreshMyobAccessToken(token.refreshToken);
-  await upsertMyobOauthTokenByTenantId(tenantId, {
-    accessToken: refreshed.access_token,
-    refreshToken: refreshed.refresh_token ?? token.refreshToken,
-    tokenType: refreshed.token_type ?? token.tokenType,
-    scope: refreshed.scope ?? token.scope,
-    expiresAt: normaliseExpiresAt(refreshed.expires_in)
-  });
-
-  return { accessToken: refreshed.access_token, refreshed: true };
+  const accessToken = await refreshAccessTokenForTenant(tenantId, token.accessToken);
+  return { accessToken, refreshed: accessToken !== token.accessToken };
 }
 
-export async function fetchMyobJson(accessToken: string, companyFileId: string, endpoint: string) {
-  const url = new URL(`${companyFileId}${endpoint}`, `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`);
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    headers: {
+type MyobRequestMethod = "GET" | "POST" | "PUT";
+
+async function performMyobRequest(input: {
+  tenantId: string;
+  accessToken: string;
+  companyFileId: string;
+  endpoint: string;
+  method: MyobRequestMethod;
+  body?: Record<string, unknown>;
+}) {
+  const url = new URL(`${input.companyFileId}${input.endpoint}`, `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`);
+  const companyFileAuthToken = await companyFileAuthTokenForTenant(input.tenantId);
+
+  const doFetch = async (accessToken: string) => {
+    const headers: Record<string, string> = {
       Authorization: `Bearer ${accessToken}`,
       Accept: "application/json",
       "x-myobapi-key": env.MYOB_CLIENT_ID ?? "",
       "x-myobapi-version": "v2"
-    },
-    cache: "no-store",
-    signal: AbortSignal.timeout(20000)
-  });
+    };
+    if (companyFileAuthToken) headers["x-myobapi-cftoken"] = companyFileAuthToken;
+    if (input.method !== "GET") headers["Content-Type"] = "application/json";
+
+    return fetch(url.toString(), {
+      method: input.method,
+      headers,
+      body: input.method === "GET" ? undefined : JSON.stringify(input.body ?? {}),
+      cache: "no-store",
+      signal: AbortSignal.timeout(20000)
+    });
+  };
+
+  let response = await doFetch(input.accessToken);
+  let retriedAfterRefresh = false;
+
+  if (response.status === 401) {
+    const refreshedAccessToken = await refreshAccessTokenForTenant(input.tenantId, input.accessToken);
+    response = await doFetch(refreshedAccessToken);
+    retriedAfterRefresh = true;
+  }
 
   const text = await response.text();
   let parsed: unknown = null;
@@ -144,10 +211,22 @@ export async function fetchMyobJson(accessToken: string, companyFileId: string, 
 
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : text || response.statusText;
-    throw new Error(`${response.status}: ${detail}`);
+    const authHint = response.status === 401
+      ? " MYOB rejected the OAuth/company-file credentials even after an automatic token refresh. Check the company-file username/password in Integrations."
+      : "";
+    throw new Error(`${response.status}: ${detail}${authHint}`);
   }
 
-  return { url: url.toString(), data: parsed };
+  return {
+    url: url.toString(),
+    data: parsed,
+    location: response.headers.get("location"),
+    retriedAfterRefresh
+  };
+}
+
+export async function fetchMyobJson(accessToken: string, companyFileId: string, endpoint: string, tenantId: string) {
+  return performMyobRequest({ tenantId, accessToken, companyFileId, endpoint, method: "GET" });
 }
 
 function countCollection(data: unknown) {
@@ -182,7 +261,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
   };
 
   try {
-    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences");
+    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences", tenantId);
     const data = result.data as Record<string, unknown> | null;
     summary.companyInfo = {
       ok: true,
@@ -200,7 +279,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
 
   for (const [key, endpoint] of [["customers", "/Contact/Customer?$top=50"], ["suppliers", "/Contact/Supplier?$top=50"], ["items", "/Inventory/Item?$top=50"]] as const) {
     try {
-      const result = await fetchMyobJson(accessToken, connection.companyFileId, endpoint);
+      const result = await fetchMyobJson(accessToken, connection.companyFileId, endpoint, tenantId);
       summary[key] = { ok: true, endpoint: result.url, count: countCollection(result.data) } as any;
     } catch (error) {
       summary[key] = { ok: false, endpoint, count: 0, error: error instanceof Error ? error.message : "Unknown error" } as any;
@@ -274,7 +353,7 @@ export async function fetchMyobPriceLevelNamesForTenant(tenantId: string): Promi
   if (!connection?.companyFileId || connection.status !== "connected") return defaultMyobPriceLevelNames();
   try {
     const { accessToken } = await getValidAccessToken(tenantId);
-    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Inventory/PriceLevelDetail");
+    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Inventory/PriceLevelDetail", tenantId);
     return parseMyobPriceLevelDetail(result.data);
   } catch (error) {
     console.warn("Could not read MYOB custom price-level names; using Level A-F labels.", error);
@@ -306,10 +385,10 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
 
   const companyFileId = connection.companyFileId;
   const { accessToken } = await getValidAccessToken(tenantId);
-  const priceLevelNames = await fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail")
+  const priceLevelNames = await fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail", tenantId)
     .then((response) => parseMyobPriceLevelDetail(response.data))
     .catch(() => defaultMyobPriceLevelNames());
-  const result = await fetchMyobJson(accessToken, companyFileId, "/Contact/Customer?$top=50");
+  const result = await fetchMyobJson(accessToken, companyFileId, "/Contact/Customer?$top=50", tenantId);
   const payload = result.data as Record<string, unknown> | null;
   const customers = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? result.data as unknown[] : [];
   const imported: Array<{ myobUid: string; displayName: string; localId: string }> = [];
@@ -434,9 +513,9 @@ export async function importMyobItemsAndCreateMappings(tenantId: string): Promis
   const companyFileId = connection.companyFileId;
   const { accessToken } = await getValidAccessToken(tenantId);
   const [result, matrixResult, priceLevelResult] = await Promise.all([
-    fetchMyobJson(accessToken, companyFileId, "/Inventory/Item?$top=50"),
-    fetchMyobJson(accessToken, companyFileId, "/Inventory/ItemPriceMatrix?$top=50").catch(() => ({ data: null })),
-    fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail").catch(() => ({ data: null }))
+    fetchMyobJson(accessToken, companyFileId, "/Inventory/Item?$top=50", tenantId),
+    fetchMyobJson(accessToken, companyFileId, "/Inventory/ItemPriceMatrix?$top=50", tenantId).catch(() => ({ data: null })),
+    fetchMyobJson(accessToken, companyFileId, "/Inventory/PriceLevelDetail", tenantId).catch(() => ({ data: null }))
   ]);
   const payload = result.data as Record<string, unknown> | null;
   const items = Array.isArray(payload?.Items) ? payload.Items : Array.isArray(result.data) ? (result.data as unknown[]) : [];
@@ -529,36 +608,8 @@ export type MyobOrderPushResult = {
   message: string;
 };
 
-async function sendMyobJson(accessToken: string, companyFileId: string, endpoint: string, method: "POST" | "PUT", body: Record<string, unknown>) {
-  const url = new URL(`${companyFileId}${endpoint}`, `${getBusinessApiBaseUrl().replace(/\/$/, "")}/`);
-  const response = await fetch(url.toString(), {
-    method,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      Accept: "application/json",
-      "Content-Type": "application/json",
-      "x-myobapi-key": env.MYOB_CLIENT_ID ?? "",
-      "x-myobapi-version": "v2"
-    },
-    body: JSON.stringify(body),
-    cache: "no-store",
-    signal: AbortSignal.timeout(20000)
-  });
-
-  const text = await response.text();
-  let parsed: unknown = null;
-  try {
-    parsed = text ? JSON.parse(text) : null;
-  } catch {
-    parsed = null;
-  }
-
-  if (!response.ok) {
-    const detail = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : text || response.statusText;
-    throw new Error(`${response.status}: ${detail}`);
-  }
-
-  return { url: url.toString(), data: parsed, location: response.headers.get("location") };
+async function sendMyobJson(accessToken: string, companyFileId: string, endpoint: string, method: "POST" | "PUT", body: Record<string, unknown>, tenantId: string) {
+  return performMyobRequest({ tenantId, accessToken, companyFileId, endpoint, method, body });
 }
 
 function numberValue(value: string | null | undefined): number {
@@ -666,6 +717,7 @@ function buildMyobCustomerPayload(customer: CustomerRecord): Record<string, unkn
 }
 
 async function exactMyobCustomerMatches(
+  tenantId: string,
   accessToken: string,
   companyFileId: string,
   customer: CustomerRecord
@@ -681,7 +733,7 @@ async function exactMyobCustomerMatches(
   if (!companyName && lastName) endpoints.push(`/Contact/Customer?$filter=LastName eq '${odataString(lastName)}'&$top=20`);
 
   const byUid = new Map<string, Record<string, unknown>>();
-  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint)));
+  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint, tenantId)));
   for (const result of results) {
     for (const candidate of myobCollectionRecords(result.data)) {
       const uid = textOrNull(candidate.UID);
@@ -799,7 +851,7 @@ export async function createMyobCustomerFromLocalClientForTenant(
   }
 
   const { accessToken } = await getValidAccessToken(tenantId);
-  const matches = await exactMyobCustomerMatches(accessToken, connection.companyFileId, customer);
+  const matches = await exactMyobCustomerMatches(tenantId, accessToken, connection.companyFileId, customer);
   if (matches.length > 1) {
     const names = matches.slice(0, 4).map((item) => `${normaliseCustomerDisplayName(item)}${textOrNull(item.DisplayID) ? ` (${textOrNull(item.DisplayID)})` : ""}`).join(", ");
     throw new Error(`More than one exact MYOB customer match was found: ${names}. Link the correct existing MYOB customer instead of creating a duplicate.`);
@@ -821,7 +873,7 @@ export async function createMyobCustomerFromLocalClientForTenant(
 
   const payload = buildMyobCustomerPayload(customer);
   const endpoint = "/Contact/Customer";
-  const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload);
+  const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
   let created = result.data && typeof result.data === "object" && !Array.isArray(result.data)
     ? result.data as Record<string, unknown>
     : null;
@@ -829,7 +881,7 @@ export async function createMyobCustomerFromLocalClientForTenant(
 
   if (!uid) {
     const displayId = String(payload.DisplayID ?? "").trim();
-    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`);
+    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`, tenantId);
     created = myobCollectionRecords(lookup.data).find((candidate) => String(candidate.DisplayID ?? "").trim().toLowerCase() === displayId.toLowerCase()) ?? null;
     uid = readMyobUid(created);
   }
@@ -904,7 +956,7 @@ export async function updateMyobCustomerPriceLevelForTenant(
     throw new Error("MYOB is not connected, so the customer price level could not be updated in MYOB.");
   }
   const { accessToken } = await getValidAccessToken(tenantId);
-  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${uid}`);
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${uid}`, tenantId);
   if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) {
     throw new Error("MYOB did not return the customer record needed to update its price level.");
   }
@@ -918,7 +970,7 @@ export async function updateMyobCustomerPriceLevelForTenant(
     SellingDetails: { ...currentSelling, ItemPriceLevel: requestedLevel }
   }) as Record<string, unknown>;
 
-  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${uid}`, "PUT", updatePayload);
+  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${uid}`, "PUT", updatePayload, tenantId);
   const names = await fetchMyobPriceLevelNamesForTenant(tenantId);
   await updateCustomerPayloadForTenant(tenantId, customerId, {
     myobItemPriceLevel: requestedLevel,
@@ -1088,7 +1140,7 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
   const endpoint = "/Sale/Order/Service";
 
   try {
-    const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload);
+    const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
     const uid = readMyobUid(result.data) ?? `pending-${quote.id}`;
     const number = readMyobNumber(result.data) ?? quote.quoteNumber ?? null;
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
@@ -1194,14 +1246,14 @@ function buildMyobSupplierPayload(supplier: SupplierRecord): Record<string, unkn
   };
 }
 
-async function exactMyobSupplierMatches(accessToken: string, companyFileId: string, supplier: SupplierRecord): Promise<Record<string, unknown>[]> {
+async function exactMyobSupplierMatches(tenantId: string, accessToken: string, companyFileId: string, supplier: SupplierRecord): Promise<Record<string, unknown>[]> {
   const endpoints: string[] = [];
   const email = String(supplier.email ?? "").trim();
   const company = supplier.displayName.trim();
   if (email) endpoints.push(`/Contact/Supplier?$filter=Addresses/any(x: x/Email eq '${odataString(email)}')&$top=20`);
   if (company) endpoints.push(`/Contact/Supplier?$filter=CompanyName eq '${odataString(company)}'&$top=20`);
   const byUid = new Map<string, Record<string, unknown>>();
-  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint).catch(() => ({ data: null }))));
+  const results = await Promise.all(endpoints.map((endpoint) => fetchMyobJson(accessToken, companyFileId, endpoint, tenantId).catch(() => ({ data: null }))));
   for (const result of results) {
     for (const candidate of myobCollectionRecords(result.data)) {
       const uid = textOrNull(candidate.UID);
@@ -1245,7 +1297,7 @@ export async function importMyobSuppliersAndCreateMappings(tenantId: string): Pr
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId) throw new Error("No MYOB company file is linked to this tenant yet.");
   const { accessToken } = await getValidAccessToken(tenantId);
-  const response = await fetchMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier?$top=1000");
+  const response = await fetchMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier?$top=1000", tenantId);
   const imported: MyobSupplierImportSummary["sample"] = [];
   for (const supplier of myobCollectionRecords(response.data)) {
     const uid = textOrNull(supplier.UID);
@@ -1279,19 +1331,19 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
   const { accessToken } = await getValidAccessToken(tenantId);
   const linkedUid = supplier.myobUid && !supplier.myobUid.startsWith("manual-") ? supplier.myobUid : null;
   if (!linkedUid) {
-    const matches = await exactMyobSupplierMatches(accessToken, connection.companyFileId, supplier);
+    const matches = await exactMyobSupplierMatches(tenantId, accessToken, connection.companyFileId, supplier);
     if (matches.length > 1) throw new Error("More than one matching MYOB supplier was found. Link the correct supplier before syncing.");
     if (matches.length === 1) {
       await saveLocalSupplierMyobLink(tenantId, supplier, matches[0], "exact_match");
       return { uid: String(matches[0].UID), created: false, matchedExisting: true };
     }
     const payload = buildMyobSupplierPayload(supplier);
-    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier", "POST", payload);
+    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Contact/Supplier", "POST", payload, tenantId);
     const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
     let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
     if (!uid) {
       const displayId = String(payload.DisplayID ?? "");
-      const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`);
+      const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier?$filter=DisplayID eq '${odataString(displayId)}'&$top=5`, tenantId);
       const found = myobCollectionRecords(lookup.data).find((row) => String(row.DisplayID ?? "") === displayId);
       uid = readMyobUid(found);
       if (found) Object.assign(created, found);
@@ -1304,7 +1356,7 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
     return { uid, created: true, matchedExisting: false };
   }
 
-  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier/${linkedUid}`);
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier/${linkedUid}`, tenantId);
   if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked supplier.");
   const current = currentResponse.data as Record<string, unknown>;
   const local = buildMyobSupplierPayload(supplier);
@@ -1320,7 +1372,7 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
     Notes: local.Notes,
     Addresses: mergedAddresses
   }) as Record<string, unknown>;
-  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier/${linkedUid}`, "PUT", updatePayload);
+  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Supplier/${linkedUid}`, "PUT", updatePayload, tenantId);
   await saveLocalSupplierMyobLink(tenantId, supplier, { ...current, ...updatePayload, UID: linkedUid }, "updated_from_production_manager");
   return { uid: linkedUid, created: false, matchedExisting: false };
 }
@@ -1335,7 +1387,7 @@ export async function syncLocalCustomerToMyobForTenant(tenantId: string, custome
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
   const { accessToken } = await getValidAccessToken(tenantId);
-  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`);
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`, tenantId);
   if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked customer.");
   const current = currentResponse.data as Record<string, unknown>;
   const local = buildMyobCustomerPayload(customer);
@@ -1349,7 +1401,7 @@ export async function syncLocalCustomerToMyobForTenant(tenantId: string, custome
     CompanyName: local.CompanyName, FirstName: local.FirstName, LastName: local.LastName,
     Addresses: mergedAddresses, SellingDetails: { ...currentSelling, ...localSelling }
   }) as Record<string, unknown>;
-  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`, "PUT", updatePayload);
+  await sendMyobJson(accessToken, connection.companyFileId, `/Contact/Customer/${linkedUid}`, "PUT", updatePayload, tenantId);
   await saveLocalCustomerMyobLink(tenantId, customer, { ...current, ...updatePayload, UID: linkedUid }, "updated_from_production_manager");
   return { uid: linkedUid, displayName: normaliseCustomerDisplayName({ ...current, ...updatePayload }), displayId: textOrNull(current.DisplayID), created: false, matchedExisting: false };
 }
@@ -1364,8 +1416,8 @@ export async function fetchMyobPurchasingReferenceDataForTenant(tenantId: string
   if (!connection?.companyFileId || connection.status !== "connected") return { accounts: [], taxCodes: [] };
   const { accessToken } = await getValidAccessToken(tenantId);
   const [accountsResponse, taxResponse] = await Promise.all([
-    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/Account?$top=1000"),
-    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/TaxCode?$top=1000")
+    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/Account?$top=1000", tenantId),
+    fetchMyobJson(accessToken, connection.companyFileId, "/GeneralLedger/TaxCode?$top=1000", tenantId)
   ]);
   const accounts = myobCollectionRecords(accountsResponse.data)
     .filter((row) => row.IsActive !== false && ["Expense", "CostOfSales"].includes(String(row.Classification ?? "")))
@@ -1446,9 +1498,9 @@ function buildMyobMaterialPayload(material: MaterialRecord, refs: Awaited<Return
   return payload;
 }
 
-async function exactMyobItemMatches(accessToken: string, companyFileId: string, material: MaterialRecord): Promise<Record<string, unknown>[]> {
+async function exactMyobItemMatches(tenantId: string, accessToken: string, companyFileId: string, material: MaterialRecord): Promise<Record<string, unknown>[]> {
   const number = generatedMyobMaterialNumber(material);
-  const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item?$filter=Number eq '${odataString(number)}'&$top=20`);
+  const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item?$filter=Number eq '${odataString(number)}'&$top=20`, tenantId);
   return myobCollectionRecords(response.data).filter((row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase());
 }
 
@@ -1469,18 +1521,18 @@ export async function syncLocalMaterialToMyobForTenant(tenantId: string, materia
   const refs = await materialPurchaseReferences(tenantId, material);
   let linkedUid = material.myobUid;
   if (!linkedUid) {
-    const matches = await exactMyobItemMatches(accessToken, connection.companyFileId, material);
+    const matches = await exactMyobItemMatches(tenantId, accessToken, connection.companyFileId, material);
     if (matches.length > 1) throw new Error(`More than one MYOB item uses material number ${generatedMyobMaterialNumber(material)}.`);
     if (matches.length === 1) {
       await saveMaterialLink(tenantId, material, matches[0], refs, "number_exact_match");
       return { uid: String(matches[0].UID), number: String(matches[0].Number ?? generatedMyobMaterialNumber(material)), created: false, matchedExisting: true };
     }
     const payload = buildMyobMaterialPayload(material, refs);
-    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Inventory/Item", "POST", payload);
+    const result = await sendMyobJson(accessToken, connection.companyFileId, "/Inventory/Item", "POST", payload, tenantId);
     const created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
     linkedUid = readMyobUid(created) ?? readUidFromLocation(result.location);
     if (!linkedUid) {
-      const matchesAfter = await exactMyobItemMatches(accessToken, connection.companyFileId, material);
+      const matchesAfter = await exactMyobItemMatches(tenantId, accessToken, connection.companyFileId, material);
       linkedUid = readMyobUid(matchesAfter[0]);
       if (matchesAfter[0]) Object.assign(created, matchesAfter[0]);
     }
@@ -1492,13 +1544,13 @@ export async function syncLocalMaterialToMyobForTenant(tenantId: string, materia
     await saveMaterialLink(tenantId, material, created, refs, "created_from_production_manager");
     return { uid: linkedUid, number: String(created.Number), created: true, matchedExisting: false };
   }
-  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${linkedUid}`);
+  const currentResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${linkedUid}`, tenantId);
   if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked material item.");
   const current = currentResponse.data as Record<string, unknown>;
   const payload = buildMyobMaterialPayload(material, refs, current.RowVersion);
   payload.UID = linkedUid;
   payload.IsActive = current.IsActive !== false;
-  await sendMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${linkedUid}`, "PUT", payload);
+  await sendMyobJson(accessToken, connection.companyFileId, `/Inventory/Item/${linkedUid}`, "PUT", payload, tenantId);
   await saveMaterialLink(tenantId, material, { ...current, ...payload, UID: linkedUid }, refs, "updated_from_production_manager");
   return { uid: linkedUid, number: String(payload.Number), created: false, matchedExisting: false };
 }
@@ -1541,11 +1593,11 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
   };
   if (order.shipToAddress) payload.ShipToAddress = order.shipToAddress.slice(0, 255);
   if (order.promisedDate) payload.PromisedDate = `${order.promisedDate} 00:00:00`;
-  const result = await sendMyobJson(accessToken, connection.companyFileId, "/Purchase/Order/Item", "POST", payload);
+  const result = await sendMyobJson(accessToken, connection.companyFileId, "/Purchase/Order/Item", "POST", payload, tenantId);
   let created = result.data && typeof result.data === "object" && !Array.isArray(result.data) ? result.data as Record<string, unknown> : {};
   let uid = readMyobUid(created) ?? readUidFromLocation(result.location);
   if (!uid) {
-    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(order.poNumber.slice(0,13))}'&$top=10`);
+    const lookup = await fetchMyobJson(accessToken, connection.companyFileId, `/Purchase/Order/Item?$filter=Number eq '${odataString(order.poNumber.slice(0,13))}'&$top=10`, tenantId);
     const found = myobCollectionRecords(lookup.data).find((row) => String(row.Number ?? "") === order.poNumber.slice(0,13));
     uid = readMyobUid(found); if (found) created = found;
   }

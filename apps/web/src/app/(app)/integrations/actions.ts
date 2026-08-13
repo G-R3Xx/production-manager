@@ -6,6 +6,7 @@ import { getTenantContext } from "@/server/tenant/tenant-context";
 import {
   createSyncRunForTenant,
   disconnectMyobConnectionByTenantId,
+  getMyobConnectionByTenantId,
   startMyobConnectScaffold,
   upsertMyobConnectionByTenantId
 } from "@/server/integrations";
@@ -41,6 +42,18 @@ export async function saveMyobConnectionAction(formData: FormData) {
 
   const companyFileId = String(formData.get("companyFileId") ?? "").trim() || null;
   const companyName = String(formData.get("companyName") ?? "").trim() || null;
+  const existing = await getMyobConnectionByTenantId(tenantId);
+  const enteredUsername = String(formData.get("companyFileUsername") ?? "").trim();
+  const enteredPassword = String(formData.get("companyFilePassword") ?? "");
+  const companyFileUsername = enteredUsername || existing?.companyFileUsername || (environment === "sandbox" ? "APIDeveloper" : null);
+  let companyFileAuthToken: string | null | undefined = undefined;
+  const usernameChanged = Boolean(enteredUsername && enteredUsername !== (existing?.companyFileUsername ?? ""));
+  if (enteredPassword || usernameChanged || (!existing?.companyFileAuthToken && enteredUsername)) {
+    const username = companyFileUsername || "Administrator";
+    companyFileAuthToken = Buffer.from(`${username}:${enteredPassword}`, "utf8").toString("base64");
+  } else if (!existing?.companyFileAuthToken && environment === "sandbox") {
+    companyFileAuthToken = Buffer.from("APIDeveloper:", "utf8").toString("base64");
+  }
   const status = String(formData.get("status") ?? "disconnected") as
     | "disconnected"
     | "connected"
@@ -50,6 +63,8 @@ export async function saveMyobConnectionAction(formData: FormData) {
     environment,
     companyFileId,
     companyName,
+    companyFileUsername,
+    companyFileAuthToken,
     status,
     connectedAt: status === "connected" ? new Date().toISOString() : null,
     disconnectedAt: status === "disconnected" ? new Date().toISOString() : null,
