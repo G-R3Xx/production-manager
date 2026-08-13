@@ -898,7 +898,32 @@ function localCustomerContactName(customer: CustomerRecord): string {
   return [customer.firstName, customer.lastName].filter(Boolean).join(" ").trim() || customer.displayName;
 }
 
-function buildMyobCustomerPayload(customer: CustomerRecord): Record<string, unknown> {
+type MyobTaxCodeReference = { uid: string; code: string };
+
+async function resolveMyobCustomerSalesTaxCode(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string
+): Promise<MyobTaxCodeReference> {
+  const response = await fetchAllMyobCollectionRecords(
+    accessToken,
+    companyFileId,
+    `/GeneralLedger/TaxCode?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+    tenantId
+  );
+  const active = response.records.filter((row) => row.IsActive !== false);
+  const preferred = active.find((row) => String(row.Code ?? "").trim().toUpperCase() === "GST")
+    ?? active.find((row) => String(row.Type ?? "").trim() === "GST_VAT" && Number(row.Rate ?? 0) > 0)
+    ?? active.find((row) => String(row.Type ?? "").trim() === "GST_VAT");
+  const uid = preferred ? textOrNull(preferred.UID) : null;
+  const code = preferred ? textOrNull(preferred.Code) : null;
+  if (!uid || !code) {
+    throw new Error("MYOB customer creation needs an active GST tax code, but Production Manager could not resolve one from General Ledger > Tax Codes.");
+  }
+  return { uid, code };
+}
+
+function buildMyobCustomerPayload(customer: CustomerRecord, salesTaxCode?: MyobTaxCodeReference): Record<string, unknown> {
   const companyName = String(customer.companyName ?? "").trim();
   const firstName = String(customer.firstName ?? "").trim();
   const lastName = String(customer.lastName ?? "").trim();
@@ -929,7 +954,14 @@ function buildMyobCustomerPayload(customer: CustomerRecord): Record<string, unkn
 
   if (Object.keys(addressRecord).length > 1) payload.Addresses = [addressRecord];
   const itemPriceLevel = normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A";
-  payload.SellingDetails = { ItemPriceLevel: itemPriceLevel };
+  payload.SellingDetails = {
+    ItemPriceLevel: itemPriceLevel,
+    ...(salesTaxCode ? {
+      TaxCode: { UID: salesTaxCode.uid, Code: salesTaxCode.code },
+      FreightTaxCode: { UID: salesTaxCode.uid, Code: salesTaxCode.code },
+      UseCustomerTaxCode: false
+    } : {})
+  };
   return payload;
 }
 
@@ -1088,7 +1120,8 @@ export async function createMyobCustomerFromLocalClientForTenant(
     };
   }
 
-  const payload = buildMyobCustomerPayload(customer);
+  const salesTaxCode = await resolveMyobCustomerSalesTaxCode(tenantId, accessToken, connection.companyFileId);
+  const payload = buildMyobCustomerPayload(customer, salesTaxCode);
   const endpoint = "/Contact/Customer";
   const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
   let created = result.data && typeof result.data === "object" && !Array.isArray(result.data)
