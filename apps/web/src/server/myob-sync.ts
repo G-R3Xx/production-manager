@@ -12,6 +12,7 @@ import {
   upsertMyobOauthTokenByTenantId
 } from "@/server/integrations";
 import { env } from "@/lib/env";
+import { addressKey, formatAustralianAbn, formatStructuredAddress, hasStructuredAddress, myobAddressFields, myobRecordToStructuredAddress, structuredAddressFromPayload, type StructuredAddress } from "@/lib/contact-address";
 import { MYOB_PRICE_LEVELS, getCustomerById, normaliseMyobPriceLevel, updateCustomerPayloadForTenant, upsertImportedCustomer, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { upsertImportedProduct } from "@/server/products";
 import { getSupplierById, updateSupplierMyobLink, upsertImportedSupplier, type SupplierRecord } from "@/server/suppliers";
@@ -611,12 +612,18 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
     const companyName = typeof customer.CompanyName === "string" ? customer.CompanyName : null;
     const firstName = typeof customer.FirstName === "string" ? customer.FirstName : null;
     const lastName = typeof customer.LastName === "string" ? customer.LastName : null;
-    const email = customer.Email && typeof customer.Email === "object" && customer.Email && "Address" in customer.Email
-      ? String((customer.Email as Record<string, unknown>).Address ?? "") || null
-      : null;
-    const phone = customer.Phone1 && typeof customer.Phone1 === "object" && customer.Phone1 && "Number" in customer.Phone1
-      ? String((customer.Phone1 as Record<string, unknown>).Number ?? "") || null
-      : null;
+    const importedAddresses = customerAddressRecords(customer);
+    const billingRecord = importedAddresses.find((address) => Number(address.Location ?? 0) === 1) ?? importedAddresses[0] ?? {};
+    const siteRecord = importedAddresses.find((address) => Number(address.Location ?? 0) === 2) ?? {};
+    const contactRecord = importedAddresses.find((address) => textOrNull(address.Email) || textOrNull(address.Phone1)) ?? billingRecord;
+    const email = textOrNull(contactRecord.Email);
+    const phone = textOrNull(contactRecord.Phone1);
+    const billingAddressStructured = myobRecordToStructuredAddress(billingRecord);
+    const defaultSiteAddressStructured = myobRecordToStructuredAddress(siteRecord);
+    const sellingDetails = customer.SellingDetails && typeof customer.SellingDetails === "object" && !Array.isArray(customer.SellingDetails)
+      ? customer.SellingDetails as Record<string, unknown>
+      : {};
+    const abn = textOrNull(sellingDetails.ABN);
     const isActive = customer.IsActive !== false;
     const myobItemPriceLevel = priceLevelFromSellingDetails(customer);
 
@@ -631,6 +638,11 @@ export async function importMyobCustomersAndCreateMappings(tenantId: string): Pr
       isActive,
       payloadJson: {
         ...customer,
+        abn: abn ?? "",
+        billingAddressStructured,
+        billingAddress: formatStructuredAddress(billingAddressStructured),
+        defaultSiteAddressStructured,
+        defaultSiteAddress: formatStructuredAddress(defaultSiteAddressStructured),
         myobItemPriceLevel: myobItemPriceLevel ?? undefined,
         myobPriceLevelName: myobItemPriceLevel ? priceLevelNames[myobItemPriceLevel] : undefined,
         myobPriceLevelNames: priceLevelNames,
@@ -923,20 +935,55 @@ async function resolveMyobCustomerSalesTaxCode(
   return { uid, code };
 }
 
+function localCustomerAddress(customer: CustomerRecord, kind: "billing" | "site"): StructuredAddress {
+  return kind === "billing"
+    ? structuredAddressFromPayload(customer.payloadJson?.billingAddressStructured, customer.payloadJson?.billingAddress)
+    : structuredAddressFromPayload(customer.payloadJson?.defaultSiteAddressStructured, customer.payloadJson?.defaultSiteAddress);
+}
+
+function buildMyobContactAddress(
+  location: number,
+  address: StructuredAddress,
+  extras?: { email?: string; phone?: string; contactName?: string }
+): Record<string, unknown> {
+  const record: Record<string, unknown> = { Location: location, ...myobAddressFields(address) };
+  const email = String(extras?.email ?? "").trim();
+  const phone = String(extras?.phone ?? "").trim();
+  const contactName = String(extras?.contactName ?? "").trim();
+  if (email) record.Email = email.slice(0, 255);
+  if (phone) record.Phone1 = phone.slice(0, 21);
+  if (contactName) record.ContactName = contactName.slice(0, 25);
+  return record;
+}
+
+function buildMyobCustomerAddresses(customer: CustomerRecord): Record<string, unknown>[] {
+  const billing = localCustomerAddress(customer, "billing");
+  const site = localCustomerAddress(customer, "site");
+  const email = String(customer.email ?? "").trim();
+  const phone = String(customer.phone ?? "").trim();
+  const contactName = localCustomerContactName(customer);
+  const hasBilling = hasStructuredAddress(billing);
+  const hasSite = hasStructuredAddress(site);
+  const records: Record<string, unknown>[] = [];
+
+  if (hasBilling) {
+    records.push(buildMyobContactAddress(1, billing, { email, phone, contactName }));
+    if (hasSite && addressKey(site) !== addressKey(billing)) records.push(buildMyobContactAddress(2, site));
+  } else if (hasSite) {
+    // If PM only has a site/delivery address, use MYOB Address 1 so the contact still has a usable primary address.
+    records.push(buildMyobContactAddress(1, site, { email, phone, contactName }));
+  } else if (email || phone || contactName) {
+    records.push(buildMyobContactAddress(1, billing, { email, phone, contactName }));
+  }
+  return records;
+}
+
 function buildMyobCustomerPayload(customer: CustomerRecord, salesTaxCode?: MyobTaxCodeReference): Record<string, unknown> {
   const companyName = String(customer.companyName ?? "").trim();
   const firstName = String(customer.firstName ?? "").trim();
   const lastName = String(customer.lastName ?? "").trim();
   const isIndividual = !companyName && Boolean(firstName || lastName);
-  const address = String(customer.payloadJson?.billingAddress ?? customer.payloadJson?.defaultSiteAddress ?? "").trim();
-  const email = String(customer.email ?? "").trim();
-  const phone = String(customer.phone ?? "").trim();
-  const contactName = localCustomerContactName(customer).slice(0, 25);
-  const addressRecord: Record<string, unknown> = { Location: 1 };
-  if (address) addressRecord.Street = address.slice(0, 255);
-  if (email) addressRecord.Email = email.slice(0, 255);
-  if (phone) addressRecord.Phone1 = phone.slice(0, 21);
-  if (contactName) addressRecord.ContactName = contactName;
+  const addresses = buildMyobCustomerAddresses(customer);
 
   const payload: Record<string, unknown> = {
     DisplayID: generatedMyobCustomerDisplayId(customer.id),
@@ -952,10 +999,12 @@ function buildMyobCustomerPayload(customer: CustomerRecord, salesTaxCode?: MyobT
     payload.CompanyName = (companyName || customer.displayName || "Customer").slice(0, 50);
   }
 
-  if (Object.keys(addressRecord).length > 1) payload.Addresses = [addressRecord];
+  if (addresses.length) payload.Addresses = addresses;
   const itemPriceLevel = normaliseMyobPriceLevel(customer.payloadJson?.myobItemPriceLevel) ?? "Level A";
+  const abn = formatAustralianAbn(customer.payloadJson?.abn);
   payload.SellingDetails = {
     ItemPriceLevel: itemPriceLevel,
+    ...(abn ? { ABN: abn } : {}),
     ...(salesTaxCode ? {
       TaxCode: { UID: salesTaxCode.uid, Code: salesTaxCode.code },
       FreightTaxCode: { UID: salesTaxCode.uid, Code: salesTaxCode.code },
@@ -1457,6 +1506,23 @@ function addressRecords(value: unknown): Record<string, unknown>[] {
     : [];
 }
 
+function mergeMyobAddresses(currentValue: unknown, localValue: unknown): Record<string, unknown>[] {
+  const current = addressRecords(currentValue);
+  const local = addressRecords(localValue);
+  if (!local.length) return current;
+  const byLocation = new Map<number, Record<string, unknown>>();
+  for (const record of current) {
+    const location = Number(record.Location ?? 0);
+    if (location > 0) byLocation.set(location, record);
+  }
+  for (const record of local) {
+    const location = Number(record.Location ?? 0);
+    if (location <= 0) continue;
+    byLocation.set(location, { ...(byLocation.get(location) ?? { Location: location }), ...record, Location: location });
+  }
+  return Array.from(byLocation.values()).sort((a, b) => Number(a.Location ?? 0) - Number(b.Location ?? 0));
+}
+
 function supplierDisplayName(record: Record<string, unknown>): string {
   const company = textOrNull(record.CompanyName);
   if (company) return company;
@@ -1482,7 +1548,9 @@ function buildMyobSupplierPayload(supplier: SupplierRecord): Record<string, unkn
   const contact = String(supplier.contactName ?? "").trim();
   const email = String(supplier.email ?? "").trim();
   const phone = String(supplier.phone ?? "").trim();
-  const address: Record<string, unknown> = { Location: 1 };
+  const storedMyobAddress = addressRecords(supplier.payloadJson?.Addresses)[0];
+  const structured = structuredAddressFromPayload(supplier.payloadJson?.addressStructured ?? storedMyobAddress, supplier.payloadJson?.address);
+  const address: Record<string, unknown> = { Location: 1, ...myobAddressFields(structured) };
   if (email) address.Email = email.slice(0, 255);
   if (phone) address.Phone1 = phone.slice(0, 21);
   if (contact) address.ContactName = contact.slice(0, 25);
@@ -1557,7 +1625,8 @@ export async function importMyobSuppliersAndCreateMappings(tenantId: string): Pr
   for (const supplier of response.records) {
     const uid = textOrNull(supplier.UID);
     if (!uid) continue;
-    const firstAddress = addressRecords(supplier.Addresses)[0] ?? {};
+    const firstAddress = addressRecords(supplier.Addresses).find((address) => Number(address.Location ?? 0) === 1) ?? addressRecords(supplier.Addresses)[0] ?? {};
+    const addressStructured = myobRecordToStructuredAddress(firstAddress);
     const saved = await upsertImportedSupplier(tenantId, {
       myobUid: uid,
       displayName: supplierDisplayName(supplier),
@@ -1566,7 +1635,7 @@ export async function importMyobSuppliersAndCreateMappings(tenantId: string): Pr
       phone: textOrNull(firstAddress.Phone1),
       isActive: supplier.IsActive !== false,
       notes: textOrNull(supplier.Notes),
-      payloadJson: { ...supplier, myobSyncedAt: new Date().toISOString() }
+      payloadJson: { ...supplier, addressStructured, address: formatStructuredAddress(addressStructured), myobSyncedAt: new Date().toISOString() }
     });
     await upsertExternalMappingByTenantId(tenantId, {
       entityType: "supplier", localId: saved.id, externalId: uid, syncState: "synced", lastSyncedAt: new Date().toISOString(),
@@ -1615,9 +1684,7 @@ export async function syncLocalSupplierToMyobForTenant(tenantId: string, supplie
   if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked supplier.");
   const current = currentResponse.data as Record<string, unknown>;
   const local = buildMyobSupplierPayload(supplier);
-  const currentAddresses = addressRecords(current.Addresses);
-  const localAddress = addressRecords(local.Addresses)[0];
-  const mergedAddresses = localAddress ? [{ ...(currentAddresses[0] ?? { Location: 1 }), ...localAddress }, ...currentAddresses.slice(1)] : currentAddresses;
+  const mergedAddresses = mergeMyobAddresses(current.Addresses, local.Addresses);
   const updatePayload = stripMyobReadOnlyFields({
     ...current,
     UID: linkedUid,
@@ -1646,9 +1713,7 @@ export async function syncLocalCustomerToMyobForTenant(tenantId: string, custome
   if (!currentResponse.data || typeof currentResponse.data !== "object" || Array.isArray(currentResponse.data)) throw new Error("MYOB did not return the linked customer.");
   const current = currentResponse.data as Record<string, unknown>;
   const local = buildMyobCustomerPayload(customer);
-  const currentAddresses = addressRecords(current.Addresses);
-  const localAddress = addressRecords(local.Addresses)[0];
-  const mergedAddresses = localAddress ? [{ ...(currentAddresses[0] ?? { Location: 1 }), ...localAddress }, ...currentAddresses.slice(1)] : currentAddresses;
+  const mergedAddresses = mergeMyobAddresses(current.Addresses, local.Addresses);
   const currentSelling = current.SellingDetails && typeof current.SellingDetails === "object" && !Array.isArray(current.SellingDetails) ? current.SellingDetails as Record<string, unknown> : {};
   const localSelling = local.SellingDetails && typeof local.SellingDetails === "object" && !Array.isArray(local.SellingDetails) ? local.SellingDetails as Record<string, unknown> : {};
   const updatePayload = stripMyobReadOnlyFields({

@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { AUSTRALIAN_STATES, formatAustralianAbn, structuredAddressFromPayload, type StructuredAddress } from "@/lib/contact-address";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { MYOB_PRICE_LEVELS, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, isDeletedCustomer, listCustomersForTenant, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
@@ -43,6 +44,7 @@ function clientMatches(client: CustomerRecord, q: string): boolean {
     client.email ?? "",
     client.phone ?? "",
     client.payloadJson?.abn ?? "",
+    client.payloadJson?.accountReference ?? "",
     client.payloadJson?.billingAddress ?? "",
     client.payloadJson?.defaultSiteAddress ?? "",
     client.payloadJson?.notes ?? ""
@@ -59,6 +61,24 @@ function ClientLogo({ client }: { client: CustomerRecord }) {
   return (
     <div style={{ width: 58, height: 58, borderRadius: 16, background: "linear-gradient(135deg,#eef2ff,#e0f2fe)", border: "1px solid #dbeafe", display: "grid", placeItems: "center", color: "#1d4ed8", fontWeight: 950 }}>
       {client.displayName.slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
+function AddressFields({ title, prefix, address }: { title: string; prefix: "billing" | "site"; address: StructuredAddress }) {
+  return (
+    <div style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 14, background: "#fbfdff", display: "grid", gap: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "baseline", flexWrap: "wrap" }}>
+        <b>{title}</b>
+        <span style={{ fontSize: 11, color: "#667085" }}>Stored as separate MYOB address fields</span>
+      </div>
+      <label style={{ display: "grid", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Street address</span><textarea name={`${prefix}Street`} defaultValue={address.street} rows={2} style={{ ...textareaStyle, minHeight: 70 }} /></label>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(150px,1.4fr) minmax(90px,.55fr) minmax(100px,.65fr)", gap: 9 }}>
+        <label style={{ display: "grid", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Suburb / town</span><input name={`${prefix}City`} defaultValue={address.city} style={inputStyle} /></label>
+        <label style={{ display: "grid", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>State</span><input name={`${prefix}State`} defaultValue={address.state} list="au-state-options" placeholder="ACT" style={inputStyle} /></label>
+        <label style={{ display: "grid", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Postcode</span><input name={`${prefix}Postcode`} defaultValue={address.postcode} inputMode="numeric" style={inputStyle} /></label>
+      </div>
+      <label style={{ display: "grid", gap: 5 }}><span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Country</span><input name={`${prefix}Country`} defaultValue={address.country || "Australia"} style={inputStyle} /></label>
     </div>
   );
 }
@@ -91,6 +111,21 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
     : typeof payload.myobUid === "string" ? payload.myobUid : "";
   const mappedCustomer = myobCustomers.find((candidate) => candidate.myobUid === currentMyobUid) ?? null;
   const currentPriceLevel = customerMyobPriceLevel(client) ?? "Level A";
+  const rawMyobAddresses = Array.isArray(payload.Addresses)
+    ? payload.Addresses.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)))
+    : [];
+  const rawBilling = rawMyobAddresses.find((address) => Number(address.Location ?? 0) === 1) ?? rawMyobAddresses[0];
+  const rawSite = rawMyobAddresses.find((address) => Number(address.Location ?? 0) === 2);
+  const billingAddress = structuredAddressFromPayload(payload.billingAddressStructured ?? rawBilling, payload.billingAddress);
+  const siteAddress = structuredAddressFromPayload(payload.defaultSiteAddressStructured ?? rawSite, payload.defaultSiteAddress);
+  const rawSellingDetails = payload.SellingDetails && typeof payload.SellingDetails === "object" && !Array.isArray(payload.SellingDetails)
+    ? payload.SellingDetails as Record<string, unknown>
+    : {};
+  const legacyAbn = typeof payload.abn === "string" ? payload.abn.trim() : (typeof rawSellingDetails.ABN === "string" ? rawSellingDetails.ABN.trim() : "");
+  const legacyAbnDigits = legacyAbn.replace(/\D/g, "");
+  const hasExplicitAccountReference = typeof payload.accountReference === "string";
+  const abnValue = hasExplicitAccountReference || legacyAbnDigits.length === 11 ? (formatAustralianAbn(legacyAbn) || legacyAbn) : "";
+  const accountReferenceValue = hasExplicitAccountReference ? String(payload.accountReference ?? "") : (legacyAbn && legacyAbnDigits.length !== 11 ? legacyAbn : "");
 
   return (
     <section style={{ ...panelStyle(), display: "grid", gap: 18 }}>
@@ -105,6 +140,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
 
       <form action={isNew ? createClientAction : updateClientAction} encType="multipart/form-data" style={{ display: "grid", gap: 14 }}>
         {client ? <input type="hidden" name="customerId" value={client.id} /> : null}
+        <datalist id="au-state-options">{AUSTRALIAN_STATES.map((state) => <option key={state} value={state} />)}</datalist>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}><b>Display name</b><input name="displayName" defaultValue={client?.displayName ?? ""} placeholder="ANU" style={inputStyle} /></label>
@@ -151,11 +187,14 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
           <label style={{ display: "grid", gap: 6 }}><b>Phone</b><input name="phone" defaultValue={client?.phone ?? ""} style={inputStyle} /></label>
         </div>
 
-        <label style={{ display: "grid", gap: 6 }}><b>ABN / account reference</b><input name="abn" defaultValue={String(payload.abn ?? "")} style={inputStyle} /></label>
-
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}><b>Billing address</b><textarea name="billingAddress" defaultValue={String(payload.billingAddress ?? "")} style={textareaStyle} /></label>
-          <label style={{ display: "grid", gap: 6 }}><b>Default site / delivery address</b><textarea name="defaultSiteAddress" defaultValue={String(payload.defaultSiteAddress ?? "")} style={textareaStyle} /></label>
+          <label style={{ display: "grid", gap: 6 }}><b>ABN</b><input name="abn" defaultValue={abnValue} placeholder="00 000 000 000" style={inputStyle} /><span style={{ color: "#667085", fontSize: 11 }}>Synced to MYOB Selling Details when supplied.</span></label>
+          <label style={{ display: "grid", gap: 6 }}><b>Account reference</b><input name="accountReference" defaultValue={accountReferenceValue} placeholder="Optional internal/client reference" style={inputStyle} /><span style={{ color: "#667085", fontSize: 11 }}>Production Manager reference; kept separate from the ABN.</span></label>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, alignItems: "start" }}>
+          <AddressFields title="Billing address" prefix="billing" address={billingAddress} />
+          <AddressFields title="Default site / delivery address" prefix="site" address={siteAddress} />
         </div>
 
         <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 14, background: "#f8fbff", display: "grid", gap: 10 }}>

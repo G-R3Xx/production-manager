@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import type { StructuredAddress } from "@/lib/contact-address";
 
 export const MYOB_PRICE_LEVELS = ["Level A", "Level B", "Level C", "Level D", "Level E", "Level F"] as const;
 export type MyobPriceLevel = (typeof MYOB_PRICE_LEVELS)[number];
@@ -8,8 +9,11 @@ export type MyobPriceLevel = (typeof MYOB_PRICE_LEVELS)[number];
 export type CustomerPayload = {
   source?: string;
   abn?: string;
+  accountReference?: string;
   billingAddress?: string;
+  billingAddressStructured?: StructuredAddress;
   defaultSiteAddress?: string;
+  defaultSiteAddressStructured?: StructuredAddress;
   notes?: string;
   logoUrl?: string;
   logoStoragePath?: string;

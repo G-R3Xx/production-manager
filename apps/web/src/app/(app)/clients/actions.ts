@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
+import { formatStructuredAddress, normaliseStructuredAddress, type StructuredAddress } from "@/lib/contact-address";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, normaliseMyobPriceLevel, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
@@ -18,8 +19,17 @@ const clientSchema = z.object({
   email: z.string().email("Please enter a valid email.").optional().or(z.literal("")),
   phone: z.string().max(80).optional().or(z.literal("")),
   abn: z.string().max(80).optional().or(z.literal("")),
-  billingAddress: z.string().max(2000).optional().or(z.literal("")),
-  defaultSiteAddress: z.string().max(2000).optional().or(z.literal("")),
+  accountReference: z.string().max(120).optional().or(z.literal("")),
+  billingStreet: z.string().max(1000).optional().or(z.literal("")),
+  billingCity: z.string().max(255).optional().or(z.literal("")),
+  billingState: z.string().max(255).optional().or(z.literal("")),
+  billingPostcode: z.string().max(20).optional().or(z.literal("")),
+  billingCountry: z.string().max(255).optional().or(z.literal("")),
+  siteStreet: z.string().max(1000).optional().or(z.literal("")),
+  siteCity: z.string().max(255).optional().or(z.literal("")),
+  siteState: z.string().max(255).optional().or(z.literal("")),
+  sitePostcode: z.string().max(20).optional().or(z.literal("")),
+  siteCountry: z.string().max(255).optional().or(z.literal("")),
   notes: z.string().max(4000).optional().or(z.literal("")),
   logoUrl: z.string().url("Logo URL must be a valid URL.").optional().or(z.literal("")),
   myobPriceLevel: z.string().optional().or(z.literal(""))
@@ -77,11 +87,35 @@ async function uploadLogoIfPresent(tenantId: string, customerId: string, formDat
   return { logoUrl: data.publicUrl, logoStoragePath: storagePath };
 }
 
+function addressFromParsed(parsed: z.infer<typeof clientSchema>, kind: "billing" | "site"): StructuredAddress {
+  return kind === "billing"
+    ? normaliseStructuredAddress({
+        street: parsed.billingStreet,
+        city: parsed.billingCity,
+        state: parsed.billingState,
+        postcode: parsed.billingPostcode,
+        country: parsed.billingCountry || "Australia"
+      })
+    : normaliseStructuredAddress({
+        street: parsed.siteStreet,
+        city: parsed.siteCity,
+        state: parsed.siteState,
+        postcode: parsed.sitePostcode,
+        country: parsed.siteCountry || "Australia"
+      });
+}
+
 function payloadFromParsed(parsed: z.infer<typeof clientSchema>, extra?: { logoUrl?: string; logoStoragePath?: string }): CustomerPayload {
+  const billingAddressStructured = addressFromParsed(parsed, "billing");
+  const defaultSiteAddressStructured = addressFromParsed(parsed, "site");
   return {
-    abn: nullable(parsed.abn) ?? undefined,
-    billingAddress: nullable(parsed.billingAddress) ?? undefined,
-    defaultSiteAddress: nullable(parsed.defaultSiteAddress) ?? undefined,
+    // Empty strings are intentional: JSONB merge updates can now clear old combined fields.
+    abn: (parsed.abn ?? "").trim(),
+    accountReference: (parsed.accountReference ?? "").trim(),
+    billingAddress: formatStructuredAddress(billingAddressStructured),
+    billingAddressStructured,
+    defaultSiteAddress: formatStructuredAddress(defaultSiteAddressStructured),
+    defaultSiteAddressStructured,
     notes: nullable(parsed.notes) ?? undefined,
     logoUrl: extra?.logoUrl ?? nullable(parsed.logoUrl) ?? undefined,
     logoStoragePath: extra?.logoStoragePath ?? undefined,
@@ -117,8 +151,17 @@ export async function createClientAction(formData: FormData): Promise<void> {
     email: String(formData.get("email") || ""),
     phone: String(formData.get("phone") || ""),
     abn: String(formData.get("abn") || ""),
-    billingAddress: String(formData.get("billingAddress") || ""),
-    defaultSiteAddress: String(formData.get("defaultSiteAddress") || ""),
+    accountReference: String(formData.get("accountReference") || ""),
+    billingStreet: String(formData.get("billingStreet") || ""),
+    billingCity: String(formData.get("billingCity") || ""),
+    billingState: String(formData.get("billingState") || ""),
+    billingPostcode: String(formData.get("billingPostcode") || ""),
+    billingCountry: String(formData.get("billingCountry") || "Australia"),
+    siteStreet: String(formData.get("siteStreet") || ""),
+    siteCity: String(formData.get("siteCity") || ""),
+    siteState: String(formData.get("siteState") || ""),
+    sitePostcode: String(formData.get("sitePostcode") || ""),
+    siteCountry: String(formData.get("siteCountry") || "Australia"),
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
     myobPriceLevel: String(formData.get("myobPriceLevel") || "Level A")
@@ -177,8 +220,17 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     email: String(formData.get("email") || ""),
     phone: String(formData.get("phone") || ""),
     abn: String(formData.get("abn") || ""),
-    billingAddress: String(formData.get("billingAddress") || ""),
-    defaultSiteAddress: String(formData.get("defaultSiteAddress") || ""),
+    accountReference: String(formData.get("accountReference") || ""),
+    billingStreet: String(formData.get("billingStreet") || ""),
+    billingCity: String(formData.get("billingCity") || ""),
+    billingState: String(formData.get("billingState") || ""),
+    billingPostcode: String(formData.get("billingPostcode") || ""),
+    billingCountry: String(formData.get("billingCountry") || "Australia"),
+    siteStreet: String(formData.get("siteStreet") || ""),
+    siteCity: String(formData.get("siteCity") || ""),
+    siteState: String(formData.get("siteState") || ""),
+    sitePostcode: String(formData.get("sitePostcode") || ""),
+    siteCountry: String(formData.get("siteCountry") || "Australia"),
     notes: String(formData.get("notes") || ""),
     logoUrl: String(formData.get("logoUrl") || ""),
     myobPriceLevel: String(formData.get("myobPriceLevel") || "Level A")

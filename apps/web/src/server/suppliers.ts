@@ -54,24 +54,27 @@ export async function getSupplierById(tenantId: string, supplierId: string | nul
 
 export async function createSupplierForTenant(tenantId: string, input: {
   displayName: string; contactName?: string | null; email?: string | null; phone?: string | null; notes?: string | null;
+  payloadJson?: Record<string, unknown>;
 }): Promise<{ id: string }> {
   const result = await pool.query<{ id: string }>(`
     INSERT INTO app.suppliers (tenant_id, myob_uid, display_name, contact_name, email, phone, is_active, notes, payload_json, created_at, updated_at)
-    VALUES ($1::uuid, null, $2::varchar, $3::varchar, $4::varchar, $5::varchar, true, $6::text, '{}'::jsonb, now(), now())
+    VALUES ($1::uuid, null, $2::varchar, $3::varchar, $4::varchar, $5::varchar, true, $6::text, $7::jsonb, now(), now())
     RETURNING id
-  `, [tenantId, input.displayName, input.contactName ?? null, input.email ?? null, input.phone ?? null, input.notes ?? null]);
+  `, [tenantId, input.displayName, input.contactName ?? null, input.email ?? null, input.phone ?? null, input.notes ?? null, JSON.stringify(input.payloadJson ?? {})]);
   return result.rows[0];
 }
 
 export async function updateSupplierById(tenantId: string, supplierId: string, input: {
   displayName: string; contactName?: string | null; email?: string | null; phone?: string | null; notes?: string | null; isActive?: boolean;
+  payloadJson?: Record<string, unknown>;
 }): Promise<void> {
   await pool.query(`
     UPDATE app.suppliers SET display_name=$3::varchar, contact_name=$4::varchar, email=$5::varchar, phone=$6::varchar,
-      notes=$7::text, is_active=COALESCE($8::boolean,is_active), updated_at=now()
+      notes=$7::text, is_active=COALESCE($8::boolean,is_active),
+      payload_json=COALESCE(payload_json,'{}'::jsonb)||$9::jsonb, updated_at=now()
     WHERE tenant_id=$1::uuid AND id=$2::uuid
   `, [tenantId, supplierId, input.displayName, input.contactName ?? null, input.email ?? null, input.phone ?? null,
-    input.notes ?? null, typeof input.isActive === "boolean" ? input.isActive : null]);
+    input.notes ?? null, typeof input.isActive === "boolean" ? input.isActive : null, JSON.stringify(input.payloadJson ?? {})]);
 }
 
 export async function upsertImportedSupplier(tenantId: string, input: {
