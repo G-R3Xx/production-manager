@@ -212,7 +212,7 @@ async function performMyobRequest(input: {
   if (!response.ok) {
     const detail = parsed && typeof parsed === "object" ? JSON.stringify(parsed) : text || response.statusText;
     const authHint = response.status === 401
-      ? " MYOB rejected the OAuth/company-file credentials even after an automatic token refresh. Check the company-file username/password in Integrations."
+      ? ` MYOB rejected this request even after an automatic token refresh. This can mean the endpoint is outside the token's granted SME scopes, the API key does not match the token, or the OAuth token itself is invalid. Endpoint: ${input.endpoint}.`
       : "";
     throw new Error(`${response.status}: ${detail}${authHint}`);
   }
@@ -254,14 +254,14 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
     companyFileId: connection.companyFileId,
     companyName: connection.companyName,
     tokenRefreshed: refreshed,
-    companyInfo: { ok: false, endpoint: "/Company/Preferences" },
+    companyInfo: { ok: false, endpoint: "/Info" },
     customers: { ok: false, endpoint: "/Contact/Customer?$top=50", count: 0 },
     suppliers: { ok: false, endpoint: "/Contact/Supplier?$top=50", count: 0 },
     items: { ok: false, endpoint: "/Inventory/Item?$top=50", count: 0 }
   };
 
   try {
-    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Company/Preferences", tenantId);
+    const result = await fetchMyobJson(accessToken, connection.companyFileId, "/Info", tenantId);
     const data = result.data as Record<string, unknown> | null;
     summary.companyInfo = {
       ok: true,
@@ -272,7 +272,7 @@ export async function runMyobReadOnlySync(tenantId: string): Promise<MyobReadOnl
   } catch (error) {
     summary.companyInfo = {
       ok: false,
-      endpoint: "/Company/Preferences",
+      endpoint: "/Info",
       error: error instanceof Error ? error.message : "Unknown error"
     };
   }

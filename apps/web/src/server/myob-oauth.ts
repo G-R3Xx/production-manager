@@ -90,7 +90,6 @@ export async function exchangeMyobAuthorizationCode(
     client_secret: env.MYOB_CLIENT_SECRET,
     code,
     redirect_uri: env.MYOB_REDIRECT_URI,
-    scope: getMyobScopes(),
     grant_type: "authorization_code"
   });
 
