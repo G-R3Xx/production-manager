@@ -953,7 +953,7 @@ export async function respondToQuoteLineByToken(
     eventType: "quote_line_response",
     title: `Client ${responseLabel} a quote line`,
     message: `${quoteNumber}: ${productName}${notes ? ` — ${notes}` : ""}`,
-    href: `/quotes?quote=${quoteId}`,
+    href: `/quotes?selected=${quoteId}&focusLine=${lineId}#quote-line-${lineId}`,
     payloadJson: { quoteId, lineId, response, notes }
   }).catch((error) => console.error("Quote line response saved, but notification failed", error));
   if (options?.deferNotification) after(saveNotification);

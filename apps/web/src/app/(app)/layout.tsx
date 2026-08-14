@@ -10,7 +10,20 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.14.09";
+const APP_VERSION = "V26.08.14.10";
+
+function notificationHref(notification: { eventType: string; href: string | null; payloadJson?: Record<string, unknown> }): string {
+  const payload = notification.payloadJson ?? {};
+  const quoteId = typeof payload.quoteId === "string" ? payload.quoteId.trim() : "";
+  const lineId = typeof payload.lineId === "string" ? payload.lineId.trim() : "";
+  if (notification.eventType === "quote_line_response" && quoteId) {
+    const focus = lineId ? `&focusLine=${encodeURIComponent(lineId)}#quote-line-${encodeURIComponent(lineId)}` : "";
+    return `/quotes?selected=${encodeURIComponent(quoteId)}${focus}`;
+  }
+  const href = notification.href ?? "#";
+  if (href.startsWith("/quotes?quote=")) return href.replace("/quotes?quote=", "/quotes?selected=");
+  return href;
+}
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -205,7 +218,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
                 {unreadCount > 0 ? <form action={markAllNotificationsReadAction}><button style={{ border: 0, background: "transparent", color: "#2563eb", fontWeight: 850, cursor: "pointer" }}>Mark all read</button></form> : null}
               </div>
               <div style={{ display: "grid", gap: 7 }}>
-                {notifications.length ? notifications.map((notification) => <a key={notification.id} href={notification.href ?? "#"} style={{ display: "grid", gap: 4, padding: 12, borderRadius: 13, border: notification.isRead ? "1px solid #e2e8f0" : "1px solid #93c5fd", background: notification.isRead ? "#fff" : "#eff6ff", textDecoration: "none", color: "inherit" }}>
+                {notifications.length ? notifications.map((notification) => <a key={notification.id} href={notificationHref(notification)} style={{ display: "grid", gap: 4, padding: 12, borderRadius: 13, border: notification.isRead ? "1px solid #e2e8f0" : "1px solid #93c5fd", background: notification.isRead ? "#fff" : "#eff6ff", textDecoration: "none", color: "inherit" }}>
                   <span style={{ fontWeight: 900 }}>{notification.title}</span>
                   {notification.message ? <span style={{ color: "#475569", fontSize: 13, lineHeight: 1.45 }}>{notification.message}</span> : null}
                   <span style={{ color: "#94a3b8", fontSize: 11 }}>{new Date(notification.createdAt).toLocaleString("en-AU", { timeZone: "Australia/Sydney" })}</span>

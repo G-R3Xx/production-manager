@@ -757,7 +757,55 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
     const title = quote.jobName || quote.quoteNumber || "Your quote";
     const quoteNumber = quote.quoteNumber || "Quote";
     const subject = `${quoteNumber} — ${title}`;
-    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172033;line-height:1.5"><div style="max-width:680px;margin:auto"><h2 style="margin:0 0 12px">${quoteEmailEscape(title)}</h2><p>Hi ${quoteEmailEscape(contactName)},</p><p>Your quote <strong>${quoteEmailEscape(quoteNumber)}</strong> is ready to review.</p><p style="margin:24px 0"><a href="${quoteEmailEscape(publicUrl)}" style="display:inline-block;background:#111827;color:#fff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px">View and respond to quote</a></p><p>You can approve, cancel or request changes for each item directly from the quote page.</p><p>If the button does not open, copy this link into your browser:<br><a href="${quoteEmailEscape(publicUrl)}">${quoteEmailEscape(publicUrl)}</a></p><p>Regards,<br><strong>${quoteEmailEscape(companyName)}</strong>${company?.phone ? `<br>${quoteEmailEscape(company.phone)}` : ""}${company?.email ? `<br>${quoteEmailEscape(company.email)}` : ""}</p></div></body></html>`;
+    const companyLogo = company?.companyLogoUrl
+      ? `<img src="${quoteEmailEscape(company.companyLogoUrl)}" alt="${quoteEmailEscape(companyName)}" style="display:block;max-width:220px;max-height:84px;width:auto;height:auto;border:0;outline:none;text-decoration:none" />`
+      : `<div style="font-size:24px;line-height:1.1;font-weight:800;color:#ffffff">${quoteEmailEscape(companyName)}</div>`;
+    const companyDetails = [company?.companyLegalName, company?.abn ? `ABN ${company.abn}` : null, company?.phone, company?.email, company?.address]
+      .filter(Boolean)
+      .map((value) => quoteEmailEscape(String(value)))
+      .join(" &nbsp;·&nbsp; ");
+    const html = `<!doctype html>
+<html>
+  <body style="margin:0;padding:0;background:#f2f5f9;font-family:Arial,Helvetica,sans-serif;color:#172033;line-height:1.5">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background:#f2f5f9;padding:28px 12px">
+      <tr><td align="center">
+        <table role="presentation" width="680" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:680px;background:#ffffff;border:1px solid #dfe7f2;border-radius:20px;overflow:hidden">
+          <tr>
+            <td style="padding:24px 28px;background:#123a63">
+              ${companyLogo}
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:30px 32px 12px">
+              <div style="font-size:12px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;color:#18a7b5;margin-bottom:8px">Quote ready for review</div>
+              <h1 style="margin:0;font-size:28px;line-height:1.2;color:#0f172a">${quoteEmailEscape(title)}</h1>
+              <div style="margin-top:10px;font-size:15px;color:#64748b">${quoteEmailEscape(quoteNumber)} &nbsp;·&nbsp; ${quoteEmailEscape(quote.clientName || recipient)}</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:12px 32px 30px">
+              <p style="margin:0 0 14px">Hi ${quoteEmailEscape(contactName)},</p>
+              <p style="margin:0 0 22px;color:#475569">Your ${quoteEmailEscape(companyName)} quote is ready. You can review each item and approve it, cancel it, or request changes directly from the quote page.</p>
+              <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px">
+                <tr><td style="border-radius:12px;background:#0f766e">
+                  <a href="${quoteEmailEscape(publicUrl)}" style="display:inline-block;padding:13px 20px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:800">View and respond to quote</a>
+                </td></tr>
+              </table>
+              <div style="padding:14px 16px;border:1px solid #dbe4f0;border-radius:12px;background:#f8fbff;color:#64748b;font-size:12px;word-break:break-all">
+                If the button does not open, use this link:<br><a href="${quoteEmailEscape(publicUrl)}" style="color:#0f766e">${quoteEmailEscape(publicUrl)}</a>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px">
+              <strong style="color:#334155">${quoteEmailEscape(companyName)}</strong>${companyDetails ? `<br>${companyDetails}` : ""}
+            </td>
+          </tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`;
 
     const sent = await sendOutboundEmail({
       fromName: `${companyName} Quotes`,

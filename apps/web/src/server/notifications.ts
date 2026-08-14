@@ -9,6 +9,7 @@ export type AppNotificationRecord = {
   title: string;
   message: string | null;
   href: string | null;
+  payloadJson: Record<string, unknown>;
   isRead: boolean;
   createdAt: string;
 };
@@ -56,7 +57,7 @@ export async function listNotificationsForTenant(tenantId: string, limit = 12): 
   await ensureNotificationSchema();
   const result = await pool.query<AppNotificationRecord>(`
     SELECT id,tenant_id::text AS "tenantId",event_type AS "eventType",title,message,href,
-      is_read AS "isRead",created_at AS "createdAt"
+      payload_json AS "payloadJson",is_read AS "isRead",created_at AS "createdAt"
     FROM app.notifications
     WHERE tenant_id=$1::uuid
     ORDER BY is_read ASC,created_at DESC

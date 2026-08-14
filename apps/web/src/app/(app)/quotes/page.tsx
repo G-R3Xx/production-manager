@@ -188,6 +188,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const fromEnquiry = readParam(params, "fromEnquiry");
   const fromSurvey = readParam(params, "fromSurvey");
   const selected = readParam(params, "selected");
+  const focusLine = readParam(params, "focusLine");
   const filter = readParam(params, "filter");
 
   const builderDataNeeded = Boolean(selected);
@@ -266,6 +267,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const suggestedMyobCustomer = suggestedMyobCustomers.length === 1 ? suggestedMyobCustomers[0] : null;
 
   const quoteSubtotal = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
+  const requestedChangeLines = quoteLines.filter((line) => line.clientResponseStatus === "changes_requested");
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
   const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
   const linkedClientLogoUrl = customerLogoUrl(linkedClient);
@@ -409,6 +411,22 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       <p style={{ margin: "6px 0 0", color: "#667085" }}>Client: <strong>{selectedQuote.clientName}</strong> · Add line items by building from your material library.</p>
                     </div>
                   </div>
+                  {requestedChangeLines.length ? (
+                    <div style={{ flex: "1 1 520px", maxWidth: 780, border: "1px solid #fdba74", borderRadius: 16, background: "#fff7ed", color: "#9a3412", padding: "10px 12px", display: "grid", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: 13 }}>Client requested changes</strong>
+                        <span style={{ fontSize: 11, fontWeight: 900, color: "#c2410c" }}>{requestedChangeLines.length} line{requestedChangeLines.length === 1 ? "" : "s"}</span>
+                      </div>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        {requestedChangeLines.slice(0, 3).map((line) => (
+                          <a key={line.id} href={`#quote-line-${line.id}`} style={{ color: "#9a3412", textDecoration: "none", fontSize: 12, lineHeight: 1.4 }}>
+                            <strong>{line.productName}</strong>{line.clientResponseNotes ? ` — ${line.clientResponseNotes}` : " — Review requested changes"}
+                          </a>
+                        ))}
+                        {requestedChangeLines.length > 3 ? <span style={{ fontSize: 11, color: "#c2410c" }}>+ {requestedChangeLines.length - 3} more requested-change line{requestedChangeLines.length - 3 === 1 ? "" : "s"}</span> : null}
+                      </div>
+                    </div>
+                  ) : null}
                   {(() => { const tone = quoteStatusTone(selectedQuote.status); return <span style={{ border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedQuote.status.replace(/_/g, " ")}</span>; })()}
                 </div>
 
@@ -574,7 +592,20 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
                   return (
-                    <details key={line.id} style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 0, background: "#fbfdff", overflow: "hidden" }}>
+                    <details
+                      key={line.id}
+                      id={`quote-line-${line.id}`}
+                      open={focusLine === line.id ? true : undefined}
+                      style={{
+                        border: focusLine === line.id ? "2px solid #fb923c" : "1px solid #dfe7f2",
+                        borderRadius: 18,
+                        padding: 0,
+                        background: focusLine === line.id ? "#fffaf5" : "#fbfdff",
+                        overflow: "hidden",
+                        scrollMarginTop: 18,
+                        boxShadow: focusLine === line.id ? "0 0 0 4px rgba(251,146,60,0.10)" : "none"
+                      }}
+                    >
                       <summary style={{ listStyle: "none", cursor: "pointer", padding: 14 }}>
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                           <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
