@@ -757,9 +757,13 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
     const title = quote.jobName || quote.quoteNumber || "Your quote";
     const quoteNumber = quote.quoteNumber || "Quote";
     const subject = `${quoteNumber} — ${title}`;
-    const companyLogo = company?.companyLogoUrl
-      ? `<img src="${quoteEmailEscape(company.companyLogoUrl)}" alt="${quoteEmailEscape(companyName)}" style="display:block;max-width:220px;max-height:84px;width:auto;height:auto;border:0;outline:none;text-decoration:none" />`
-      : `<div style="font-size:24px;line-height:1.1;font-weight:800;color:#ffffff">${quoteEmailEscape(companyName)}</div>`;
+    const emailOrigin = new URL(publicUrl).origin;
+    const tenderEdgeHorizontalLogoUrl = `${emailOrigin}/brand/tender-edge-horizontal-logo-2025.png`;
+    const isTenderEdge = /tender\s*edge/i.test(companyName);
+    const quoteEmailLogoUrl = isTenderEdge ? tenderEdgeHorizontalLogoUrl : company?.companyLogoUrl;
+    const companyLogo = quoteEmailLogoUrl
+      ? `<img src="${quoteEmailEscape(quoteEmailLogoUrl)}" alt="${quoteEmailEscape(companyName)}" style="display:block;max-width:390px;max-height:58px;width:auto;height:auto;border:0;outline:none;text-decoration:none" />`
+      : `<div style="font-size:24px;line-height:1.1;font-weight:800;color:#123a63">${quoteEmailEscape(companyName)}</div>`;
     const companyDetails = [company?.companyLegalName, company?.abn ? `ABN ${company.abn}` : null, company?.phone, company?.email, company?.address]
       .filter(Boolean)
       .map((value) => quoteEmailEscape(String(value)))
@@ -771,7 +775,7 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
       <tr><td align="center">
         <table role="presentation" width="680" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:680px;background:#ffffff;border:1px solid #dfe7f2;border-radius:20px;overflow:hidden">
           <tr>
-            <td style="padding:24px 28px;background:#123a63">
+            <td style="padding:18px 28px;background:#ffffff;border-bottom:1px solid #d7e0eb">
               ${companyLogo}
             </td>
           </tr>
