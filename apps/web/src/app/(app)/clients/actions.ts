@@ -8,8 +8,7 @@ import { formatStructuredAddress, normaliseStructuredAddress, type StructuredAdd
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, normaliseMyobPriceLevel, type CustomerPayload, updateCustomerForTenant, updateCustomerPayloadForTenant, upsertImportedCustomer } from "@/server/customers";
-import { getMyobConnectionByTenantId } from "@/server/integrations";
-import { syncLocalCustomerToMyobForTenant } from "@/server/myob-sync";
+import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
 
 const clientSchema = z.object({
   displayName: z.string().min(1).max(255),
@@ -47,21 +46,6 @@ async function requireTenant() {
     redirect("/bootstrap?error=Create%20or%20select%20a%20tenant%20first");
   }
   return activeTenant!;
-}
-
-async function isMyobConnected(tenantId: string): Promise<boolean> {
-  const connection = await getMyobConnectionByTenantId(tenantId);
-  return connection?.status === "connected" && Boolean(connection.companyFileId);
-}
-
-async function syncClientIfConnected(tenantId: string, customerId: string): Promise<string | null> {
-  if (!(await isMyobConnected(tenantId))) return null;
-  try {
-    await syncLocalCustomerToMyobForTenant(tenantId, customerId);
-    return null;
-  } catch (error) {
-    return error instanceof Error ? error.message : String(error);
-  }
 }
 
 async function uploadLogoIfPresent(tenantId: string, customerId: string, formData: FormData): Promise<{ logoUrl?: string; logoStoragePath?: string }> {
@@ -202,11 +186,8 @@ export async function createClientAction(formData: FormData): Promise<void> {
 
   await updateCustomerPayloadForTenant(activeTenant.tenantId, created.id, { ...payloadFromParsed(parsed.data, uploadedLogo), ...myobMapping }, true);
 
-  const syncWarning = await syncClientIfConnected(activeTenant.tenantId, created.id);
-  if (syncWarning) {
-    redirect(`/clients?selected=${created.id}&error=${encodeURIComponent(`Client created locally, but MYOB sync failed: ${syncWarning}`)}`);
-  }
-  redirect(`/clients?selected=${created.id}&message=${encodeURIComponent("Client created" + ((await isMyobConnected(activeTenant.tenantId)) ? " and synced to MYOB" : ""))}`);
+  const queued = await queueMyobMasterDataSync(activeTenant.tenantId, "customer", created.id);
+  redirect(`/clients?selected=${created.id}&message=${encodeURIComponent(queued ? "Client created · MYOB sync queued" : "Client created")}`);
 }
 
 export async function updateClientAction(formData: FormData): Promise<void> {
@@ -289,12 +270,8 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     isActive: existing.isActive
   });
 
-  const syncWarning = await syncClientIfConnected(activeTenant.tenantId, customerId);
-  if (syncWarning) {
-    redirect(`/clients?selected=${customerId}&error=${encodeURIComponent(`Client saved locally, but MYOB sync failed: ${syncWarning}`)}`);
-  }
-
-  redirect(`/clients?selected=${customerId}&message=Client%20updated`);
+  const queued = await queueMyobMasterDataSync(activeTenant.tenantId, "customer", customerId);
+  redirect(`/clients?selected=${customerId}&message=${encodeURIComponent(queued ? "Client updated · MYOB sync queued" : "Client updated")}`);
 }
 
 export async function syncClientToMyobAction(formData: FormData): Promise<void> {
@@ -304,7 +281,7 @@ export async function syncClientToMyobAction(formData: FormData): Promise<void> 
   let message = "";
   let errorMessage = "";
   try {
-    await syncLocalCustomerToMyobForTenant(activeTenant.tenantId, customerId);
+    await runMyobMasterDataSyncNow(activeTenant.tenantId, "customer", customerId);
     message = "Client synced to MYOB";
   } catch (error) {
     errorMessage = error instanceof Error ? error.message : String(error);

@@ -4,8 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createMaterial, setMaterialActive, updateMaterial } from "@/server/materials";
-import { getMyobConnectionByTenantId } from "@/server/integrations";
-import { syncLocalMaterialToMyobForTenant } from "@/server/myob-sync";
+import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
 
 function readString(formData: FormData, key: string): string { return String(formData.get(key) ?? "").trim(); }
 function readOptionalNumeric(formData: FormData, key: string): string | null {
@@ -26,19 +25,15 @@ function materialInput(tenantId:string,formData:FormData,name:string){return{
   purchaseUom:readString(formData,'purchaseUom')||'sheet',stockQuantity:readRequiredNumeric(formData,'stockQuantity'),purchaseCost:readRequiredNumeric(formData,'purchaseCost'),
   widthMm:readOptionalNumeric(formData,'widthMm'),lengthMm:readOptionalNumeric(formData,'lengthMm'),rollWidthMm:readOptionalNumeric(formData,'rollWidthMm'),gsm:readOptionalNumeric(formData,'gsm'),notes:readString(formData,'notes')||null
 };}
-async function trySync(tenantId:string,materialId:string):Promise<{attempted:boolean;error:string|null}>{
-  const connection=await getMyobConnectionByTenantId(tenantId);if(connection?.status!=="connected"||!connection.companyFileId)return {attempted:false,error:null};
-  try{await syncLocalMaterialToMyobForTenant(tenantId,materialId);return {attempted:true,error:null};}catch(error){return {attempted:true,error:getErrorMessage(error)};}
-}
+
 
 export async function createMaterialAction(formData:FormData){
   const active=await tenant();const name=readString(formData,'name');if(!name)redirect('/materials?error=Material%20name%20is%20required');
   let created:{id:string}|null=null;let saveError="";
   try{created=await createMaterial(materialInput(active.tenantId,formData,name));}catch(error){console.error('Create material failed',error);saveError=getErrorMessage(error);}
   if(saveError||!created)redirect(`/materials?error=${encodeURIComponent(saveError||"Could not create material")}`);
-  const sync=await trySync(active.tenantId,created.id);
-  if(sync.error)redirect(`/materials?error=${encodeURIComponent(`Material saved locally, but MYOB sync failed: ${sync.error}`)}`);
-  redirect(`/materials?message=${encodeURIComponent(sync.attempted?"Material created and synced to MYOB":"Material created")}`);
+  const queued=await queueMyobMasterDataSync(active.tenantId,"material",created.id);
+  redirect(`/materials?message=${encodeURIComponent(queued?"Material created · MYOB sync queued":"Material created")}`);
 }
 
 export async function updateMaterialAction(formData:FormData){
@@ -46,10 +41,9 @@ export async function updateMaterialAction(formData:FormData){
   if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');if(!name)redirect('/materials?error=Material%20name%20is%20required');
   let saveError="";try{await updateMaterial({id:materialId,...materialInput(active.tenantId,formData,name)});}catch(error){console.error('Update material failed',error);saveError=getErrorMessage(error);}
   if(saveError)redirect(`/materials?error=${encodeURIComponent(saveError)}`);
-  const sync=await trySync(active.tenantId,materialId);
-  if(sync.error)redirect(`/materials?error=${encodeURIComponent(`Material saved locally, but MYOB sync failed: ${sync.error}`)}`);
-  redirect(`/materials?message=${encodeURIComponent(sync.attempted?"Material updated and synced to MYOB":"Material updated")}`);
+  const queued=await queueMyobMasterDataSync(active.tenantId,"material",materialId);
+  redirect(`/materials?message=${encodeURIComponent(queued?"Material updated · MYOB sync queued":"Material updated")}`);
 }
 
 export async function setMaterialActiveAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');const nextActive=readString(formData,'active')==='true';if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');try{await setMaterialActive(active.tenantId,materialId,nextActive);}catch(error){redirect(`/materials?error=${encodeURIComponent(getErrorMessage(error))}`);}redirect(nextActive?'/materials?message=Material%20restored':'/materials?message=Material%20deleted');}
-export async function syncMaterialToMyobAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');let result:{number:string}|null=null;let errorMessage="";try{result=await syncLocalMaterialToMyobForTenant(active.tenantId,materialId);}catch(error){errorMessage=getErrorMessage(error);}redirect(`/materials?${errorMessage?`error=${encodeURIComponent(errorMessage)}`:`message=${encodeURIComponent(`Material synced to MYOB item ${result?.number??"linked"}`)}`}`);}
+export async function syncMaterialToMyobAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');let result:{number?:string|null}|null=null;let errorMessage="";try{result=await runMyobMasterDataSyncNow(active.tenantId,"material",materialId);}catch(error){errorMessage=getErrorMessage(error);}redirect(`/materials?${errorMessage?`error=${encodeURIComponent(errorMessage)}`:`message=${encodeURIComponent(`Material synced to MYOB item ${result?.number??"linked"}`)}`}`);}

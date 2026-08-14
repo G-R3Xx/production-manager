@@ -4,6 +4,8 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { MYOB_PRICE_LEVELS, customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, isDeletedCustomer, listCustomersForTenant, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { archiveClientAction, createClientAction, deleteClientAction, restoreClientAction, syncClientToMyobAction, updateClientAction } from "./actions";
+import { AutoRefreshWhenPending } from "@/components/AutoRefreshWhenPending";
+import { MyobSyncStatus, readMyobSyncStatus } from "@/components/MyobSyncStatus";
 
 type ClientsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -111,6 +113,8 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
     : typeof payload.myobUid === "string" ? payload.myobUid : "";
   const mappedCustomer = myobCustomers.find((candidate) => candidate.myobUid === currentMyobUid) ?? null;
   const currentPriceLevel = customerMyobPriceLevel(client) ?? "Level A";
+  const myobSyncStatus = readMyobSyncStatus(payload.myobSyncStatus, Boolean(currentMyobUid));
+  const myobSyncError = typeof payload.myobSyncError === "string" ? payload.myobSyncError : "";
   const rawMyobAddresses = Array.isArray(payload.Addresses)
     ? payload.Addresses.filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)))
     : [];
@@ -155,9 +159,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
         <div style={{ border: `1px solid ${currentMyobUid ? "#86efac" : "#fed7aa"}`, borderRadius: 20, padding: 14, background: currentMyobUid ? "#ecfdf3" : "#fff7ed", display: "grid", gap: 9 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
             <strong>MYOB customer mapping</strong>
-            <span style={{ borderRadius: 999, padding: "5px 10px", fontSize: 11, fontWeight: 950, background: currentMyobUid ? "#dcfae6" : "#ffedd5", color: currentMyobUid ? "#067647" : "#9a3412" }}>
-              {currentMyobUid ? "Linked to MYOB" : "Not linked to MYOB"}
-            </span>
+            <MyobSyncStatus status={myobSyncStatus} linked={Boolean(currentMyobUid)} error={myobSyncError} />
           </div>
           <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Choose the matching imported MYOB customer. Accepted quotes and website orders use this link when creating the MYOB Order.</p>
           <select name="myobCustomerId" defaultValue={mappedCustomer?.id ?? ""} style={inputStyle}>
@@ -167,6 +169,7 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
             ))}
           </select>
           {mappedCustomer ? <span style={{ color: "#067647", fontSize: 12, fontWeight: 800 }}>Current MYOB customer: {mappedCustomer.displayName}</span> : null}
+          {myobSyncStatus === "error" && myobSyncError ? <span style={{ color: "#b42318", fontSize: 12, lineHeight: 1.5 }}><strong>MYOB sync:</strong> {myobSyncError}</span> : null}
           <div style={{ display: "grid", gridTemplateColumns: "minmax(220px, 360px) 1fr", gap: 12, alignItems: "end", marginTop: 4 }}>
             <label style={{ display: "grid", gap: 6 }}>
               <b>MYOB price level</b>
@@ -260,9 +263,11 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
   const activeCount = clients.filter((client) => client.isActive && !isDeletedCustomer(client)).length;
   const archivedCount = clients.filter((client) => !client.isActive && !isDeletedCustomer(client)).length;
   const deletedCount = clients.filter(isDeletedCustomer).length;
+  const hasPendingMyobSync = clients.some((client) => ["pending", "syncing"].includes(String(client.payloadJson?.myobSyncStatus ?? "")));
 
   return (
     <div style={{ maxWidth: 1440, margin: "0 auto", display: "grid", gap: 16 }}>
+      <AutoRefreshWhenPending active={hasPendingMyobSync} />
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 16 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 16 }}>{error}</section> : null}
 

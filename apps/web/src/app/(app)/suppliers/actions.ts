@@ -6,8 +6,7 @@ import { formatStructuredAddress, normaliseStructuredAddress } from "@/lib/conta
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createSupplierForTenant, updateSupplierById } from "@/server/suppliers";
-import { getMyobConnectionByTenantId } from "@/server/integrations";
-import { syncLocalSupplierToMyobForTenant } from "@/server/myob-sync";
+import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
 
 const supplierSchema = z.object({
   displayName: z.string().min(1).max(255),
@@ -49,17 +48,6 @@ async function requireTenant() {
   return activeTenant!;
 }
 
-async function syncIfConnected(tenantId: string, supplierId: string): Promise<{ attempted: boolean; error: string | null }> {
-  const connection = await getMyobConnectionByTenantId(tenantId);
-  if (connection?.status !== "connected" || !connection.companyFileId) return { attempted: false, error: null };
-  try {
-    await syncLocalSupplierToMyobForTenant(tenantId, supplierId);
-    return { attempted: true, error: null };
-  } catch (error) {
-    return { attempted: true, error: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 export async function createSupplierAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const parsed = supplierSchema.safeParse({
@@ -81,9 +69,8 @@ export async function createSupplierAction(formData: FormData): Promise<void> {
     displayName: parsed.data.displayName.trim(), contactName: nullable(parsed.data.contactName), email: nullable(parsed.data.email),
     purchaseOrderEmail: nullable(parsed.data.purchaseOrderEmail), phone: nullable(parsed.data.phone), notes: nullable(parsed.data.notes), payloadJson: supplierAddressPayload(parsed.data)
   });
-  const sync = await syncIfConnected(activeTenant.tenantId, created.id);
-  if (sync.error) redirect(`/suppliers?error=${encodeURIComponent(`Supplier created locally, but MYOB sync failed: ${sync.error}`)}`);
-  redirect(`/suppliers?message=${encodeURIComponent(sync.attempted ? "Supplier created and synced to MYOB" : "Supplier created")}`);
+  const queued = await queueMyobMasterDataSync(activeTenant.tenantId, "supplier", created.id);
+  redirect(`/suppliers?message=${encodeURIComponent(queued ? "Supplier created · MYOB sync queued" : "Supplier created")}`);
 }
 
 export async function updateSupplierAction(formData: FormData): Promise<void> {
@@ -101,18 +88,17 @@ export async function updateSupplierAction(formData: FormData): Promise<void> {
     displayName: parsed.data.displayName.trim(), contactName: nullable(parsed.data.contactName), email: nullable(parsed.data.email),
     purchaseOrderEmail: nullable(parsed.data.purchaseOrderEmail), phone: nullable(parsed.data.phone), notes: nullable(parsed.data.notes), payloadJson: supplierAddressPayload(parsed.data)
   });
-  const sync = await syncIfConnected(activeTenant.tenantId, supplierId);
-  if (sync.error) redirect(`/suppliers?error=${encodeURIComponent(`Supplier saved locally, but MYOB sync failed: ${sync.error}`)}`);
-  redirect(`/suppliers?message=${encodeURIComponent(sync.attempted ? "Supplier updated and synced to MYOB" : "Supplier updated")}`);
+  const queued = await queueMyobMasterDataSync(activeTenant.tenantId, "supplier", supplierId);
+  redirect(`/suppliers?message=${encodeURIComponent(queued ? "Supplier updated · MYOB sync queued" : "Supplier updated")}`);
 }
 
 export async function syncSupplierToMyobAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const supplierId = String(formData.get("supplierId") || "").trim();
   if (!supplierId) redirect("/suppliers?error=Missing%20supplier%20id");
-  let result: { uid: string } | null = null;
+  let result: { uid?: string } | null = null;
   let errorMessage = "";
-  try { result = await syncLocalSupplierToMyobForTenant(activeTenant.tenantId, supplierId); }
+  try { result = await runMyobMasterDataSyncNow(activeTenant.tenantId, "supplier", supplierId); }
   catch (error) { errorMessage = error instanceof Error ? error.message : String(error); }
   redirect(`/suppliers?${errorMessage ? `error=${encodeURIComponent(errorMessage)}` : `message=${encodeURIComponent(`Supplier synced to MYOB (${result?.uid ?? "linked"})`)}`}`);
 }

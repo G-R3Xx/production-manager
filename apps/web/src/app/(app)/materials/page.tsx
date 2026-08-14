@@ -7,6 +7,8 @@ import { listSuppliersForTenant } from "@/server/suppliers";
 import { setMaterialActiveAction, syncMaterialToMyobAction } from "./actions";
 import { startPurchaseOrderAction } from "../purchasing/actions";
 import { CreateMaterialForm, EditMaterialForm } from "./MaterialForms";
+import { AutoRefreshWhenPending } from "@/components/AutoRefreshWhenPending";
+import { MyobSyncStatus, readMyobSyncStatus } from "@/components/MyobSyncStatus";
 
 type MaterialsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -230,7 +232,11 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
         </div>
       </div>
       <div style={mutedTextStyle}>Supplier: {material.supplierName ?? "Not linked"} · SKU: {material.sku ?? "—"}</div>
-      <div style={{ ...mutedTextStyle, color: material.myobUid ? "#067647" : "#9a3412", fontWeight: 750 }}>{material.myobUid ? `MYOB item: ${material.myobDisplayId ?? material.myobUid}` : "MYOB item: Not synced"}</div>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <MyobSyncStatus status={readMyobSyncStatus(material.myobSyncState ?? material.myobPayloadJson?.myobSyncStatus, Boolean(material.myobUid))} linked={Boolean(material.myobUid)} error={material.myobPayloadJson?.myobSyncError} />
+        <span style={mutedTextStyle}>{material.myobUid ? `Item ${material.myobDisplayId ?? material.myobUid}` : "No MYOB item link yet"}</span>
+      </div>
+      {String(material.myobSyncState ?? material.myobPayloadJson?.myobSyncStatus ?? "") === "error" && material.myobPayloadJson?.myobSyncError ? <div style={{ ...mutedTextStyle, color: "#b42318" }}>{String(material.myobPayloadJson.myobSyncError)}</div> : null}
       {material.active ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <form action={syncMaterialToMyobAction}><input type="hidden" name="materialId" value={material.id} /><button type="submit" style={{ ...secondaryButtonStyle, color: "#0f766e", borderColor: "#0f766e" }}>Sync to MYOB</button></form>
         {material.supplierId ? <form action={startPurchaseOrderAction}><input type="hidden" name="supplierId" value={material.supplierId} /><input type="hidden" name="materialId" value={material.id} /><button type="submit" style={secondaryButtonStyle}>New PO for this material</button></form> : <span style={{ ...mutedTextStyle, alignSelf: "center" }}>Set a supplier to start a PO from this material.</span>}
@@ -266,6 +272,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
   const groupParam = readParam(params, "group");
   const selectedGroup: MaterialGroup | "" = isValidGroup(groupParam) ? groupParam : "";
 
+  const hasPendingMyobSync = materials.some((material) => ["pending", "syncing"].includes(String(material.myobSyncState ?? material.myobPayloadJson?.myobSyncStatus ?? "")));
   const activeMaterials = materials.filter((material) => material.active);
   const rollMaterials = materials.filter((material) => isRollType(material.materialType));
   const sheetMaterials = materials.filter((material) => isSheetType(material.materialType));
@@ -289,6 +296,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
   return (
     <div style={{ maxWidth: 1360, margin: "0 auto", display: "grid", gap: 16, minWidth: 0 }}>
+      <AutoRefreshWhenPending active={hasPendingMyobSync} />
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 16, fontWeight: 700 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 16, fontWeight: 700 }}>{error}</section> : null}
 
