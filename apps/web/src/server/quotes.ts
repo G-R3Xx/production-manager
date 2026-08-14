@@ -58,6 +58,7 @@ export type QuoteLineRecord = {
   clientResponseStatus: "pending" | "approved" | "changes_requested" | "cancelled" | string;
   clientResponseNotes: string | null;
   clientRespondedAt: string | null;
+  clientRevisionExcluded: boolean;
   createdAt: string;
 };
 
@@ -232,7 +233,8 @@ async function ensureQuoteLineClientResponseColumns(): Promise<void> {
     ALTER TABLE sales.quote_lines
       ADD COLUMN IF NOT EXISTS client_response_status varchar(32) NOT NULL DEFAULT 'pending',
       ADD COLUMN IF NOT EXISTS client_response_notes text,
-      ADD COLUMN IF NOT EXISTS client_responded_at timestamptz
+      ADD COLUMN IF NOT EXISTS client_responded_at timestamptz,
+      ADD COLUMN IF NOT EXISTS client_revision_excluded boolean NOT NULL DEFAULT false
   `);
   await pool.query(`
     CREATE INDEX IF NOT EXISTS quote_lines_client_response_idx
@@ -472,6 +474,7 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]
       COALESCE(client_response_status, 'pending') as "clientResponseStatus",
       client_response_notes as "clientResponseNotes",
       client_responded_at as "clientRespondedAt",
+      COALESCE(client_revision_excluded, false) as "clientRevisionExcluded",
       created_at as "createdAt"
     FROM sales.quote_lines
     WHERE quote_id = $1::uuid
@@ -583,6 +586,7 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
         client_response_status = 'pending',
         client_response_notes = NULL,
         client_responded_at = NULL,
+        client_revision_excluded = false,
         updated_at = now()
     FROM sales.quote_drafts qd
     WHERE ql.quote_id = qd.id
@@ -620,6 +624,7 @@ export async function getQuoteLineForTenant(tenantId: string, quoteId: string, l
       COALESCE(ql.client_response_status, 'pending') as "clientResponseStatus",
       ql.client_response_notes as "clientResponseNotes",
       ql.client_responded_at as "clientRespondedAt",
+      COALESCE(ql.client_revision_excluded, false) as "clientRevisionExcluded",
       ql.created_at as "createdAt"
     FROM sales.quote_lines ql
     JOIN sales.quote_drafts qd ON qd.id = ql.quote_id
@@ -683,10 +688,23 @@ export async function markQuoteSentForTenant(tenantId: string, quoteId: string):
     SELECT status FROM sales.quote_drafts WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1
   `, [tenantId, quoteId]);
   if (previous.rows[0]?.status === "changes_requested") {
+    // A resent revision keeps prior client cancellations out of the new client-facing scope.
+    // Only lines that actually requested changes are reset for a fresh response cycle.
     await pool.query(`
       UPDATE sales.quote_lines
-      SET client_response_status = 'pending', client_response_notes = NULL, client_responded_at = NULL, updated_at = now()
+      SET client_revision_excluded = true, updated_at = now()
       WHERE quote_id = $1::uuid
+        AND client_response_status = 'cancelled'
+    `, [quoteId]);
+    await pool.query(`
+      UPDATE sales.quote_lines
+      SET client_response_status = 'pending',
+          client_response_notes = NULL,
+          client_responded_at = NULL,
+          client_revision_excluded = false,
+          updated_at = now()
+      WHERE quote_id = $1::uuid
+        AND client_response_status = 'changes_requested'
     `, [quoteId]);
   }
   await pool.query(`
@@ -895,6 +913,7 @@ export async function respondToQuoteLineByToken(
           client_responded_at = now(),
           updated_at = now()
       WHERE quote_id = $1::uuid AND id = $2::uuid
+        AND COALESCE(client_revision_excluded, false) = false
       RETURNING product_name as "productName"
     `, [quote.id, lineId, response, notes]);
     if (!lineResult.rowCount) throw new Error("Quote line not found.");
@@ -910,6 +929,7 @@ export async function respondToQuoteLineByToken(
         COALESCE(SUM(CASE WHEN COALESCE(client_response_status, 'pending') <> 'cancelled' THEN line_total ELSE 0 END), 0)::text as subtotal
       FROM sales.quote_lines
       WHERE quote_id = $1::uuid
+        AND COALESCE(client_revision_excluded, false) = false
     `, [quote.id]);
     const counts = summary.rows[0];
     const total = Number(counts?.total ?? 0);

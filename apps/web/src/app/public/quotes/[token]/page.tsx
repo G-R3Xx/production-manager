@@ -315,7 +315,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   await markQuoteViewedByToken(token);
 
-  const [lines, companySettings, linkedClient, sourceSurvey] = await Promise.all([
+  const [allLines, companySettings, linkedClient, sourceSurvey] = await Promise.all([
     listQuoteLines(quote.id),
     getCompanySettingsByTenantId(quote.tenantId),
     getCustomerById(quote.tenantId, quote.linkedCustomerId),
@@ -324,6 +324,9 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   const sourceEnquiryId = quote.enquiryId || sourceSurvey?.enquiryId || null;
   const sourceEnquiry = sourceEnquiryId ? await getEnquiryById(quote.tenantId, sourceEnquiryId) : null;
+  // Cancelled lines stay in Production Manager for audit/history, but once a revised quote is
+  // resent they are removed from the client-facing scope via clientRevisionExcluded.
+  const lines = allLines.filter((line) => !line.clientRevisionExcluded);
   const subtotal = lines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
