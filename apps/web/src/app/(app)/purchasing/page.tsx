@@ -59,7 +59,7 @@ export default async function PurchasingPage({searchParams}:Props){
   const [lines,events,documents]=selected?await Promise.all([listPurchaseOrderLines(tenant.tenantId,selected.id),listPurchaseOrderEvents(tenant.tenantId,selected.id),listPurchaseOrderDocuments(tenant.tenantId,selected.id)]):[[],[],[]];
   const selectedSupplier=selected?suppliers.find((supplier)=>supplier.id===selected.supplierId)??null:null;
   const poEmail=selectedSupplier?.purchaseOrderEmail||selectedSupplier?.email||"";
-  const emailConfigured=outboundEmailConfigured(process.env.PURCHASE_ORDER_FROM_EMAIL?.trim()||company?.email?.trim()||"");
+  const emailConfigured=outboundEmailConfigured();
   let refs:{accounts:Array<{uid:string;name:string;displayId:string;classification:string}>;taxCodes:Array<{uid:string;code:string;description:string}>}={accounts:[],taxCodes:[]};
   if(connection?.status==="connected"&&connection.companyFileId){try{refs=await fetchMyobPurchasingReferenceDataForTenant(tenant.tenantId);}catch{/* surfaced when saving/sending */}}
   const allowedMaterials=selected?materials.filter(m=>m.active&&(!m.supplierId||m.supplierId===selected.supplierId)):[];
@@ -68,7 +68,7 @@ export default async function PurchasingPage({searchParams}:Props){
     {message?<div style={{...card,borderColor:"#86efac",background:"#f0fdf4",color:"#166534"}}>{message}</div>:null}
     {error?<div style={{...card,borderColor:"#fda4af",background:"#fff1f2",color:"#9f1239"}}>{error}</div>:null}
     <section style={card}><p style={{margin:0,fontSize:12,fontWeight:900,letterSpacing:".08em",textTransform:"uppercase",color:"#4f46e5"}}>Purchasing</p><h1 style={{margin:"8px 0"}}>Purchase orders</h1><p style={{margin:0,color:"#667085"}}>Build the PO in Production Manager, then <b>Send Purchase Order</b> to email the supplier with a PDF and sync the same order to MYOB.</p></section>
-    {!emailConfigured?<section style={{...card,borderColor:"#fdba74",background:"#fff7ed",color:"#9a3412"}}><b>Automated supplier email is not configured yet.</b> Production Manager's existing quote/artwork email buttons open your local mail app; they are not a server-side sender and cannot automatically attach the PO PDF. For automatic PO delivery, add <code>RESEND_API_KEY</code> and a verified <code>PURCHASE_ORDER_FROM_EMAIL</code>. MYOB sync remains independent.</section>:null}
+    {!emailConfigured?<section style={{...card,borderColor:"#fdba74",background:"#fff7ed",color:"#9a3412"}}><b>Automated supplier email is not configured yet.</b> Production Manager's existing quote/artwork email buttons open your local mail app; they are not a server-side sender and cannot automatically attach the PO PDF. For automatic PO delivery, add <code>GMAIL_USER</code> and <code>GMAIL_APP_PASSWORD</code> in Vercel. Emails send through the authenticated Gmail/Google Workspace mailbox. MYOB sync remains independent.</section>:null}
     {connection?.status==="connected" && tokenRecord?.scope && !tokenRecord.scope.includes("sme-general-ledger") ? <section style={{...card,borderColor:"#fdba74",background:"#fff7ed",color:"#9a3412"}}><b>Reconnect MYOB once after this update.</b> Purchasing needs General Ledger permission to load the expense/Cost of Sales accounts used when creating MYOB material items. Open Integrations and run MYOB OAuth again.</section> : null}
     <div style={{display:"grid",gridTemplateColumns:"340px minmax(0,1fr)",gap:16,alignItems:"start"}}>
       <aside style={{display:"grid",gap:14}}>

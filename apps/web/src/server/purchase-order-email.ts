@@ -284,20 +284,18 @@ export async function sendPurchaseOrderEmailForTenant(tenantId: string, purchase
   }
 
   await markPurchaseOrderEmailPending(tenantId, purchaseOrderId, recipient);
-  const fromEmail = process.env.PURCHASE_ORDER_FROM_EMAIL?.trim() || document.company?.email?.trim() || "";
-  if (!process.env.RESEND_API_KEY?.trim() || !fromEmail) {
-    const message = "Purchase-order email is not configured. Add RESEND_API_KEY and a verified PURCHASE_ORDER_FROM_EMAIL to the Production Manager deployment. MYOB sync can still run independently.";
+  if (!process.env.GMAIL_USER?.trim() || !process.env.GMAIL_APP_PASSWORD?.trim()) {
+    const message = "Purchase-order email is not configured. Add GMAIL_USER and GMAIL_APP_PASSWORD to the Production Manager deployment. MYOB sync can still run independently.";
     await markPurchaseOrderEmailFailed(tenantId, purchaseOrderId, { emailTo: recipient, errorMessage: message });
     throw new Error(message);
   }
 
-  const fromName = document.company?.tradingName || document.company?.companyLegalName || document.company?.tenantName || "Production Manager";
-  const replyTo = process.env.PURCHASE_ORDER_REPLY_TO?.trim() || document.company?.email?.trim() || undefined;
+  const fromName = "Tender Edge Purchasing";
+  const replyTo = process.env.PURCHASE_ORDER_REPLY_TO?.trim() || process.env.GMAIL_USER?.trim() || document.company?.email?.trim() || undefined;
   let messageId: string | null = null;
   try {
     const sent = await sendOutboundEmail({
       fromName,
-      fromEmail,
       to: recipient,
       subject: document.subject,
       html: document.html,
@@ -317,7 +315,7 @@ export async function sendPurchaseOrderEmailForTenant(tenantId: string, purchase
     bytes: document.bytes,
     recipientEmail: recipient,
     messageId,
-    metadata: { subject: document.subject, total: document.total, provider: "resend" }
+    metadata: { subject: document.subject, total: document.total, provider: "gmail-smtp" }
   });
   await markPurchaseOrderEmailSent(tenantId, purchaseOrderId, { emailTo: recipient, messageId });
   return { recipient, messageId, fileName: document.fileName };
