@@ -324,10 +324,11 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   const sourceEnquiryId = quote.enquiryId || sourceSurvey?.enquiryId || null;
   const sourceEnquiry = sourceEnquiryId ? await getEnquiryById(quote.tenantId, sourceEnquiryId) : null;
-  // Cancelled lines stay in Production Manager for audit/history, but once a revised quote is
-  // resent they are removed from the client-facing scope via clientRevisionExcluded.
-  const lines = allLines.filter((line) => !line.clientRevisionExcluded);
-  const subtotal = lines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
+  // Cancelled lines remain in Production Manager for audit/history only. They are never
+  // rendered back to the client, including while a revised quote is being prepared/resend.
+  // clientRevisionExcluded additionally removes historical lines that have been taken out of scope.
+  const lines = allLines.filter((line) => !line.clientRevisionExcluded && line.clientResponseStatus !== "cancelled");
+  const subtotal = lines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
@@ -468,12 +469,11 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                     gridTemplateColumns: "minmax(0, 1fr) minmax(125px, auto) minmax(245px, auto)",
                     gap: 14,
                     alignItems: "center",
-                    background: line.clientResponseStatus === "cancelled" ? "#fff8f7" : "#fbfdff",
-                    opacity: line.clientResponseStatus === "cancelled" ? 0.82 : 1
+                    background: "#fbfdff"
                   }}
                 >
                   <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
-                    <strong style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}>{clientLine.title}</strong>
+                    <strong>{clientLine.title}</strong>
                     {clientLine.detail ? <span style={{ color: "#667085", fontSize: 13 }}>{clientLine.detail}</span> : null}
                   </div>
                   <div className="quote-line-price" style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 4, minWidth: 0 }}>
@@ -490,7 +490,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                 </div>
               );
             })}
-            {lines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>This quote has no saved line items yet.</p> : null}
+            {lines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>{allLines.length ? "There are no active items remaining on this quote." : "This quote has no saved line items yet."}</p> : null}
           </div>
           <QuoteLiveTotals subtotal={subtotal} gst={gst} total={total} />
             </div>

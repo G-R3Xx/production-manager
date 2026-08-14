@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { respondToQuoteLineFastAction, type FastQuoteLineResponseResult } from "./actions";
 
 type Props = {
@@ -28,6 +29,7 @@ function statusLabel(status: string): string | null {
 }
 
 export function QuoteLineResponseControls({ token, lineId, status, notes, locked = false }: Props) {
+  const router = useRouter();
   const [localStatus, setLocalStatus] = useState(status);
   const [localNotes, setLocalNotes] = useState(notes ?? null);
   const [showChanges, setShowChanges] = useState(false);
@@ -74,6 +76,7 @@ export function QuoteLineResponseControls({ token, lineId, status, notes, locked
       setFeedback("Saved");
       setShowChanges(false);
       window.dispatchEvent(new CustomEvent<FastQuoteLineResponseResult>("quote-line-response-saved", { detail: result }));
+      if ((result.lineStatus ?? response) === "cancelled") router.refresh();
       window.setTimeout(() => setFeedback((value) => value === "Saved" ? null : value), 1300);
     });
   };
