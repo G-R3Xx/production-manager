@@ -24,6 +24,11 @@ export type QuoteDraftRecord = {
   discountPercent: string;
   notes: string | null;
   sentAt: string | null;
+  emailStatus: string;
+  emailTo: string | null;
+  emailSentAt: string | null;
+  emailMessageId: string | null;
+  emailLastError: string | null;
   viewedAt: string | null;
   acceptedAt: string | null;
   declinedAt: string | null;
@@ -178,6 +183,11 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS public_token varchar(96),
       ADD COLUMN IF NOT EXISTS job_name varchar(255),
       ADD COLUMN IF NOT EXISTS sent_at timestamptz,
+      ADD COLUMN IF NOT EXISTS email_status varchar(50) NOT NULL DEFAULT 'not_sent',
+      ADD COLUMN IF NOT EXISTS email_to varchar(320),
+      ADD COLUMN IF NOT EXISTS email_sent_at timestamptz,
+      ADD COLUMN IF NOT EXISTS email_message_id text,
+      ADD COLUMN IF NOT EXISTS email_last_error text,
       ADD COLUMN IF NOT EXISTS viewed_at timestamptz,
       ADD COLUMN IF NOT EXISTS accepted_at timestamptz,
       ADD COLUMN IF NOT EXISTS declined_at timestamptz,
@@ -368,6 +378,11 @@ function quoteSelectSql(): string {
       discount_percent::text as "discountPercent",
       notes,
       sent_at as "sentAt",
+      COALESCE(email_status, 'not_sent') as "emailStatus",
+      email_to as "emailTo",
+      email_sent_at as "emailSentAt",
+      email_message_id as "emailMessageId",
+      email_last_error as "emailLastError",
       viewed_at as "viewedAt",
       accepted_at as "acceptedAt",
       declined_at as "declinedAt",
@@ -650,6 +665,17 @@ export async function updateQuoteJobNameForTenant(tenantId: string, quoteId: str
   `, [tenantId, quoteId, nullableText(jobName)]);
 }
 
+export async function ensureQuotePublicIdentityForTenant(tenantId: string, quoteId: string): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET public_token = COALESCE(public_token, $3),
+        quote_number = COALESCE(quote_number, 'Q-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(id::text, '-', ''), 1, 5))),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, makePublicToken()]);
+}
+
 export async function markQuoteSentForTenant(tenantId: string, quoteId: string): Promise<void> {
   await ensureQuoteLifecycleColumns();
   await ensureQuoteLineClientResponseColumns();
@@ -676,6 +702,44 @@ export async function markQuoteSentForTenant(tenantId: string, quoteId: string):
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, quoteId, makePublicToken()]);
+}
+
+export async function markQuoteEmailPendingForTenant(tenantId: string, quoteId: string, recipient: string): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET email_status = 'pending',
+        email_to = $3::varchar,
+        email_last_error = NULL,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, nullableText(recipient)]);
+}
+
+export async function markQuoteEmailSentForTenant(tenantId: string, quoteId: string, input: { recipient: string; messageId?: string | null }): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET email_status = 'sent',
+        email_to = $3::varchar,
+        email_sent_at = now(),
+        email_message_id = $4::text,
+        email_last_error = NULL,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, nullableText(input.recipient), input.messageId ?? null]);
+}
+
+export async function markQuoteEmailFailedForTenant(tenantId: string, quoteId: string, input: { recipient?: string | null; error: string }): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET email_status = 'failed',
+        email_to = COALESCE($3::varchar, email_to),
+        email_last_error = $4::text,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, nullableText(input.recipient), nullableText(input.error)]);
 }
 
 export async function setQuoteDraftStatusForTenant(tenantId: string, quoteId: string, status: string): Promise<void> {

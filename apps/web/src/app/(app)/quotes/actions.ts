@@ -12,10 +12,14 @@ import {
   createQuoteDraftForTenant,
   deleteQuoteLineForTenant,
   getQuoteLineForTenant,
+  ensureQuotePublicIdentityForTenant,
   linkQuoteLineToProductForTenant,
   markArtworkApprovalSentForTenant,
   updateQuoteLineForTenant,
   markQuoteSentForTenant,
+  markQuoteEmailPendingForTenant,
+  markQuoteEmailSentForTenant,
+  markQuoteEmailFailedForTenant,
   removeArtworkApprovalPageForTenant,
   setQuoteDraftStatusForTenant,
   getQuoteDraftById,
@@ -26,6 +30,8 @@ import { createProduct, getProductById, updateProduct } from "@/server/products"
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
 import { createMyobCustomerFromLocalClientForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
+import { getCompanySettingsByTenantId } from "@/server/company";
+import { sendOutboundEmail } from "@/server/outbound-email";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -698,6 +704,82 @@ export async function markQuoteSentAction(formData: FormData): Promise<void> {
 
   await markQuoteSentForTenant(activeTenant.tenantId, quoteId);
   redirect(`/quotes?selected=${quoteId}&message=Quote%20marked%20as%20sent`);
+}
+
+function quoteEmailPublicUrl(token: string): string {
+  const explicit = String(process.env.NEXT_PUBLIC_APP_URL || process.env.APP_BASE_URL || "").trim().replace(/\/$/, "");
+  const base = explicit || (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : "");
+  if (!base) throw new Error("Production Manager public URL is not configured. Add NEXT_PUBLIC_APP_URL to the deployment.");
+  return `${base}/public/quotes/${encodeURIComponent(token)}`;
+}
+
+function quoteEmailEscape(value: string | null | undefined): string {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+export async function emailQuoteAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20first");
+
+  const initialQuote = await getQuoteDraftById(activeTenant.tenantId, quoteId);
+  if (!initialQuote) redirect(`/quotes?selected=${quoteId}&error=Quote%20not%20found`);
+
+  const recipient = String(initialQuote.email ?? "").trim();
+  if (!recipient || !recipient.includes("@")) {
+    await markQuoteEmailFailedForTenant(activeTenant.tenantId, quoteId, { recipient, error: "Quote has no valid client email address." });
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Quote has no valid client email address.")}`);
+  }
+
+  // Ensure a public identity without changing lifecycle state. The quote only
+  // becomes "sent" after Gmail accepts the message successfully.
+  await ensureQuotePublicIdentityForTenant(activeTenant.tenantId, quoteId);
+  const quote = await getQuoteDraftById(activeTenant.tenantId, quoteId);
+  if (!quote?.publicToken) {
+    await markQuoteEmailFailedForTenant(activeTenant.tenantId, quoteId, { recipient, error: "Quote public link could not be generated." });
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Quote public link could not be generated.")}`);
+  }
+
+  await markQuoteEmailPendingForTenant(activeTenant.tenantId, quoteId, recipient);
+
+  let successMessage = "";
+  let failureMessage = "";
+  try {
+    const company = await getCompanySettingsByTenantId(activeTenant.tenantId);
+    const publicUrl = quoteEmailPublicUrl(quote.publicToken);
+    const companyName = company?.tradingName || company?.companyLegalName || activeTenant.tenantName || "Tender Edge";
+    const contactName = quote.contactName || quote.clientName || "there";
+    const title = quote.jobName || quote.quoteNumber || "Your quote";
+    const quoteNumber = quote.quoteNumber || "Quote";
+    const subject = `${quoteNumber} — ${title}`;
+    const html = `<!doctype html><html><body style="font-family:Arial,sans-serif;color:#172033;line-height:1.5"><div style="max-width:680px;margin:auto"><h2 style="margin:0 0 12px">${quoteEmailEscape(title)}</h2><p>Hi ${quoteEmailEscape(contactName)},</p><p>Your quote <strong>${quoteEmailEscape(quoteNumber)}</strong> is ready to review.</p><p style="margin:24px 0"><a href="${quoteEmailEscape(publicUrl)}" style="display:inline-block;background:#111827;color:#fff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px">View and respond to quote</a></p><p>You can approve, cancel or request changes for each item directly from the quote page.</p><p>If the button does not open, copy this link into your browser:<br><a href="${quoteEmailEscape(publicUrl)}">${quoteEmailEscape(publicUrl)}</a></p><p>Regards,<br><strong>${quoteEmailEscape(companyName)}</strong>${company?.phone ? `<br>${quoteEmailEscape(company.phone)}` : ""}${company?.email ? `<br>${quoteEmailEscape(company.email)}` : ""}</p></div></body></html>`;
+
+    const sent = await sendOutboundEmail({
+      fromName: `${companyName} Quotes`,
+      to: recipient,
+      subject,
+      html,
+      replyTo: company?.email || undefined,
+      idempotencyKey: `quote-${quoteId}-${Date.now()}`,
+      tags: [{ name: "Type", value: "Quote" }, { name: "Quote", value: quoteNumber }]
+    });
+    await markQuoteSentForTenant(activeTenant.tenantId, quoteId);
+    await markQuoteEmailSentForTenant(activeTenant.tenantId, quoteId, { recipient, messageId: sent.messageId });
+    successMessage = `Quote emailed to ${recipient}`;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await markQuoteEmailFailedForTenant(activeTenant.tenantId, quoteId, { recipient, error: message });
+    failureMessage = `Quote email failed: ${message}`;
+  }
+
+  revalidatePath("/quotes");
+  if (failureMessage) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(failureMessage)}`);
+  redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(successMessage)}`);
 }
 
 export async function createArtworkApprovalAction(formData: FormData): Promise<void> {

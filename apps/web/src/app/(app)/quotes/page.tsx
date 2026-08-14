@@ -8,7 +8,7 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, updateQuoteJobNameAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, updateQuoteJobNameAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
@@ -436,12 +436,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <span style={{ border: "1px solid #bfdbfe", borderRadius: 999, padding: "7px 11px", background: "#eff6ff", color: "#1d4ed8", fontSize: 12 }}>Price level: <strong>{linkedClientPriceLevelName}</strong>{linkedClientPriceLevelName !== linkedClientPriceLevel ? ` (${linkedClientPriceLevel})` : ""}</span>
                     {Number(selectedQuote.discountPercent || 0) > 0 ? <span style={{ border: "1px solid #fed7aa", borderRadius: 999, padding: "7px 11px", background: "#fff7ed", color: "#c2410c", fontSize: 12 }}>Manual quote discount: <strong>{selectedQuote.discountPercent}%</strong></span> : null}
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Client: <strong>{selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</strong></span>
+                    <span style={{ border: `1px solid ${selectedQuote.emailStatus === "sent" ? "#86efac" : selectedQuote.emailStatus === "failed" ? "#fecaca" : "#e4e7ec"}`, borderRadius: 999, padding: "7px 11px", background: selectedQuote.emailStatus === "sent" ? "#f0fdf4" : selectedQuote.emailStatus === "failed" ? "#fef2f2" : "#fff", color: selectedQuote.emailStatus === "sent" ? "#067647" : selectedQuote.emailStatus === "failed" ? "#b42318" : "#344054", fontSize: 12 }}>Email: <strong>{selectedQuote.emailStatus === "sent" ? `Sent${selectedQuote.emailSentAt ? ` ${formatDateTime(selectedQuote.emailSentAt)}` : ""}` : selectedQuote.emailStatus === "pending" ? "Sending" : selectedQuote.emailStatus === "failed" ? "Failed" : "Not sent"}</strong></span>
                   </div>
 
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
                     <div style={{ display: "grid", gap: 6 }}>
                       <strong>Client-facing quote link</strong>
-                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Mark the quote as sent, then copy/open this public link or use the email button.</p>
+                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Email Quote sends this link directly from Production Manager and marks the quote as sent automatically.</p>
                       <input readOnly value={quotePublicUrl || "Mark quote as sent to generate/confirm the link"} style={{ ...inputStyle, fontSize: 13 }} />
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -463,14 +464,15 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         </form>
                       )}
                       {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Open client quote</a> : null}
-                      {quotePublicUrl && selectedQuote.email ? <a href={`mailto:${selectedQuote.email}?subject=${encodeURIComponent(`Quote ${selectedQuote.quoteNumber ?? "from Production Manager"}`)}&body=${encodeURIComponent(`Hi ${selectedQuote.contactName ?? selectedQuote.clientName},
-
-Please view your quote here:
-${quotePublicUrl}
-
-Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Email quote</a> : null}
+                      {selectedQuote.email ? (
+                        <form action={emailQuoteAction}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <button type="submit" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #0f766e", background: "#0f766e", color: "#fff", fontWeight: 950, padding: "0 14px" }}>{selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}</button>
+                        </form>
+                      ) : null}
                     </div>
                   </div>
+                  {selectedQuote.emailStatus === "failed" && selectedQuote.emailLastError ? <div style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#b42318", borderRadius: 14, padding: "10px 12px", fontSize: 13 }}><strong>Quote email:</strong> {selectedQuote.emailLastError}</div> : null}
                   {(() => {
                     const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
                     const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
