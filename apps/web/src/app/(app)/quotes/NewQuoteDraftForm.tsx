@@ -17,6 +17,7 @@ export type QuoteDraftClientOption = {
 };
 
 type InitialQuoteDraftValues = {
+  jobName: string;
   linkedCustomerId: string;
   clientName: string;
   contactName: string;
@@ -138,6 +139,19 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
       <input type="hidden" name="enquiryId" value={enquiryId} />
       <input type="hidden" name="surveyRequestId" value={surveyRequestId} />
       <input type="hidden" name="linkedCustomerId" value={entryMode === "existing" ? selectedClientId : ""} />
+
+      <label style={{ display: "grid", gap: 6 }}>
+        <span style={{ fontWeight: 900, color: "#101828" }}>Job name / quote title</span>
+        <input
+          name="jobName"
+          defaultValue={initialValues.jobName}
+          placeholder="e.g. Fyshwick reception signs"
+          required
+          maxLength={255}
+          style={inputStyle}
+        />
+        <small style={{ color: "#667085" }}>Shown to the customer at the top of the quote and carried into Artwork / Production.</small>
+      </label>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button

@@ -15,6 +15,7 @@ export type QuoteDraftRecord = {
   clientPurchaseOrderNumber: string | null;
   quoteNumber: string | null;
   publicToken: string | null;
+  jobName: string | null;
   clientName: string;
   contactName: string | null;
   email: string | null;
@@ -175,6 +176,7 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
     ALTER TABLE sales.quote_drafts
       ADD COLUMN IF NOT EXISTS quote_number varchar(50),
       ADD COLUMN IF NOT EXISTS public_token varchar(96),
+      ADD COLUMN IF NOT EXISTS job_name varchar(255),
       ADD COLUMN IF NOT EXISTS sent_at timestamptz,
       ADD COLUMN IF NOT EXISTS viewed_at timestamptz,
       ADD COLUMN IF NOT EXISTS accepted_at timestamptz,
@@ -357,6 +359,7 @@ function quoteSelectSql(): string {
       client_purchase_order_number as "clientPurchaseOrderNumber",
       quote_number as "quoteNumber",
       public_token as "publicToken",
+      job_name as "jobName",
       client_name as "clientName",
       contact_name as "contactName",
       email,
@@ -467,6 +470,7 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
   surveyRequestId?: string | null;
   linkedCustomerId?: string | null;
   clientPurchaseOrderNumber?: string | null;
+  jobName?: string | null;
   clientName: string;
   contactName?: string | null;
   email?: string | null;
@@ -478,9 +482,9 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
   const token = makePublicToken();
   const result = await pool.query<{ id: string }>(`
     INSERT INTO sales.quote_drafts (
-      tenant_id, enquiry_id, survey_request_id, linked_customer_id, client_purchase_order_number, quote_number, public_token, client_name, contact_name, email, phone, status, discount_percent, notes, created_at, updated_at
+      tenant_id, enquiry_id, survey_request_id, linked_customer_id, client_purchase_order_number, quote_number, public_token, job_name, client_name, contact_name, email, phone, status, discount_percent, notes, created_at, updated_at
     ) VALUES (
-      $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::varchar,('Q-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5))),$6,$7::varchar,$8::varchar,$9::varchar,$10::varchar,'draft',$11::numeric,$12::text,now(),now()
+      $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::varchar,('Q-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5))),$6,$7::varchar,$8::varchar,$9::varchar,$10::varchar,$11::varchar,'draft',$12::numeric,$13::text,now(),now()
     ) RETURNING id
   `, [
     tenantId,
@@ -489,6 +493,7 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
     input.linkedCustomerId ?? null,
     input.clientPurchaseOrderNumber ?? null,
     token,
+    nullableText(input.jobName),
     input.clientName,
     input.contactName ?? null,
     input.email ?? null,
@@ -634,6 +639,16 @@ export async function linkQuoteLineToProductForTenant(
   `, [tenantId, quoteId, lineId, productId, productName]);
 }
 
+
+export async function updateQuoteJobNameForTenant(tenantId: string, quoteId: string, jobName: string): Promise<void> {
+  await ensureQuoteLifecycleColumns();
+  await pool.query(`
+    UPDATE sales.quote_drafts
+    SET job_name = $3::varchar,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, quoteId, nullableText(jobName)]);
+}
 
 export async function markQuoteSentForTenant(tenantId: string, quoteId: string): Promise<void> {
   await ensureQuoteLifecycleColumns();
@@ -932,7 +947,7 @@ export async function createArtworkApprovalFromQuote(tenantId: string, quoteId: 
     quote.clientName,
     quote.contactName,
     quote.email,
-    quote.notes ? quote.notes.slice(0, 255) : quote.clientName,
+    quote.jobName || (quote.notes ? quote.notes.slice(0, 255) : quote.clientName),
     quote.quoteNumber ? `Artwork proof for ${quote.quoteNumber}` : "Artwork proof",
     "S1",
     "Please review the proof pages below."

@@ -8,7 +8,7 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, updateQuoteJobNameAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
@@ -391,6 +391,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             enquiryId={sourceEnquiry?.id ?? survey?.enquiryId ?? ""}
             surveyRequestId={survey?.id ?? ""}
             initialValues={{
+              jobName: "",
               linkedCustomerId: sourceLinkedCustomerId ?? "",
               clientName: initialDraftClientName,
               contactName: initialDraftContactName,
@@ -416,7 +417,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   </div>
                   <span style={{ flex: "0 0 auto", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>{quote.status}</span>
                 </div>
-                <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Manual discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
+                <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.jobName, quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Manual discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
               </a>
             );
           })}
@@ -432,14 +433,30 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
                     <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={58} radius={16} padding={5} />
                     <div style={{ minWidth: 0 }}>
-                      <h2 style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Selected quote: {selectedQuote.clientName}</h2>
-                      <p style={{ margin: "6px 0 0", color: "#667085" }}>Add line items by building from your material library. Start with Acrylic, ACM, Corflute, PVC, Banner or another sheet material.</p>
+                      <h2 style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Selected quote: {selectedQuote.jobName || selectedQuote.clientName}</h2>
+                      <p style={{ margin: "6px 0 0", color: "#667085" }}>Client: <strong>{selectedQuote.clientName}</strong> · Add line items by building from your material library.</p>
                     </div>
                   </div>
                   {(() => { const tone = quoteStatusTone(selectedQuote.status); return <span style={{ border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedQuote.status.replace(/_/g, " ")}</span>; })()}
                 </div>
 
                 <section style={{ border: "1px solid #d9e2ef", borderRadius: 22, background: "linear-gradient(135deg,#ffffff,#f8fbff)", padding: 16, display: "grid", gap: 14 }}>
+                  <form action={updateQuoteJobNameAction} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end" }}>
+                    <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.06em" }}>Job name / quote title</span>
+                      <input
+                        name="jobName"
+                        defaultValue={selectedQuote.jobName ?? ""}
+                        placeholder="e.g. Fyshwick reception signs"
+                        required
+                        maxLength={255}
+                        style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cfd9e8", padding: "0 14px", width: "100%", boxSizing: "border-box", background: "#fff" }}
+                      />
+                    </label>
+                    <button type="submit" style={{ ...buttonStyle, minWidth: 132 }}>Save job name</button>
+                    <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
+                  </form>
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}><strong>{quoteLines.length}</strong> line item{quoteLines.length === 1 ? "" : "s"}</span>

@@ -19,7 +19,8 @@ import {
   removeArtworkApprovalPageForTenant,
   setQuoteDraftStatusForTenant,
   getQuoteDraftById,
-  updateQuoteMyobOrderSyncForTenant
+  updateQuoteMyobOrderSyncForTenant,
+  updateQuoteJobNameForTenant
 } from "@/server/quotes";
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
@@ -334,7 +335,12 @@ function quoteLineDefinition(formData: FormData, createEditableOptions: boolean)
 
 export async function createQuoteDraftAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
+  const jobName = String(formData.get("jobName") ?? "").trim();
   const clientName = String(formData.get("clientName") ?? "").trim();
+
+  if (!jobName) {
+    redirect("/quotes?error=Job%20name%20is%20required");
+  }
 
   if (!clientName) {
     redirect("/quotes?error=Client%20name%20is%20required");
@@ -352,6 +358,7 @@ export async function createQuoteDraftAction(formData: FormData): Promise<void> 
     enquiryId: nullable(formData.get("enquiryId")),
     surveyRequestId: nullable(formData.get("surveyRequestId")),
     linkedCustomerId,
+    jobName,
     clientName,
     contactName: nullable(formData.get("contactName")),
     email: nullable(formData.get("email")),
@@ -361,6 +368,23 @@ export async function createQuoteDraftAction(formData: FormData): Promise<void> 
   });
 
   redirect(`/quotes?selected=${created.id}&message=Quote%20draft%20created`);
+}
+
+export async function updateQuoteJobNameAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const jobName = String(formData.get("jobName") ?? "").trim();
+
+  if (!quoteId) {
+    redirect("/quotes?error=Select%20a%20quote%20first");
+  }
+  if (!jobName) {
+    redirect(`/quotes?selected=${quoteId}&error=Job%20name%20is%20required`);
+  }
+
+  await updateQuoteJobNameForTenant(activeTenant.tenantId, quoteId, jobName);
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=Job%20name%20updated`);
 }
 
 export async function addQuoteLineAction(formData: FormData): Promise<void> {

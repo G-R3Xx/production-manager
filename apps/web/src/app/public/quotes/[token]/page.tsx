@@ -170,6 +170,48 @@ function friendlyPrintMethod(value: string | null | undefined): string | null {
   return titleCaseLabel(value);
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function customerFacingRollMediaName(line: Pick<QuoteLineRecord, "optionSummary" | "configurationSnapshot">): string {
+  const snapshot = recordValue(line.configurationSnapshot);
+  const materialSnapshots = recordValue(snapshot?.materialSnapshots);
+  const media = recordValue(materialSnapshots?.media);
+  const main = recordValue(materialSnapshots?.main);
+  const printMethod = compactText(snapshot?.printMethod as string | null | undefined).toLowerCase();
+  const mainLooksLikeRoll = Boolean(
+    main && (
+      Number(main.rollWidthMm ?? 0) > 0 ||
+      /^(?:lm|linear\s*m(?:etre)?s?)$/i.test(compactText(main.stockUom as string | null | undefined)) ||
+      /\b(roll|vinyl|banner|sav|media)\b/i.test(compactText(main.materialType as string | null | undefined))
+    )
+  );
+  const selected = media ?? (printMethod === "roll_stock" && mainLooksLikeRoll ? main : null);
+  const customerName = compactText(selected?.customerFacingName as string | null | undefined);
+  if (customerName) return customerName;
+
+  // Materials deliberately fall back to their stock name when Customer-facing name is blank.
+  // That is the same rule used by the quote builder itself.
+  const stockName = compactText(selected?.name as string | null | undefined);
+  if (stockName && !/^roll stock$/i.test(stockName)) return stockName;
+
+  // Older quick-quote snapshots may not contain materialSnapshots. The builder stores the
+  // selected media immediately after the Roll stock choice in optionSummary, so recover it
+  // there without exposing pricing/setup/internal workflow labels.
+  const parts = summaryParts(line);
+  const rollIndex = parts.findIndex((part) => /^roll stock$/i.test(part));
+  if (rollIndex >= 0) {
+    for (const candidate of parts.slice(rollIndex + 1)) {
+      if (/^(?:no print|direct print|roll stock|cut vinyl|cmyk|mono|white|white ink|cmyk \+ white|cmyk \+ special)$/i.test(candidate)) continue;
+      if (/\bsided\b/i.test(candidate) || /^(?:reverse|standard|positive) print$/i.test(candidate)) continue;
+      if (/^(?:substrate|stock|material|finished size|size|artwork|print setup|backing|laminate|finishing|dispatch|qty)\s*:/i.test(candidate)) continue;
+      return candidate;
+    }
+  }
+  return "";
+}
+
 function friendlySide(value: string | null | undefined): string | null {
   const lower = compactText(value).toLowerCase();
   if (lower.includes("double")) return "Double sided";
@@ -193,14 +235,16 @@ function installLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   };
 }
 
-function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "configurationSnapshot">): ClientQuoteLine {
   const parts = summaryParts(line);
   const combined = [line.productName, line.optionSummary].filter(Boolean).join(" · ");
   const base = cleanBaseMaterialName(line.productName);
   const selectedMaterial = cleanSelectedMaterialName(line);
   const materialTitle = clientMaterialTitle(selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
-  const printMethod = friendlyPrintMethod(parts.find((part) => /^(no print|direct print|roll stock|cut vinyl)$/i.test(part)));
+  const rawPrintMethod = parts.find((part) => /^(no print|direct print|roll stock|cut vinyl)$/i.test(part));
+  const printMethod = friendlyPrintMethod(rawPrintMethod);
+  const rollMediaName = /^roll stock$/i.test(compactText(rawPrintMethod)) ? customerFacingRollMediaName(line) : "";
   const ink = parts.find((part) => /^(cmyk|mono|white|white ink|cmyk \+ white|cmyk \+ special)$/i.test(part));
   const side = friendlySide(parts.find((part) => /\bsided\b/i.test(part)));
   const printDirection = parts.find((part) => /^(reverse|standard|positive) print$/i.test(part));
@@ -211,7 +255,7 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   const title = [materialTitle, dimension, laminate].filter(Boolean).join(" ") || line.productName;
   const detailParts = [
     selectedMaterial && selectedMaterial !== materialTitle ? `Substrate: ${selectedMaterial}` : null,
-    printMethod,
+    rollMediaName || printMethod,
     ink ? ink.toUpperCase().replace("CMYK + WHITE", "CMYK + White").replace(/^WHITE$/, "White") : null,
     printDirection ? titleCaseLabel(printDirection) : null,
     backing,
@@ -238,7 +282,7 @@ function smallFormatLineForClient(line: Pick<QuoteLineRecord, "productName" | "o
   return { title, detail: detail || null };
 }
 
-function quoteLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+function quoteLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "configurationSnapshot">): ClientQuoteLine {
   if (isInstallLine(line)) return installLineForClient(line);
   const combined = `${line.productName} · ${line.optionSummary ?? ""}`.toLowerCase();
   if (/\b(card|flyer|brochure|book|booklet|ncr|duplicate|triplicate|gsm|cello)\b/.test(combined)) return smallFormatLineForClient(line);
@@ -293,7 +337,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   const clientAddress = linkedClient?.payloadJson.billingAddress || null;
   const sourceSiteAddress = sourceSurvey?.siteAddress || sourceEnquiry?.siteAddress || linkedClient?.payloadJson.defaultSiteAddress || null;
   const siteAddress = sourceSiteAddress && sourceSiteAddress !== clientAddress ? sourceSiteAddress : null;
-  const jobName = deriveJobName(quote, lines, sourceEnquiry?.requestSummary || sourceSurvey?.notes || sourceSurvey?.surveyDetails);
+  const jobName = compactText(quote.jobName) || deriveJobName(quote, lines, sourceEnquiry?.requestSummary || sourceSurvey?.notes || sourceSurvey?.surveyDetails);
   const responseStatus = quote.status === "accepted" || quote.status === "approved"
     ? "accepted"
     : quote.status === "declined"
