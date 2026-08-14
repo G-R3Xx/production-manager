@@ -14,7 +14,6 @@ import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
-import { inferLegacyQuickQuoteSnapshot, readQuickQuoteSnapshot, type QuickQuoteStep } from "./quoteLineSnapshot";
 import { MyobSubmitButton } from "./MyobSubmitButton";
 
 type PageProps = {
@@ -190,8 +189,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const fromSurvey = readParam(params, "fromSurvey");
   const selected = readParam(params, "selected");
   const filter = readParam(params, "filter");
-  const editLineId = readParam(params, "editLine");
-  const editStepParam = readParam(params, "editStep");
 
   const builderDataNeeded = Boolean(selected);
   const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, quoteProducts] = await Promise.all([
@@ -267,31 +264,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       })
     : [];
   const suggestedMyobCustomer = suggestedMyobCustomers.length === 1 ? suggestedMyobCustomers[0] : null;
-
-  const editingQuoteLineRecord = editLineId ? quoteLines.find((line) => line.id === editLineId) ?? null : null;
-  const editingSnapshot = editingQuoteLineRecord
-    ? readQuickQuoteSnapshot(editingQuoteLineRecord.configurationSnapshot) ?? inferLegacyQuickQuoteSnapshot({
-        productName: editingQuoteLineRecord.productName,
-        optionSummary: editingQuoteLineRecord.optionSummary,
-        quantity: editingQuoteLineRecord.quantity,
-        unitPrice: editingQuoteLineRecord.unitPrice,
-        notes: editingQuoteLineRecord.notes,
-        materials
-      })
-    : null;
-  const editingQuoteLine = editingQuoteLineRecord && editingSnapshot
-    ? {
-        id: editingQuoteLineRecord.id,
-        productName: editingQuoteLineRecord.productName,
-        optionSummary: editingQuoteLineRecord.optionSummary,
-        quantity: editingQuoteLineRecord.quantity,
-        unitPrice: editingQuoteLineRecord.unitPrice,
-        notes: editingQuoteLineRecord.notes,
-        configurationSnapshot: editingSnapshot,
-        reconstructed: Boolean(editingSnapshot.reconstructed)
-      }
-    : null;
-  const editingStep = editStepParam ? editStepParam as QuickQuoteStep : null;
 
   const quoteSubtotal = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
@@ -569,12 +541,10 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
 
               {selectedQuote.status !== "deleted" ? (
                 <QuoteMaterialFlowBuilder
-                  key={editingQuoteLine?.id ?? "new-quote-line"}
+                  key="new-quote-line"
                   quoteId={selectedQuote.id}
                   materials={activeMaterials}
                   savedProducts={savedQuoteProducts}
-                  editingLine={editingQuoteLine}
-                  editingStep={editingStep}
                   pricingSettings={{
                     markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                     profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
@@ -597,7 +567,7 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
               <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18 }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <h4 style={{ margin: 0 }}>Saved quote lines</h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Saved-product options edit in the breakdown. Quick-builder lines reopen their original controls; older lines can be rebuilt once.</p>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Click any editable component card to change it in place. Saved products and quick-built lines now use the same inline editing workflow; older lines are recovered automatically.</p>
                 </div>
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
@@ -646,6 +616,12 @@ Thanks`)}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                             profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                            labourRate: companySettings?.quoteLabourRate ?? "66",
+                            inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
+                            inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
+                            monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
+                            signageSizePresets: companySettings?.quoteSignageSizePresets,
+                            smallSizePresets: companySettings?.quoteSmallSizePresets,
                             priceLevelFactor: linkedClientPriceFactor,
                             priceLevelName: linkedClientPriceLevelName,
                             priceLevelCode: linkedClientPriceLevel,

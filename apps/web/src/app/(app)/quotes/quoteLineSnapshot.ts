@@ -473,6 +473,21 @@ export function stepForQuoteSummaryRow(label: string, value: string, snapshot: Q
   const labelKey = normalise(label);
   const valueKey = normalise(value);
   const flowType = snapshot?.flowType ?? "signage";
+  const matchesMaterial = (material: SnapshotMaterial | null | undefined): boolean => {
+    if (!material || !valueKey) return false;
+    return [material.name, material.customerFacingName].filter(Boolean).some((name) => {
+      const key = normalise(String(name));
+      return Boolean(key && (valueKey === key || valueKey.includes(key) || key.includes(valueKey)));
+    });
+  };
+
+  if (matchesMaterial(snapshot?.materialSnapshots?.media)) return "media";
+  if (matchesMaterial(snapshot?.materialSnapshots?.backing)) return "laminate";
+  if (matchesMaterial(snapshot?.materialSnapshots?.laminate)) return "laminate";
+  if (matchesMaterial(snapshot?.materialSnapshots?.smallStock)) return "small_stock";
+  if (matchesMaterial(snapshot?.materialSnapshots?.smallCoating)) return "small_coating";
+  if (matchesMaterial(snapshot?.materialSnapshots?.main)) return flowType === "signage" ? "thickness" : "small_stock";
+  if (valueKey.includes("laminate") || valueKey.includes("cello") || valueKey.includes("coating")) return flowType === "signage" ? "laminate" : "small_coating";
 
   if (labelKey === "quantity") return flowType === "small_format" || flowType === "plan_printing" || flowType === "poster_printing" ? "small_quantity" : "review";
   if (labelKey === "substrate" || labelKey === "stock" || labelKey === "material") return flowType === "signage" ? "thickness" : "small_stock";

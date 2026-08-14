@@ -479,7 +479,7 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
       configurationSnapshot: { ...configurationSnapshot, linkedDispatchLineId: linkedDispatchLineId || null }
     });
 
-    redirect(`/quotes?selected=${quoteId}&message=Quote%20line%20rebuilt%20and%20updated#saved-lines`);
+    redirect(`/quotes?selected=${quoteId}&message=Quote%20line%20updated#saved-lines`);
   }
 
   const createdMain = await addQuoteLine(quoteId, {

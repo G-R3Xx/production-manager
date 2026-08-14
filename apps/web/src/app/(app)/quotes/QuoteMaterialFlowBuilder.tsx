@@ -5,7 +5,7 @@ import { addQuoteLineAction } from "./actions";
 import { QuoteLineBuilder } from "./QuoteLineBuilder";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
 
-type QuoteMaterial = {
+export type QuoteMaterial = {
   id: string;
   name: string;
   customerFacingName?: string | null;
@@ -34,7 +34,7 @@ type QuoteSizePreset = {
   height: string;
 };
 
-type PricingSettings = {
+export type PricingSettings = {
   markupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
   labourRate?: string | number | null;
@@ -139,6 +139,8 @@ type QuoteMaterialFlowBuilderProps = {
   savedProducts?: SavedQuoteProduct[];
   editingLine?: EditableQuoteLine | null;
   editingStep?: QuickQuoteStep | null;
+  compactEdit?: boolean;
+  onCompactCancel?: () => void;
 };
 
 type FlowType = QuickQuoteFlowType;
@@ -1009,7 +1011,7 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [], editingLine = null, editingStep = null }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [], editingLine = null, editingStep = null, compactEdit = false, onCompactCancel }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const materialPool = useMemo(() => {
     const restoredMaterials = materialsFromSnapshot(initialSnapshot);
@@ -1035,7 +1037,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : [createBlankComponentPart()];
 
   const [builderMode, setBuilderMode] = useState<BuilderMode>(editingLine ? "advanced" : initialSnapshot?.builderMode ?? "quick");
-  const [activeStep, setActiveStep] = useState<StepKey>(editingStep ?? initialSnapshot?.activeStep ?? (initialSnapshot?.flowType === "service" ? "service_type" : initialSnapshot?.flowType === "small_format" ? "small_type" : initialSnapshot?.flowType === "plan_printing" || initialSnapshot?.flowType === "poster_printing" ? "small_stock" : "base"));
+  const [activeStep, setActiveStepState] = useState<StepKey>(editingStep ?? initialSnapshot?.activeStep ?? (initialSnapshot?.flowType === "service" ? "service_type" : initialSnapshot?.flowType === "small_format" ? "small_type" : initialSnapshot?.flowType === "plan_printing" || initialSnapshot?.flowType === "poster_printing" ? "small_stock" : "base"));
+  const setActiveStep = (next: StepKey) => {
+    if (!compactEdit) setActiveStepState(next);
+  };
   const [flowType, setFlowType] = useState<FlowType>(initialSnapshot?.flowType || "signage");
   const isPrintDepartment = isPrintDepartmentFlow(flowType);
 
@@ -3259,6 +3264,116 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     );
   }
 
+
+  function renderCompactStep() {
+    const compactGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 } as const;
+    const compactPanel = { border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 } as const;
+    const checkGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 } as const;
+    const changed = () => setUnitPriceOverridden(false);
+
+    if (activeStep === "flow") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Quote line type</b><select value={flowType} onChange={(event) => { setFlowType(event.target.value as FlowType); changed(); }} style={inputStyle}><option value="signage">Large format / signage</option><option value="small_format">Small format / print</option><option value="plan_printing">Plan printing</option><option value="poster_printing">Poster printing</option><option value="service">Pickup / delivery / install</option><option value="component">Custom component / assembly</option></select></label></div>;
+    }
+
+    if (activeStep === "base") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Base product</b><select value={baseType} onChange={(event) => { setBaseType(event.target.value as BaseType); setThickness(""); setColour(""); setMediaId(""); changed(); }} style={inputStyle}><option value="">Choose base</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label></div>;
+    }
+
+    if (activeStep === "thickness" || activeStep === "colour") {
+      const selectedId = selectedMainMaterial?.id ?? "";
+      return <div style={compactPanel}>
+        <label style={{ display: "grid", gap: 6 }}><b>Material / substrate</b><select value={selectedId} onChange={(event) => { const material = baseMaterials.find((item) => item.id === event.target.value); if (baseType === "banner") setMediaId(event.target.value); else { setThickness(material ? thicknessFor(material) : ""); setColour(material ? colourFor(material) : ""); } changed(); }} style={inputStyle}><option value="">Choose material</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label>
+        {selectedMainMaterial ? <small style={{ color: "#64748b" }}>{materialCardMeta(selectedMainMaterial)}</small> : null}
+      </div>;
+    }
+
+    if (activeStep === "size" || activeStep === "small_size") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}</div>;
+    }
+
+    if (activeStep === "artwork") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Artwork</b><select value={artworkChoice} onChange={(event) => { setArtworkChoice(event.target.value as ArtworkChoice); changed(); }} style={inputStyle}><option value="">Choose artwork</option><option value="client_supplied">Print-ready artwork supplied</option><option value="required">Artwork / setup required</option></select></label>{artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label> : null}</div></div>;
+    }
+
+    if (activeStep === "print") {
+      return <div style={compactPanel}><div style={compactGrid}>{!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => { setPrintMethod(event.target.value as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : <div><b>Print method</b><div style={{ marginTop: 6, fontWeight: 900 }}>Roll stock</div></div>}</div>{printed ? <InlineLabourField label="Print setup labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); changed(); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); changed(); }} labourRate={labourRate} quantity={quantityNumber} /> : null}</div>;
+    }
+
+    if (activeStep === "media") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll stock / media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label></div>;
+    }
+
+    if (activeStep === "ink") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Ink</b><select value={ink} onChange={(event) => { setInk(event.target.value as InkChoice); changed(); }} style={inputStyle}><option value="">Choose ink</option>{availableInkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label></div>;
+    }
+
+    if (activeStep === "sides" || activeStep === "small_sides") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => { setSides(event.target.value as SidesChoice); changed(); }} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>{activeStep === "sides" && canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => { const direction = event.target.value as PrintDirection; setPrintDirection(direction); if (direction !== "reverse") setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose direction</option><option value="positive">{selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive / face print"}</option><option value="reverse">Reverse print</option></select></label> : null}</div></div>;
+    }
+
+    if (activeStep === "laminate") {
+      return <div style={compactPanel}><div style={compactGrid}>{backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}</option>)}</select></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label></div>{printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={labourRate} quantity={quantityNumber} /> : null}</div>;
+    }
+
+    if (activeStep === "finishing") {
+      return <div style={compactPanel}><div style={checkGrid}>{finishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={finishings.includes(item.key)} onChange={() => { toggleFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setFinishingLabourBasis(value); changed(); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} quantity={quantityNumber} />{finishings.includes("eyelets") ? <div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Eyelet preset</b><select value={eyeletPresetLabel} onChange={(event) => { setEyeletPresetLabel(event.target.value); changed(); }} style={inputStyle}>{eyeletPresets.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => { setCustomEyeletQty(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label></div> : null}</div>;
+    }
+
+    if (activeStep === "small_type") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Print item</b><select value={smallType} onChange={(event) => { setSmallType(event.target.value as SmallFormatType); changed(); }} style={inputStyle}><option value="">Choose item</option>{smallFormatTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label></div>;
+    }
+
+    if (activeStep === "ncr_details") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Copies / parts</b><input value={ncrCopies} onChange={(event) => { setNcrCopies(event.target.value); changed(); }} type="number" min="2" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Sets per book</b><input value={ncrSetsPerBook} onChange={(event) => { setNcrSetsPerBook(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Page colours</b><input value={ncrPageColours.join(", ")} onChange={(event) => { setNcrPageColours(event.target.value.split(",").map((item) => item.trim()).filter(Boolean)); changed(); }} style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Cover colour</b><input value={ncrCoverColour} onChange={(event) => { setNcrCoverColour(event.target.value); changed(); }} style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Tape colour</b><input value={ncrTapeColour} onChange={(event) => { setNcrTapeColour(event.target.value); changed(); }} style={inputStyle} /></label></div></div>;
+    }
+
+    if (activeStep === "small_stock") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label>{customSmallStockEnabled ? <small style={{ color: "#b54708" }}>This line currently uses a custom stock. Choosing a library material will replace it.</small> : null}</div>;
+    }
+
+    if (activeStep === "small_print") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => { setSmallPrintColour(event.target.value as SmallPrintColour); changed(); }} style={inputStyle}><option value="">Choose print</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label></div>;
+    }
+
+    if (activeStep === "small_coating") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Cello / coating</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose coating</option><option value="none">None</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label></div>;
+    }
+
+    if (activeStep === "small_finishing") {
+      return <div style={compactPanel}><div style={checkGrid}>{smallFinishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={smallFinishings.includes(item.key)} onChange={() => { toggleSmallFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); changed(); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} quantity={quantityNumber} /></div>;
+    }
+
+    if (activeStep === "small_quantity" || activeStep === "review") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => { setQuantity(event.target.value); changed(); }} type="number" min="1" step="any" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Internal line notes</b><textarea value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} style={textareaStyle} /></label></div></div>;
+    }
+
+    if (activeStep === "service_type") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Service</b><select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}><option value="">Choose service</option>{serviceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label></div>;
+    }
+
+    if (activeStep === "service_details" || activeStep === "dispatch") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Pickup / delivery / install</b><select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}><option value="">Choose</option>{serviceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>{serviceType === "delivery" ? <label style={{ display: "grid", gap: 6 }}><b>Delivery charge</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label> : null}{serviceType === "install" ? <><label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Install minutes</b><input value={installMinutes} onChange={(event) => { setInstallMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Travel / call-out</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label></> : null}</div></div>;
+    }
+
+    if (activeStep === "service_fixings") {
+      return <div style={compactPanel}>{fixingOptions.map((item) => <div key={item.key} style={{ display: "grid", gridTemplateColumns: "minmax(180px,1fr) 120px 140px", gap: 8, alignItems: "center" }}><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={serviceFixings.includes(item.key)} onChange={() => { toggleServiceFixing(item.key); changed(); }} />{item.label}</label>{serviceFixings.includes(item.key) ? <><input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); changed(); }} placeholder={`Qty (${item.unit})`} type="number" min="0" step="0.01" style={inputStyle} /><input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); changed(); }} placeholder="Cost each" type="number" min="0" step="0.01" style={inputStyle} /></> : <span />}</div>)}</div>;
+    }
+
+    if (activeStep === "component_details") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Component name</b><input value={componentName} onChange={(event) => { setComponentName(event.target.value); changed(); }} style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Description</b><textarea value={componentDescription} onChange={(event) => { setComponentDescription(event.target.value); changed(); }} style={textareaStyle} /></label></div></div>;
+    }
+
+    if (activeStep === "component_parts") {
+      return <div style={compactPanel}>{componentParts.map((part, index) => <div key={part.id} style={{ border: "1px solid #fed7aa", borderRadius: 12, padding: 10, display: "grid", gap: 8 }}><div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}><b>Part {index + 1}</b><button type="button" onClick={() => removeComponentPart(part.id)} style={{ ...ghostButton, color: "#b42318", minHeight: 32 }}>Remove</button></div><div style={compactGrid}><select value={part.materialId} onChange={(event) => { const material = materialPool.find((item) => item.id === event.target.value); updateComponentPart(part.id, { materialId: event.target.value, name: part.name.trim() || material?.name || "", unit: material ? (isRollMaterial(material) ? "lm" : isSheetMaterial(material) ? "sheet" : "each") : part.unit }); changed(); }} style={inputStyle}><option value="">Custom part</option>{materialPool.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select><input value={part.name} onChange={(event) => { updateComponentPart(part.id, { name: event.target.value }); changed(); }} placeholder="Part name" style={inputStyle} /><input value={part.qty} onChange={(event) => { updateComponentPart(part.id, { qty: event.target.value }); changed(); }} placeholder="Qty" type="number" min="0" step="0.01" style={inputStyle} /><select value={part.unit} onChange={(event) => { updateComponentPart(part.id, { unit: event.target.value }); changed(); }} style={inputStyle}><option value="each">each</option><option value="lm">lm</option><option value="sheet">sheet</option><option value="sqm">sqm</option><option value="pack">pack</option></select><input value={part.unitCost} onChange={(event) => { updateComponentPart(part.id, { unitCost: event.target.value }); changed(); }} placeholder="Cost/unit" type="number" min="0" step="0.01" style={inputStyle} /></div></div>)}<button type="button" onClick={addComponentPart} style={ghostButton}>+ Add part</button></div>;
+    }
+
+    if (activeStep === "component_labour") {
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Labour label</b><input value={componentLabourLabel} onChange={(event) => { setComponentLabourLabel(event.target.value); changed(); }} style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Labour minutes</b><input value={componentLabourMinutes} onChange={(event) => { setComponentLabourMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div></div>;
+    }
+
+    return <div style={compactPanel}><span style={{ color: "#64748b" }}>This component is stored in the structured quote snapshot and can be updated here.</span></div>;
+  }
+
   const handleBuilderKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     const target = event.target as HTMLElement | null;
     const tagName = target?.tagName?.toLowerCase();
@@ -3270,10 +3385,47 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   };
 
   const handleBuilderSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (!canSave || (builderMode !== "quick" && activeStep !== "review")) {
+    if (!canSave || (!compactEdit && builderMode !== "quick" && activeStep !== "review")) {
       event.preventDefault();
     }
   };
+
+  if (compactEdit && editingLine) {
+    return (
+      <form action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
+        <input type="hidden" name="quoteId" value={quoteId} />
+        <input type="hidden" name="editingLineId" value={editingLine.id} />
+        <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
+        <input type="hidden" name="productName" value={editingLine.productName} />
+        <input type="hidden" name="optionSummary" value={optionSummary} />
+        <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
+        <input type="hidden" name="quantity" value={quantity} />
+        <input type="hidden" name="notes" value={lineNotes} />
+        {shouldCreateDispatchLine ? (
+          <>
+            <input type="hidden" name="serviceLineProductName" value={serviceType === "install" ? "Sign Install" : "Delivery"} />
+            <input type="hidden" name="serviceLineOptionSummary" value={dispatchSummary} />
+            <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
+            <input type="hidden" name="serviceLineQuantity" value="1" />
+            <input type="hidden" name="serviceLineConfigurationSnapshot" value={JSON.stringify(dispatchConfigurationSnapshot)} />
+          </>
+        ) : null}
+
+        {renderCompactStep()}
+
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
+          <div style={{ display: "grid", gap: 2 }}>
+            <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
+            <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            {onCompactCancel ? <button type="button" onClick={onCompactCancel} style={{ ...ghostButton, minHeight: 40 }}>Cancel</button> : null}
+            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 40, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save component change" : "Complete required values"}</button>
+          </div>
+        </div>
+      </form>
+    );
+  }
 
   if (builderMode === "saved") {
     return renderSavedProductLayout();
