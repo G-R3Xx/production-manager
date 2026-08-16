@@ -25,6 +25,7 @@ import {
   createArtworkApprovalFromQuoteAction,
   deleteArtworkApprovalAction,
   directApproveArtworkApprovalAction,
+  emailArtworkApprovalClientAction,
   prefillArtworkApprovalPagesFromQuoteAction,
   removeArtworkApprovalPageFromPageAction,
   replaceArtworkApprovalPageProofAction,
@@ -452,7 +453,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     {selectedApproval.status !== "deleted" ? (
                       <>
                         <form action={sendArtworkApprovalFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...primaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Mark sent to client</button></form>
-                        {publicUrl && selectedApproval.email ? <a href={`mailto:${selectedApproval.email}?subject=${encodeURIComponent(`Artwork proof approval - ${selectedApproval.projectName || selectedApproval.clientName}`)}&body=${encodeURIComponent(`Hi ${selectedApproval.contactName || selectedApproval.clientName},\n\nPlease review the artwork proof using the link below:\n\n${publicUrl}\n\nThanks`)}`} style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none" }}>Email client link</a> : null}
+                        {publicUrl && selectedApproval.email ? <form action={emailArtworkApprovalClientAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Email client link</button></form> : null}
                         <form action={directApproveArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", color: "#067647", opacity: !readyToSend || approved ? 0.45 : 1 }}>Approve internally</button></form>
                       </>
                     ) : <form action={restoreArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...primaryButton, width: "100%", background: "#067647" }}>Restore approval</button></form>}
