@@ -28,7 +28,8 @@ import {
 } from "@/server/quotes";
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
-import { createMyobCustomerFromLocalClientForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
+import { createMyobCustomerFromLocalClientForTenant, fetchMyobSalesReferenceDataForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
+import { saveMyobSalesDefaults } from "@/server/myob-sales-settings";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { sendOutboundEmail } from "@/server/outbound-email";
@@ -1040,3 +1041,33 @@ export async function pushAcceptedQuoteToMyobOrderAction(formData: FormData): Pr
 
   redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Order`);
 }
+
+export async function saveMyobSalesDefaultsAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const incomeAccountUid = String(formData.get("incomeAccountUid") ?? "").trim();
+  if (!incomeAccountUid) {
+    redirect(`/quotes?selected=${encodeURIComponent(quoteId)}&error=${encodeURIComponent("Choose a MYOB sales income account first.")}`);
+  }
+
+  let actionError = "";
+  try {
+    const refs = await fetchMyobSalesReferenceDataForTenant(activeTenant.tenantId);
+    const account = refs.accounts.find((candidate) => candidate.uid === incomeAccountUid);
+    if (!account) throw new Error("The selected MYOB income account is no longer available.");
+    await saveMyobSalesDefaults(activeTenant.tenantId, {
+      incomeAccountUid: account.uid,
+      incomeAccountName: account.name,
+      incomeAccountDisplayId: account.displayId
+    });
+  } catch (error) {
+    actionError = error instanceof Error ? error.message : String(error);
+  }
+
+  revalidatePath("/quotes");
+  if (actionError) {
+    redirect(`/quotes?selected=${encodeURIComponent(quoteId)}&error=${encodeURIComponent(actionError)}`);
+  }
+  redirect(`/quotes?selected=${encodeURIComponent(quoteId)}&message=${encodeURIComponent("MYOB sales income account saved. You can send the accepted quote to MYOB now.")}`);
+}
+

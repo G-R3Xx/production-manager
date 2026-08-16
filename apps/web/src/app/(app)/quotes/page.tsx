@@ -8,13 +8,15 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, updateQuoteJobNameAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
+import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
+import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -192,7 +194,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const filter = readParam(params, "filter");
 
   const builderDataNeeded = Boolean(selected);
-  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, quoteProducts] = await Promise.all([
+  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, quoteProducts, salesDefaults] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? listMaterialsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
@@ -201,8 +203,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     builderDataNeeded ? getCompanySettingsByTenantId(activeTenant.tenantId) : Promise.resolve(null),
     listCustomersForTenant(activeTenant.tenantId),
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([])
+    builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([]),
+    selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null })
   ]);
+  const salesReferences = selectedQuote?.status === "accepted"
+    ? await fetchMyobSalesReferenceDataForTenant(activeTenant.tenantId).catch(() => ({ accounts: [] }))
+    : { accounts: [] };
 
   const deletedQuoteCount = allQuoteDrafts.filter((quote) => quote.status === "deleted").length;
   const quoteDrafts = filter === "deleted"
@@ -515,6 +521,25 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             ) : null}
                           </div>
                         </div>
+
+                        {selectedQuote.status === "accepted" && salesReferences.accounts.length ? (
+                          <div style={{ borderTop: `1px solid ${needsMyobLink ? "#fed7aa" : myobTone.border}`, paddingTop: 12, display: "grid", gap: 8 }}>
+                            <form action={saveMyobSalesDefaultsAction} style={{ display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
+                              <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                              <label style={{ display: "grid", gap: 6 }}>
+                                <b style={{ fontSize: 13 }}>Default sales income account</b>
+                                <select name="incomeAccountUid" defaultValue={salesDefaults.incomeAccountUid ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
+                                  <option value="">Choose MYOB income account…</option>
+                                  {salesReferences.accounts.map((account) => (
+                                    <option key={account.uid} value={account.uid}>{account.displayId} · {account.name} ({account.classification})</option>
+                                  ))}
+                                </select>
+                              </label>
+                              <button type="submit" style={{ ...buttonStyle, background: "#334155" }}>Save sales account</button>
+                            </form>
+                            <span style={{ fontSize: 12, color: needsMyobLink ? "#9a3412" : myobTone.fg }}>MYOB Service Orders require an Income account on every line. A customer-specific MYOB Income Account takes priority; this is the fallback for PM-created work.</span>
+                          </div>
+                        ) : null}
 
                         {needsMyobLink ? (
                           <div style={{ borderTop: "1px solid #fed7aa", paddingTop: 12, display: "grid", gap: 12 }}>

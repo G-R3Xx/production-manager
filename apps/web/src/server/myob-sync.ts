@@ -18,6 +18,7 @@ import { upsertImportedProduct } from "@/server/products";
 import { getSupplierById, updateSupplierMyobLink, upsertImportedSupplier, type SupplierRecord } from "@/server/suppliers";
 import { getMaterialById, updateMaterialMyobLink, type MaterialRecord } from "@/server/materials";
 import { getPurchasingDefaults, getPurchaseOrder, listPurchaseOrderLines, markPurchaseOrderMyobSynced } from "@/server/purchasing";
+import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
 
 export type MyobReadOnlySyncSummary = {
   companyFileId: string;
@@ -991,7 +992,13 @@ function buildMyobCustomerAddresses(customer: CustomerRecord): Record<string, un
   return records;
 }
 
-function buildMyobCustomerPayload(customer: CustomerRecord, salesTaxCode?: MyobTaxCodeReference): Record<string, unknown> {
+type MyobIncomeAccountReference = { uid: string; name?: string; displayId?: string };
+
+function buildMyobCustomerPayload(
+  customer: CustomerRecord,
+  salesTaxCode?: MyobTaxCodeReference,
+  incomeAccount?: MyobIncomeAccountReference
+): Record<string, unknown> {
   const companyName = String(customer.companyName ?? "").trim();
   const firstName = String(customer.firstName ?? "").trim();
   const lastName = String(customer.lastName ?? "").trim();
@@ -1018,6 +1025,13 @@ function buildMyobCustomerPayload(customer: CustomerRecord, salesTaxCode?: MyobT
   payload.SellingDetails = {
     ItemPriceLevel: itemPriceLevel,
     ...(abn ? { ABN: abn } : {}),
+    ...(incomeAccount?.uid ? {
+      IncomeAccount: {
+        UID: incomeAccount.uid,
+        ...(incomeAccount.name ? { Name: incomeAccount.name } : {}),
+        ...(incomeAccount.displayId ? { DisplayID: incomeAccount.displayId } : {})
+      }
+    } : {}),
     ...(salesTaxCode ? {
       TaxCode: { UID: salesTaxCode.uid, Code: salesTaxCode.code },
       FreightTaxCode: { UID: salesTaxCode.uid, Code: salesTaxCode.code },
@@ -1281,7 +1295,16 @@ export async function createMyobCustomerFromLocalClientForTenant(
   }
 
   const salesTaxCode = await resolveMyobCustomerSalesTaxCode(tenantId, accessToken, connection.companyFileId);
-  const payload = buildMyobCustomerPayload(customer, salesTaxCode);
+  const salesDefaults = await getMyobSalesDefaults(tenantId);
+  const payload = buildMyobCustomerPayload(
+    customer,
+    salesTaxCode,
+    salesDefaults.incomeAccountUid ? {
+      uid: salesDefaults.incomeAccountUid,
+      name: salesDefaults.incomeAccountName ?? undefined,
+      displayId: salesDefaults.incomeAccountDisplayId ?? undefined
+    } : undefined
+  );
   const endpoint = "/Contact/Customer";
   const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
   let created = result.data && typeof result.data === "object" && !Array.isArray(result.data)
@@ -1469,32 +1492,101 @@ async function resolveMyobCustomerUid(tenantId: string, quote: import("@/server/
   return { uid: null, source: "client-is-manual-not-linked-to-myob", customerPayload: customer.payloadJson };
 }
 
+type MyobSalesOrderReferences = {
+  incomeAccountUid: string;
+  taxCodeUid: string;
+  taxCode: string;
+  freightTaxCodeUid: string;
+  freightTaxCode: string;
+  incomeSource: "customer" | "tenant_default" | "only_income_account";
+};
+
+async function resolveMyobSalesOrderReferences(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string,
+  customerUid: string
+): Promise<MyobSalesOrderReferences> {
+  let currentCustomer: Record<string, unknown> = {};
+  try {
+    const current = await fetchMyobJson(accessToken, companyFileId, `/Contact/Customer/${customerUid}`, tenantId);
+    if (current.data && typeof current.data === "object" && !Array.isArray(current.data)) {
+      currentCustomer = current.data as Record<string, unknown>;
+    }
+  } catch (error) {
+    if (!isMyobNotFoundError(error)) throw error;
+  }
+
+  const selling = objectChild(currentCustomer, "SellingDetails");
+  const customerIncome = objectChild(selling, "IncomeAccount");
+  const customerTax = objectChild(selling, "TaxCode");
+  const customerFreightTax = objectChild(selling, "FreightTaxCode");
+  const defaults = await getMyobSalesDefaults(tenantId);
+
+  let incomeAccountUid = textOrNull(customerIncome.UID);
+  let incomeSource: MyobSalesOrderReferences["incomeSource"] = "customer";
+  if (!incomeAccountUid && defaults.incomeAccountUid) {
+    incomeAccountUid = defaults.incomeAccountUid;
+    incomeSource = "tenant_default";
+  }
+  if (!incomeAccountUid) {
+    const refs = await fetchMyobSalesReferenceDataForTenant(tenantId);
+    if (refs.accounts.length === 1) {
+      incomeAccountUid = refs.accounts[0].uid;
+      incomeSource = "only_income_account";
+    }
+  }
+  if (!incomeAccountUid) {
+    throw new Error("MYOB needs an Income account for service-order lines. Choose the Default sales income account in the MYOB open job / order section on Quotes, then send the order again.");
+  }
+
+  let taxCodeUid = textOrNull(customerTax.UID);
+  let taxCode = textOrNull(customerTax.Code) ?? "GST";
+  if (!taxCodeUid) {
+    const fallbackTax = await resolveMyobCustomerSalesTaxCode(tenantId, accessToken, companyFileId);
+    taxCodeUid = fallbackTax.uid;
+    taxCode = fallbackTax.code;
+  }
+
+  let freightTaxCodeUid = textOrNull(customerFreightTax.UID);
+  let freightTaxCode = textOrNull(customerFreightTax.Code) ?? taxCode;
+  if (!freightTaxCodeUid) {
+    freightTaxCodeUid = taxCodeUid;
+    freightTaxCode = taxCode;
+  }
+
+  return { incomeAccountUid, taxCodeUid, taxCode, freightTaxCodeUid, freightTaxCode, incomeSource };
+}
+
 function buildMyobServiceOrderPayload(input: {
   quote: import("@/server/quotes").QuoteDraftRecord;
   lines: import("@/server/quotes").QuoteLineRecord[];
   customerUid: string;
+  references: MyobSalesOrderReferences;
   customerMaterialNames?: Map<string, string>;
 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const subtotal = input.lines.reduce((sum, line) => sum + numberValue(line.lineTotal), 0);
   const lines = input.lines.map((line) => ({
     Type: "Transaction",
     Description: buildOrderLineDescription(line, input.customerMaterialNames),
     Total: numberValue(line.lineTotal),
-    TaxCode: { Code: "GST" },
+    Account: { UID: input.references.incomeAccountUid },
+    TaxCode: { UID: input.references.taxCodeUid, Code: input.references.taxCode },
     Job: null
   }));
 
   return {
     Customer: { UID: input.customerUid },
     Date: today,
-    Number: input.quote.quoteNumber ?? undefined,
+    // Let MYOB allocate its own Sales Order number. PM quote numbers can exceed MYOB's 13-character order-number limit.
+    // The PM quote number is preserved in JournalMemo/Comment and in the local external mapping.
+    Number: undefined,
     CustomerPurchaseOrderNumber: input.quote.clientPurchaseOrderNumber ?? undefined,
     JournalMemo: `Production Manager accepted quote ${input.quote.quoteNumber ?? input.quote.id}`,
     Comment: input.quote.notes ?? undefined,
     Lines: lines,
     Freight: 0,
-    FreightTaxCode: { Code: "GST" },
+    FreightTaxCode: { UID: input.references.freightTaxCodeUid, Code: input.references.freightTaxCode },
     IsTaxInclusive: false
   };
 }
@@ -1546,13 +1638,20 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
 
   const { accessToken } = await getValidAccessToken(tenantId);
   const customerMaterialNames = await customerFacingMaterialNamesForTenant(tenantId).catch(() => new Map<string, string>());
-  const payload = buildMyobServiceOrderPayload({ quote, lines, customerUid: customer.uid, customerMaterialNames });
   const endpoint = "/Sale/Order/Service";
+  let payload: Record<string, unknown> | null = null;
 
   try {
+    const references = await resolveMyobSalesOrderReferences(tenantId, accessToken, connection.companyFileId, customer.uid);
+    payload = buildMyobServiceOrderPayload({ quote, lines, customerUid: customer.uid, references, customerMaterialNames });
     const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
-    const uid = readMyobUid(result.data) ?? `pending-${quote.id}`;
-    const number = readMyobNumber(result.data) ?? quote.quoteNumber ?? null;
+    const uid = readMyobUid(result.data) ?? readUidFromLocation(result.location, connection.companyFileId);
+    if (!uid) throw new Error("MYOB accepted the Sales Order request but Production Manager could not read the new order UID.");
+    let number = readMyobNumber(result.data);
+    if (!number) {
+      const createdOrder = await fetchMyobJson(accessToken, connection.companyFileId, `/Sale/Order/Service/${uid}`, tenantId);
+      number = readMyobNumber(createdOrder.data);
+    }
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
       status: "synced",
       uid,
@@ -1937,6 +2036,32 @@ export async function fetchMyobPurchasingReferenceDataForTenant(tenantId: string
     .map((row) => ({ uid: String(row.UID), code: String(row.Code ?? ""), description: String(row.Description ?? row.Name ?? "") }))
     .filter((row) => row.uid && row.code);
   return { accounts, taxCodes };
+}
+
+export type MyobSalesReferenceData = {
+  accounts: Array<{ uid: string; name: string; displayId: string; classification: string }>;
+};
+
+export async function fetchMyobSalesReferenceDataForTenant(tenantId: string): Promise<MyobSalesReferenceData> {
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") return { accounts: [] };
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const accountsResponse = await fetchAllMyobCollectionRecords(
+    accessToken,
+    connection.companyFileId,
+    `/GeneralLedger/Account?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+    tenantId
+  );
+  const accounts = accountsResponse.records
+    .filter((row) => row.IsActive !== false && row.IsHeader !== true && ["Income", "OtherIncome"].includes(String(row.Classification ?? "")))
+    .map((row) => ({
+      uid: String(row.UID ?? ""),
+      name: String(row.Name ?? ""),
+      displayId: String(row.DisplayID ?? ""),
+      classification: String(row.Classification ?? "")
+    }))
+    .filter((row) => row.uid);
+  return { accounts };
 }
 
 function generatedMyobMaterialNumber(material: MaterialRecord): string {
