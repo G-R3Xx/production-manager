@@ -2,11 +2,12 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { artworkQuoteLineInScope, getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, listQuoteLines, markArtworkApprovalViewedByToken, quoteUsesLineResponses, type ArtworkApprovalPageRecord } from "@/server/quotes";
+import { artworkQuoteLineInScope, getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, listQuoteLines, markArtworkApprovalViewedByToken, quoteUsesLineResponses, type ArtworkApprovalPageRecord, type QuoteLineRecord } from "@/server/quotes";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { ArtworkResponsePanel } from "./ArtworkResponsePanel";
+import { ArtworkProofPreview } from "./ArtworkProofPreview";
 
 type PageProps = { params: Promise<{ token: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
@@ -18,20 +19,6 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
 function isPdfArtwork(url: string | null | undefined, fileName?: string | null): boolean {
   const haystack = `${url ?? ""} ${fileName ?? ""}`.toLowerCase().split("?")[0];
   return haystack.endsWith(".pdf") || haystack.includes(".pdf ");
-}
-
-function proofArtworkPreview(page: ArtworkApprovalPageRecord) {
-  if (isPdfArtwork(page.imageUrl, page.fileName)) {
-    return (
-      <div style={{ width: "100%", minHeight: 500, display: "grid", gap: 10 }}>
-        <object data={page.imageUrl} type="application/pdf" style={{ width: "100%", height: 540, border: "none", borderRadius: 12, background: "#fff" }}>
-          <iframe src={page.imageUrl} title={page.title} style={{ width: "100%", height: 540, border: "none", borderRadius: 12, background: "#fff" }} />
-        </object>
-        <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#3538cd", fontWeight: 900, textDecoration: "none", textAlign: "center" }}>Open PDF full size</a>
-      </div>
-    );
-  }
-  return <img src={page.imageUrl} alt={page.title} style={{ width: "100%", maxHeight: 720, objectFit: "contain", objectPosition: "center", display: "block" }} />;
 }
 
 function summaryKey(value: string): string {
@@ -54,15 +41,96 @@ function cleanSummaryLines(value: string | null | undefined, options?: { exclude
   return specific.length ? specific.join("\n") : null;
 }
 
-function detailsList(page: ArtworkApprovalPageRecord): Array<{ label: string; value: string | null }> {
-  const finishing = page.productionType === "small_format" || page.productionType === "plan_printing" || page.productionType === "poster_printing" ? cleanSummaryLines(page.smallFormatSummary) : cleanSummaryLines(page.installSummary);
-  return [
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function compactText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function materialName(material: Record<string, unknown> | null): string | null {
+  if (!material) return null;
+  return compactText(material.customerFacingName) || compactText(material.name) || null;
+}
+
+function friendlyValue(value: unknown): string | null {
+  const raw = compactText(value);
+  if (!raw) return null;
+  return raw.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function summaryValues(line: QuoteLineRecord | null | undefined, label: string): string[] {
+  if (!line?.optionSummary) return [];
+  const wanted = summaryKey(label);
+  return line.optionSummary
+    .split(/\s+[·•]\s+/g)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part) => {
+      const colon = part.indexOf(":");
+      if (colon <= 0) return [];
+      const currentLabel = summaryKey(part.slice(0, colon));
+      return currentLabel === wanted ? [part.slice(colon + 1).trim()] : [];
+    })
+    .filter(Boolean);
+}
+
+function structuredDetails(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined): Array<{ label: string; value: string | null }> {
+  const snapshot = recordValue(line?.configurationSnapshot);
+  const materials = recordValue(snapshot?.materialSnapshots);
+  const main = recordValue(materials?.main);
+  const media = recordValue(materials?.media);
+  const backing = recordValue(materials?.backing);
+  const laminate = recordValue(materials?.laminate);
+  const smallStock = recordValue(materials?.smallStock);
+  const smallCoating = recordValue(materials?.smallCoating);
+  const flowType = compactText(snapshot?.flowType || page.productionType).toLowerCase();
+  const printMethod = compactText(snapshot?.printMethod).toLowerCase();
+  const mainLooksLikeRoll = Boolean(main && (Number(main.rollWidthMm ?? 0) > 0 || /^(?:lm|linear\s*m(?:etre)?s?)$/i.test(compactText(main.stockUom)) || /\b(roll|vinyl|banner|sav|media)\b/i.test(compactText(main.materialType))));
+  const resolvedMedia = media ?? (printMethod === "roll_stock" && mainLooksLikeRoll ? main : null);
+  const baseStock = flowType === "small_format" || flowType === "plan_printing" || flowType === "poster_printing" ? (smallStock ?? main) : (mainLooksLikeRoll && resolvedMedia === main ? null : main);
+  const resolvedLaminate = laminate ?? smallCoating;
+
+  const ink = friendlyValue(snapshot?.ink ?? snapshot?.smallPrintColour) || cleanSummaryLines(page.colourSummary);
+  const sides = friendlyValue(snapshot?.sides ?? snapshot?.smallSides);
+  const printDirection = compactText(snapshot?.printDirection);
+  const printBits = [ink, sides && !/^single sided$/i.test(sides) ? sides : null, printDirection && !/^(?:standard|positive)$/i.test(printDirection) ? friendlyValue(printDirection) : null].filter(Boolean) as string[];
+
+  const finishingFromQuote = [...summaryValues(line, "Finishing"), ...summaryValues(line, "Finishings")];
+  const fallbackFinishing = page.productionType === "small_format" || page.productionType === "plan_printing" || page.productionType === "poster_printing"
+    ? cleanSummaryLines(page.smallFormatSummary, { exclude: /\b(laminate|lamination|coating|stock|substrate|print setup|artwork supplied|finished size|quantity|qty)\b/i })
+    : cleanSummaryLines(page.installSummary, { exclude: /\b(laminate|lamination|coating)\b/i });
+  const finishing = finishingFromQuote.length ? cleanSummaryLines(finishingFromQuote.join("\n"), { exclude: /\b(laminate|lamination|coating)\b/i }) : fallbackFinishing;
+
+  const stockFallback = cleanSummaryLines(page.substrateSummary, { exclude: /\b(laminate|lamination|coating|roll stock|media)\b/i });
+  const rows = [
     { label: "Quantity", value: page.quantity },
     { label: "Finished size", value: page.sizeSummary },
-    { label: "Colour / print", value: cleanSummaryLines(page.colourSummary) },
-    { label: "Stock", value: cleanSummaryLines(page.substrateSummary, { exclude: /\b(laminate|lamination|coating)\b/i }) },
+    { label: "Stock", value: materialName(baseStock) || stockFallback },
+    { label: "Print media", value: materialName(resolvedMedia) },
+    { label: "Colour / print", value: printBits.length ? printBits.join(" · ") : cleanSummaryLines(page.colourSummary) },
+    { label: "Backing", value: materialName(backing) },
+    { label: "Laminate", value: materialName(resolvedLaminate) },
     { label: "Finishing", value: finishing }
-  ].filter((row) => String(row.value ?? "").trim());
+  ];
+
+  const seen = new Set<string>();
+  return rows.filter((row) => {
+    const value = compactText(row.value);
+    if (!value || /^none$/i.test(value)) return false;
+    const key = `${summaryKey(row.label)}:${summaryKey(value)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function proofDescription(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined): string | null {
+  // Quote-backed proof pages already have the production specification broken into dedicated
+  // fields. Do not repeat the entire option/process summary as a giant description.
+  if (line) return null;
+  return cleanSummaryLines(page.description);
 }
 
 function formatDate(value: string | null | undefined): string {
@@ -101,6 +169,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
     .filter((line) => artworkQuoteLineInScope(line, sourceQuote?.status, usesLineResponses))
     .map((line) => line.id));
   const pages = allPages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
+  const sourceLineById = new Map(sourceLines.map((line) => [line.id, line]));
   const [linkedClient, sourceEnquiry] = await Promise.all([
     sourceQuote?.linkedCustomerId ? getCustomerById(approval.tenantId, sourceQuote.linkedCustomerId) : Promise.resolve(null),
     sourceQuote?.enquiryId ? getEnquiryById(approval.tenantId, sourceQuote.enquiryId) : Promise.resolve(null)
@@ -153,13 +222,13 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             <article id={`proof-${index + 1}`} key={page.id} style={{ border: "1px solid #d0d5dd", borderRadius: 22, background: "#fff", boxShadow: "0 14px 40px rgba(15,23,42,0.06)", overflow: "hidden", scrollMarginTop: 18 }}>
               <header style={{ padding: "13px 16px", borderBottom: "1px solid #e4e7ec", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", background: "#fbfcfe" }}>
                 <div style={{ minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.08em" }}>{page.signCode || `S${index + 1}`} · Proof {index + 1} of {pages.length}</p><h2 style={{ margin: "3px 0 0", fontSize: 20 }}>{page.title}</h2></div>
-                <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#3538cd", fontWeight: 900, textDecoration: "none", fontSize: 12, whiteSpace: "nowrap" }}>Open full size ↗</a>
+                <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#3538cd", fontWeight: 900, textDecoration: "none", fontSize: 12, whiteSpace: "nowrap" }}>Open original ↗</a>
               </header>
               <div className="public-artwork-proof">
-                <div style={{ padding: 18, display: "grid", placeItems: "center", background: "#fff", overflow: "hidden" }}>{proofArtworkPreview(page)}</div>
+                <div style={{ padding: 18, display: "grid", placeItems: "center", background: "#eef2f6", overflow: "hidden" }}><ArtworkProofPreview url={page.imageUrl} title={page.title} isPdf={isPdfArtwork(page.imageUrl, page.fileName)} /></div>
                 <aside style={{ borderLeft: "1px solid #e4e7ec", background: "#f8fafc", padding: 16, display: "grid", alignContent: "start", gap: 11 }}>
-                  {page.description ? <div><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>Description</span><p style={{ margin: "4px 0 0", color: "#344054", fontSize: 12, lineHeight: 1.45 }}>{page.description}</p></div> : null}
-                  {detailsList(page).map((row) => <div key={row.label} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><p style={{ margin: "4px 0 0", color: "#1d2939", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{row.value}</p></div>)}
+                  {proofDescription(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null) ? <div><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>Description</span><p style={{ margin: "4px 0 0", color: "#344054", fontSize: 12, lineHeight: 1.45 }}>{proofDescription(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null)}</p></div> : null}
+                  {structuredDetails(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null).map((row) => <div key={row.label} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><p style={{ margin: "4px 0 0", color: "#1d2939", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{row.value}</p></div>)}
                   {page.notes && !/auto-created from quote line/i.test(page.notes) ? <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>Notes</span><p style={{ margin: "4px 0 0", color: "#344054", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{page.notes}</p></div> : null}
                 </aside>
               </div>
