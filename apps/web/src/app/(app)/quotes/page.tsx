@@ -506,9 +506,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                           <div style={{ display: "grid", gap: 4 }}>
                             <strong>MYOB open job / order</strong>
-                            <span style={{ fontSize: 13 }}>Accepted quotes become open MYOB Orders. Drafts, enquiries and surveys stay in Production Manager only.</span>
+                            <span style={{ fontSize: 13 }}>Accepted quotes become open MYOB Item Orders. Drafts, enquiries and surveys stay in Production Manager only.</span>
                             {linkedClient ? <span style={{ fontSize: 13 }}>Client: <strong>{linkedClient.displayName}</strong> · MYOB: <strong>{linkedMyobCustomer ? linkedMyobCustomer.displayName : "Not linked"}</strong>{customerMyobPriceLevel(linkedClient) ? <> · Price level: <strong>{customerMyobPriceLevelName(linkedClient)} ({customerMyobPriceLevel(linkedClient)})</strong></> : null}</span> : null}
                             {selectedQuote.myobOrderNumber ? <span style={{ fontSize: 13 }}>Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · synced ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</span> : null}
+                            {selectedQuote.myobOrderStatus === "synced" && JSON.stringify(selectedQuote.myobOrderPayloadJson ?? {}).includes("/Sale/Order/Service") ? (
+                              <span style={{ fontSize: 12, color: "#9a3412", fontWeight: 800 }}>This order was created by an older Production Manager build using MYOB Service layout. New accepted quotes are sent using MYOB Item layout.</span>
+                            ) : null}
                             {selectedQuote.myobOrderSyncError && !needsMyobLink ? <span style={{ fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</span> : null}
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -516,7 +519,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {canPush && !needsMyobLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
                                 <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                                <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
+                                <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Item Order</button>
                               </form>
                             ) : null}
                           </div>
@@ -537,7 +540,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                               </label>
                               <button type="submit" style={{ ...buttonStyle, background: "#334155" }}>Save sales account</button>
                             </form>
-                            <span style={{ fontSize: 12, color: needsMyobLink ? "#9a3412" : myobTone.fg }}>MYOB Service Orders require an Income account on every line. A customer-specific MYOB Income Account takes priority; this is the fallback for PM-created work.</span>
+                            <span style={{ fontSize: 12, color: needsMyobLink ? "#9a3412" : myobTone.fg }}>MYOB Item Orders use the linked MYOB sales item on saved products. Custom/quick quote lines use the PM-CUSTOM sales item; this Income account is used when Production Manager creates that fallback item.</span>
                           </div>
                         ) : null}
 

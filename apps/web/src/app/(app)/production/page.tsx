@@ -994,7 +994,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                   <div style={{ display: "grid", gap: 5 }}>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>MYOB open job / order</p>
                     <h3 style={{ margin: 0 }}>{myobTone.label}</h3>
-                    <p style={{ margin: 0, fontSize: 13 }}>Production Manager runs the workflow. Accepted quotes are sent to MYOB as open Orders when you choose to sync.</p>
+                    <p style={{ margin: 0, fontSize: 13 }}>Production Manager runs the workflow. Accepted quotes are sent to MYOB as open Item Orders when you choose to sync.</p>
                     {selectedQuote.myobOrderNumber ? <p style={{ margin: 0, fontSize: 13 }}>MYOB Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</p> : null}
                     {selectedQuote.myobOrderSyncError ? <p style={{ margin: 0, fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</p> : null}
                   </div>
@@ -1004,7 +1004,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                       <form action={pushProductionQuoteToMyobOrderAction}>
                         <input type="hidden" name="jobId" value={selectedJob.id} />
                         <input type="hidden" name="quoteId" value={selectedJob.quoteId} />
-                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Order</button>
+                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Item Order</button>
                       </form>
                     ) : null}
                   </div>

@@ -1039,7 +1039,7 @@ export async function pushAcceptedQuoteToMyobOrderAction(formData: FormData): Pr
     redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(pushError)}`);
   }
 
-  redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Order`);
+  redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Item%20Order`);
 }
 
 export async function saveMyobSalesDefaultsAction(formData: FormData): Promise<void> {

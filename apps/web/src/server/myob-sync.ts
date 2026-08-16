@@ -14,7 +14,7 @@ import {
 import { env } from "@/lib/env";
 import { addressKey, formatAustralianAbn, formatStructuredAddress, hasStructuredAddress, myobAddressFields, myobRecordToStructuredAddress, structuredAddressFromPayload, type StructuredAddress } from "@/lib/contact-address";
 import { MYOB_PRICE_LEVELS, getCustomerById, normaliseMyobPriceLevel, updateCustomerPayloadForTenant, upsertImportedCustomer, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
-import { upsertImportedProduct } from "@/server/products";
+import { getProductById, upsertImportedProduct } from "@/server/products";
 import { getSupplierById, updateSupplierMyobLink, upsertImportedSupplier, type SupplierRecord } from "@/server/suppliers";
 import { getMaterialById, updateMaterialMyobLink, type MaterialRecord } from "@/server/materials";
 import { getPurchasingDefaults, getPurchaseOrder, listPurchaseOrderLines, markPurchaseOrderMyobSynced } from "@/server/purchasing";
@@ -1537,7 +1537,7 @@ async function resolveMyobSalesOrderReferences(
     }
   }
   if (!incomeAccountUid) {
-    throw new Error("MYOB needs an Income account for service-order lines. Choose the Default sales income account in the MYOB open job / order section on Quotes, then send the order again.");
+    throw new Error("MYOB needs a sales Income account for Item Orders and the PM-CUSTOM fallback sales item. Choose the Default sales income account in the MYOB open job / order section on Quotes, then send the order again.");
   }
 
   let taxCodeUid = textOrNull(customerTax.UID);
@@ -1558,22 +1558,200 @@ async function resolveMyobSalesOrderReferences(
   return { incomeAccountUid, taxCodeUid, taxCode, freightTaxCodeUid, freightTaxCode, incomeSource };
 }
 
-function buildMyobServiceOrderPayload(input: {
+type MyobItemOrderLineReference = {
+  uid: string;
+  number: string | null;
+  name: string | null;
+  locationUid: string | null;
+  source: "linked_product" | "pm_custom_fallback";
+};
+
+const PM_CUSTOM_SALES_ITEM_NUMBER = "PM-CUSTOM";
+const PM_CUSTOM_SALES_ITEM_NAME = "Custom Production";
+
+function myobItemLocationUid(item: Record<string, unknown>): string | null {
+  return textOrNull(objectChild(item, "DefaultSellLocation").UID);
+}
+
+function isUsableMyobSalesItem(item: Record<string, unknown>): boolean {
+  return item.IsActive !== false && item.IsSold === true && Boolean(readMyobUid(item));
+}
+
+async function exactMyobSalesItemNumberMatches(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string,
+  number: string
+): Promise<Record<string, unknown>[]> {
+  try {
+    const response = await fetchMyobJson(
+      accessToken,
+      companyFileId,
+      `/Inventory/Item?$filter=Number eq '${odataString(number)}'&$top=20`,
+      tenantId
+    );
+    return myobCollectionRecords(response.data).filter(
+      (row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase()
+    );
+  } catch (error) {
+    if (!shouldFallbackToUnfilteredMyobRead(error)) throw error;
+    const fallback = await fetchAllMyobCollectionRecords(
+      accessToken,
+      companyFileId,
+      `/Inventory/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    );
+    return fallback.records.filter(
+      (row) => String(row.Number ?? "").trim().toLowerCase() === number.toLowerCase()
+    );
+  }
+}
+
+function buildMyobCustomSalesItemPayload(references: MyobSalesOrderReferences): Record<string, unknown> {
+  return {
+    Number: PM_CUSTOM_SALES_ITEM_NUMBER,
+    Name: PM_CUSTOM_SALES_ITEM_NAME,
+    Description: "Production Manager custom quoted work",
+    UseDescription: false,
+    IsActive: true,
+    IsBought: false,
+    IsSold: true,
+    IsInventoried: false,
+    IncomeAccount: { UID: references.incomeAccountUid },
+    SellingDetails: {
+      BaseSellingPrice: 0,
+      TaxCode: { UID: references.taxCodeUid },
+      IsTaxInclusive: false,
+      CalculateSalesTaxOn: "ActualSellingPrice"
+    }
+  };
+}
+
+async function ensureMyobCustomSalesItem(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string,
+  references: MyobSalesOrderReferences
+): Promise<MyobItemOrderLineReference> {
+  let matches = await exactMyobSalesItemNumberMatches(tenantId, accessToken, companyFileId, PM_CUSTOM_SALES_ITEM_NUMBER);
+  if (matches.length > 1) {
+    throw new Error(`More than one MYOB item uses ${PM_CUSTOM_SALES_ITEM_NUMBER}. Keep one active sold item with that Item Number before sending PM quotes.`);
+  }
+
+  let item = matches[0] ?? null;
+  if (!item) {
+    const payload = buildMyobCustomSalesItemPayload(references);
+    const result = await sendMyobJson(accessToken, companyFileId, "/Inventory/Item", "POST", payload, tenantId);
+    const created = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+      ? result.data as Record<string, unknown>
+      : {};
+    const uid = readMyobUid(created) ?? readUidFromLocation(result.location, companyFileId);
+    if (uid) {
+      try {
+        const current = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item/${uid}`, tenantId);
+        if (current.data && typeof current.data === "object" && !Array.isArray(current.data)) {
+          item = current.data as Record<string, unknown>;
+        } else {
+          item = { ...created, UID: uid, Number: PM_CUSTOM_SALES_ITEM_NUMBER, Name: PM_CUSTOM_SALES_ITEM_NAME, IsActive: true, IsSold: true };
+        }
+      } catch {
+        item = { ...created, UID: uid, Number: PM_CUSTOM_SALES_ITEM_NUMBER, Name: PM_CUSTOM_SALES_ITEM_NAME, IsActive: true, IsSold: true };
+      }
+    } else {
+      matches = await exactMyobSalesItemNumberMatches(tenantId, accessToken, companyFileId, PM_CUSTOM_SALES_ITEM_NUMBER);
+      item = matches[0] ?? null;
+    }
+  }
+
+  if (!item || !readMyobUid(item)) {
+    throw new Error(`MYOB could not create or find the ${PM_CUSTOM_SALES_ITEM_NUMBER} fallback sales item.`);
+  }
+  if (!isUsableMyobSalesItem(item)) {
+    throw new Error(`MYOB item ${PM_CUSTOM_SALES_ITEM_NUMBER} exists but is not an active sold item. Make it active and tick "I Sell This Item", or rename/remove it so Production Manager can create the fallback sales item.`);
+  }
+
+  return {
+    uid: readMyobUid(item)!,
+    number: textOrNull(item.Number),
+    name: textOrNull(item.Name),
+    locationUid: myobItemLocationUid(item),
+    source: "pm_custom_fallback"
+  };
+}
+
+async function resolveMyobItemOrderLineReferences(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string,
+  lines: import("@/server/quotes").QuoteLineRecord[],
+  references: MyobSalesOrderReferences
+): Promise<Map<string, MyobItemOrderLineReference>> {
+  const resolved = new Map<string, MyobItemOrderLineReference>();
+  let fallback: MyobItemOrderLineReference | null = null;
+
+  for (const line of lines) {
+    let lineItem: MyobItemOrderLineReference | null = null;
+    if (line.productId) {
+      const product = await getProductById(tenantId, line.productId);
+      const linkedUid = product?.myobUid && normaliseGuid(product.myobUid) !== normaliseGuid(companyFileId)
+        ? product.myobUid
+        : null;
+      if (linkedUid) {
+        try {
+          const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item/${linkedUid}`, tenantId);
+          if (response.data && typeof response.data === "object" && !Array.isArray(response.data)) {
+            const item = response.data as Record<string, unknown>;
+            if (isUsableMyobSalesItem(item)) {
+              lineItem = {
+                uid: linkedUid,
+                number: textOrNull(item.Number),
+                name: textOrNull(item.Name),
+                locationUid: myobItemLocationUid(item),
+                source: "linked_product"
+              };
+            }
+          }
+        } catch (error) {
+          if (!isMyobNotFoundError(error)) throw error;
+        }
+      }
+    }
+
+    if (!lineItem) {
+      fallback ??= await ensureMyobCustomSalesItem(tenantId, accessToken, companyFileId, references);
+      lineItem = fallback;
+    }
+    resolved.set(line.id, lineItem);
+  }
+
+  return resolved;
+}
+
+function buildMyobItemOrderPayload(input: {
   quote: import("@/server/quotes").QuoteDraftRecord;
   lines: import("@/server/quotes").QuoteLineRecord[];
   customerUid: string;
   references: MyobSalesOrderReferences;
+  lineItems: Map<string, MyobItemOrderLineReference>;
   customerMaterialNames?: Map<string, string>;
 }) {
   const today = new Date().toISOString().slice(0, 10);
-  const lines = input.lines.map((line) => ({
-    Type: "Transaction",
-    Description: buildOrderLineDescription(line, input.customerMaterialNames),
-    Total: numberValue(line.lineTotal),
-    Account: { UID: input.references.incomeAccountUid },
-    TaxCode: { UID: input.references.taxCodeUid, Code: input.references.taxCode },
-    Job: null
-  }));
+  const lines = input.lines.map((line) => {
+    const item = input.lineItems.get(line.id);
+    if (!item) throw new Error(`No MYOB sales item could be resolved for quote line ${line.productName}.`);
+    return {
+      Type: "Transaction",
+      Description: buildOrderLineDescription(line, input.customerMaterialNames),
+      ShipQuantity: numberValue(line.quantity),
+      UnitPrice: numberValue(line.unitPrice),
+      DiscountPercent: 0,
+      Total: numberValue(line.lineTotal),
+      Item: { UID: item.uid },
+      TaxCode: { UID: input.references.taxCodeUid, Code: input.references.taxCode },
+      ...(item.locationUid ? { Location: { UID: item.locationUid } } : {}),
+      Job: null
+    };
+  });
 
   return {
     Customer: { UID: input.customerUid },
@@ -1638,18 +1816,19 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
 
   const { accessToken } = await getValidAccessToken(tenantId);
   const customerMaterialNames = await customerFacingMaterialNamesForTenant(tenantId).catch(() => new Map<string, string>());
-  const endpoint = "/Sale/Order/Service";
+  const endpoint = "/Sale/Order/Item";
   let payload: Record<string, unknown> | null = null;
 
   try {
     const references = await resolveMyobSalesOrderReferences(tenantId, accessToken, connection.companyFileId, customer.uid);
-    payload = buildMyobServiceOrderPayload({ quote, lines, customerUid: customer.uid, references, customerMaterialNames });
+    const lineItems = await resolveMyobItemOrderLineReferences(tenantId, accessToken, connection.companyFileId, lines, references);
+    payload = buildMyobItemOrderPayload({ quote, lines, customerUid: customer.uid, references, lineItems, customerMaterialNames });
     const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
     const uid = readMyobUid(result.data) ?? readUidFromLocation(result.location, connection.companyFileId);
     if (!uid) throw new Error("MYOB accepted the Sales Order request but Production Manager could not read the new order UID.");
     let number = readMyobNumber(result.data);
     if (!number) {
-      const createdOrder = await fetchMyobJson(accessToken, connection.companyFileId, `/Sale/Order/Service/${uid}`, tenantId);
+      const createdOrder = await fetchMyobJson(accessToken, connection.companyFileId, `/Sale/Order/Item/${uid}`, tenantId);
       number = readMyobNumber(createdOrder.data);
     }
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
@@ -1663,8 +1842,11 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
         response: result.data && typeof result.data === "object" ? result.data as Record<string, unknown> : { raw: result.data },
         requestSummary: {
           quoteNumber: quote.quoteNumber,
+          layout: "Item",
           lineCount: lines.length,
-          subtotal: lines.reduce((sum, line) => sum + numberValue(line.lineTotal), 0)
+          subtotal: lines.reduce((sum, line) => sum + numberValue(line.lineTotal), 0),
+          itemNumbers: lines.map((line) => lineItems.get(line.id)?.number ?? PM_CUSTOM_SALES_ITEM_NUMBER),
+          itemSources: lines.map((line) => lineItems.get(line.id)?.source ?? "pm_custom_fallback")
         }
       }
     });
@@ -1687,7 +1869,7 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
       endpoint: result.url
     }, null);
 
-    return { ok: true, quoteId, myobOrderUid: uid, myobOrderNumber: number, endpoint: result.url, message: "Accepted quote sent to MYOB as an open order." };
+    return { ok: true, quoteId, myobOrderUid: uid, myobOrderNumber: number, endpoint: result.url, message: "Accepted quote sent to MYOB as an Item Order." };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
