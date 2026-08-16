@@ -17,6 +17,7 @@ import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
 import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
 import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
+import { getProductionJobForQuote } from "@/server/production";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -247,9 +248,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourceEmail = sourceEnquiry?.email ?? "";
   const sourceLinkedCustomerId = survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
 
-  const [quoteLines, selectedArtworkApproval] = await Promise.all([
+  const [quoteLines, selectedArtworkApproval, selectedProductionJob] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
-    selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
+    selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null),
+    selectedQuote ? getProductionJobForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
   ]);
   const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
   const importedMyobCustomers = clients.filter((client) => client.isActive && Boolean(client.myobUid) && !client.myobUid.startsWith("manual-"));
@@ -721,6 +723,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     </form>
                   )}
                   <Link href={`/artwork-approvals?quote=${selectedQuote.id}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Go to Artwork Approvals</Link>
+                  {selectedProductionJob ? <a href={`/job-sheets/${selectedProductionJob.id}`} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Print job sheet</a> : selectedQuote.status === "accepted" ? <span style={{ minHeight: 44, borderRadius: 14, border: "1px solid #e4e7ec", background: "#f8fafc", color: "#667085", fontWeight: 850, display: "inline-flex", alignItems: "center", padding: "0 14px", fontSize: 12 }}>Job sheet available after approved artwork creates Production</span> : null}
                 </div>
               </section>
             </div>

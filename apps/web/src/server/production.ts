@@ -781,6 +781,17 @@ export async function getProductionJobForArtworkApproval(tenantId: string, appro
   return result.rows[0] ?? null;
 }
 
+export async function getProductionJobForQuote(tenantId: string, quoteId: string): Promise<ProductionJobRecord | null> {
+  const result = await pool.query<ProductionJobRecord>(`
+    SELECT ${productionJobSelectSql()}
+    FROM production.production_jobs
+    WHERE tenant_id = $1::uuid AND quote_id = $2::uuid AND status <> 'deleted'
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `, [tenantId, quoteId]);
+  return result.rows[0] ?? null;
+}
+
 export async function listProductionItemsForJob(jobId: string): Promise<ProductionItemRecord[]> {
   const result = await pool.query<ProductionItemRecord>(`
     SELECT

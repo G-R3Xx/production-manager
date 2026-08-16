@@ -845,6 +845,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                 <input type="hidden" name="jobId" value={selectedJob.id} />
                 <button type="submit" style={secondaryButtonStyle}>Sync from artwork pages</button>
               </form>
+              <a href={`/job-sheets/${selectedJob.id}`} target="_blank" rel="noreferrer" style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none", color: "#0f172a" }}>Print job sheet</a>
               {selectedJob.status === "deleted" ? (
                 <form action={restoreProductionJobAction}>
                   <input type="hidden" name="jobId" value={selectedJob.id} />

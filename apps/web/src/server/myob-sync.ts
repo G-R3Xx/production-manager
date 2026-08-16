@@ -1727,6 +1727,36 @@ async function resolveMyobItemOrderLineReferences(
   return resolved;
 }
 
+async function myobSalesOrderShipToForQuote(
+  tenantId: string,
+  quote: import("@/server/quotes").QuoteDraftRecord,
+  lines: import("@/server/quotes").QuoteLineRecord[]
+): Promise<string | undefined> {
+  if (!quote.linkedCustomerId) return undefined;
+  const customer = await getCustomerById(tenantId, quote.linkedCustomerId);
+  if (!customer) return undefined;
+
+  const billing = structuredAddressFromPayload(
+    customer.payloadJson?.billingAddressStructured,
+    customer.payloadJson?.billingAddress
+  );
+  const defaultSite = structuredAddressFromPayload(
+    customer.payloadJson?.defaultSiteAddressStructured,
+    customer.payloadJson?.defaultSiteAddress
+  );
+  const explicitSiteWork = lines.some((line) => {
+    const text = [line.productName, line.optionSummary, line.notes].filter(Boolean).join(" ").toLowerCase();
+    return /\b(install|installation|delivery|deliver|courier|site)\b/.test(text);
+  });
+  const chosen = explicitSiteWork && hasStructuredAddress(defaultSite) ? defaultSite : billing;
+  const fallback = hasStructuredAddress(chosen) ? chosen : defaultSite;
+  if (!hasStructuredAddress(fallback)) return undefined;
+
+  const address = formatStructuredAddress(fallback, true);
+  const name = (customer.companyName || customer.displayName || quote.clientName || "").trim();
+  return [name, address].filter(Boolean).join("\n").slice(0, 255);
+}
+
 function buildMyobItemOrderPayload(input: {
   quote: import("@/server/quotes").QuoteDraftRecord;
   lines: import("@/server/quotes").QuoteLineRecord[];
@@ -1734,6 +1764,7 @@ function buildMyobItemOrderPayload(input: {
   references: MyobSalesOrderReferences;
   lineItems: Map<string, MyobItemOrderLineReference>;
   customerMaterialNames?: Map<string, string>;
+  shipToAddress?: string;
 }) {
   const today = new Date().toISOString().slice(0, 10);
   const lines = input.lines.map((line) => {
@@ -1762,6 +1793,7 @@ function buildMyobItemOrderPayload(input: {
     CustomerPurchaseOrderNumber: input.quote.clientPurchaseOrderNumber ?? undefined,
     JournalMemo: `Production Manager accepted quote ${input.quote.quoteNumber ?? input.quote.id}`,
     Comment: input.quote.notes ?? undefined,
+    ShipToAddress: input.shipToAddress || undefined,
     Lines: lines,
     Freight: 0,
     FreightTaxCode: { UID: input.references.freightTaxCodeUid, Code: input.references.freightTaxCode },
@@ -1822,7 +1854,8 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
   try {
     const references = await resolveMyobSalesOrderReferences(tenantId, accessToken, connection.companyFileId, customer.uid);
     const lineItems = await resolveMyobItemOrderLineReferences(tenantId, accessToken, connection.companyFileId, lines, references);
-    payload = buildMyobItemOrderPayload({ quote, lines, customerUid: customer.uid, references, lineItems, customerMaterialNames });
+    const shipToAddress = await myobSalesOrderShipToForQuote(tenantId, quote, lines);
+    payload = buildMyobItemOrderPayload({ quote, lines, customerUid: customer.uid, references, lineItems, customerMaterialNames, shipToAddress });
     const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
     const uid = readMyobUid(result.data) ?? readUidFromLocation(result.location, connection.companyFileId);
     if (!uid) throw new Error("MYOB accepted the Sales Order request but Production Manager could not read the new order UID.");
