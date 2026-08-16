@@ -1047,13 +1047,28 @@ function normaliseForSearch(value: string | null | undefined): string {
 
 type ArtworkQuoteLineKind = "signage" | "plan_printing" | "poster_printing" | "small_format";
 
-export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes">): ArtworkQuoteLineKind | null {
+function artworkQuoteLineKindFromSnapshot(snapshot: Record<string, unknown> | null | undefined): ArtworkQuoteLineKind | null | undefined {
+  if (!snapshot || typeof snapshot !== "object") return undefined;
+  const flowType = String(snapshot.flowType ?? "").trim().toLowerCase();
+  if (flowType === "signage") return "signage";
+  if (flowType === "small_format") return "small_format";
+  if (flowType === "plan_printing") return "plan_printing";
+  if (flowType === "poster_printing") return "poster_printing";
+  if (flowType === "service") return null;
+  // Custom components are production items and can still require an artwork / fabrication proof.
+  if (flowType === "component") return "signage";
+  return undefined;
+}
+
+export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes" | "configurationSnapshot">): ArtworkQuoteLineKind | null {
+  const snapshotKind = artworkQuoteLineKindFromSnapshot(line.configurationSnapshot);
+  if (snapshotKind !== undefined) return snapshotKind;
+
   const product = normaliseForSearch(line.productName);
   const combined = normaliseForSearch([line.productName, line.optionSummary, line.notes].filter(Boolean).join(" · "));
 
   if (/\b(pickup|delivery|install|installation|freight|courier)\b/.test(product)) return null;
   if (/\b(pickup|delivery charge|client collects|installer|install hr|install\b|travel)\b/.test(combined)) return null;
-  if (/\b(custom component|assembly|parts:)\b/.test(combined)) return null;
 
   if (/\b(plan printing|plans?|drawing|drawings|cad|architectural|engineering|blueprint|a0|a1|a2|a3|a4)\b/.test(combined)) {
     return "plan_printing";
@@ -1071,7 +1086,10 @@ export function artworkQuoteLineKind(line: Pick<QuoteLineRecord, "productName" |
     return "signage";
   }
 
-  return null;
+  // Legacy quote lines did not always persist a structured flowType or use one of the
+  // keywords above. Once service-only lines have been excluded, keep the approved
+  // production line in artwork scope rather than silently dropping it.
+  return "signage";
 }
 
 function normalisedQuoteLineResponseStatus(line: Pick<QuoteLineRecord, "clientResponseStatus">): string {
@@ -1083,7 +1101,7 @@ export function quoteUsesLineResponses(lines: Array<Pick<QuoteLineRecord, "clien
 }
 
 export function artworkQuoteLineInScope(
-  line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes" | "clientResponseStatus">,
+  line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "notes" | "configurationSnapshot" | "clientResponseStatus">,
   quoteStatus: string | null | undefined,
   usesLineResponses: boolean
 ): boolean {

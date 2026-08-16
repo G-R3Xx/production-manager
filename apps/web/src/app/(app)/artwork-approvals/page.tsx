@@ -10,6 +10,7 @@ import {
   getQuoteDraftById,
   listArtworkApprovalPages,
   listArtworkApprovalsForTenant,
+  prefillArtworkApprovalPagesFromQuoteLines,
   listQuoteDraftsForTenant,
   listQuoteLines,
   type ArtworkApprovalPageRecord,
@@ -200,10 +201,30 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
 
   const selectedApproval = selectedParam ? await getArtworkApprovalById(activeTenant.tenantId, selectedParam) : existingForQuote ?? approvals[0] ?? null;
   const selectedQuote = selectedApproval ? await getQuoteDraftById(activeTenant.tenantId, selectedApproval.quoteId) : quoteForCreate;
-  const [quoteLines, proofPages] = await Promise.all([
+  const [quoteLines, initialProofPages] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
     selectedApproval ? listArtworkApprovalPages(selectedApproval.id) : Promise.resolve([])
   ]);
+  let proofPages = initialProofPages;
+
+  // Artwork approvals should materialise the accepted quote scope automatically.
+  // Self-heal older approvals created while quote-line classification was too strict:
+  // if an in-scope quote line has no proof slot, populate it on opening the workspace.
+  if (selectedApproval && selectedQuote && selectedApproval.status !== "deleted") {
+    const autoUsesLineResponses = quoteUsesLineResponses(quoteLines);
+    const expectedLineIds = new Set(quoteLines
+      .filter((line) => artworkQuoteLineInScope(line, selectedQuote.status, autoUsesLineResponses))
+      .map((line) => line.id));
+    const existingLineIds = new Set(proofPages
+      .map((page) => page.sourceQuoteLineId)
+      .filter((lineId): lineId is string => Boolean(lineId)));
+    const hasMissingAutoPage = [...expectedLineIds].some((lineId) => !existingLineIds.has(lineId));
+
+    if (hasMissingAutoPage) {
+      await prefillArtworkApprovalPagesFromQuoteLines(activeTenant!.tenantId, selectedApproval.id);
+      proofPages = await listArtworkApprovalPages(selectedApproval.id);
+    }
+  }
 
   const customerById = new Map(clients.map((client) => [client.id, client]));
   const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
