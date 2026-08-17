@@ -1720,14 +1720,14 @@ export async function respondToArtworkApprovalByToken(token: string, response: "
   const timestampColumn = response === "approved" ? "approved_at" : "changes_requested_at";
   const result = await pool.query<{ id: string; tenantId: string }>(`
     UPDATE sales.artwork_approvals
-    SET status = $2,
+    SET status = $2::varchar,
         ${timestampColumn} = now(),
-        client_response_notes = $3,
-        client_signatory_name = CASE WHEN $2 = 'approved' THEN $4 ELSE client_signatory_name END,
-        client_signature_data_url = CASE WHEN $2 = 'approved' THEN $5 ELSE client_signature_data_url END,
-        client_confirmed_at = CASE WHEN $2 = 'approved' THEN now() ELSE client_confirmed_at END,
+        client_response_notes = $3::text,
+        client_signatory_name = CASE WHEN $2::varchar = 'approved' THEN $4::varchar ELSE client_signatory_name END,
+        client_signature_data_url = CASE WHEN $2::varchar = 'approved' THEN $5::text ELSE client_signature_data_url END,
+        client_confirmed_at = CASE WHEN $2::varchar = 'approved' THEN now() ELSE client_confirmed_at END,
         updated_at = now()
-    WHERE public_token = $1
+    WHERE public_token = $1::varchar
       AND status IN ('sent','viewed')
     RETURNING id, tenant_id as "tenantId"
   `, [token, response, notes, signatoryName ?? null, signatureDataUrl ?? null]);
