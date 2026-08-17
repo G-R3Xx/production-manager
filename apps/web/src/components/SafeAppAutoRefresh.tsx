@@ -3,7 +3,8 @@
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 
-const REFRESH_INTERVAL_MS = 15_000;
+const PULSE_INTERVAL_MS = 10_000;
+const FALLBACK_REFRESH_MS = 60_000;
 
 function isEditableElement(target: EventTarget | null): target is HTMLElement {
   if (!(target instanceof HTMLElement)) return false;
@@ -16,41 +17,65 @@ export function SafeAppAutoRefresh() {
   const router = useRouter();
   const dirtyRef = useRef(false);
   const refreshingRef = useRef(false);
+  const pulseRef = useRef<string | null>(null);
+  const pendingRefreshRef = useRef(false);
+  const lastRefreshAtRef = useRef(Date.now());
 
   useEffect(() => {
     const markDirty = (event: Event) => {
       if (isEditableElement(event.target)) dirtyRef.current = true;
     };
-    const clearDirtyOnSubmit = () => {
-      dirtyRef.current = false;
-    };
-    const clearDirtyOnReset = () => {
+    const clearDirty = () => {
       dirtyRef.current = false;
     };
 
     document.addEventListener("input", markDirty, true);
     document.addEventListener("change", markDirty, true);
-    document.addEventListener("submit", clearDirtyOnSubmit, true);
-    document.addEventListener("reset", clearDirtyOnReset, true);
+    document.addEventListener("submit", clearDirty, true);
+    document.addEventListener("reset", clearDirty, true);
 
-    const timer = window.setInterval(() => {
-      if (document.visibilityState !== "visible") return;
-      if (dirtyRef.current || refreshingRef.current) return;
-      if (isEditableElement(document.activeElement)) return;
+    async function checkPulse() {
+      if (document.visibilityState !== "visible" || refreshingRef.current) return;
+
+      try {
+        const response = await fetch("/api/app-pulse", { cache: "no-store", credentials: "same-origin" });
+        if (!response.ok) throw new Error(`Pulse request failed (${response.status})`);
+        const payload = await response.json() as { pulse?: string };
+        const nextPulse = String(payload.pulse ?? "");
+
+        if (pulseRef.current === null) {
+          pulseRef.current = nextPulse;
+          return;
+        }
+        if (nextPulse !== pulseRef.current) {
+          pulseRef.current = nextPulse;
+          pendingRefreshRef.current = true;
+        }
+      } catch {
+        if (Date.now() - lastRefreshAtRef.current >= FALLBACK_REFRESH_MS) pendingRefreshRef.current = true;
+      }
+
+      if (!pendingRefreshRef.current) return;
+      if (dirtyRef.current || isEditableElement(document.activeElement)) return;
 
       refreshingRef.current = true;
+      pendingRefreshRef.current = false;
+      lastRefreshAtRef.current = Date.now();
       router.refresh();
       window.setTimeout(() => {
         refreshingRef.current = false;
-      }, 1200);
-    }, REFRESH_INTERVAL_MS);
+      }, 900);
+    }
+
+    void checkPulse();
+    const timer = window.setInterval(() => void checkPulse(), PULSE_INTERVAL_MS);
 
     return () => {
       window.clearInterval(timer);
       document.removeEventListener("input", markDirty, true);
       document.removeEventListener("change", markDirty, true);
-      document.removeEventListener("submit", clearDirtyOnSubmit, true);
-      document.removeEventListener("reset", clearDirtyOnReset, true);
+      document.removeEventListener("submit", clearDirty, true);
+      document.removeEventListener("reset", clearDirty, true);
     };
   }, [router]);
 

@@ -2035,6 +2035,40 @@ export async function updateProductionItemPrintReadyFileForTenant(tenantId: stri
   return { jobId };
 }
 
+export async function removeProductionItemPrintReadyFileForTenant(tenantId: string, itemId: string): Promise<{ jobId: string | null }> {
+  await ensureProductionTables();
+  const result = await pool.query<{ jobId: string }>(`
+    UPDATE production.production_items pi
+    SET print_ready_url = NULL,
+        print_ready_storage_path = NULL,
+        print_ready_file_name = NULL,
+        print_ready_file_type = NULL,
+        print_ready_notes = NULL,
+        print_ready_uploaded_at = NULL,
+        print_ready_uploaded_by = NULL,
+        status = 'waiting_on_file',
+        updated_at = now()
+    FROM production.production_jobs pj
+    WHERE pi.job_id = pj.id
+      AND pj.tenant_id = $1::uuid
+      AND pi.id = $2::uuid
+    RETURNING pi.job_id as "jobId"
+  `, [tenantId, itemId]);
+
+  const jobId = result.rows[0]?.jobId ?? null;
+  if (jobId) {
+    await pool.query(`
+      UPDATE production.production_steps
+      SET status = 'pending', checked_at = NULL, checked_by = NULL, updated_at = now()
+      WHERE job_id = $1::uuid
+        AND item_id = $2::uuid
+        AND lower(label) = lower('Print-ready file attached')
+    `, [jobId, itemId]);
+    await autoProgressProductionJobStatusForTenant(tenantId, jobId);
+  }
+  return { jobId };
+}
+
 export async function removeProductionJobForTenant(tenantId: string, jobId: string): Promise<void> {
   await setProductionJobStatusForTenant(tenantId, jobId, "deleted");
 }

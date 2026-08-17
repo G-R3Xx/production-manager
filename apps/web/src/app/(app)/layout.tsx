@@ -5,13 +5,13 @@ import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
 import { AppNavLink } from "@/components/AppNavLink";
 import { SafeAppAutoRefresh } from "@/components/SafeAppAutoRefresh";
 import { signOutAction, switchTenantAction, markAllNotificationsReadAction } from "./actions";
-import { countUnreadNotificationsForTenant, listNotificationsForTenant } from "@/server/notifications";
+import { listNotificationsWithUnreadForTenant } from "@/server/notifications";
 
 type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.17.10";
+const APP_VERSION = "V26.08.17.11";
 
 function notificationHref(notification: { eventType: string; href: string | null; payloadJson?: Record<string, unknown> }): string {
   const payload = notification.payloadJson ?? {};
@@ -47,10 +47,10 @@ export default async function AppLayout({ children }: AppLayoutProps) {
     listMembershipsForAuthUser(user.id),
     resolveActiveTenantForAuthUserId(user.id)
   ]);
-  const [notifications, unreadCount] = activeTenant ? await Promise.all([
-    listNotificationsForTenant(activeTenant.tenantId),
-    countUnreadNotificationsForTenant(activeTenant.tenantId)
-  ]) : [[], 0];
+  const notificationSnapshot = activeTenant
+    ? await listNotificationsWithUnreadForTenant(activeTenant.tenantId)
+    : { notifications: [], unreadCount: 0 };
+  const { notifications, unreadCount } = notificationSnapshot;
 
   return (
     <div

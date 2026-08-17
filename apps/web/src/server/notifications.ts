@@ -53,6 +53,28 @@ export async function createNotificationForTenant(tenantId: string, input: {
   `, [tenantId, input.eventType, input.title, input.message ?? null, input.href ?? null, JSON.stringify(input.payloadJson ?? {})]);
 }
 
+export type NotificationSnapshot = { notifications: AppNotificationRecord[]; unreadCount: number };
+
+export async function listNotificationsWithUnreadForTenant(tenantId: string, limit = 12): Promise<NotificationSnapshot> {
+  await ensureNotificationSchema();
+  const result = await pool.query<AppNotificationRecord & { unreadCount: string }>(`
+    SELECT id,tenant_id::text AS "tenantId",event_type AS "eventType",title,message,href,
+      payload_json AS "payloadJson",is_read AS "isRead",created_at AS "createdAt",
+      (count(*) FILTER (WHERE is_read=false) OVER ())::text AS "unreadCount"
+    FROM app.notifications
+    WHERE tenant_id=$1::uuid
+    ORDER BY is_read ASC,created_at DESC
+    LIMIT $2::int
+  `, [tenantId, Math.max(1, Math.min(50, limit))]);
+  return {
+    notifications: result.rows.map((row: AppNotificationRecord & { unreadCount: string }) => {
+      const { unreadCount: _unreadCount, ...notification } = row;
+      return notification;
+    }),
+    unreadCount: Number(result.rows[0]?.unreadCount ?? 0)
+  };
+}
+
 export async function listNotificationsForTenant(tenantId: string, limit = 12): Promise<AppNotificationRecord[]> {
   await ensureNotificationSchema();
   const result = await pool.query<AppNotificationRecord>(`
@@ -72,6 +94,29 @@ export async function countUnreadNotificationsForTenant(tenantId: string): Promi
     SELECT count(*)::text AS count FROM app.notifications WHERE tenant_id=$1::uuid AND is_read=false
   `, [tenantId]);
   return Number(result.rows[0]?.count ?? 0);
+}
+
+export async function getAppActivityPulseForTenant(tenantId: string): Promise<string> {
+  await ensureNotificationSchema();
+  try {
+    const result = await pool.query<{ pulse: string }>(`
+      SELECT concat_ws('|',
+        COALESCE((SELECT max(created_at)::text FROM app.notifications WHERE tenant_id=$1::uuid), ''),
+        COALESCE((SELECT max(updated_at)::text FROM production.production_jobs WHERE tenant_id=$1::uuid), '')
+      ) AS pulse
+    `, [tenantId]);
+    return result.rows[0]?.pulse ?? '';
+  } catch {
+    // A fresh tenant may not have visited every module yet, so some lazily-created tables
+    // can be absent. Notifications always exist after ensureNotificationSchema and still
+    // cover client approvals/change requests, which are the most important live events.
+    const fallback = await pool.query<{ pulse: string }>(`
+      SELECT COALESCE(max(created_at)::text, '') AS pulse
+      FROM app.notifications
+      WHERE tenant_id=$1::uuid
+    `, [tenantId]);
+    return fallback.rows[0]?.pulse ?? '';
+  }
 }
 
 export async function markAllNotificationsReadForTenant(tenantId: string): Promise<void> {

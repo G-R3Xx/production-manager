@@ -8,6 +8,7 @@ import {
   listProductionItemsForJob,
   listProductionJobStepSummariesForTenant,
   listProductionJobsForTenant,
+  getProductionJobById,
   listProductionStepsForJob,
   type ProductionItemRecord,
   type ProductionJobRecord,
@@ -22,14 +23,15 @@ import {
   setProductionJobStatusAction,
   syncProductionJobAction,
   updateProductionJobDetailsAction,
-  pushProductionQuoteToMyobOrderAction
+  pushProductionQuoteToMyobOrderAction,
+  removePrintReadyFileAction
 } from "./actions";
 import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
 import { OpenFullscreenBoardButton } from "./OpenFullscreenBoardButton";
 import { ProductionStepToggle } from "./ProductionStepToggle";
 import { getQuoteDraftById, listQuoteDraftsForTenant } from "@/server/quotes";
-import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
-import { listEnquiriesForTenant } from "@/server/enquiries";
+import { customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
+import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type PageProps = {
@@ -660,14 +662,52 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
     redirect(`/production/${encodeURIComponent(selectedParam)}${suffix}`);
   }
 
-  const [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries, stepSummaries] = await Promise.all([
-    listProductionJobsForTenant(tenantId, { includeDeleted: true }),
-    listApprovedArtworkReadyForProduction(tenantId),
-    listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
-    listCustomersForTenant(tenantId),
-    listEnquiriesForTenant(tenantId, { includeDeleted: true }),
-    listProductionJobStepSummariesForTenant(tenantId)
-  ]);
+  let allJobs: ProductionJobRecord[] = [];
+  let approvedArtwork: Awaited<ReturnType<typeof listApprovedArtworkReadyForProduction>> = [];
+  let quoteDrafts: Awaited<ReturnType<typeof listQuoteDraftsForTenant>> = [];
+  let clients: Awaited<ReturnType<typeof listCustomersForTenant>> = [];
+  let allEnquiries: Awaited<ReturnType<typeof listEnquiriesForTenant>> = [];
+  let stepSummaries: Awaited<ReturnType<typeof listProductionJobStepSummariesForTenant>> = [];
+  let selectedJob: ProductionJobRecord | null = null;
+  let items: ProductionItemRecord[] = [];
+  let steps: ProductionStepRecord[] = [];
+  let selectedQuote = null as Awaited<ReturnType<typeof getQuoteDraftById>>;
+  let selectedJobLogoUrl: string | null = null;
+
+  if (detailOnly && selectedParam) {
+    selectedJob = await getProductionJobById(tenantId, selectedParam);
+    if (selectedJob) {
+      const [loadedItems, loadedSteps, loadedQuote, selectedCustomer] = await Promise.all([
+        listProductionItemsForJob(selectedJob.id),
+        listProductionStepsForJob(selectedJob.id),
+        getQuoteDraftById(tenantId, selectedJob.quoteId),
+        selectedJob.linkedCustomerId ? getCustomerById(tenantId, selectedJob.linkedCustomerId) : Promise.resolve(null)
+      ]);
+      items = loadedItems;
+      steps = loadedSteps;
+      selectedQuote = loadedQuote;
+      const selectedEnquiry = selectedQuote?.enquiryId ? await getEnquiryById(tenantId, selectedQuote.enquiryId) : null;
+      selectedJobLogoUrl = selectedEnquiry?.clientLogoUrl || customerLogoUrl(selectedCustomer);
+    }
+  } else {
+    [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries, stepSummaries] = await Promise.all([
+      listProductionJobsForTenant(tenantId, { includeDeleted: true }),
+      listApprovedArtworkReadyForProduction(tenantId),
+      listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
+      listCustomersForTenant(tenantId),
+      listEnquiriesForTenant(tenantId, { includeDeleted: true }),
+      listProductionJobStepSummariesForTenant(tenantId)
+    ]);
+    selectedJob = selectedParam ? allJobs.find((job) => job.id === selectedParam) ?? null : null;
+    if (selectedJob) {
+      [items, steps, selectedQuote] = await Promise.all([
+        listProductionItemsForJob(selectedJob.id),
+        listProductionStepsForJob(selectedJob.id),
+        getQuoteDraftById(tenantId, selectedJob.quoteId)
+      ]);
+    }
+  }
+
   const deletedJobCount = allJobs.filter((job) => job.status === "deleted").length;
   const completedJobCount = allJobs.filter((job) => job.status === "completed").length;
   const jobs = filter === "deleted"
@@ -675,14 +715,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
     : filter === "completed"
       ? allJobs.filter((job) => job.status === "completed")
       : allJobs.filter((job) => job.status !== "deleted" && job.status !== "completed");
-  const selectedJob = selectedParam ? allJobs.find((job) => job.id === selectedParam) ?? null : null;
   const selectedJobMissing = Boolean(selectedParam && !selectedJob);
-  let items: ProductionItemRecord[] = [];
-  let steps: ProductionStepRecord[] = [];
-  let selectedQuote = null as Awaited<ReturnType<typeof getQuoteDraftById>>;
-  if (selectedJob) {
-    [items, steps, selectedQuote] = await Promise.all([listProductionItemsForJob(selectedJob.id), listProductionStepsForJob(selectedJob.id), getQuoteDraftById(tenantId, selectedJob.quoteId)]);
-  }
   const customerById = new Map(clients.map((client) => [client.id, client]));
   const quoteById = new Map(quoteDrafts.map((quote) => [quote.id, quote]));
   const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
@@ -693,7 +726,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
   };
   const logoForJob = (job: ProductionJobRecord | null | undefined) =>
     logoForQuoteId(job?.quoteId) || customerLogoUrl(job?.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null);
-  const selectedJobLogoUrl = logoForJob(selectedJob);
+  if (!selectedJobLogoUrl) selectedJobLogoUrl = logoForJob(selectedJob);
   const stepSummaryByJobId = new Map(stepSummaries.map((summary) => [summary.jobId, summary]));
   const complete = pageCompletion(selectedJob ? items.flatMap((item) => visibleStepsForItem(item, steps)) : steps);
   const readyCount = allJobs.filter((job) => job.status === "ready_to_start").length;
@@ -948,10 +981,17 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                           {item.printReadyUrl ? <span style={{ color: "#067647", fontWeight: 950, fontSize: 12 }}>Attached {formatDateTime(item.printReadyUploadedAt)}</span> : <span style={{ color: "#c2410c", fontWeight: 950, fontSize: 12 }}>Waiting on file</span>}
                         </div>
                         {item.printReadyUrl ? (
-                          <div style={{ display: "grid", gap: 4, color: "#475467", fontSize: 13 }}>
-                            {item.artworkFiles?.length ? item.artworkFiles.map((file, fileIndex) => <a key={`${file.downloadUrl}-${fileIndex}`} href={file.downloadUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{file.name || `Artwork file ${fileIndex + 1}`}</a>) : <a href={item.printReadyUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{item.printReadyFileName || "Open print-ready file"}</a>}
-                            <span>{item.printReadyFileType || "File"}{item.printReadyUploadedBy ? ` · uploaded by ${item.printReadyUploadedBy}` : ""}</span>
-                            {item.printReadyNotes ? <span style={{ whiteSpace: "pre-wrap" }}>{item.printReadyNotes}</span> : null}
+                          <div style={{ display: "grid", gap: 8, color: "#475467", fontSize: 13 }}>
+                            <div style={{ display: "grid", gap: 4 }}>
+                              {item.artworkFiles?.length ? item.artworkFiles.map((file, fileIndex) => <a key={`${file.downloadUrl}-${fileIndex}`} href={file.downloadUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{file.name || `Artwork file ${fileIndex + 1}`}</a>) : <a href={item.printReadyUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>{item.printReadyFileName || "Open print-ready file"}</a>}
+                              <span>{item.printReadyFileType || "File"}{item.printReadyUploadedBy ? ` · uploaded by ${item.printReadyUploadedBy}` : ""}</span>
+                              {item.printReadyNotes ? <span style={{ whiteSpace: "pre-wrap" }}>{item.printReadyNotes}</span> : null}
+                            </div>
+                            <form action={removePrintReadyFileAction}>
+                              <input type="hidden" name="itemId" value={item.id} />
+                              <button type="submit" style={{ ...secondaryButtonStyle, minHeight: 36, color: "#b42318", borderColor: "#fda29b", width: "fit-content" }}>Remove artwork file</button>
+                            </form>
+                            <span style={{ color: "#667085", fontSize: 11 }}>Removes the print-ready attachment from this production item only. The approved Artwork Approval proof remains unchanged.</span>
                           </div>
                         ) : null}
                         <form action={attachPrintReadyFileAction} style={{ display: "grid", gap: 8 }}>

@@ -9,6 +9,7 @@ import {
   createProductionJobFromArtworkApprovalForTenant,
   getProductionInstallSchedulerPayloadForStep,
   recordProductionInstallSchedulerBridgeResultForStep,
+  removeProductionItemPrintReadyFileForTenant,
   removeProductionJobForTenant,
   restoreProductionJobForTenant,
   setProductionJobStatusForTenant,
@@ -200,6 +201,14 @@ export async function attachPrintReadyFileAction(formData: FormData): Promise<vo
   productionRedirect(result.jobId, "Print-ready artwork attached");
 }
 
+
+export async function removePrintReadyFileAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const itemId = String(formData.get("itemId") ?? "").trim();
+  if (!itemId) redirectToProduction("/production?error=Missing%20production%20item");
+  const result = await removeProductionItemPrintReadyFileForTenant(activeTenant.tenantId, itemId);
+  productionRedirect(result.jobId, "Print-ready artwork removed");
+}
 
 export async function pushProductionQuoteToMyobOrderAction(formData: FormData): Promise<void> {
   const { activeTenant } = await requireTenant();
