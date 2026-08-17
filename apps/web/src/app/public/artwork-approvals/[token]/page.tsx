@@ -147,6 +147,12 @@ function statusTone(status: string) {
   return { bg: "#f8fafc", fg: "#475467", border: "#d0d5dd", label: "Awaiting review" };
 }
 
+function watermarkText(companyName: string, quoteNumber: string | null | undefined): string {
+  const brand = String(companyName || "Tender Edge").trim().toUpperCase();
+  const quote = String(quoteNumber || "").trim();
+  return quote ? `PROOF ONLY • ${brand} • ${quote}` : `PROOF ONLY • ${brand}`;
+}
+
 export default async function PublicArtworkApprovalPage({ params, searchParams }: PageProps) {
   const { token } = await params;
   const query = (await searchParams) ?? {};
@@ -177,6 +183,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
 
   const clientLogoUrl = sourceEnquiry?.clientLogoUrl || customerLogoUrl(linkedClient);
   const companyName = companySettings?.tradingName || companySettings?.companyLegalName || companySettings?.tenantName || "Production Manager";
+  const proofWatermarkText = watermarkText(companySettings?.tenantName || companySettings?.tradingName || companyName, sourceQuote?.quoteNumber || approval.drawingNumber);
   const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const isApproved = approval.status === "approved";
   const hasChanges = approval.status === "changes_requested";
@@ -222,10 +229,10 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             <article id={`proof-${index + 1}`} key={page.id} style={{ border: "1px solid #d0d5dd", borderRadius: 22, background: "#fff", boxShadow: "0 14px 40px rgba(15,23,42,0.06)", overflow: "hidden", scrollMarginTop: 18 }}>
               <header style={{ padding: "13px 16px", borderBottom: "1px solid #e4e7ec", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", background: "#fbfcfe" }}>
                 <div style={{ minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.08em" }}>{page.signCode || `S${index + 1}`} · Proof {index + 1} of {pages.length}</p><h2 style={{ margin: "3px 0 0", fontSize: 20 }}>{page.title}</h2></div>
-                <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#3538cd", fontWeight: 900, textDecoration: "none", fontSize: 12, whiteSpace: "nowrap" }}>Open original ↗</a>
+                <span style={{ color: "#667085", fontWeight: 900, fontSize: 12, whiteSpace: "nowrap" }}>Watermarked proof preview</span>
               </header>
               <div className="public-artwork-proof">
-                <div style={{ padding: 18, display: "grid", placeItems: "center", background: "#eef2f6", overflow: "hidden" }}><ArtworkProofPreview url={page.imageUrl} title={page.title} isPdf={isPdfArtwork(page.imageUrl, page.fileName)} /></div>
+                <div style={{ padding: 18, display: "grid", placeItems: "center", background: "#eef2f6", overflow: "hidden" }}><ArtworkProofPreview url={page.imageUrl} title={page.title} isPdf={isPdfArtwork(page.imageUrl, page.fileName)} watermarkText={proofWatermarkText} /></div>
                 <aside style={{ borderLeft: "1px solid #e4e7ec", background: "#f8fafc", padding: 16, display: "grid", alignContent: "start", gap: 11 }}>
                   {proofDescription(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null) ? <div><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>Description</span><p style={{ margin: "4px 0 0", color: "#344054", fontSize: 12, lineHeight: 1.45 }}>{proofDescription(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null)}</p></div> : null}
                   {structuredDetails(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null).map((row) => <div key={row.label} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><p style={{ margin: "4px 0 0", color: "#1d2939", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{row.value}</p></div>)}

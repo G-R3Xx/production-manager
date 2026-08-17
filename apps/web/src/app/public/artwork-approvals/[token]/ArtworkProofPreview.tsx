@@ -65,7 +65,22 @@ function loadPdfJs(): Promise<PdfJsLibrary> {
   return window.__productionManagerPdfJsPromise;
 }
 
-function PdfCanvas({ url, title, large = false }: { url: string; title: string; large?: boolean }) {
+function watermarkPatternSvg(text: string): string {
+  const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="420" height="300" viewBox="0 0 420 300">
+    <g transform="rotate(-28 210 150)">
+      <text x="24" y="92" fill="rgba(15,23,42,0.16)" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="1.5">${safe}</text>
+      <text x="52" y="212" fill="rgba(15,23,42,0.16)" font-family="Arial, Helvetica, sans-serif" font-size="22" font-weight="700" letter-spacing="1.5">${safe}</text>
+    </g>
+  </svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+}
+
+function ProofWatermark({ text, borderRadius = 10 }: { text: string; borderRadius?: number }) {
+  return <div aria-hidden="true" style={{ position: "absolute", inset: 0, borderRadius, pointerEvents: "none", userSelect: "none", backgroundImage: watermarkPatternSvg(text), backgroundRepeat: "repeat", backgroundSize: "360px 260px", opacity: 1, mixBlendMode: "multiply" }} />;
+}
+
+function PdfCanvas({ url, title, watermarkText, large = false }: { url: string; title: string; watermarkText: string; large?: boolean }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [pageCount, setPageCount] = useState(0);
@@ -134,21 +149,24 @@ function PdfCanvas({ url, title, large = false }: { url: string; title: string; 
 
   return (
     <div style={{ width: "100%", display: "grid", gap: 9 }}>
-      {status === "loading" ? <div style={{ minHeight: large ? 420 : 360, display: "grid", placeItems: "center", color: "#667085", fontWeight: 800, background: "#f8fafc", borderRadius: 14 }}>Rendering clean PDF preview…</div> : null}
-      <div ref={hostRef} style={{ width: "100%", display: status === "error" ? "none" : "block" }} />
+      {status === "loading" ? <div style={{ minHeight: large ? 420 : 360, display: "grid", placeItems: "center", color: "#667085", fontWeight: 800, background: "#f8fafc", borderRadius: 14 }}>Rendering proof preview…</div> : null}
+      <div style={{ position: "relative", width: "100%", display: status === "error" ? "none" : "block" }}>
+        <div ref={hostRef} style={{ width: "100%" }} />
+        <ProofWatermark text={watermarkText} borderRadius={14} />
+      </div>
       {status === "ready" && pageCount > 1 ? <div style={{ textAlign: "center", color: "#667085", fontSize: 12, fontWeight: 800 }}>{pageCount} PDF pages</div> : null}
-      {status === "error" ? <div style={{ minHeight: 260, display: "grid", placeItems: "center", textAlign: "center", padding: 24, color: "#667085", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 14 }}><div><strong style={{ color: "#344054" }}>Preview unavailable</strong><p style={{ margin: "6px 0 0" }}>The original proof is still available below.</p></div></div> : null}
+      {status === "error" ? <div style={{ minHeight: 260, display: "grid", placeItems: "center", textAlign: "center", padding: 24, color: "#667085", background: "#f8fafc", border: "1px dashed #cbd5e1", borderRadius: 14 }}><div><strong style={{ color: "#344054" }}>Preview unavailable</strong><p style={{ margin: "6px 0 0" }}>The proof preview could not be rendered.</p></div></div> : null}
     </div>
   );
 }
 
-export function ArtworkProofPreview({ url, title, isPdf }: { url: string; title: string; isPdf: boolean }) {
+export function ArtworkProofPreview({ url, title, isPdf, watermarkText }: { url: string; title: string; isPdf: boolean; watermarkText: string }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <>
       <div style={{ width: "100%", position: "relative" }}>
-        {isPdf ? <PdfCanvas url={url} title={title} /> : <img src={url} alt={title} style={{ width: "100%", maxHeight: 760, objectFit: "contain", objectPosition: "center", display: "block", borderRadius: 10 }} />}
+        {isPdf ? <PdfCanvas url={url} title={title} watermarkText={watermarkText} /> : <div style={{ position: "relative", width: "100%" }}><img src={url} alt={title} style={{ width: "100%", maxHeight: 760, objectFit: "contain", objectPosition: "center", display: "block", borderRadius: 10 }} /><ProofWatermark text={watermarkText} borderRadius={10} /></div>}
         <button type="button" onClick={() => setExpanded(true)} style={{ position: "absolute", top: 10, right: 10, minHeight: 38, border: "1px solid #d0d5dd", borderRadius: 10, background: "rgba(255,255,255,0.94)", color: "#101828", padding: "0 12px", fontWeight: 900, cursor: "pointer", boxShadow: "0 4px 14px rgba(15,23,42,0.10)" }}>View larger</button>
       </div>
 
@@ -156,9 +174,9 @@ export function ArtworkProofPreview({ url, title, isPdf }: { url: string; title:
         <div onClick={(event) => event.stopPropagation()} style={{ width: "min(1500px, 96vw)", maxHeight: "94vh", overflow: "auto", background: "#eef2f6", borderRadius: 18, padding: 16, boxShadow: "0 28px 90px rgba(0,0,0,0.35)" }}>
           <div style={{ position: "sticky", top: 0, zIndex: 2, display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12, padding: "8px 10px", background: "rgba(255,255,255,0.96)", border: "1px solid #d0d5dd", borderRadius: 12 }}>
             <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title}</strong>
-            <div style={{ display: "flex", gap: 8, flex: "0 0 auto" }}><a href={url} target="_blank" rel="noreferrer" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", border: "1px solid #d0d5dd", borderRadius: 9, padding: "0 11px", color: "#344054", textDecoration: "none", fontWeight: 850 }}>Open original ↗</a><button type="button" onClick={() => setExpanded(false)} style={{ minHeight: 36, border: "none", borderRadius: 9, padding: "0 12px", background: "#101828", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Close</button></div>
+            <div style={{ display: "flex", gap: 8, flex: "0 0 auto" }}><span style={{ minHeight: 36, display: "inline-flex", alignItems: "center", border: "1px solid #d0d5dd", borderRadius: 9, padding: "0 11px", color: "#667085", background: "#fff", fontSize: 12, fontWeight: 850 }}>Watermarked preview only</span><button type="button" onClick={() => setExpanded(false)} style={{ minHeight: 36, border: "none", borderRadius: 9, padding: "0 12px", background: "#101828", color: "#fff", fontWeight: 900, cursor: "pointer" }}>Close</button></div>
           </div>
-          {isPdf ? <PdfCanvas url={url} title={title} large /> : <img src={url} alt={title} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(94vh - 92px)", margin: "0 auto", objectFit: "contain", borderRadius: 10, background: "#fff" }} />}
+          {isPdf ? <PdfCanvas url={url} title={title} watermarkText={watermarkText} large /> : <div style={{ position: "relative", width: "100%" }}><img src={url} alt={title} style={{ display: "block", maxWidth: "100%", maxHeight: "calc(94vh - 92px)", margin: "0 auto", objectFit: "contain", borderRadius: 10, background: "#fff" }} /><ProofWatermark text={watermarkText} borderRadius={10} /></div>}
         </div>
       </div> : null}
     </>
