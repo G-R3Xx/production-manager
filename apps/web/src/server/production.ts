@@ -1680,12 +1680,19 @@ async function autoProgressProductionJobStatusForTenant(tenantId: string, jobId:
     stepType: string | null;
     label: string | null;
     status: string | null;
+    missingPrintReadyFiles: boolean;
   }>(`
     SELECT
       pj.status AS "currentStatus",
       ps.step_type AS "stepType",
       ps.label,
-      ps.status
+      ps.status,
+      EXISTS (
+        SELECT 1
+        FROM production.production_items pi
+        WHERE pi.job_id = pj.id
+          AND NULLIF(btrim(COALESCE(pi.print_ready_url, '')), '') IS NULL
+      ) AS "missingPrintReadyFiles"
     FROM production.production_jobs pj
     LEFT JOIN production.production_steps ps ON ps.job_id = pj.id
     WHERE pj.tenant_id = $1::uuid
@@ -1702,16 +1709,15 @@ async function autoProgressProductionJobStatusForTenant(tenantId: string, jobId:
   const dispatchSteps = steps.filter((step) => isDispatchReadyStep(step.stepType, step.label));
   const dispatchDone = dispatchSteps.length > 0 && dispatchSteps.every((step) => step.status === "done");
   const productionStarted = steps.some((step) => step.status === "done" && !isPreProductionStep(step.stepType, step.label) && !isDispatchReadyStep(step.stepType, step.label));
-  const preProductionSteps = steps.filter((step) => isPreProductionStep(step.stepType, step.label));
-  const preProductionReady = preProductionSteps.length > 0 && preProductionSteps.every((step) => step.status === "done");
+  const missingPrintReadyFiles = Boolean(result.rows[0]?.missingPrintReadyFiles);
 
   let nextStatus: ProductionJobAutoStatus;
   if (allDone) nextStatus = "completed";
   else if (dispatchDone) nextStatus = "ready_for_dispatch";
   else if (productionStarted) nextStatus = "in_production";
   else if (currentStatus === "waiting_on_material") return null;
-  else if (preProductionReady) nextStatus = "ready_to_start";
-  else nextStatus = "waiting_on_files";
+  else if (missingPrintReadyFiles) nextStatus = "waiting_on_files";
+  else nextStatus = "ready_to_start";
 
   if (nextStatus === currentStatus) return nextStatus;
   await pool.query(`
