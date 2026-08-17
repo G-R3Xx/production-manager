@@ -151,6 +151,9 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
   const companyName = company?.tradingName || company?.companyLegalName || company?.tenantName || "Production Manager";
   const companyLogo = company?.companyLogoUrl || "/brand/tender-edge-horizontal-logo-2025.png";
   const activeQuoteLines = quoteLines.filter((line) => line.clientResponseStatus !== "cancelled" && !line.clientRevisionExcluded);
+  const jobSheetName = job.projectName || quote?.jobName || job.clientName || "Production Job";
+  const jobSheetNumber = job.quoteNumber || quote?.quoteNumber || `JOB-${job.id.slice(0, 8).toUpperCase()}`;
+  const printTitle = `${jobSheetNumber} - ${jobSheetName}`;
 
   return (
     <main className="job-sheet-page" style={{ maxWidth: 1120, margin: "0 auto", padding: "24px", color: "#111827" }}>
@@ -168,7 +171,7 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
 
       <div className="job-sheet-screen-only" style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18 }}>
         <a href={`/production/${job.id}`} style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>← Back to production job</a>
-        <PrintJobSheetButton />
+        <PrintJobSheetButton printTitle={printTitle} />
       </div>
 
       <header style={{ border: "1px solid #d9e2ef", borderRadius: 18, padding: 18, background: "#fff", display: "grid", gap: 14 }}>
