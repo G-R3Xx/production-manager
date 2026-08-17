@@ -152,6 +152,7 @@ type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl"
 type InkChoice = "" | "none" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
 type PrintDirection = "" | "positive" | "reverse";
+type DropDirection = "auto" | "vertical" | "horizontal";
 type ArtworkChoice = "" | "required" | "client_supplied";
 type LabourBasis = "per_item" | "line_total";
 type SmallPrintColour = "" | "mono" | "cmyk" | "special";
@@ -702,6 +703,48 @@ function roundRollUsage(totalMetres: number, increment: number): number {
   return Math.max(totalMetres, Math.ceil((totalMetres - 0.0000001) / increment) * increment);
 }
 
+type ForcedDropLayout = {
+  direction: Exclude<DropDirection, "auto">;
+  drops: number;
+  panelAcrossMm: number;
+  lengthMm: number;
+  overlapMm: number;
+  rollWidthMm: number;
+  totalLmPerFace: number;
+  printedAreaSqmPerFace: number;
+  note: string;
+};
+
+function forcedDropLayout(widthMm: number, heightMm: number, material: QuoteMaterial | undefined, direction: DropDirection, overlapMm: number): ForcedDropLayout | null {
+  if (!material || direction === "auto" || widthMm <= 0 || heightMm <= 0) return null;
+  const rollWidthMm = numberValue(material.rollWidthMm, 0);
+  if (rollWidthMm <= 0) return null;
+  const safeOverlap = Math.max(0, Math.min(overlapMm, Math.max(0, rollWidthMm - 1)));
+  const acrossMm = direction === "vertical" ? widthMm : heightMm;
+  const lengthMm = direction === "vertical" ? heightMm : widthMm;
+  const effectiveCoverageMm = Math.max(1, rollWidthMm - safeOverlap);
+  let drops = Math.max(1, Math.ceil(Math.max(0, acrossMm - safeOverlap) / effectiveCoverageMm));
+  let panelAcrossMm = (acrossMm + Math.max(0, drops - 1) * safeOverlap) / drops;
+  while (panelAcrossMm > rollWidthMm + 0.0001) {
+    drops += 1;
+    panelAcrossMm = (acrossMm + Math.max(0, drops - 1) * safeOverlap) / drops;
+  }
+  const totalLmPerFace = (drops * lengthMm) / 1000;
+  const printedAreaSqmPerFace = (drops * panelAcrossMm * lengthMm) / 1_000_000;
+  const orientationLabel = direction === "vertical" ? "vertical drops" : "horizontal strips";
+  return {
+    direction,
+    drops,
+    panelAcrossMm,
+    lengthMm,
+    overlapMm: safeOverlap,
+    rollWidthMm,
+    totalLmPerFace,
+    printedAreaSqmPerFace,
+    note: `${drops} ${orientationLabel} at approx ${dimensionMm(panelAcrossMm)} × ${dimensionMm(lengthMm)}mm${safeOverlap > 0 ? ` with ${dimensionMm(safeOverlap)}mm overlap` : ""}`
+  };
+}
+
 function panelisedRollMetres(widthMm: number, heightMm: number, rollWidthMm: number): { amount: number; panels: number; panelWidthMm: number; note: string } {
   const panels = Math.max(1, Math.ceil(widthMm / rollWidthMm));
   const panelWidthMm = widthMm / panels;
@@ -730,11 +773,43 @@ function linearMetres(widthMm: number, heightMm: number, material: QuoteMaterial
   return { amount: panelised.amount, note: panelised.note };
 }
 
-function roundedRollMetresForQuantity(widthMm: number, heightMm: number, material: QuoteMaterial, pieces: number): { amount: number; unroundedAmount: number; note?: string } {
+function roundedRollMetresForQuantity(widthMm: number, heightMm: number, material: QuoteMaterial, pieces: number, dropDirection: DropDirection = "auto", dropOverlapMm = 0, referenceDropLayout?: ForcedDropLayout | null): { amount: number; unroundedAmount: number; note?: string; dropLayout?: ForcedDropLayout | null } {
   const rollWidthMm = numberValue(material.rollWidthMm, 0);
   const pieceCount = Math.max(1, Math.ceil(pieces));
   const billing = rollBillingRule(material);
-  if (widthMm <= 0 || heightMm <= 0) return { amount: 0, unroundedAmount: 0, note: "size missing" };
+  if (widthMm <= 0 || heightMm <= 0) return { amount: 0, unroundedAmount: 0, note: "size missing", dropLayout: null };
+
+  if (referenceDropLayout) {
+    const materialRollWidthMm = numberValue(material.rollWidthMm, 0);
+    const stripsPerDrop = materialRollWidthMm > 0 ? Math.max(1, Math.ceil(referenceDropLayout.panelAcrossMm / materialRollWidthMm)) : 1;
+    const totalStripsPerFace = referenceDropLayout.drops * stripsPerDrop;
+    const unroundedAmount = (totalStripsPerFace * referenceDropLayout.lengthMm / 1000) * pieceCount;
+    const amount = roundRollUsage(unroundedAmount, billing.increment);
+    return {
+      amount,
+      unroundedAmount,
+      dropLayout: referenceDropLayout,
+      note: [
+        `follows ${referenceDropLayout.drops} ${referenceDropLayout.direction === "vertical" ? "vertical drop" : "horizontal strip"}${referenceDropLayout.drops === 1 ? "" : "s"} from print layout`,
+        stripsPerDrop > 1 ? `${stripsPerDrop} ${material.name} strips required across each printed drop because this roll is narrower` : `one ${material.name} strip per printed drop`,
+        `${usage(unroundedAmount)}lm calculated across ${pieceCount} face${pieceCount === 1 ? "" : "s"}`,
+        billing.label,
+        `charged as ${usage(amount)}lm`
+      ].join(" · ")
+    };
+  }
+
+  const forced = forcedDropLayout(widthMm, heightMm, material, dropDirection, dropOverlapMm);
+  if (forced) {
+    const unroundedAmount = forced.totalLmPerFace * pieceCount;
+    const amount = roundRollUsage(unroundedAmount, billing.increment);
+    return {
+      amount,
+      unroundedAmount,
+      dropLayout: forced,
+      note: [forced.note, `${usage(unroundedAmount)}lm calculated across ${pieceCount} face${pieceCount === 1 ? "" : "s"}`, billing.label, `charged as ${usage(amount)}lm`].join(" · ")
+    };
+  }
 
   if (rollWidthMm <= 0) {
     const single = linearMetres(widthMm, heightMm, material);
@@ -1050,6 +1125,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [widthMm, setWidthMm] = useState(snapshotString(initialSnapshot, "widthMm"));
   const [heightMm, setHeightMm] = useState(snapshotString(initialSnapshot, "heightMm"));
   const [bleedSpacingMm, setBleedSpacingMm] = useState(snapshotString(initialSnapshot, "bleedSpacingMm"));
+  const [dropDirection, setDropDirection] = useState<DropDirection>((snapshotString(initialSnapshot, "dropDirection") as DropDirection) || "auto");
+  const [dropOverlapMm, setDropOverlapMm] = useState(snapshotString(initialSnapshot, "dropOverlapMm", "0"));
   const [artworkChoice, setArtworkChoice] = useState<ArtworkChoice>(snapshotString(initialSnapshot, "artworkChoice") as ArtworkChoice);
   const [artworkMinutes, setArtworkMinutes] = useState(snapshotString(initialSnapshot, "artworkMinutes"));
   const [printMethod, setPrintMethod] = useState<PrintMethod>(snapshotString(initialSnapshot, "printMethod") as PrintMethod);
@@ -1246,6 +1323,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const areaSqm = width > 0 && height > 0 ? (width / 1000) * (height / 1000) : 0;
   const sideMultiplier = printed && sides === "double" ? 2 : 1;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
+  const safeDropOverlapMm = Math.max(0, numberValue(dropOverlapMm, 0));
+  const activeRollMaterial = isRollStockBase ? selectedMainMaterial : selectedMedia;
+  const activeRollWidthMm = numberValue(activeRollMaterial?.rollWidthMm, 0);
+  const effectiveDropDirection: DropDirection = dropDirection === "auto" && activeRollWidthMm > 0 && usageWidth > activeRollWidthMm && usageHeight > activeRollWidthMm
+    ? "vertical"
+    : dropDirection;
+  const dropLayoutPreview = forcedDropLayout(usageWidth, usageHeight, activeRollMaterial, effectiveDropDirection, safeDropOverlapMm);
   const selectedBacking = useMemo(() => selectedBackingGroup
     ? bestRollMaterialForGroup(selectedBackingGroup.materials, usageWidth, usageHeight, quantityNumber)
     : undefined, [selectedBackingGroup, usageWidth, usageHeight, quantityNumber]);
@@ -1367,6 +1451,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setWidthMm("");
     setHeightMm("");
     setBleedSpacingMm("");
+    setDropDirection("auto");
+    setDropOverlapMm("0");
     setArtworkChoice("");
     setArtworkMinutes("");
     setPrintMethod("");
@@ -1412,6 +1498,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     setWidthMm("");
     setHeightMm("");
     setBleedSpacingMm("");
+    setDropDirection("auto");
+    setDropOverlapMm("0");
     setArtworkChoice("");
     setArtworkMinutes("");
     setPrintMethod(rollStockBase ? "roll_stock" : "");
@@ -1512,7 +1600,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (flowType === "signage") {
       if (selectedMainMaterial && areaSqm > 0) {
         if (isRollMaterial(selectedMainMaterial) && !isSheetMaterial(selectedMainMaterial)) {
-          const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedMainMaterial, quantityNumber);
+          const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedMainMaterial, quantityNumber, effectiveDropDirection, safeDropOverlapMm);
           const rate = rollRate(selectedMainMaterial);
           const amount = lm.amount / quantityNumber;
           rows.push({
@@ -1565,7 +1653,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (selectedMedia && needsAdditionalMediaCost && areaSqm > 0) {
         const mediaFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
-        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedMedia, mediaFaces);
+        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedMedia, mediaFaces, effectiveDropDirection, safeDropOverlapMm);
         const rate = rollRate(selectedMedia);
         const amount = lm.amount / quantityNumber;
         rows.push({
@@ -1589,9 +1677,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         const inkRollMaterial = isRollStockBase ? selectedMainMaterial : needsAdditionalMediaCost ? selectedMedia : undefined;
         const inkRollPieces = isRollStockBase ? quantityNumber : quantityNumber * sideMultiplier;
         const inkRollUse = inkRollMaterial
-          ? roundedRollMetresForQuantity(usageWidth, usageHeight, inkRollMaterial, inkRollPieces)
+          ? roundedRollMetresForQuantity(usageWidth, usageHeight, inkRollMaterial, inkRollPieces, effectiveDropDirection, safeDropOverlapMm)
           : null;
-        const inkUse = roundedInkSquareMetresForQuoteLine(areaSqm, sideMultiplier, quantityNumber, inkRollUse, inkBillingIncrementSqm);
+        const inkAreaPerFaceSqm = dropLayoutPreview?.printedAreaSqmPerFace ?? areaSqm;
+        const inkUse = roundedInkSquareMetresForQuoteLine(inkAreaPerFaceSqm, sideMultiplier, quantityNumber, inkRollUse, inkBillingIncrementSqm);
         const inkNote = [inkUse.note, sides === "double" ? "double sided" : null].filter(Boolean).join(" · ") || undefined;
         if (ink === "cmyk" || ink === "both") {
           rows.push({ label: "CMYK ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
@@ -1602,7 +1691,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }
 
       if (backingApplicable && selectedBacking && backingId !== "none" && areaSqm > 0) {
-        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedBacking, quantityNumber);
+        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedBacking, quantityNumber, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview);
         const rate = rollRate(selectedBacking);
         const amount = quantityNumber > 0 ? lm.amount / quantityNumber : lm.amount;
         rows.push({
@@ -1624,7 +1713,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
 
       if (selectedLaminate && laminateId !== "none" && areaSqm > 0) {
         const laminateFaces = Math.max(1, Math.ceil(quantityNumber * sideMultiplier));
-        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedLaminate, laminateFaces);
+        const lm = roundedRollMetresForQuantity(usageWidth, usageHeight, selectedLaminate, laminateFaces, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview);
         const rate = rollRate(selectedLaminate);
         const amount = quantityNumber > 0 ? lm.amount / quantityNumber : lm.amount;
         rows.push({
@@ -1858,7 +1947,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1946,6 +2035,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     return `${usage(numberValue(part.qty, 0))} ${part.unit || "each"} ${part.name.trim() || customerMaterialName(material) || "part"}`;
   }).join(", ");
   const finishedSizeLabel = width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : "";
+  const dropLayoutSummary = dropLayoutPreview
+    ? `${dropLayoutPreview.drops} ${dropLayoutPreview.direction === "vertical" ? "vertical drops" : "horizontal strips"} approx ${dimensionMm(dropLayoutPreview.panelAcrossMm)} × ${dimensionMm(dropLayoutPreview.lengthMm)}mm${dropLayoutPreview.overlapMm > 0 ? ` · ${dimensionMm(dropLayoutPreview.overlapMm)}mm overlap` : ""}`
+    : activeRollMaterial && dropDirection === "auto" ? "Auto / best yield" : "";
   const lineName = flowType === "component"
     ? componentName.trim() || "Custom component"
     : flowType === "service"
@@ -2016,6 +2108,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       isRollStockBase ? null : printMethods.find((item) => item.key === resolvedPrintMethod)?.label,
       printed && numberValue(printSetupMinutes, 0) > 0 ? `Print setup ${minutesLabel(printSetupMinutes)}` : null,
       selectedMediaName || null,
+      activeRollMaterial && dropLayoutSummary ? `Drop layout: ${dropLayoutSummary}` : null,
       inkChoices.find((item) => item.key === ink)?.label,
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       printDirection ? `${printDirection === "reverse" ? "Reverse" : (selectedReversePrintableRoll && !isClearAcrylic ? "Standard" : "Positive")} print` : null,
@@ -2051,6 +2144,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     widthMm,
     heightMm,
     bleedSpacingMm,
+    dropDirection: effectiveDropDirection,
+    dropOverlapMm: String(safeDropOverlapMm),
+    dropCount: dropLayoutPreview?.drops,
+    dropPanelWidthMm: dropLayoutPreview ? String(dropLayoutPreview.panelAcrossMm) : undefined,
+    dropLengthMm: dropLayoutPreview ? String(dropLayoutPreview.lengthMm) : undefined,
     artworkChoice,
     artworkMinutes,
     printMethod: resolvedPrintMethod,
@@ -2172,6 +2270,43 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   function stepTitle(): string {
     const current = steps.find((step) => step.key === activeStep);
     return current?.label ?? "Quote builder";
+  }
+
+  function renderDropLayoutControls(compact = false) {
+    if (!activeRollMaterial) return null;
+    const preview = dropLayoutPreview;
+    const cardStyle = (selected: boolean) => ({
+      border: selected ? "2px solid #ea580c" : "1px solid #d0d5dd",
+      borderRadius: 12,
+      background: selected ? "#fff7ed" : "#fff",
+      minHeight: compact ? 42 : 74,
+      padding: compact ? "8px 10px" : "10px 12px",
+      display: "grid",
+      gap: 3,
+      textAlign: "left" as const,
+      cursor: "pointer"
+    });
+    return (
+      <div style={{ border: "1px solid #fed7aa", borderRadius: compact ? 14 : 18, padding: compact ? 10 : 14, background: "#fffaf5", display: "grid", gap: 10, gridColumn: "1 / -1" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start", flexWrap: "wrap" }}>
+          <div><strong>Drop / panel direction</strong><div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>Controls how wide roll jobs are split for printing, laminate and installation.</div></div>
+          <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 900 }}>{numberValue(activeRollMaterial.rollWidthMm, 0) > 0 ? `${dimensionMm(numberValue(activeRollMaterial.rollWidthMm, 0))}mm roll` : "Roll width not set"}</span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8 }}>
+          {([
+            ["auto", "Auto / best yield", "Uses the most efficient roll layout. Oversized wall panels default to vertical drops."],
+            ["vertical", "Vertical drops", "Split across the wall width; each drop runs the finished wall height."],
+            ["horizontal", "Horizontal strips", "Split across the wall height; each strip runs the finished wall width."]
+          ] as Array<[DropDirection, string, string]>).map(([value, label, note]) => (
+            <button key={value} type="button" onClick={() => { setDropDirection(value); setUnitPriceOverridden(false); }} style={cardStyle(dropDirection === value)}>
+              <strong>{label}</strong>{!compact ? <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{note}</span> : null}
+            </button>
+          ))}
+        </div>
+        <label style={{ display: "grid", gap: 5, maxWidth: 260 }}><b>Overlap between drops mm</b><input value={dropOverlapMm} onChange={(event) => { setDropOverlapMm(event.target.value); setUnitPriceOverridden(false); }} type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>0 = butt join / no overlap. Enter the printed overlap required between adjacent drops.</small></label>
+        {preview ? <div style={{ borderRadius: 10, background: "#fff", border: "1px solid #fdba74", padding: "8px 10px", color: "#7c2d12", fontSize: 12 }}><strong>{preview.direction === "vertical" ? "INSTALL AS VERTICAL DROPS" : "INSTALL AS HORIZONTAL STRIPS"}</strong><br />{preview.note} · {usage(preview.totalLmPerFace)}lm per face before billing round-up.</div> : dropDirection === "auto" ? <div style={{ color: "#64748b", fontSize: 12 }}>Auto will choose the existing best-yield layout. If both finished dimensions exceed the roll width, PM uses vertical drops.</div> : null}
+      </div>
+    );
   }
 
   function renderArtworkStep(nextAfterChoice: StepKey) {
@@ -2351,6 +2486,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
                 {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <InlineLabourField label="Print setup labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }} labourRate={labourRate} quantity={quantityNumber} /> : null}
                 {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
+                {activeRollMaterial ? renderDropLayoutControls(true) : null}
                 {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "roll_stock" ? "Print / Ink" : "Ink"}</b><select value={ink} onChange={(event) => chooseInk(event.target.value as InkChoice)} style={inputStyle}><option value="">{resolvedPrintMethod === "roll_stock" ? "Choose print / ink" : "Choose ink"}</option>{availableInkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
                 {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
                 {canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => { const value = event.target.value as PrintDirection; setPrintDirection(value); if (value !== "reverse") setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose direction</option><option value="positive">{selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive / face print"}</option><option value="reverse">Reverse print</option></select></label> : null}
@@ -2439,6 +2575,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               {flowType === "small_format" || isPrintDepartment ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
               <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
               <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
+              {flowType === "signage" && activeRollMaterial ? <SummaryRow label="Drop layout" value={dropLayoutSummary || undefined} /> : null}
               <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `${minutesLabel(artworkMinutes)} required` : "Artwork required" : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
               <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
             </div>
@@ -2831,6 +2968,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `${nestingFootprintLabel} for material yield` : "Optional"}</small></label>
             <button type="button" onClick={() => setActiveStep("artwork")} style={primaryButton}>Continue</button>
           </div>
+          {isRollStockBase ? renderDropLayoutControls() : null}
         </div>
       );
     }
@@ -2911,6 +3049,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       return (
         <div style={{ display: "grid", gap: 16 }}>
           <StepIntro icon="9" title={resolvedPrintMethod === "roll_stock" ? "Choose print / ink" : "Choose ink"} text={resolvedPrintMethod === "roll_stock" ? "Choose No print for unprinted roll stock, or select the ink mode to be charged per square metre." : "Choose the ink mode to be charged per square metre."} />
+          {!isRollStockBase && activeRollMaterial ? renderDropLayoutControls() : null}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
             {availableInkChoices.map((choice) => (
               <button key={choice.key} type="button" onClick={() => chooseInk(choice.key, "sides")} style={cardButtonStyle(ink === choice.key, choice.key === "white" ? "#64748b" : "#f97316")}>
@@ -2928,6 +3067,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       return (
         <div style={{ display: "grid", gap: 16 }}>
           <StepIntro icon="•" title={canChooseReversePrint ? "Choose sides and print direction" : "Choose sides"} text={canChooseReversePrint ? (isClearAcrylic ? "Clear acrylic needs a positive/reverse print choice." : "This roll media is marked Reverse printable, so choose Standard or Reverse print.") : "Single or double sided printing affects ink, roll media and laminate usage."} />
+          {resolvedPrintMethod === "cut_vinyl" && activeRollMaterial ? renderDropLayoutControls() : null}
           <SidesCards onComplete={() => canChooseReversePrint ? undefined : setActiveStep("laminate")} sides={sides} setSides={setSides} />
           {canChooseReversePrint ? (
             <div style={{ display: "grid", gap: 10 }}>
@@ -3288,7 +3428,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (activeStep === "size" || activeStep === "small_size") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}</div>;
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}{activeStep === "size" && isRollStockBase ? renderDropLayoutControls(true) : null}</div>;
     }
 
     if (activeStep === "artwork") {
@@ -3300,7 +3440,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (activeStep === "media") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll stock / media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label></div>;
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll stock / media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label>{activeRollMaterial ? renderDropLayoutControls(true) : null}</div>;
     }
 
     if (activeStep === "ink") {

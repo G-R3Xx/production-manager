@@ -216,6 +216,14 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
             ? `${numericText(snapshot.widthMm)} x ${numericText(snapshot.heightMm)} mm`
             : item.sizeSummary || "—";
           const bleedSpacing = text(snapshot.bleedSpacingMm) ? `${numericText(snapshot.bleedSpacingMm)} mm per side` : "—";
+          const dropCount = Number(snapshot.dropCount);
+          const dropDirection = text(snapshot.dropDirection).toLowerCase();
+          const dropPanelWidthMm = Number(snapshot.dropPanelWidthMm);
+          const dropLengthMm = Number(snapshot.dropLengthMm);
+          const dropOverlap = Number(snapshot.dropOverlapMm);
+          const dropInstruction = Number.isFinite(dropCount) && dropCount > 0 && (dropDirection === "vertical" || dropDirection === "horizontal")
+            ? `${dropCount} ${dropDirection === "vertical" ? "VERTICAL DROPS" : "HORIZONTAL STRIPS"}${Number.isFinite(dropPanelWidthMm) && Number.isFinite(dropLengthMm) ? ` · approx ${numericText(dropPanelWidthMm)} × ${numericText(dropLengthMm)} mm each` : ""}${Number.isFinite(dropOverlap) && dropOverlap > 0 ? ` · ${numericText(dropOverlap)} mm overlap` : ""}`
+            : "";
           const labour = [
             Number(snapshot.artworkMinutes) > 0 ? `Artwork ${numericText(snapshot.artworkMinutes)} min` : "",
             Number(snapshot.printSetupMinutes) > 0 ? `Print setup ${numericText(snapshot.printSetupMinutes)} min (${human(snapshot.printSetupLabourBasis)})` : "",
@@ -254,6 +262,7 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8 }}>
                     {[
                       ["Finished size", finishedSize],
+                      ["Drop layout", dropInstruction || "—"],
                       ["Print", [human(snapshot.printMethod), human(snapshot.ink), human(snapshot.sides), human(snapshot.printDirection)].filter(Boolean).join(" · ") || item.colourSummary || "—"],
                       ["Bleed / spacing", bleedSpacing],
                       ["Laminate", materialDisplayName(snapshot, "laminate", "smallCoating") || human(snapshot.laminate) || item.finishingSummary || "—"],
@@ -261,6 +270,8 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                       ["Artwork choice", human(snapshot.artworkChoice) || "—"]
                     ].map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: 8 }}><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>{label}</div><strong style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{String(value)}</strong></div>)}
                   </div>
+
+                  {dropInstruction ? <div style={{ border: "2px solid #fb923c", background: "#fff7ed", color: "#9a3412", borderRadius: 10, padding: 9, fontSize: 12 }}><strong>INSTALL LAYOUT:</strong> {dropInstruction}</div> : null}
 
                   {materials.length ? <div><strong style={{ fontSize: 12 }}>Stock / materials</strong><table style={{ width: "100%", borderCollapse: "collapse", marginTop: 5, fontSize: 11 }}><tbody>{materials.map((material) => <tr key={`${material.role}-${material.name}`}><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 4px", width: "24%", fontWeight: 900 }}>{material.role}</td><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 4px" }}>{material.name}{material.sku ? ` · SKU ${material.sku}` : ""}</td><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 4px", textAlign: "right" }}>{material.detail}</td></tr>)}</tbody></table></div> : null}
 

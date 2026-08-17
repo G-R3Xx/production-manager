@@ -1,5 +1,6 @@
 export type QuickQuoteFlowType = "" | "signage" | "plan_printing" | "poster_printing" | "small_format" | "service" | "component";
 export type QuickQuoteLabourBasis = "per_item" | "line_total";
+export type QuickQuoteDropDirection = "auto" | "vertical" | "horizontal";
 export type QuickQuoteStep =
   | "flow"
   | "base"
@@ -69,6 +70,11 @@ export type QuickQuoteSnapshot = {
   widthMm?: string;
   heightMm?: string;
   bleedSpacingMm?: string;
+  dropDirection?: QuickQuoteDropDirection;
+  dropOverlapMm?: string;
+  dropCount?: number;
+  dropPanelWidthMm?: string;
+  dropLengthMm?: string;
   artworkChoice?: string;
   artworkMinutes?: string;
   printMethod?: string;

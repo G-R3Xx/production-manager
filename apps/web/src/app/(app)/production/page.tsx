@@ -349,6 +349,11 @@ function buildRequirements(item: ProductionItemRecord, details: {
   const requirements: ProductionRequirement[] = [];
   const qty = quantityNumber(item.quantity);
   const finished = details.finishedSize;
+  const dropLayoutRaw = details.quoteParts.find((part) => /^Drop layout:/i.test(part));
+  if (dropLayoutRaw) {
+    const dropLayout = dropLayoutRaw.replace(/^Drop layout:\s*/i, "").trim();
+    requirements.push({ label: "Drop layout", item: /vertical/i.test(dropLayout) ? "INSTALL AS VERTICAL DROPS" : /horizontal/i.test(dropLayout) ? "INSTALL AS HORIZONTAL STRIPS" : "ROLL LAYOUT", quantity: dropLayout, note: "Use this production/install direction for roll media and laminate." });
+  }
   const stockParts = details.quoteParts.filter((part) => {
     if (!stockDimensionFromPart(part)) return false;
     if (/\b(laminate|lamination|lam-)\b/i.test(part)) return false;
@@ -428,6 +433,8 @@ function quotedDetailsForItem(item: ProductionItemRecord) {
   const laminateRaw = firstMatchingPart(quoteParts, /\b(laminate|lamination|lam-|gloss|matt|matte|anti graffiti|whiteboard)\b/i) || item.finishingSummary;
   const inkLabel = item.colourSummary || firstMatchingPart(quoteParts, /\b(cmyk|mono|white ink|white only|black only)\b/i);
   const print = printDisplayName(quoteParts, inkLabel);
+  const dropLayoutRaw = firstMatchingPart(quoteParts, /^Drop layout:/i);
+  const dropLayout = dropLayoutRaw ? dropLayoutRaw.replace(/^Drop layout:\s*/i, "").trim() : null;
   const finishing = laminateDisplayName(laminateRaw) || quoteParts.filter((part) => /\b(jingwei|router|cnc|cut|drill|holes|eyelet|fold|score|staple|numbering|padding|tape|finishing|coating)\b/i.test(part)).join("\n") || null;
   const baseName = baseProductName(item, quoteParts);
   const material = cleanProductionSummary(item.substrateSummary, { exclude: /\b(laminate|lamination|lam-|gloss laminate|matt laminate|matte laminate|coating)\b/i }) || stockPart || firstMatchingPart(quoteParts, /\b(acm|aluminium composite|acrylic|corflute|coreflute|pvc|foamboard|banner|vinyl|roll|stock|paper|gsm|substrate|clear|opal|white|black|sheet)\b/i) || item.quoteProductName;
@@ -440,6 +447,7 @@ function quotedDetailsForItem(item: ProductionItemRecord) {
     material,
     print,
     finishing,
+    dropLayout,
     quoteParts,
     notes: item.quoteLineNotes,
     lineTotal: item.quoteLineTotal,
@@ -461,6 +469,7 @@ function QuotedDetailsCard({ item, purchaseOrderNumber }: { item: ProductionItem
     ["Finished item", details.productionTitle],
     ["Quantity", item.quantity],
     ["Finished size", details.size],
+    ["Drop layout", details.dropLayout],
     ["Primary stock", details.material],
     ["Print", details.print],
     ["Laminate / finish", details.finishing]
