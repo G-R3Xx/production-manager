@@ -3,6 +3,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
 import { AppNavLink } from "@/components/AppNavLink";
+import { SafeAppAutoRefresh } from "@/components/SafeAppAutoRefresh";
 import { signOutAction, switchTenantAction, markAllNotificationsReadAction } from "./actions";
 import { countUnreadNotificationsForTenant, listNotificationsForTenant } from "@/server/notifications";
 
@@ -10,7 +11,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.17.04";
+const APP_VERSION = "V26.08.17.07";
 
 function notificationHref(notification: { eventType: string; href: string | null; payloadJson?: Record<string, unknown> }): string {
   const payload = notification.payloadJson ?? {};
@@ -227,6 +228,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
             </div>
           </details>
         </div>
+        <SafeAppAutoRefresh />
         {children}
       </main>
     </div>

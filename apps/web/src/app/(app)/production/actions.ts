@@ -207,11 +207,15 @@ export async function pushProductionQuoteToMyobOrderAction(formData: FormData): 
   const quoteId = String(formData.get("quoteId") ?? "").trim();
   if (!jobId || !quoteId) redirectToProduction("/production?error=Missing%20quote%20or%20production%20job");
 
+  let pushError = "";
   try {
     await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
-    productionRedirect(jobId, "Accepted quote sent to MYOB Order");
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    redirectToProduction(`/production/${encodeURIComponent(jobId)}?error=${encodeURIComponent(message)}`);
+    pushError = error instanceof Error ? error.message : String(error);
   }
+
+  if (pushError) {
+    redirectToProduction(`/production/${encodeURIComponent(jobId)}?error=${encodeURIComponent(pushError)}`);
+  }
+  productionRedirect(jobId, "Accepted quote sent to MYOB Order");
 }

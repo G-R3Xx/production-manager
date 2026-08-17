@@ -21,6 +21,7 @@ import {
   type QuoteLineRecord
 } from "@/server/quotes";
 import { PrintJobSheetButton } from "./PrintJobSheetButton";
+import { JobSheetArtworkPreview } from "./JobSheetArtworkPreview";
 
 type JobSheetPageProps = { params: Promise<{ id: string }> };
 type UnknownRecord = Record<string, unknown>;
@@ -225,16 +226,12 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                       <strong style={{ color: "#067647" }}>APPROVED ARTWORK</strong>
                       <span style={{ fontSize: 11, fontWeight: 900 }}>{artwork.proofRevision || approval?.revision || "Approved"}</span>
                     </div>
-                    {!proofIsPlaceholder(artwork) && proofIsPdf(artwork) ? (
-                      <div style={{ border: "1px solid #bbf7d0", borderRadius: 10, background: "#fff", padding: 18, minHeight: 180, display: "grid", placeItems: "center", textAlign: "center" }}>
-                        <div><strong>Approved PDF artwork</strong><br /><span style={{ color: "#667085", fontSize: 12 }}>{artwork.fileName || artwork.title}</span><br /><a href={artwork.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontSize: 11, overflowWrap: "anywhere" }}>{artwork.imageUrl}</a></div>
-                      </div>
-                    ) : !proofIsPlaceholder(artwork) ? (
-                      <img src={artwork.imageUrl} alt={artwork.title} style={{ width: "100%", maxHeight: 310, objectFit: "contain", background: "#fff", borderRadius: 10, border: "1px solid #bbf7d0" }} />
+                    {!proofIsPlaceholder(artwork) ? (
+                      <JobSheetArtworkPreview url={artwork.imageUrl} title={artwork.title} isPdf={proofIsPdf(artwork)} />
                     ) : (
                       <div style={{ border: "1px dashed #f59e0b", borderRadius: 10, background: "#fff7ed", padding: 18, color: "#9a3412" }}>Artwork placeholder only — approved proof image is not available.</div>
                     )}
-                    <div style={{ fontSize: 11, color: "#475467", marginTop: 8 }}><strong>{artwork.title}</strong>{artwork.fileName ? ` · ${artwork.fileName}` : ""}{artwork.notes ? <><br />{artwork.notes}</> : null}</div>
+                    <div style={{ fontSize: 11, color: "#475467", marginTop: 8 }}><strong>{artwork.title}</strong>{artwork.fileName ? ` · ${artwork.fileName}` : ""}{artwork.notes ? <><br />{artwork.notes}</> : null}{!proofIsPlaceholder(artwork) ? <><br /><a className="job-sheet-screen-only" href={artwork.imageUrl} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 800, overflowWrap: "anywhere" }}>Open approved artwork ↗</a></> : null}</div>
                   </section>
                 ) : null}
 

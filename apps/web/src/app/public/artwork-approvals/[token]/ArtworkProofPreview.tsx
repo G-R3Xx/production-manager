@@ -2,68 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-type PdfViewport = { width: number; height: number };
-type PdfRenderTask = { promise: Promise<void>; cancel?: () => void };
-type PdfPage = {
-  getViewport(options: { scale: number }): PdfViewport;
-  render(options: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport; transform?: number[] }): PdfRenderTask;
-};
-type PdfDocument = { numPages: number; getPage(pageNumber: number): Promise<PdfPage>; destroy?: () => Promise<void> | void };
-type PdfLoadingTask = { promise: Promise<PdfDocument> };
-type PdfJsLibrary = {
-  GlobalWorkerOptions: { workerSrc: string };
-  getDocument(source: string | { url: string }): PdfLoadingTask;
-};
-
-declare global {
-  interface Window {
-    pdfjsLib?: PdfJsLibrary;
-    __productionManagerPdfJsPromise?: Promise<PdfJsLibrary>;
-  }
-}
-
-const PDFJS_VERSION = "3.11.174";
-const PDFJS_SCRIPT = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.min.js`;
-const PDFJS_WORKER = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
-
-function loadPdfJs(): Promise<PdfJsLibrary> {
-  if (typeof window === "undefined") return Promise.reject(new Error("PDF preview is only available in the browser."));
-  if (window.pdfjsLib) {
-    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-    return Promise.resolve(window.pdfjsLib);
-  }
-  if (window.__productionManagerPdfJsPromise) return window.__productionManagerPdfJsPromise;
-
-  window.__productionManagerPdfJsPromise = new Promise<PdfJsLibrary>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[data-pm-pdfjs="${PDFJS_VERSION}"]`);
-    const finish = () => {
-      if (!window.pdfjsLib) {
-        reject(new Error("The clean PDF preview could not be loaded."));
-        return;
-      }
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER;
-      resolve(window.pdfjsLib);
-    };
-    if (existing) {
-      if (window.pdfjsLib) finish();
-      else {
-        existing.addEventListener("load", finish, { once: true });
-        existing.addEventListener("error", () => reject(new Error("The PDF preview library could not be loaded.")), { once: true });
-      }
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = PDFJS_SCRIPT;
-    script.async = true;
-    script.dataset.pmPdfjs = PDFJS_VERSION;
-    script.onload = finish;
-    script.onerror = () => reject(new Error("The PDF preview library could not be loaded."));
-    document.head.appendChild(script);
-  });
-
-  return window.__productionManagerPdfJsPromise;
-}
+import { loadPdfJs, type PdfDocument } from "@/lib/pdfjs-browser";
 
 function watermarkPatternSvg(text: string): string {
   const safe = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
