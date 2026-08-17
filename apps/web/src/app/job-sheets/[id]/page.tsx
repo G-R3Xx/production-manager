@@ -83,6 +83,18 @@ function materialRows(snapshot: UnknownRecord): Array<{ role: string; name: stri
   });
 }
 
+
+function materialDisplayName(snapshot: UnknownRecord, ...keys: string[]): string {
+  const materialSnapshots = isRecord(snapshot.materialSnapshots) ? snapshot.materialSnapshots : {};
+  for (const key of keys) {
+    const material = isRecord(materialSnapshots[key]) ? materialSnapshots[key] as UnknownRecord : null;
+    if (!material) continue;
+    const name = text(material.name) || text(material.customerFacingName);
+    if (name) return name;
+  }
+  return "";
+}
+
 function pricingRows(snapshot: UnknownRecord): Array<{ label: string; detail: string; usage: string; note: string }> {
   const pricingSnapshot = isRecord(snapshot.pricingSnapshot) ? snapshot.pricingSnapshot : {};
   const rows = Array.isArray(pricingSnapshot.pricingBreakdown) ? pricingSnapshot.pricingBreakdown : [];
@@ -244,7 +256,7 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                       ["Finished size", finishedSize],
                       ["Print", [human(snapshot.printMethod), human(snapshot.ink), human(snapshot.sides), human(snapshot.printDirection)].filter(Boolean).join(" · ") || item.colourSummary || "—"],
                       ["Bleed / spacing", bleedSpacing],
-                      ["Laminate", text(snapshot.laminateId) || item.finishingSummary || "—"],
+                      ["Laminate", materialDisplayName(snapshot, "laminate", "smallCoating") || human(snapshot.laminate) || item.finishingSummary || "—"],
                       ["Finishing", Array.isArray(snapshot.finishings) ? snapshot.finishings.map(human).join(", ") || "—" : item.finishingSummary || "—"],
                       ["Artwork choice", human(snapshot.artworkChoice) || "—"]
                     ].map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: 8 }}><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>{label}</div><strong style={{ fontSize: 12, whiteSpace: "pre-wrap" }}>{String(value)}</strong></div>)}

@@ -1,0 +1,60 @@
+/* Tender Edge independent product-column scrolling.
+   Desktop only. The parent/theme layout stays in normal document flow;
+   ONLY the two real product panes get a viewport height + their own scrollbar. */
+
+@media (min-width: 1024px) {
+  body.single-product.te-independent-product-scroll {
+    --te-product-pane-height: 620px;
+  }
+
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane {
+    height: var(--te-product-pane-height) !important;
+    max-height: var(--te-product-pane-height) !important;
+    min-height: 0 !important;
+    overflow-y: auto !important;
+    overflow-x: hidden !important;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+    -webkit-overflow-scrolling: touch;
+    scroll-behavior: auto;
+    box-sizing: border-box !important;
+    position: relative;
+  }
+
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane::-webkit-scrollbar-thumb {
+    background: rgba(15, 41, 61, 0.18);
+    border-radius: 999px;
+  }
+
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane::-webkit-scrollbar-thumb:hover {
+    background: rgba(15, 41, 61, 0.32);
+  }
+
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane--gallery,
+  body.single-product.te-independent-product-scroll .te-independent-scroll-pane--summary {
+    padding-right: 10px;
+  }
+}
+
+@media (max-width: 1023px) {
+  body.single-product .te-independent-scroll-pane {
+    height: auto !important;
+    max-height: none !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    padding-right: 0 !important;
+    scrollbar-gutter: auto;
+  }
+}
+
+html.te-product-option-settling {
+  scroll-behavior: auto !important;
+}

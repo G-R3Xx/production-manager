@@ -3,7 +3,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listEnquiriesForTenant, listRecentEnquiryCorrespondenceForTenant } from "@/server/enquiries";
+import { listEnquiriesForTenant, listRecentEnquiryCorrespondenceForTenant, reconcileEnquiryWorkflowStatusesForTenant } from "@/server/enquiries";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { attachEnquiryCorrespondenceAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
 import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
@@ -43,15 +43,19 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const message = readParam(params, "message");
   const error = readParam(params, "error");
   const filter = readParam(params, "filter");
+  await reconcileEnquiryWorkflowStatusesForTenant(activeTenant.tenantId);
   const [allEnquiries, clients, correspondence] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     listCustomersForTenant(activeTenant.tenantId),
     listRecentEnquiryCorrespondenceForTenant(activeTenant.tenantId, 5)
   ]);
   const deletedCount = allEnquiries.filter((enquiry) => enquiry.status === "deleted").length;
+  const completedCount = allEnquiries.filter((enquiry) => enquiry.status === "converted").length;
   const enquiries = filter === "deleted"
     ? allEnquiries.filter((enquiry) => enquiry.status === "deleted")
-    : allEnquiries.filter((enquiry) => enquiry.status !== "deleted");
+    : filter === "completed"
+      ? allEnquiries.filter((enquiry) => enquiry.status === "converted")
+      : allEnquiries.filter((enquiry) => enquiry.status !== "deleted" && enquiry.status !== "converted");
   const correspondenceByEnquiry = new Map<string, typeof correspondence>();
   for (const item of correspondence) {
     const existing = correspondenceByEnquiry.get(item.enquiryId) ?? [];
@@ -102,9 +106,10 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
 
         <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : "Current enquiries"}</h2>
+            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : filter === "completed" ? "Completed enquiries" : "Current enquiries"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <a href="/enquiries" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</a>
+              <a href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</a>
+              <a href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</a>
               <a href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</a>
               <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} shown</span>
             </div>
@@ -131,7 +136,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                       </div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
                         <span style={{ borderRadius: 999, border: `1px solid ${urgencyBadgeStyle(enquiry.urgency).borderColor}`, ...urgencyBadgeStyle(enquiry.urgency), padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{enquiry.urgency || "Normal"}</span>
-                        <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status}</span>
+                        <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status === "converted" ? "Converted to job" : enquiry.status === "survey_requested" ? "Survey requested" : enquiry.status === "quoted" ? "Quoted" : enquiry.status}</span>
                       </div>
                     </div>
                     {contactLine ? <div style={{ color: "#667085", fontSize: 13 }}>{contactLine}</div> : null}
@@ -153,7 +158,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                       ) : (
                         <span style={{ color: "#98a2b3", fontSize: 12 }}>No email correspondence attached yet.</span>
                       )}
-                      {enquiry.status !== "deleted" ? (
+                      {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
                         <form action={attachEnquiryCorrespondenceAction} style={{ margin: 0 }}>
                           <input type="hidden" name="enquiryId" value={enquiry.id} />
                           <EnquiryCorrespondenceDropzone />
@@ -162,7 +167,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                     </section>
 
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                      {enquiry.status !== "deleted" ? (
+                      {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
                         <>
                           <form action={createSurveyFromEnquiryAction} style={{ margin: 0 }}>
                             <input type="hidden" name="enquiryId" value={enquiry.id} />
@@ -171,7 +176,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                           <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
                         </>
                       ) : null}
-                      {enquiry.status !== "deleted" ? <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
+                      {enquiry.status !== "deleted" && enquiry.status !== "converted" ? <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
                       {enquiry.status === "deleted" ? (
                         <form action={restoreEnquiryAction} style={{ margin: 0 }}>
                           <input type="hidden" name="enquiryId" value={enquiry.id} />

@@ -86,6 +86,50 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
   return result.rows;
 }
 
+
+export async function reconcileEnquiryWorkflowStatusesForTenant(tenantId: string): Promise<void> {
+  if (!process.env.DATABASE_URL) return;
+  await pool.query(`
+    UPDATE app.enquiries e
+    SET status = CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM sales.quote_drafts qd
+            WHERE qd.tenant_id = e.tenant_id
+              AND qd.enquiry_id = e.id
+              AND qd.status = 'accepted'
+          ) THEN 'converted'
+          WHEN EXISTS (
+            SELECT 1
+            FROM sales.quote_drafts qd
+            WHERE qd.tenant_id = e.tenant_id
+              AND qd.enquiry_id = e.id
+              AND qd.status <> 'deleted'
+          ) AND e.status IN ('new','survey_requested','quoted') THEN 'quoted'
+          ELSE e.status
+        END,
+        updated_at = CASE
+          WHEN EXISTS (
+            SELECT 1
+            FROM sales.quote_drafts qd
+            WHERE qd.tenant_id = e.tenant_id
+              AND qd.enquiry_id = e.id
+              AND qd.status = 'accepted'
+          ) AND e.status <> 'converted' THEN now()
+          WHEN EXISTS (
+            SELECT 1
+            FROM sales.quote_drafts qd
+            WHERE qd.tenant_id = e.tenant_id
+              AND qd.enquiry_id = e.id
+              AND qd.status <> 'deleted'
+          ) AND e.status IN ('new','survey_requested') THEN now()
+          ELSE e.updated_at
+        END
+    WHERE e.tenant_id = $1::uuid
+      AND e.status <> 'deleted'
+  `, [tenantId]);
+}
+
 export async function getEnquiryById(tenantId: string, enquiryId: string): Promise<EnquiryRecord | null> {
   const result = await pool.query<EnquiryRecord>(`
     SELECT

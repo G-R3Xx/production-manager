@@ -519,6 +519,15 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
     normaliseMoney(input.discountPercent, "0"),
     input.notes ?? null
   ]);
+  if (input.enquiryId) {
+    await pool.query(`
+      UPDATE app.enquiries
+      SET status = CASE WHEN status = 'deleted' THEN status ELSE 'quoted' END,
+          updated_at = CASE WHEN status = 'deleted' THEN updated_at ELSE now() END
+      WHERE tenant_id = $1::uuid
+        AND id = $2::uuid
+    `, [tenantId, input.enquiryId]);
+  }
   return result.rows[0];
 }
 
@@ -866,6 +875,15 @@ export async function respondToQuoteByToken(token: string, response: "accepted" 
 
   if (response === "accepted") {
     await updateQuoteReadyForMyobByToken(token);
+    await pool.query(`
+      UPDATE app.enquiries e
+      SET status = 'converted',
+          updated_at = now()
+      FROM sales.quote_drafts qd
+      WHERE qd.public_token = $1
+        AND qd.enquiry_id = e.id
+        AND e.status <> 'deleted'
+    `, [token]);
   }
 }
 
@@ -890,8 +908,8 @@ export async function respondToQuoteLineByToken(
   let subtotal = 0;
   try {
     await client.query("BEGIN");
-    const quoteResult = await client.query<{ id: string; tenantId: string; quoteNumber: string | null; status: string }>(`
-      SELECT id::text, tenant_id::text as "tenantId", quote_number as "quoteNumber", status
+    const quoteResult = await client.query<{ id: string; tenantId: string; quoteNumber: string | null; status: string; enquiryId: string | null }>(`
+      SELECT id::text, tenant_id::text as "tenantId", quote_number as "quoteNumber", status, enquiry_id::text as "enquiryId"
       FROM sales.quote_drafts
       WHERE public_token = $1 AND status <> 'deleted'
       FOR UPDATE
@@ -959,6 +977,17 @@ export async function respondToQuoteLineByToken(
           updated_at = now()
       WHERE id = $1::uuid
     `, [quote.id, overallStatus]);
+
+    if (overallStatus === "accepted" && quote.enquiryId) {
+      await client.query(`
+        UPDATE app.enquiries
+        SET status = 'converted',
+            updated_at = now()
+        WHERE tenant_id = $1::uuid
+          AND id = $2::uuid
+          AND status <> 'deleted'
+      `, [quote.tenantId, quote.enquiryId]);
+    }
 
     await client.query("COMMIT");
   } catch (error) {
