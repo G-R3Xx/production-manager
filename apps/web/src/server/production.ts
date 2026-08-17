@@ -1660,11 +1660,77 @@ export async function setProductionJobStatusForTenant(tenantId: string, jobId: s
   `, [tenantId, jobId, status]);
 }
 
+type ProductionJobAutoStatus = "waiting_on_files" | "ready_to_start" | "in_production" | "ready_for_dispatch" | "completed";
+
+function isPreProductionStep(stepType: string | null | undefined, label: string | null | undefined): boolean {
+  const value = cleanSearchText(`${stepType} ${label}`).replace(/\s+/g, "_");
+  return value.includes("artwork_checked") || value.includes("print_ready_file_attached");
+}
+
+function isDispatchReadyStep(stepType: string | null | undefined, label: string | null | undefined): boolean {
+  const value = cleanSearchText(`${stepType} ${label}`).replace(/\s+/g, "_");
+  return /ready_(?:for|to)_(?:dispatch|install|pickup|delivery)/.test(value)
+    || /ready_for_install_pickup_delivery/.test(value)
+    || /ready_for_pickup_delivery/.test(value);
+}
+
+async function autoProgressProductionJobStatusForTenant(tenantId: string, jobId: string): Promise<ProductionJobAutoStatus | null> {
+  const result = await pool.query<{
+    currentStatus: string;
+    stepType: string | null;
+    label: string | null;
+    status: string | null;
+  }>(`
+    SELECT
+      pj.status AS "currentStatus",
+      ps.step_type AS "stepType",
+      ps.label,
+      ps.status
+    FROM production.production_jobs pj
+    LEFT JOIN production.production_steps ps ON ps.job_id = pj.id
+    WHERE pj.tenant_id = $1::uuid
+      AND pj.id = $2::uuid
+    ORDER BY ps.sort_order ASC NULLS LAST, ps.created_at ASC NULLS LAST
+  `, [tenantId, jobId]);
+
+  const currentStatus = result.rows[0]?.currentStatus ?? "";
+  if (!currentStatus || currentStatus === "deleted") return null;
+  const steps = result.rows.filter((row) => row.stepType || row.label);
+  if (!steps.length) return null;
+
+  const allDone = steps.every((step) => step.status === "done");
+  const dispatchSteps = steps.filter((step) => isDispatchReadyStep(step.stepType, step.label));
+  const dispatchDone = dispatchSteps.length > 0 && dispatchSteps.every((step) => step.status === "done");
+  const productionStarted = steps.some((step) => step.status === "done" && !isPreProductionStep(step.stepType, step.label) && !isDispatchReadyStep(step.stepType, step.label));
+  const preProductionSteps = steps.filter((step) => isPreProductionStep(step.stepType, step.label));
+  const preProductionReady = preProductionSteps.length > 0 && preProductionSteps.every((step) => step.status === "done");
+
+  let nextStatus: ProductionJobAutoStatus;
+  if (allDone) nextStatus = "completed";
+  else if (dispatchDone) nextStatus = "ready_for_dispatch";
+  else if (productionStarted) nextStatus = "in_production";
+  else if (currentStatus === "waiting_on_material") return null;
+  else if (preProductionReady) nextStatus = "ready_to_start";
+  else nextStatus = "waiting_on_files";
+
+  if (nextStatus === currentStatus) return nextStatus;
+  await pool.query(`
+    UPDATE production.production_jobs
+    SET status = $3::varchar,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+      AND status <> 'deleted'
+  `, [tenantId, jobId, nextStatus]);
+  return nextStatus;
+}
+
 export async function setProductionStepStatusForTenant(tenantId: string, stepId: string, status: "pending" | "done", checkedBy?: string | null): Promise<{
   jobId: string | null;
   checkedAt: string | null;
   checkedBy: string | null;
   isInstallHandoff: boolean;
+  jobStatus: ProductionJobAutoStatus | null;
 }> {
   const result = await pool.query<{ jobId: string; checkedAt: string | null; checkedBy: string | null; stepType: string; label: string }>(`
     WITH updated_step AS (
@@ -1696,11 +1762,13 @@ export async function setProductionStepStatusForTenant(tenantId: string, stepId:
   `, [tenantId, stepId, status, checkedBy ?? null]);
   const row = result.rows[0];
   const handoffText = `${row?.stepType ?? ""} ${row?.label ?? ""}`.toLowerCase();
+  const jobStatus = row?.jobId ? await autoProgressProductionJobStatusForTenant(tenantId, row.jobId) : null;
   return {
     jobId: row?.jobId ?? null,
     checkedAt: row?.checkedAt ?? null,
     checkedBy: row?.checkedBy ?? null,
-    isInstallHandoff: /ready[_ ]for[_ ]install|ready[_ ]to[_ ]install/.test(handoffText)
+    isInstallHandoff: /ready[_ ]for[_ ]install|ready[_ ]to[_ ]install/.test(handoffText),
+    jobStatus
   };
 }
 
@@ -1956,6 +2024,7 @@ export async function updateProductionItemPrintReadyFileForTenant(tenantId: stri
         AND item_id = $2::uuid
         AND lower(label) = lower('Print-ready file attached')
     `, [jobId, itemId, input.uploadedBy ?? null]);
+    await autoProgressProductionJobStatusForTenant(tenantId, jobId);
   }
   return { jobId };
 }
