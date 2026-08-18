@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
-import { createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
+import { createQuoteFromCompletedSurveyAction, createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
 import { listSurveyRequestsForTenant } from "@/server/surveys";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
@@ -282,7 +282,12 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                     {survey.status !== "deleted" ? (
                       <>
                         <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
-                        <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: hasCompletedSurvey ? "#111827" : "#344054", color: "#fff", fontWeight: 800 }}>{hasCompletedSurvey ? "Create quote from completed survey" : "Create quote from survey notes"}</Link>
+                        {hasCompletedSurvey ? (
+                          <form action={createQuoteFromCompletedSurveyAction} style={{ margin: 0 }}>
+                            <input type="hidden" name="surveyId" value={survey.id} />
+                            <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer" }}>Create quote + surveyed sign lines</button>
+                          </form>
+                        ) : <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#344054", color: "#fff", fontWeight: 800 }}>Create quote from survey notes</Link>}
                         <form action={deleteSurveyRequestAction} style={{ margin: 0 }}>
                           <input type="hidden" name="surveyId" value={survey.id} />
                           <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Delete</button>

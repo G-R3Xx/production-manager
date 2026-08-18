@@ -70,6 +70,41 @@ function internalMaterialDisplayName(snapshot: UnknownRecord, ...keys: string[])
   return "";
 }
 
+
+
+type JobSheetSurveyReference = {
+  title: string;
+  location: string;
+  width: string;
+  height: string;
+  depth: string;
+  quantity: string;
+  description: string;
+  condition: string;
+  requiredWork: string;
+  fixingMethod: string;
+  accessNotes: string;
+  powerRequired: string;
+  notes: string;
+  photos: Array<{ url: string; fileName: string; annotated: boolean }>;
+};
+
+function surveyReferenceFromSnapshot(snapshot: UnknownRecord): JobSheetSurveyReference | null {
+  const context = isRecord(snapshot.surveyContext) ? snapshot.surveyContext : null;
+  if (!context) return null;
+  const photos = Array.isArray(context.photos) ? context.photos.flatMap((raw): JobSheetSurveyReference["photos"] => {
+    if (!isRecord(raw)) return [];
+    const url = text(raw.url);
+    if (!url) return [];
+    return [{ url, fileName: text(raw.fileName) || "Survey photo", annotated: Boolean(raw.annotated) }];
+  }) : [];
+  return {
+    title: text(context.title), location: text(context.location), width: text(context.width), height: text(context.height), depth: text(context.depth), quantity: text(context.quantity),
+    description: text(context.description), condition: text(context.condition), requiredWork: text(context.requiredWork), fixingMethod: text(context.fixingMethod),
+    accessNotes: text(context.accessNotes), powerRequired: text(context.powerRequired), notes: text(context.notes), photos
+  };
+}
+
 type StockRequiredRow = { role: string; material: string; required: string };
 
 function formatRequiredAmount(amount: number, unit: string): string {
@@ -257,6 +292,8 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           .job-sheet-stock-row { min-height: 14mm !important; }
           .job-sheet-process-row { min-height: 12mm !important; padding-top: 6px !important; padding-bottom: 6px !important; }
           .job-sheet-final-notes { gap: 12px !important; }
+          .job-sheet-survey-reference { break-inside: avoid; page-break-inside: avoid; }
+          .job-sheet-survey-photo img { height: 135px !important; }
           .job-sheet-note-line { min-height: 23px !important; }
           .job-sheet-footer { margin-top: 8px !important; padding-top: 6px !important; font-size: 8px !important; break-inside: avoid; page-break-inside: avoid; }
           a { color: inherit !important; text-decoration: none !important; }
@@ -290,6 +327,7 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           const line = quoteLineForItem(item, activeQuoteLines);
           const snapshot = line && isRecord(line.configurationSnapshot) ? line.configurationSnapshot : {};
           const artwork = artworkPageForItem(item, artworkPages);
+          const surveyReference = surveyReferenceFromSnapshot(snapshot);
           const itemSteps = steps.filter((step) => step.itemId === item.id);
           const finishedSize = [text(snapshot.widthMm), text(snapshot.heightMm)].every(Boolean)
             ? `${numericText(snapshot.widthMm)} x ${numericText(snapshot.heightMm)} mm`
@@ -333,6 +371,21 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                   {dropInstruction ? <div style={{ border: "2px solid #fb923c", background: "#fff7ed", color: "#9a3412", borderRadius: 10, padding: 10, fontSize: 12 }}><strong>INSTALL LAYOUT:</strong> {dropInstruction}</div> : null}
                   {line?.notes || item.quoteLineNotes ? <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 10, padding: 9, fontSize: 11, whiteSpace: "pre-wrap" }}><strong>Production notes:</strong> {line?.notes || item.quoteLineNotes}</div> : null}
                 </section>
+
+                {surveyReference ? (
+                  <section className="job-sheet-survey-reference" style={{ border: "1px solid #fdba74", borderRadius: 14, padding: 12, background: "#fffaf5", display: "grid", gap: 10 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+                      <strong style={{ color: "#9a3412", fontSize: 13 }}>SITE SURVEY REFERENCE</strong>
+                      <span style={{ color: "#9a3412", fontSize: 11, fontWeight: 900 }}>{surveyReference.title || `Survey item ${itemIndex + 1}`}</span>
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,minmax(0,1fr))", gap: 7 }}>
+                      {[ ["Location", surveyReference.location], ["Measured size", [surveyReference.width, surveyReference.height, surveyReference.depth].filter(Boolean).join(" × ")], ["Survey qty", surveyReference.quantity], ["Required work", surveyReference.requiredWork], ["Fixing / substrate", surveyReference.fixingMethod], ["Condition", surveyReference.condition], ["Access", surveyReference.accessNotes], ["Power", surveyReference.powerRequired] ].filter((row) => row[1]).map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #fed7aa", borderRadius: 9, background: "#fff", padding: 8 }}><div style={{ fontSize: 8, fontWeight: 950, color: "#9a3412", textTransform: "uppercase" }}>{label}</div><div style={{ marginTop: 3, fontSize: 10, lineHeight: 1.35, whiteSpace: "pre-wrap" }}>{value}</div></div>)}
+                    </div>
+                    {surveyReference.photos.length ? <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 8 }}>{surveyReference.photos.slice(0, 4).map((photo, photoIndex) => <div key={`${photo.url}-${photoIndex}`} className="job-sheet-survey-photo" style={{ border: "1px solid #fed7aa", borderRadius: 9, background: "#fff", overflow: "hidden" }}><img src={photo.url} alt={photo.fileName} style={{ width: "100%", height: 180, objectFit: "contain", display: "block", background: "#f8fafc" }} /><div style={{ padding: "5px 7px", fontSize: 9, color: "#7c2d12" }}>{photo.annotated ? "Annotated · " : ""}{photo.fileName}</div></div>)}</div> : null}
+                    {surveyReference.photos.length > 4 ? <div style={{ fontSize: 9, color: "#9a3412" }}>+ {surveyReference.photos.length - 4} more survey photo{surveyReference.photos.length - 4 === 1 ? "" : "s"} retained in Production Manager.</div> : null}
+                    {[surveyReference.description ? `Description: ${surveyReference.description}` : null, surveyReference.notes ? `Notes: ${surveyReference.notes}` : null].filter(Boolean).length ? <div style={{ fontSize: 10, color: "#475467", whiteSpace: "pre-wrap" }}>{[surveyReference.description ? `Description: ${surveyReference.description}` : null, surveyReference.notes ? `Notes: ${surveyReference.notes}` : null].filter(Boolean).join("\n")}</div> : null}
+                  </section>
+                ) : null}
 
                 {artwork ? (
                   <section className="job-sheet-artwork" style={{ border: "2px solid #86efac", borderRadius: 14, padding: 12, background: "#f0fdf4" }}>

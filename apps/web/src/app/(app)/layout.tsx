@@ -11,7 +11,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.18.08";
+const APP_VERSION = "V26.08.18.10";
 
 function notificationHref(notification: { eventType: string; href: string | null; payloadJson?: Record<string, unknown> }): string {
   const payload = notification.payloadJson ?? {};
@@ -28,6 +28,7 @@ function notificationHref(notification: { eventType: string; href: string | null
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
+  { href: "/calendar", label: "Calendar", emoji: "▦" },
   { href: "/enquiries", label: "Enquiries", emoji: "?" },
   { href: "/surveys", label: "Surveys", emoji: "⌖" },
   { href: "/quotes", label: "Quotes", emoji: "$" },
@@ -88,7 +89,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           <div style={{ fontSize: 11, fontWeight: 900, color: "#64748b", letterSpacing: "0.05em", textTransform: "uppercase", textAlign: "center" }}>
             {APP_VERSION}
           </div>
-          <a href="/enquiries" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
+          <a href="/dashboard" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
             <img
               src="/brand/production-manager-logo.svg"
               alt="Production Manager"

@@ -97,6 +97,57 @@ function extractSurveyPhotos(payload: unknown): SurveyPhoto[] {
   return photoRows;
 }
 
+
+
+type SurveyLineReference = {
+  title: string;
+  location: string;
+  width: string;
+  height: string;
+  depth: string;
+  quantity: string;
+  description: string;
+  condition: string;
+  requiredWork: string;
+  fixingMethod: string;
+  accessNotes: string;
+  powerRequired: string;
+  notes: string;
+  photos: Array<{ url: string; fileName: string; annotated: boolean }>;
+};
+
+function surveyLineReference(value: unknown): SurveyLineReference | null {
+  if (!isRecord(value)) return null;
+  const context = isRecord(value.surveyContext) ? value.surveyContext : null;
+  if (!context) return null;
+  const photos = Array.isArray(context.photos) ? context.photos.flatMap((raw): SurveyLineReference["photos"] => {
+    if (!isRecord(raw)) return [];
+    const url = textValue(raw.url);
+    if (!url) return [];
+    return [{ url, fileName: textValue(raw.fileName) || "Survey photo", annotated: Boolean(raw.annotated) }];
+  }) : [];
+  return {
+    title: textValue(context.title),
+    location: textValue(context.location),
+    width: textValue(context.width),
+    height: textValue(context.height),
+    depth: textValue(context.depth),
+    quantity: textValue(context.quantity),
+    description: textValue(context.description),
+    condition: textValue(context.condition),
+    requiredWork: textValue(context.requiredWork),
+    fixingMethod: textValue(context.fixingMethod),
+    accessNotes: textValue(context.accessNotes),
+    powerRequired: textValue(context.powerRequired),
+    notes: textValue(context.notes),
+    photos,
+  };
+}
+
+function surveyLineNeedsConfiguration(value: unknown): boolean {
+  return isRecord(value) && value.surveyNeedsConfiguration === true;
+}
+
 function surveyStatusLabel(status: string | null | undefined, syncStatus: string | null | undefined): string {
   if (syncStatus === "completed" || status === "completed") return "Survey completed · ready to quote";
   if (syncStatus === "created") return "Sent to Install Scheduler · awaiting completion";
@@ -621,6 +672,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 </div>
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
+                  const surveyReference = surveyLineReference(line.configurationSnapshot);
+                  const surveyNeedsConfig = surveyLineNeedsConfiguration(line.configurationSnapshot);
                   return (
                     <details
                       key={line.id}
@@ -641,6 +694,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                               <strong style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}>{line.productName}</strong>
+                              {surveyReference ? <span style={{ borderRadius: 999, padding: "4px 8px", fontSize: 11, fontWeight: 950, background: surveyNeedsConfig ? "#fff7ed" : "#eef4ff", color: surveyNeedsConfig ? "#c2410c" : "#3538cd" }}>{surveyNeedsConfig ? "Survey line · needs pricing" : "Survey linked"}</span> : null}
                               {line.clientResponseStatus !== "pending" ? (
                                 <span style={{
                                   borderRadius: 999,
@@ -662,6 +716,19 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       </summary>
 
                       <div style={{ borderTop: "1px solid #e5edf7", padding: 14, display: "grid", gap: 14, background: "#ffffff" }}>
+                        {surveyReference ? (
+                          <section style={{ border: "1px solid #fdba74", borderRadius: 16, padding: 12, background: "#fffaf5", display: "grid", gap: 10 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start", flexWrap: "wrap" }}>
+                              <div><strong style={{ color: "#9a3412" }}>Internal survey reference · {surveyReference.title || line.productName}</strong><div style={{ color: "#667085", fontSize: 12, marginTop: 3 }}>This information stays internal and is carried with this line into Production / Job Sheet.</div></div>
+                              {surveyNeedsConfig ? <span style={{ borderRadius: 999, background: "#ffedd5", color: "#c2410c", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>Configure + price this line</span> : null}
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 8 }}>
+                              {[ ["Location", surveyReference.location], ["Survey size", [surveyReference.width, surveyReference.height, surveyReference.depth].filter(Boolean).join(" × ")], ["Survey qty", surveyReference.quantity], ["Required work", surveyReference.requiredWork], ["Fixing / substrate", surveyReference.fixingMethod], ["Access", surveyReference.accessNotes] ].filter((row) => row[1]).map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #fed7aa", borderRadius: 10, background: "#fff", padding: 8 }}><div style={{ fontSize: 9, fontWeight: 950, color: "#9a3412", textTransform: "uppercase" }}>{label}</div><div style={{ marginTop: 3, fontSize: 12, whiteSpace: "pre-wrap" }}>{value}</div></div>)}
+                            </div>
+                            {surveyReference.photos.length ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>{surveyReference.photos.map((photo, photoIndex) => <a key={`${photo.url}-${photoIndex}`} href={photo.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", border: "1px solid #fed7aa", borderRadius: 10, overflow: "hidden", background: "#fff" }}><img src={photo.url} alt={photo.fileName} style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} /><div style={{ padding: "6px 8px", fontSize: 10, color: "#7c2d12" }}>{photo.annotated ? "Annotated · " : ""}{photo.fileName}</div></a>)}</div> : null}
+                            {[surveyReference.description, surveyReference.condition, surveyReference.powerRequired, surveyReference.notes].filter(Boolean).length ? <div style={{ color: "#475467", fontSize: 12, whiteSpace: "pre-wrap" }}>{[surveyReference.description ? `Description: ${surveyReference.description}` : null, surveyReference.condition ? `Condition: ${surveyReference.condition}` : null, surveyReference.powerRequired ? `Power: ${surveyReference.powerRequired}` : null, surveyReference.notes ? `Notes: ${surveyReference.notes}` : null].filter(Boolean).join("\n")}</div> : null}
+                          </section>
+                        ) : null}
                         <QuoteLineEditor
                           quoteId={selectedQuote.id}
                           line={{

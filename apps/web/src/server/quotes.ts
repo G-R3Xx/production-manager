@@ -483,6 +483,21 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]
   return result.rows;
 }
 
+
+export async function getQuoteDraftForSurveyRequest(tenantId: string, surveyRequestId: string): Promise<QuoteDraftRecord | null> {
+  await ensureQuoteLifecycleColumns();
+  const result = await pool.query<QuoteDraftRecord>(`
+    SELECT ${quoteSelectSql()}
+    FROM sales.quote_drafts
+    WHERE tenant_id = $1::uuid
+      AND survey_request_id = $2::uuid
+      AND status <> 'deleted'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [tenantId, surveyRequestId]);
+  return result.rows[0] ?? null;
+}
+
 export async function createQuoteDraftForTenant(tenantId: string, input: {
   enquiryId?: string | null;
   surveyRequestId?: string | null;

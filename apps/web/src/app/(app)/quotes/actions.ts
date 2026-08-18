@@ -14,6 +14,7 @@ import {
   getQuoteLineForTenant,
   ensureQuotePublicIdentityForTenant,
   linkQuoteLineToProductForTenant,
+  listQuoteLines,
   markArtworkApprovalSentForTenant,
   updateQuoteLineForTenant,
   markQuoteSentForTenant,
@@ -477,13 +478,20 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
       linkedDispatchLineId = "";
     }
 
+    const surveyContext = existingSnapshot.surveyContext && typeof existingSnapshot.surveyContext === "object" && !Array.isArray(existingSnapshot.surveyContext)
+      ? existingSnapshot.surveyContext
+      : undefined;
     await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, editingLineId, {
       productName,
       optionSummary: nullable(formData.get("optionSummary")),
       quantity,
       unitPrice,
       notes: nullable(formData.get("notes")),
-      configurationSnapshot: { ...configurationSnapshot, linkedDispatchLineId: linkedDispatchLineId || null }
+      configurationSnapshot: {
+        ...configurationSnapshot,
+        linkedDispatchLineId: linkedDispatchLineId || null,
+        ...(surveyContext ? { surveyImported: true, surveyNeedsConfiguration: false, surveyContext } : {})
+      }
     });
 
     redirect(`/quotes?selected=${quoteId}&message=Quote%20line%20updated#saved-lines`);
@@ -702,9 +710,23 @@ export async function markQuoteSentAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const quoteId = String(formData.get("quoteId") ?? "").trim();
   if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20first");
+  if (await hasUnconfiguredSurveyLines(quoteId)) {
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Configure and price every surveyed sign line before sending the quote to the client.")}`);
+  }
 
   await markQuoteSentForTenant(activeTenant.tenantId, quoteId);
   redirect(`/quotes?selected=${quoteId}&message=Quote%20marked%20as%20sent`);
+}
+
+
+async function hasUnconfiguredSurveyLines(quoteId: string): Promise<boolean> {
+  const lines = await listQuoteLines(quoteId);
+  return lines.some((line) => {
+    const snapshot = line.configurationSnapshot && typeof line.configurationSnapshot === "object" && !Array.isArray(line.configurationSnapshot)
+      ? line.configurationSnapshot as Record<string, unknown>
+      : null;
+    return snapshot?.surveyNeedsConfiguration === true;
+  });
 }
 
 function quoteEmailPublicUrl(token: string): string {
@@ -730,6 +752,9 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
 
   const initialQuote = await getQuoteDraftById(activeTenant.tenantId, quoteId);
   if (!initialQuote) redirect(`/quotes?selected=${quoteId}&error=Quote%20not%20found`);
+  if (await hasUnconfiguredSurveyLines(quoteId)) {
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Configure and price every surveyed sign line before emailing the quote.")}`);
+  }
 
   const recipient = String(initialQuote.email ?? "").trim();
   if (!recipient || !recipient.includes("@")) {

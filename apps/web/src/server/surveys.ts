@@ -224,3 +224,133 @@ export async function setSurveyRequestStatusForTenant(tenantId: string, surveyId
       AND id = $2::uuid
   `, [tenantId, surveyId, status]);
 }
+
+export type SurveySignPhotoRecord = {
+  url: string;
+  fileName: string;
+  annotated: boolean;
+};
+
+export type SurveySignRecord = {
+  key: string;
+  index: number;
+  title: string;
+  location: string | null;
+  width: string | null;
+  height: string | null;
+  depth: string | null;
+  quantity: string;
+  description: string | null;
+  condition: string | null;
+  requiredWork: string | null;
+  fixingMethod: string | null;
+  accessNotes: string | null;
+  powerRequired: string | null;
+  notes: string | null;
+  photos: SurveySignPhotoRecord[];
+};
+
+function surveyRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function surveyArray(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function surveyText(value: unknown): string | null {
+  const cleaned = String(value ?? "").trim();
+  return cleaned || null;
+}
+
+function surveyPhotoUrl(value: unknown): string | null {
+  const photo = surveyRecord(value);
+  return surveyText(photo.url) || surveyText(photo.downloadUrl) || surveyText(photo.photoUrl) || surveyText(photo.photoURL);
+}
+
+export function surveyDimensionMm(value: string | null | undefined): number | null {
+  const raw = String(value ?? "").trim().toLowerCase().replace(/,/g, "");
+  if (!raw) return null;
+  const match = raw.match(/-?\d+(?:\.\d+)?/);
+  if (!match) return null;
+  let amount = Number(match[0]);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (/\bcm\b/.test(raw)) amount *= 10;
+  else if (/\bm\b/.test(raw) && !/mm/.test(raw)) amount *= 1000;
+  return Math.round(amount * 100) / 100;
+}
+
+export function surveySignsFromPayload(payload: unknown): SurveySignRecord[] {
+  const root = surveyRecord(payload);
+  const rawSurvey = surveyRecord(root.rawSurvey);
+  const preferredSigns = surveyArray(root.signs);
+  const rawSigns = preferredSigns.length ? preferredSigns : surveyArray(rawSurvey.signs);
+
+  const result = rawSigns.flatMap((value, index): SurveySignRecord[] => {
+    const sign = surveyRecord(value);
+    const title = surveyText(sign.title) || surveyText(sign.signTitle) || surveyText(sign.location) || `Sign ${index + 1}`;
+    const location = surveyText(sign.location);
+    const photos: SurveySignPhotoRecord[] = [];
+    const seen = new Set<string>();
+    for (const [photoIndex, rawPhoto] of surveyArray(sign.photos).entries()) {
+      const url = surveyPhotoUrl(rawPhoto);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      const photo = surveyRecord(rawPhoto);
+      photos.push({
+        url,
+        fileName: surveyText(photo.fileName) || surveyText(photo.originalFileName) || surveyText(photo.name) || `Photo ${photoIndex + 1}`,
+        annotated: Boolean(photo.annotated),
+      });
+    }
+    for (const [photoIndex, rawPhoto] of surveyArray(sign.referencePhotos).entries()) {
+      const url = surveyPhotoUrl(rawPhoto);
+      if (!url || seen.has(url)) continue;
+      seen.add(url);
+      const photo = surveyRecord(rawPhoto);
+      photos.push({
+        url,
+        fileName: surveyText(photo.fileName) || surveyText(photo.originalFileName) || surveyText(photo.name) || `Reference photo ${photoIndex + 1}`,
+        annotated: Boolean(photo.annotated),
+      });
+    }
+    return [{
+      key: surveyText(sign.id) || surveyText(sign.key) || `${index + 1}:${title}:${location ?? ""}`,
+      index,
+      title,
+      location,
+      width: surveyText(sign.width),
+      height: surveyText(sign.height),
+      depth: surveyText(sign.depth),
+      quantity: surveyText(sign.quantity) || "1",
+      description: surveyText(sign.description),
+      condition: surveyText(sign.condition),
+      requiredWork: surveyText(sign.requiredWork),
+      fixingMethod: surveyText(sign.fixingMethod),
+      accessNotes: surveyText(sign.accessNotes),
+      powerRequired: surveyText(sign.powerRequired),
+      notes: surveyText(sign.notes),
+      photos,
+    }];
+  });
+
+  // Some Install Scheduler payloads also provide a flattened surveyPhotos array.
+  // Merge those back into their sign/location so the line-level quote reference stays complete.
+  for (const [photoIndex, rawPhoto] of surveyArray(root.surveyPhotos).entries()) {
+    const photo = surveyRecord(rawPhoto);
+    const url = surveyPhotoUrl(photo);
+    if (!url) continue;
+    const signTitle = surveyText(photo.signTitle) || surveyText(photo.location);
+    const match = signTitle
+      ? result.find((sign) => [sign.title, sign.location].filter(Boolean).some((candidate) => String(candidate).trim().toLowerCase() === signTitle.toLowerCase()))
+      : result.length === 1 ? result[0] : undefined;
+    if (!match || match.photos.some((existing) => existing.url === url)) continue;
+    match.photos.push({
+      url,
+      fileName: surveyText(photo.fileName) || surveyText(photo.originalFileName) || surveyText(photo.name) || `Survey photo ${photoIndex + 1}`,
+      annotated: Boolean(photo.annotated),
+    });
+  }
+
+  return result;
+}

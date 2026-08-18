@@ -10,6 +10,14 @@ import { PrintQuoteButton } from "./PrintQuoteButton";
 import { QuoteLineResponseControls } from "./QuoteLineResponseControls";
 import { QuoteLiveTotals } from "./QuoteLiveTotals";
 
+function quoteSnapshotRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function surveyLineStillNeedsConfiguration(value: unknown): boolean {
+  return quoteSnapshotRecord(value)?.surveyNeedsConfiguration === true;
+}
+
 type PageProps = {
   params: Promise<{ token: string }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -327,7 +335,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   // Cancelled lines remain in Production Manager for audit/history only. They are never
   // rendered back to the client, including while a revised quote is being prepared/resend.
   // clientRevisionExcluded additionally removes historical lines that have been taken out of scope.
-  const lines = allLines.filter((line) => !line.clientRevisionExcluded && line.clientResponseStatus !== "cancelled");
+  const lines = allLines.filter((line) => !line.clientRevisionExcluded && line.clientResponseStatus !== "cancelled" && !surveyLineStillNeedsConfiguration(line.configurationSnapshot));
   const subtotal = lines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
