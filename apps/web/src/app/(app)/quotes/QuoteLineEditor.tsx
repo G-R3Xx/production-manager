@@ -434,9 +434,6 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
       materials
     });
   }, [product, line.configurationSnapshot, line.productName, line.optionSummary, line.quantity, line.unitPrice, line.notes, materials]);
-  const rawSnapshot = recordValue(line.configurationSnapshot);
-  const surveyContext = recordValue(rawSnapshot?.surveyContext);
-  const surveyNeedsConfiguration = Boolean(surveyContext && rawSnapshot?.surveyNeedsConfiguration === true);
   const hasStructuredQuickSnapshot = !product && Boolean(quickSnapshot);
   const needsLegacyRebuild = !product && Boolean(quickSnapshot?.reconstructed);
   const summaryRows = useMemo(() => parseSummary(line.optionSummary), [line.optionSummary]);
@@ -531,44 +528,6 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
       setActiveEditor(null);
     }
   }, [activeEditor, visibleFieldKeys]);
-
-  if (!product && quickSnapshot && surveyNeedsConfiguration) {
-    const title = String(surveyContext?.title ?? line.productName).trim() || line.productName;
-    const location = String(surveyContext?.location ?? "").trim();
-    const width = String(surveyContext?.width ?? "").trim();
-    const height = String(surveyContext?.height ?? "").trim();
-    const photos = Array.isArray(surveyContext?.photos) ? surveyContext.photos.flatMap((entry) => {
-      const photo = recordValue(entry);
-      const url = String(photo?.url ?? "").trim();
-      return url ? [{ url, fileName: String(photo?.fileName ?? "Survey photo"), annotated: Boolean(photo?.annotated) }] : [];
-    }) : [];
-    return (
-      <div style={{ border: "2px solid #fdba74", borderRadius: 18, padding: 14, background: "#fffaf5", display: "grid", gap: 14 }}>
-        <section style={{ display: "grid", gap: 7 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 10, flexWrap: "wrap" }}>
-            <div><strong style={{ color: "#9a3412" }}>Surveyed item ready to configure</strong><div style={{ color: "#667085", fontSize: 13, marginTop: 3 }}>Choose the actual product/material and pricing below. Survey measurements stay attached to this line.</div></div>
-            <span style={{ borderRadius: 999, background: "#ffedd5", color: "#c2410c", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{title}</span>
-          </div>
-          <div style={{ color: "#475467", fontSize: 13 }}>{[location, width && height ? `${width} × ${height}` : width || height, `Qty ${line.quantity}`].filter(Boolean).join(" · ")}</div>
-          {photos.length ? <div style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>{photos.length} survey reference photo{photos.length === 1 ? "" : "s"} attached to this line.</div> : null}
-        </section>
-        <QuoteMaterialFlowBuilder
-          quoteId={quoteId}
-          materials={materials}
-          pricingSettings={pricingSettings}
-          editingLine={{
-            id: line.id,
-            productName: line.productName,
-            optionSummary: line.optionSummary,
-            quantity: line.quantity,
-            unitPrice: line.unitPrice,
-            notes: line.notes,
-            configurationSnapshot: line.configurationSnapshot
-          }}
-        />
-      </div>
-    );
-  }
 
   if (!product && quickSnapshot) {
     const quantityStep: QuickQuoteStep = quickSnapshot.flowType === "small_format" || quickSnapshot.flowType === "plan_printing" || quickSnapshot.flowType === "poster_printing" ? "small_quantity" : "review";

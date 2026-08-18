@@ -7,7 +7,7 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
 import { getEnquiryById } from "@/server/enquiries";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
-import { createQuoteDraftForTenant, deleteQuoteLineForTenant, getQuoteDraftForSurveyRequest, listQuoteLines } from "@/server/quotes";
+import { addQuoteLine, createQuoteDraftForTenant, getQuoteDraftForSurveyRequest, listQuoteLines } from "@/server/quotes";
 import { createSurveyRequestForTenant, getSurveyRequestById, setSurveyRequestStatusForTenant, surveyDimensionMm, surveySignsFromPayload, updateSurveyRequestForTenant } from "@/server/surveys";
 
 
@@ -204,23 +204,34 @@ export async function createQuoteFromCompletedSurveyAction(formData: FormData): 
   });
 
   const existingLines = await listQuoteLines(quote.id);
-  let removedLegacyPlaceholders = 0;
-  for (const line of existingLines) {
+  const existingSignKeys = new Set(existingLines.flatMap((line) => {
     const snapshot = line.configurationSnapshot && typeof line.configurationSnapshot === "object" && !Array.isArray(line.configurationSnapshot)
       ? line.configurationSnapshot as Record<string, unknown>
       : {};
     const context = snapshot.surveyContext && typeof snapshot.surveyContext === "object" && !Array.isArray(snapshot.surveyContext)
       ? snapshot.surveyContext as Record<string, unknown>
       : {};
-    const isSurveyPlaceholder = Boolean(String(context.signKey ?? "").trim())
-      && /^Survey item\s*[—-]\s*configure material\s*\/\s*print/i.test(String(line.optionSummary ?? ""))
-      && Number(line.unitPrice || 0) === 0;
-    if (isSurveyPlaceholder) {
-      await deleteQuoteLineForTenant(activeTenant.tenantId, quote.id, line.id);
-      removedLegacyPlaceholders += 1;
-    }
+    const signKey = String(context.signKey ?? "").trim();
+    return signKey ? [signKey] : [];
+  }));
+
+  let added = 0;
+  for (const sign of signs) {
+    if (existingSignKeys.has(sign.key)) continue;
+    const widthMm = surveyDimensionMm(sign.width);
+    const heightMm = surveyDimensionMm(sign.height);
+    const sizeText = widthMm != null && heightMm != null ? `${widthMm} × ${heightMm}mm` : [sign.width, sign.height].filter(Boolean).join(" × ");
+    await addQuoteLine(quote.id, {
+      productName: sign.title,
+      optionSummary: ["Survey item — configure material / print", sizeText ? `Finished size: ${sizeText}` : null].filter(Boolean).join(" · "),
+      quantity: sign.quantity || "1",
+      unitPrice: "0",
+      notes: surveyLineNotes(sign),
+      configurationSnapshot: surveyLineSnapshot(survey.id, sign),
+    });
+    added += 1;
   }
 
-  const message = `${existingQuote ? "Opened existing survey quote" : "Quote created"} in the current guided builder. Survey measurements, photos and notes remain linked as internal reference.${removedLegacyPlaceholders ? ` Removed ${removedLegacyPlaceholders} legacy placeholder line${removedLegacyPlaceholders === 1 ? "" : "s"}.` : ""}`;
-  redirect(`/quotes?selected=${quote.id}&fromSurvey=${survey.id}&message=${encodeURIComponent(message)}#quote-builder`);
+  const message = `${existingQuote ? "Opened existing survey quote" : "Quote created"}. ${added ? `${added} surveyed sign line${added === 1 ? "" : "s"} added.` : "All surveyed sign lines are already present."} Open a line below to configure it in the single-page editor.`;
+  redirect(`/quotes?selected=${quote.id}&fromSurvey=${survey.id}&message=${encodeURIComponent(message)}#saved-lines`);
 }
