@@ -11,7 +11,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.18.11";
+const APP_VERSION = "V26.08.18.12";
 
 function notificationHref(notification: { eventType: string; href: string | null; payloadJson?: Record<string, unknown> }): string {
   const payload = notification.payloadJson ?? {};

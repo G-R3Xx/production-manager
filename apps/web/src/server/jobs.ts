@@ -368,7 +368,7 @@ async function upsertSystemStageTask(job: JobRecord, dueDate?: string | null): P
   `, [job.tenantId, job.id, meta.nextAction, job.currentStage, job.priority || "normal", dueDate ?? job.dueDate ?? null, systemKey]);
 }
 
-export async function synchroniseJobsFromCurrentWorkflow(tenantId: string): Promise<JobRecord[]> {
+async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobRecord[]> {
   await ensureJobWorkspaceSchema();
   const [enquiries, surveys, quotes, artworkApprovals, productionJobs, stepSummaries] = await Promise.all([
     listEnquiriesForTenant(tenantId),
@@ -500,6 +500,31 @@ export async function synchroniseJobsFromCurrentWorkflow(tenantId: string): Prom
   }
 
   return listJobsForTenant(tenantId, { skipSync: true });
+}
+
+const workflowSyncPromises = new Map<string, Promise<JobRecord[]>>();
+const workflowSyncCompletedAt = new Map<string, number>();
+const WORKFLOW_SYNC_THROTTLE_MS = 30_000;
+
+export async function synchroniseJobsFromCurrentWorkflow(tenantId: string): Promise<JobRecord[]> {
+  const completedAt = workflowSyncCompletedAt.get(tenantId) ?? 0;
+  if (Date.now() - completedAt < WORKFLOW_SYNC_THROTTLE_MS) {
+    return listJobsForTenant(tenantId, { skipSync: true });
+  }
+
+  const running = workflowSyncPromises.get(tenantId);
+  if (running) return running;
+
+  const promise = performWorkflowJobSynchronisation(tenantId)
+    .then((jobs) => {
+      workflowSyncCompletedAt.set(tenantId, Date.now());
+      return jobs;
+    })
+    .finally(() => {
+      workflowSyncPromises.delete(tenantId);
+    });
+  workflowSyncPromises.set(tenantId, promise);
+  return promise;
 }
 
 function jobSelectSql(): string {

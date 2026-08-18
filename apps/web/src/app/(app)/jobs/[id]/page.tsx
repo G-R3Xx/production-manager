@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getJobById, listJobTasksForTenant, buildJobTimeline, synchroniseJobsFromCurrentWorkflow, jobStageMeta } from "@/server/jobs";
+import { getJobById, listJobTasksForTenant, buildJobTimeline, jobStageMeta } from "@/server/jobs";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftById, getArtworkApprovalById } from "@/server/quotes";
@@ -56,7 +56,6 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const message = readParam(query, "message");
   const error = readParam(query, "error");
 
-  await synchroniseJobsFromCurrentWorkflow(activeTenant.tenantId);
   const job = await getJobById(activeTenant.tenantId, id);
   if (!job) { notFound(); return null; }
 

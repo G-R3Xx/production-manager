@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listUsersForTenant } from "@/server/users";
-import { listJobTasksForTenant, synchroniseJobsFromCurrentWorkflow, type JobTaskRecord, type JobRecord } from "@/server/jobs";
+import { listJobsForTenant, listJobTasksForTenant, type JobTaskRecord, type JobRecord } from "@/server/jobs";
 
 type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const card = { background: "#fff", border: "1px solid #dfe7f2", borderRadius: 22, boxShadow: "0 12px 34px rgba(15,23,42,.05)" } as const;
@@ -57,8 +57,8 @@ export default async function CalendarPage({ searchParams }: PageProps) {
   const focusMonth = parseMonth(requestedMonth || auToday.slice(0, 7));
   const focusKey = monthKey(focusMonth);
 
-  const jobs = await synchroniseJobsFromCurrentWorkflow(activeTenant.tenantId);
-  const [tasks, staff] = await Promise.all([
+  const [jobs, tasks, staff] = await Promise.all([
+    listJobsForTenant(activeTenant.tenantId, { skipSync: true }),
     listJobTasksForTenant(activeTenant.tenantId, { month: focusKey }),
     listUsersForTenant(activeTenant.tenantId),
   ]);
