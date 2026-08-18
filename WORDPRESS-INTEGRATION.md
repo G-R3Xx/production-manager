@@ -27,11 +27,19 @@ WordPress owns:
 
 ## Pricing flow
 
-1. The WooCommerce builder renders the Product Manager question schema.
-2. Each customer change posts the selected configuration to `POST /api/wordpress/price`.
-3. Production Manager resolves dimensions, quantity, manufacturing method and shared cost recipe.
-4. Before add-to-cart, WordPress repeats the calculation server-side.
-5. WooCommerce stores the returned line total and configuration on the cart item.
+1. The WooCommerce builder renders the Production Manager question schema.
+2. Logged-out visitors use public **MYOB Level A** pricing.
+3. For logged-in WooCommerce customers, the Account Pricing bridge sends the existing PM client link where available, otherwise the account email/company, to the authenticated PM pricing endpoint.
+4. Production Manager resolves the linked PM client and that client’s synced **MYOB Price Level A–F**.
+5. PM-calculated work uses the configured A–F factor after the normal PM cost × markup × profit calculation.
+6. Products linked to a MYOB Item use the imported **MYOB Item Price Matrix** for that customer level and quantity break; the PM A–F factor is not layered over the MYOB matrix.
+7. Product-page account pricing is proxied through WordPress so the PM API key is never exposed to the browser.
+8. Before Add to Cart, WooCommerce repeats the calculation server-to-server with the same logged-in customer context.
+9. WooCommerce stores the returned line total and configuration on the cart item.
+
+### Logged-in account pricing bridge (V26.08.18.08)
+
+Install `Tender-Edge-Account-Pricing-V1.0.0.zip` alongside the existing Tender Edge website platform plugin. It does not replace the existing builder. The add-on attempts to discover the current PM URL/API key from WordPress settings/outgoing PM calls. If automatic discovery fails, open **Settings → Tender Edge Account Pricing** and paste the same `pm_...` API key already used by the website integration.
 
 ## Order flow
 

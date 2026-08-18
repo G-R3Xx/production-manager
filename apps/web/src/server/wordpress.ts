@@ -12,6 +12,7 @@ import {
 } from "@/server/products";
 import { ensureMaterialPricingColumns, type MaterialRecord } from "@/server/materials";
 import { getCompanySettingsByTenantId } from "@/server/company";
+import { customerMyobPriceLevel, customerMyobPriceLevelName, getCustomerById, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
 import { listRecipesForTenant, previewRecipeCost } from "@/server/productionResources";
 import { createProductionJobFromWebsiteOrderForTenant, ensureProductionTables } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
@@ -97,12 +98,22 @@ type WebsitePricingMaterial = Pick<MaterialRecord,
   "purchaseCost" | "widthMm" | "lengthMm" | "rollWidthMm" | "minimumBillableSheetFraction" | "rollBillingIncrementMetres"
 >;
 
+export type WordPressPricingCustomerContext = {
+  pmClientId?: string;
+  websiteUserId?: string | number;
+  company?: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+};
+
 type PriceBody = {
   productId: string;
   widthMm?: number;
   heightMm?: number;
   quantity?: number;
   answers?: Record<string, unknown>;
+  customer?: WordPressPricingCustomerContext;
 };
 
 export type WordPressPublicPricingTokenPayload = {
@@ -640,7 +651,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.08.18.07",
+    version: "V26.08.18.08",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -1081,6 +1092,136 @@ function optionalComponentCostTotal(
   return Math.round(total * 100) / 100;
 }
 
+
+type WebsitePricingContext = {
+  customerId: string | null;
+  customerName: string | null;
+  priceLevelCode: MyobPriceLevel;
+  priceLevelName: string;
+  priceLevelFactor: number;
+  source: "public_level_a" | "pm_client";
+};
+
+type WebsiteMyobPricingData = {
+  myobUid: string | null;
+  myobPriceMatrix: Record<string, unknown> | null;
+};
+
+function validUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+async function resolvePricingCustomerForTenant(
+  tenantId: string,
+  context: WordPressPricingCustomerContext | null | undefined
+): Promise<CustomerRecord | null> {
+  if (!context) return null;
+  const pmClientId = text(context.pmClientId);
+  if (validUuid(pmClientId)) {
+    const linked = await getCustomerById(tenantId, pmClientId).catch(() => null);
+    if (linked?.isActive && !linked.payloadJson?.deletedAt) return linked;
+  }
+
+  const email = text(context.email).toLowerCase();
+  const company = text(context.company).toLowerCase();
+  if (!email && !company) return null;
+  const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`
+    SELECT
+      id::text,
+      tenant_id::text AS "tenantId",
+      myob_uid AS "myobUid",
+      display_name AS "displayName",
+      company_name AS "companyName",
+      first_name AS "firstName",
+      last_name AS "lastName",
+      email,
+      phone,
+      is_active AS "isActive",
+      payload_json AS "payloadJson",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+    FROM app.customers
+    WHERE tenant_id=$1::uuid
+      AND is_active=true
+      AND COALESCE(payload_json->>'deletedAt','')=''
+      AND (($2::text<>'' AND lower(COALESCE(email,''))=$2::text)
+        OR ($3::text<>'' AND lower(COALESCE(company_name,display_name,''))=$3::text))
+    ORDER BY CASE WHEN lower(COALESCE(email,''))=$2::text THEN 0 ELSE 1 END,
+      CASE WHEN COALESCE(myob_uid,'')<>'' THEN 0 ELSE 1 END
+    LIMIT 1
+  `, [tenantId, email, company]);
+  const row = result.rows[0];
+  if (!row) return null;
+  return {
+    ...row,
+    payloadJson: row.payloadJson && typeof row.payloadJson === "object" && !Array.isArray(row.payloadJson)
+      ? row.payloadJson as CustomerRecord["payloadJson"]
+      : {}
+  };
+}
+
+async function websiteMyobPricingData(tenantId: string, productId: string): Promise<WebsiteMyobPricingData> {
+  const result = await pool.query<{ myobUid: string | null; payloadJson: unknown }>(`
+    SELECT myob_uid AS "myobUid", payload_json AS "payloadJson"
+    FROM catalog.products
+    WHERE tenant_id=$1::uuid AND id=$2::uuid
+    LIMIT 1
+  `, [tenantId, productId]);
+  const row = result.rows[0];
+  const payload = row?.payloadJson && typeof row.payloadJson === "object" && !Array.isArray(row.payloadJson)
+    ? row.payloadJson as Record<string, unknown>
+    : {};
+  const matrix = payload.myobPriceMatrix;
+  return {
+    myobUid: row?.myobUid ?? null,
+    myobPriceMatrix: matrix && typeof matrix === "object" && !Array.isArray(matrix)
+      ? matrix as Record<string, unknown>
+      : null
+  };
+}
+
+function myobWebsiteMatrixPrice(
+  matrix: Record<string, unknown> | null,
+  priceLevelCode: MyobPriceLevel,
+  quantity: number
+): { unitPrice: number; quantityOver: number; levelKey: string } | null {
+  if (!matrix) return null;
+  const levelMatch = priceLevelCode.match(/^Level\s+([A-F])$/i);
+  const levelKey = `Level${(levelMatch?.[1] ?? "A").toUpperCase()}`;
+  const sellingPrices = Array.isArray(matrix.SellingPrices) ? matrix.SellingPrices : [];
+  const eligible = sellingPrices
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    .map((row) => ({ row, quantityOver: Math.max(0, numberValue(row.QuantityOver, 0)) }))
+    .filter(({ quantityOver }) => quantityOver === 0 || Math.max(0, quantity) > quantityOver)
+    .sort((a, b) => b.quantityOver - a.quantityOver);
+  for (const candidate of eligible) {
+    const levels = candidate.row.Levels;
+    if (!levels || typeof levels !== "object" || Array.isArray(levels)) continue;
+    const parsed = Number((levels as Record<string, unknown>)[levelKey]);
+    if (Number.isFinite(parsed) && parsed >= 0) {
+      return { unitPrice: parsed, quantityOver: candidate.quantityOver, levelKey };
+    }
+  }
+  return null;
+}
+
+function websitePricingContext(
+  customer: CustomerRecord | null,
+  companySettings: Awaited<ReturnType<typeof getCompanySettingsByTenantId>>
+): WebsitePricingContext {
+  const priceLevelCode = customerMyobPriceLevel(customer) ?? "Level A";
+  const rawFactor = Number(companySettings?.myobPriceLevelFactors?.[priceLevelCode] ?? 1);
+  const priceLevelFactor = Number.isFinite(rawFactor) && rawFactor >= 0 ? rawFactor : 1;
+  return {
+    customerId: customer?.id ?? null,
+    customerName: customer?.displayName ?? null,
+    priceLevelCode,
+    priceLevelName: customer ? (customerMyobPriceLevelName(customer) || priceLevelCode) : priceLevelCode,
+    priceLevelFactor,
+    source: customer ? "pm_client" : "public_level_a"
+  };
+}
+
 export async function priceWordPressProductForTenant(tenantId: string, body: PriceBody) {
   const product = await getProductById(tenantId, body.productId);
   if (!product || !product.websiteEnabled || product.status !== "active") return null;
@@ -1143,12 +1284,14 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     }
   }
 
-  const [recipe, recipes, companySettings] = await Promise.all([
+  const [recipe, recipes, companySettings, pricingCustomer, myobPricingData] = await Promise.all([
     product.productionRecipeId
       ? previewRecipeCost(tenantId, product.productionRecipeId, widthMm, heightMm, quantity).catch(() => null)
       : Promise.resolve(null),
     product.productionRecipeId ? listRecipesForTenant(tenantId).catch(() => []) : Promise.resolve([]),
-    getCompanySettingsByTenantId(tenantId).catch(() => null)
+    getCompanySettingsByTenantId(tenantId).catch(() => null),
+    resolvePricingCustomerForTenant(tenantId, body.customer).catch(() => null),
+    websiteMyobPricingData(tenantId, product.id).catch(() => ({ myobUid: product.myobUid ?? null, myobPriceMatrix: null }))
   ]);
   const recipeSettings = recipes.find((item) => item.id === product.productionRecipeId);
   const markupMultiplier = Math.max(0, numberValue(recipeSettings?.markupMultiplier, numberValue(websiteConfig.markupMultiplier, 1.5)));
@@ -1187,7 +1330,15 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
   }
   const baseAutoSellDelta = baseAutoCostDelta * markupMultiplier * profitMultiplier;
   const baseSell = (recipe?.sellPrice ?? numberValue(websiteConfig.basePrice)) + baseAutoSellDelta;
-  const lineTotal = Math.max(0, Math.round((baseSell + optionalSell + optionDelta) * 100) / 100);
+  const pricingContext = websitePricingContext(pricingCustomer, companySettings);
+  const myobMatrix = myobPricingData.myobUid
+    ? myobWebsiteMatrixPrice(myobPricingData.myobPriceMatrix, pricingContext.priceLevelCode, quantity)
+    : null;
+  const pmCalculatedLineTotal = Math.max(0, baseSell + optionalSell + optionDelta);
+  const lineTotal = Math.max(0, Math.round((myobMatrix
+    ? myobMatrix.unitPrice * quantity
+    : pmCalculatedLineTotal * pricingContext.priceLevelFactor) * 100) / 100);
+  const pricingSource = myobMatrix ? "myob_item_matrix" : "pm_calculated";
   return {
     productId: product.id,
     productName: product.name,
@@ -1203,6 +1354,17 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     lineTotal,
     unitPrice: Math.round((lineTotal / quantity) * 100) / 100,
     currency: "AUD",
+    pricing: {
+      source: pricingSource,
+      customerId: pricingContext.customerId,
+      customerName: pricingContext.customerName,
+      priceLevelCode: pricingContext.priceLevelCode,
+      priceLevelName: pricingContext.priceLevelName,
+      priceLevelFactor: pricingContext.priceLevelFactor,
+      myobItemUid: myobPricingData.myobUid,
+      myobMatrixQuantityOver: myobMatrix?.quantityOver ?? null,
+      myobMatrixLevelKey: myobMatrix?.levelKey ?? null
+    },
     cost: recipe ? {
       material: recipe.materialCost,
       machines: recipe.machineCost,
@@ -1341,7 +1503,8 @@ async function refreshExistingWebsiteQuoteLines(
       widthMm: line.widthMm,
       heightMm: line.heightMm,
       quantity: numberValue(line.quantity, 1),
-      answers
+      answers,
+      customer: payload.customer
     });
     if (!calculated) continue;
     const quantity = Math.max(1, calculated.quantity);
@@ -1366,6 +1529,7 @@ async function refreshExistingWebsiteQuoteLines(
       purchaseOrderNumber: text(payload.purchaseOrderNumber) || null,
       selectedImage,
       productionCost: calculated.cost,
+      websitePricing: calculated.pricing,
       calculatedWebsiteLineTotal: calculated.lineTotal,
       chargedWebsiteLineTotal: lineTotal,
       materialUsage: calculated.materialUsage,
@@ -1542,7 +1706,8 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
       widthMm: line.widthMm,
       heightMm: line.heightMm,
       quantity: numberValue(line.quantity, 1),
-      answers
+      answers,
+      customer: payload.customer
     });
     if (!calculated) continue;
     const quantity = Math.max(1, calculated.quantity);
@@ -1571,6 +1736,7 @@ export async function ingestWordPressOrder(connection: WordPressConnectionRecord
         purchaseOrderNumber,
         selectedImage,
         productionCost: calculated.cost,
+        websitePricing: calculated.pricing,
         calculatedWebsiteLineTotal: calculated.lineTotal,
         chargedWebsiteLineTotal: lineTotal,
         materialUsage: calculated.materialUsage,

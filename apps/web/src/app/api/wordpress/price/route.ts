@@ -2,7 +2,8 @@ import { NextResponse } from "next/server";
 import {
   apiKeyFromRequest,
   priceWordPressProductForConnection,
-  resolveWordPressConnectionByApiKey
+  resolveWordPressConnectionByApiKey,
+  type WordPressPricingCustomerContext
 } from "@/server/wordpress";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +22,10 @@ export async function POST(request: Request) {
     quantity: body.quantity == null ? undefined : Number(body.quantity),
     answers: body.answers && typeof body.answers === "object" && !Array.isArray(body.answers)
       ? body.answers as Record<string, unknown>
-      : {}
+      : {},
+    customer: body.customer && typeof body.customer === "object" && !Array.isArray(body.customer)
+      ? body.customer as WordPressPricingCustomerContext
+      : undefined
   });
   if (!result) return NextResponse.json({ error: "Website product not found" }, { status: 404 });
   return NextResponse.json(result, { headers: { "Cache-Control": "no-store" } });
