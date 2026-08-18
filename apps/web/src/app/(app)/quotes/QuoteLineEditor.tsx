@@ -546,6 +546,29 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     }
   }, [activeEditor, visibleFieldKeys]);
 
+  if (!product && quickSnapshot?.surveyNeedsConfiguration) {
+    return (
+      <div style={{ border: "1px solid #bfdbfe", borderRadius: 18, padding: 14, background: "#fff", display: "grid", gap: 12 }}>
+        <QuoteMaterialFlowBuilder
+          quoteId={quoteId}
+          materials={materials}
+          pricingSettings={pricingSettings}
+          editingLine={{
+            id: line.id,
+            productName: line.productName,
+            optionSummary: line.optionSummary,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            notes: line.notes,
+            configurationSnapshot: quickSnapshot,
+          }}
+          compactEdit
+          compactAll
+        />
+      </div>
+    );
+  }
+
   if (!product && quickSnapshot) {
     const quantityStep: QuickQuoteStep = quickSnapshot.flowType === "small_format" || quickSnapshot.flowType === "plan_printing" || quickSnapshot.flowType === "poster_printing" ? "small_quantity" : "review";
     const inlineEditingLine = {
