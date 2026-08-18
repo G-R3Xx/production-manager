@@ -246,8 +246,8 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           .job-sheet-header-kicker { font-size: 8px !important; letter-spacing: 0.08em !important; }
           .job-sheet-header-title { font-size: 18px !important; line-height: 1.1 !important; }
           .job-sheet-header-number { font-size: 10px !important; }
-          .job-sheet-header-details { padding-top: 7px !important; gap: 10px !important; font-size: 9.5px !important; line-height: 1.28 !important; }
-          .job-sheet-header-notes { padding: 6px 8px !important; font-size: 9.5px !important; line-height: 1.25 !important; border-radius: 8px !important; }
+          .job-sheet-header-details { padding-top: 8px !important; gap: 15px !important; font-size: 11.25px !important; line-height: 1.38 !important; }
+          .job-sheet-header-details > div > strong { display: inline-block; margin-bottom: 2px !important; font-size: 12px !important; }
           .job-sheet-artwork { break-inside: avoid; page-break-inside: avoid; }
           .job-sheet-artwork img, .job-sheet-artwork canvas { max-height: 250px !important; width: auto !important; max-width: 100% !important; margin-left: auto !important; margin-right: auto !important; }
           .job-sheet-signoff { break-inside: auto; page-break-inside: auto; padding: 9px !important; }
@@ -278,12 +278,11 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           </div>
         </div>
 
-        <div className="job-sheet-header-details" style={{ borderTop: "1px solid #d9e2ef", paddingTop: 14, display: "grid", gridTemplateColumns: "1.15fr 1fr 1fr", gap: 16, fontSize: 13 }}>
-          <div><strong>Client</strong><br />{job.clientName}{job.contactName ? <><br />{job.contactName}</> : null}{clientAddress ? <><br /><span style={{ whiteSpace: "pre-line" }}>{clientAddress}</span></> : null}</div>
-          <div><strong>Job details</strong><br />Client PO: {quote?.clientPurchaseOrderNumber || "—"}<br />Due: {formatDate(job.dueDate)}<br />Dispatch: {human(job.dispatchType) || "—"}<br />Priority: {human(job.priority) || "Normal"}</div>
-          <div><strong>Artwork approval</strong><br />Status: {approval?.status ? human(approval.status) : "Not linked"}<br />Revision: {approval?.revision || "—"}<br />Approved: {formatDateTime(approval?.approvedAt)}<br />Designer: {approval?.designerName || "—"}</div>
+        <div className="job-sheet-header-details" style={{ borderTop: "1px solid #d9e2ef", paddingTop: 14, display: "grid", gridTemplateColumns: "1.15fr 1fr 1fr", gap: 20, fontSize: 14, lineHeight: 1.45 }}>
+          <div><strong style={{ fontSize: 15 }}>Client</strong><br />{job.clientName}{job.contactName ? <><br />{job.contactName}</> : null}{clientAddress ? <><br /><span style={{ whiteSpace: "pre-line" }}>{clientAddress}</span></> : null}</div>
+          <div><strong style={{ fontSize: 15 }}>Job details</strong><br />Client PO: {quote?.clientPurchaseOrderNumber || "—"}<br />Due: {formatDate(job.dueDate)}<br />Dispatch: {human(job.dispatchType) || "—"}<br />Priority: {human(job.priority) || "Normal"}</div>
+          <div><strong style={{ fontSize: 15 }}>Artwork approval</strong><br />Status: {approval?.status ? human(approval.status) : "Not linked"}<br />Revision: {approval?.revision || "—"}<br />Approved: {formatDateTime(approval?.approvedAt)}<br />Designer: {approval?.designerName || "—"}</div>
         </div>
-        {job.internalNotes ? <div className="job-sheet-header-notes" style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 12, padding: 10, whiteSpace: "pre-wrap", fontSize: 13 }}><strong>Internal production notes:</strong> {job.internalNotes}</div> : null}
       </header>
 
       <section style={{ marginTop: 18, display: "grid", gap: 16 }}>
