@@ -60,6 +60,7 @@ export type JobRecord = {
   priority: string;
   ownerProfileId: string | null;
   invoiceStatus: string;
+  receivedAt: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -138,6 +139,7 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
         owner_profile_id uuid,
         invoice_status varchar(30) NOT NULL DEFAULT 'not_invoiced',
         closed_at timestamptz,
+        received_at timestamptz NOT NULL DEFAULT now(),
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now()
       )
@@ -145,6 +147,10 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
     await pool.query(`ALTER TABLE app.jobs ADD COLUMN IF NOT EXISTS owner_profile_id uuid`);
     await pool.query(`ALTER TABLE app.jobs ADD COLUMN IF NOT EXISTS invoice_status varchar(30) NOT NULL DEFAULT 'not_invoiced'`);
     await pool.query(`ALTER TABLE app.jobs ADD COLUMN IF NOT EXISTS current_href text NOT NULL DEFAULT '/enquiries'`);
+    await pool.query(`ALTER TABLE app.jobs ADD COLUMN IF NOT EXISTS received_at timestamptz`);
+    await pool.query(`UPDATE app.jobs SET received_at = created_at WHERE received_at IS NULL`);
+    await pool.query(`ALTER TABLE app.jobs ALTER COLUMN received_at SET DEFAULT now()`);
+    await pool.query(`ALTER TABLE app.jobs ALTER COLUMN received_at SET NOT NULL`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_job_number_uidx ON app.jobs (tenant_id, job_number)`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_enquiry_uidx ON app.jobs (tenant_id, enquiry_id) WHERE enquiry_id IS NOT NULL`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_survey_uidx ON app.jobs (tenant_id, survey_request_id) WHERE survey_request_id IS NOT NULL`);
@@ -338,6 +344,15 @@ function maxUpdatedAt(draft: JobDraft): string | null {
   return new Date(Math.max(...values.map((date) => date.getTime()))).toISOString();
 }
 
+function earliestCreatedAt(draft: JobDraft): string | null {
+  const values = [draft.enquiry?.createdAt, draft.survey?.createdAt, draft.quote?.createdAt, draft.artwork?.createdAt, draft.production?.createdAt]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => new Date(value))
+    .filter((date) => !Number.isNaN(date.getTime()));
+  if (!values.length) return null;
+  return new Date(Math.min(...values.map((date) => date.getTime()))).toISOString();
+}
+
 function mergeDraft(target: JobDraft, patch: Partial<JobDraft>): JobDraft {
   return { ...target, ...Object.fromEntries(Object.entries(patch).filter(([, value]) => value != null)) } as JobDraft;
 }
@@ -451,6 +466,7 @@ async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobR
     const dueDate = draft.production?.dueDate || draft.survey?.dueDate || existingJob?.dueDate || null;
     const priority = draft.production?.priority || existingJob?.priority || draft.enquiry?.urgency || "normal";
     const updatedAt = maxUpdatedAt(draft);
+    const receivedAt = earliestCreatedAt(draft);
     const href = currentHrefForDraft(draft, stage);
     const linkedCustomerId = draft.quote?.linkedCustomerId || draft.production?.linkedCustomerId || draft.survey?.linkedCustomerId || draft.enquiry?.linkedCustomerId || null;
 
@@ -476,21 +492,22 @@ async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobR
             due_date = COALESCE(NULLIF($19::text,'')::date, due_date),
             dispatch_type = COALESCE($20, dispatch_type),
             priority = COALESCE(NULLIF($21,''), priority),
-            updated_at = GREATEST(updated_at, COALESCE($22::timestamptz, now()))
+            updated_at = GREATEST(updated_at, COALESCE($22::timestamptz, now())),
+            received_at = LEAST(received_at, COALESCE($23::timestamptz, received_at))
           WHERE tenant_id = $1::uuid AND id = $2::uuid
           RETURNING ${jobSelectSql()}
-        `, [tenantId, draft.existingId, draftTitle(draft), draftClientName(draft), linkedCustomerId, draft.enquiry?.id ?? null, draft.survey?.id ?? null, draft.quote?.id ?? null, draft.artwork?.id ?? null, draft.production?.id ?? null, draft.survey?.installSchedulerJobId ?? null, draft.survey?.installSchedulerJobUrl ?? null, draft.quote?.myobOrderUid ?? null, draft.quote?.myobOrderNumber ?? null, stage, meta.label, nextAction, href, dueDate, draft.production?.dispatchType ?? null, priority, updatedAt])
+        `, [tenantId, draft.existingId, draftTitle(draft), draftClientName(draft), linkedCustomerId, draft.enquiry?.id ?? null, draft.survey?.id ?? null, draft.quote?.id ?? null, draft.artwork?.id ?? null, draft.production?.id ?? null, draft.survey?.installSchedulerJobId ?? null, draft.survey?.installSchedulerJobUrl ?? null, draft.quote?.myobOrderUid ?? null, draft.quote?.myobOrderNumber ?? null, stage, meta.label, nextAction, href, dueDate, draft.production?.dispatchType ?? null, priority, updatedAt, receivedAt])
       : await pool.query<JobRecord>(`
           INSERT INTO app.jobs (
             tenant_id, job_number, title, client_name, linked_customer_id, enquiry_id, survey_request_id, quote_id, artwork_approval_id, production_job_id,
             install_scheduler_job_id, install_scheduler_job_url, myob_order_uid, myob_order_number, current_stage, current_stage_label, next_action, current_href,
-            due_date, dispatch_type, priority, invoice_status, created_at, updated_at
+            due_date, dispatch_type, priority, invoice_status, received_at, created_at, updated_at
           ) VALUES (
             $1::uuid,
             ('J-' || to_char(now(), 'YYMMDD') || '-' || upper(substr(replace(gen_random_uuid()::text, '-', ''), 1, 5))),
-            $2,$3,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9::uuid,$10,$11,$12,$13,$14,$15,$16,$17,NULLIF($18::text,'')::date,$19,$20,'not_invoiced',now(),COALESCE($21::timestamptz,now())
+            $2,$3,$4::uuid,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9::uuid,$10,$11,$12,$13,$14,$15,$16,$17,NULLIF($18::text,'')::date,$19,$20,'not_invoiced',COALESCE($22::timestamptz,now()),now(),COALESCE($21::timestamptz,now())
           ) RETURNING ${jobSelectSql()}
-        `, [tenantId, draftTitle(draft), draftClientName(draft), linkedCustomerId, draft.enquiry?.id ?? null, draft.survey?.id ?? null, draft.quote?.id ?? null, draft.artwork?.id ?? null, draft.production?.id ?? null, draft.survey?.installSchedulerJobId ?? null, draft.survey?.installSchedulerJobUrl ?? null, draft.quote?.myobOrderUid ?? null, draft.quote?.myobOrderNumber ?? null, stage, meta.label, nextAction, href, dueDate, draft.production?.dispatchType ?? null, priority, updatedAt]);
+        `, [tenantId, draftTitle(draft), draftClientName(draft), linkedCustomerId, draft.enquiry?.id ?? null, draft.survey?.id ?? null, draft.quote?.id ?? null, draft.artwork?.id ?? null, draft.production?.id ?? null, draft.survey?.installSchedulerJobId ?? null, draft.survey?.installSchedulerJobUrl ?? null, draft.quote?.myobOrderUid ?? null, draft.quote?.myobOrderNumber ?? null, stage, meta.label, nextAction, href, dueDate, draft.production?.dispatchType ?? null, priority, updatedAt, receivedAt]);
 
     const job = result.rows[0];
     if (job) {
@@ -553,6 +570,7 @@ function jobSelectSql(): string {
     priority,
     owner_profile_id as "ownerProfileId",
     invoice_status as "invoiceStatus",
+    received_at::text as "receivedAt",
     created_at::text as "createdAt",
     updated_at::text as "updatedAt"
   `;

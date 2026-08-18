@@ -13,6 +13,7 @@ export type DashboardRow = {
   currentStage: string;
   currentStageLabel: string;
   nextAction: string;
+  receivedAt: string;
   dueDate: string | null;
   ownerProfileId: string | null;
   assigneeProfileIds: string[];
@@ -23,7 +24,7 @@ export type DashboardRow = {
 };
 
 type StaffOption = { id: string; name: string };
-type SortKey = "job" | "stage" | "next" | "due" | "assigned" | "dispatch" | "myob";
+type SortKey = "job" | "received" | "stage" | "next" | "due" | "assigned" | "dispatch" | "myob";
 
 const stageFilters = [
   ["", "All active"], ["new_enquiry", "New enquiries"], ["survey", "Surveys"], ["quote_required", "Quote required"],
@@ -44,12 +45,40 @@ function stageMatches(row: DashboardRow, filter: string, todayKey: string): bool
 
 function sortValue(row: DashboardRow, key: SortKey): string {
   if (key === "job") return `${row.title} ${row.clientName} ${row.jobNumber}`.toLowerCase();
+  if (key === "received") return row.receivedAt;
   if (key === "stage") return row.currentStageLabel.toLowerCase();
   if (key === "next") return row.nextAction.toLowerCase();
   if (key === "due") return row.dueDate || "9999-12-31";
   if (key === "assigned") return row.assigneeLabel.toLowerCase();
   if (key === "dispatch") return (row.dispatchType || "").toLowerCase();
   return (row.myobOrderNumber || "").toLowerCase();
+}
+
+function jobAgeDays(receivedAt: string, todayKey: string): number {
+  const received = new Date(`${receivedAt.slice(0, 10)}T12:00:00Z`);
+  const today = new Date(`${todayKey}T12:00:00Z`);
+  if (Number.isNaN(received.getTime()) || Number.isNaN(today.getTime())) return 0;
+  return Math.max(0, Math.floor((today.getTime() - received.getTime()) / 86_400_000));
+}
+
+function ageMatches(days: number, age: string): boolean {
+  if (!age) return true;
+  if (age === "0-7") return days <= 7;
+  if (age === "8-14") return days >= 8 && days <= 14;
+  if (age === "15-30") return days >= 15 && days <= 30;
+  if (age === "31-60") return days >= 31 && days <= 60;
+  return days >= 61;
+}
+
+function fmtReceived(value: string): string {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit", timeZone: "Australia/Sydney" });
+}
+
+function ageLabel(days: number): string {
+  if (days === 0) return "Today";
+  if (days === 1) return "1 day";
+  return `${days} days`;
 }
 
 function stageTone(stage: string) {
@@ -69,6 +98,7 @@ function fmtDate(value: string | null): string {
 export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", initialOwner = "", initialQuery = "" }: { rows: DashboardRow[]; staff: StaffOption[]; todayKey: string; initialStage?: string; initialOwner?: string; initialQuery?: string }) {
   const [stage, setStage] = useState(initialStage);
   const [owner, setOwner] = useState(initialOwner);
+  const [age, setAge] = useState("");
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState<SortKey | null>(null);
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
@@ -77,10 +107,11 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
     const q = query.trim().toLowerCase();
     const filtered = rows.filter((row) => stageMatches(row, stage, todayKey))
       .filter((row) => !owner || row.ownerProfileId === owner || row.assigneeProfileIds.includes(owner))
+      .filter((row) => ageMatches(jobAgeDays(row.receivedAt, todayKey), age))
       .filter((row) => !q || `${row.jobNumber} ${row.title} ${row.clientName} ${row.currentStageLabel} ${row.myobOrderNumber || ""}`.toLowerCase().includes(q));
     if (!sort) return filtered;
     return [...filtered].sort((a, b) => sortValue(a, sort).localeCompare(sortValue(b, sort), "en-AU", { numeric: true }) * (direction === "desc" ? -1 : 1));
-  }, [rows, stage, owner, query, sort, direction, todayKey]);
+  }, [rows, stage, owner, age, query, sort, direction, todayKey]);
 
   const changeSort = (key: SortKey) => {
     if (sort === key) setDirection((current) => current === "asc" ? "desc" : "asc");
@@ -91,23 +122,25 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
     <>
       <section style={{ ...card, padding: 16, display: "grid", gap: 12 }}>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{stageFilters.map(([value, label]) => <button type="button" key={value || "all"} onClick={() => setStage(value)} style={{ borderRadius: 999, padding: "7px 10px", border: stage === value ? "1px solid #155eef" : "1px solid #d0d5dd", background: stage === value ? "#eff6ff" : "#fff", color: stage === value ? "#155eef" : "#475467", fontSize: 12, fontWeight: 900, cursor: "pointer" }}>{label}</button>)}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) 220px auto", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) 200px 180px auto", gap: 8 }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search job, client, quote or MYOB order…" style={control} />
           <select value={owner} onChange={(event) => setOwner(event.target.value)} style={control}><option value="">All staff</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
-          <button type="button" onClick={() => { setQuery(""); setOwner(""); setStage(""); }} style={{ ...primary, border: 0, cursor: "pointer" }}>Clear</button>
+          <select value={age} onChange={(event) => setAge(event.target.value)} style={control}><option value="">Any job age</option><option value="0-7">0–7 days old</option><option value="8-14">8–14 days old</option><option value="15-30">15–30 days old</option><option value="31-60">31–60 days old</option><option value="61+">61+ days old</option></select>
+          <button type="button" onClick={() => { setQuery(""); setOwner(""); setAge(""); setStage(""); }} style={{ ...primary, border: 0, cursor: "pointer" }}>Clear</button>
         </div>
       </section>
 
       <section style={{ ...card, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1180 }}>
-            <colgroup><col style={{ width: "25%" }} /><col style={{ width: "14%" }} /><col style={{ width: "16%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} /></colgroup>
-            <thead><tr style={{ background: "#f3f6fa", color: "#475467", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>{[["Job / client","job"],["Current stage","stage"],["Next action","next"],["Due","due"],["Assigned","assigned"],["Dispatch","dispatch"],["MYOB","myob"],["",""]].map(([head, key], index) => <th key={`${head}-${index}`} style={{ padding: 0, textAlign: "left", borderBottom: "1px solid #d9e1eb", borderRight: index < 7 ? "1px solid #e4e9f0" : undefined }}>{key ? <button type="button" onClick={() => changeSort(key as SortKey)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: 10, color: "inherit", background: "transparent", border: 0, font: "inherit", textTransform: "inherit", letterSpacing: "inherit", cursor: "pointer" }}>{head}<span aria-hidden="true" style={{ color: sort === key ? "#155eef" : "#98a2b3", fontSize: 10 }}>{sort === key ? direction === "asc" ? "▲" : "▼" : "↕"}</span></button> : null}</th>)}</tr></thead>
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1280 }}>
+            <colgroup><col style={{ width: "23%" }} /><col style={{ width: "9%" }} /><col style={{ width: "13%" }} /><col style={{ width: "15%" }} /><col style={{ width: "8%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} /></colgroup>
+            <thead><tr style={{ background: "#f3f6fa", color: "#475467", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>{[["Job / client","job"],["Received","received"],["Current stage","stage"],["Next action","next"],["Due","due"],["Assigned","assigned"],["Dispatch","dispatch"],["MYOB","myob"],["",""]].map(([head, key], index) => <th key={`${head}-${index}`} style={{ padding: 0, textAlign: "left", borderBottom: "1px solid #d9e1eb", borderRight: index < 8 ? "1px solid #e4e9f0" : undefined }}>{key ? <button type="button" onClick={() => changeSort(key as SortKey)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: 10, color: "inherit", background: "transparent", border: 0, font: "inherit", textTransform: "inherit", letterSpacing: "inherit", cursor: "pointer" }}>{head}<span aria-hidden="true" style={{ color: sort === key ? "#155eef" : "#98a2b3", fontSize: 10 }}>{sort === key ? direction === "asc" ? "▲" : "▼" : "↕"}</span></button> : null}</th>)}</tr></thead>
             <tbody>{visible.map((row) => {
               const colors = stageTone(row.currentStage);
               const overdue = Boolean(row.dueDate && row.dueDate < todayKey && row.currentStage !== "invoiced" && row.currentStage !== "closed");
               return <DashboardJobRow key={row.id} href={`/jobs/${row.id}`}>
                 <td style={{ padding: "9px 10px", borderRight: "1px solid #edf1f6" }}><div style={{ display: "grid", gridTemplateColumns: "36px minmax(0,1fr)", gap: 9, alignItems: "center" }}><ClientLogoBadge logoUrl={row.logoUrl} name={row.clientName} size={36} radius={10} padding={3} /><span style={{ minWidth: 0 }}><strong style={{ display: "block", color: "#101828", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>{row.title}</strong><span style={{ display: "block", marginTop: 2, color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.jobNumber} · {row.clientName}</span></span></div></td>
+                <td style={{ padding: 10, borderRight: "1px solid #edf1f6", fontSize: 11 }}><span style={{ display: "block", color: "#344054", fontWeight: 850 }}>{fmtReceived(row.receivedAt)}</span><span style={{ display: "block", marginTop: 2, color: jobAgeDays(row.receivedAt, todayKey) > 30 ? "#b42318" : "#667085", fontSize: 10, fontWeight: 800 }}>{ageLabel(jobAgeDays(row.receivedAt, todayKey))}</span></td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6" }}><span style={{ borderRadius: 999, background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}`, padding: "5px 8px", fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{row.currentStageLabel}</span></td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#344054", fontWeight: 800, fontSize: 13 }}>{row.nextAction}</td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", fontSize: 12 }}><span style={{ color: overdue ? "#b42318" : "#344054", fontWeight: overdue ? 950 : 800 }}>{fmtDate(row.dueDate)}</span>{overdue ? <span style={{ display: "block", color: "#b42318", fontSize: 9, fontWeight: 950 }}>OVERDUE</span> : null}</td>

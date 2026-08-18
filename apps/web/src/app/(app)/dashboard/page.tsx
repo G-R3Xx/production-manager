@@ -98,6 +98,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     currentStage: job.currentStage,
     currentStageLabel: job.currentStageLabel,
     nextAction: job.nextAction,
+    receivedAt: job.receivedAt,
     dueDate: job.dueDate,
     ownerProfileId: job.ownerProfileId,
     assigneeProfileIds: Array.from(new Set((taskByJob.get(job.id) ?? []).flatMap((task) => task.assigneeProfileIds))),
