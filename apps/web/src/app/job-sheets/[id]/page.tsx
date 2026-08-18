@@ -250,10 +250,15 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           .job-sheet-header-notes { padding: 6px 8px !important; font-size: 9.5px !important; line-height: 1.25 !important; border-radius: 8px !important; }
           .job-sheet-artwork { break-inside: avoid; page-break-inside: avoid; }
           .job-sheet-artwork img, .job-sheet-artwork canvas { max-height: 250px !important; width: auto !important; max-width: 100% !important; margin-left: auto !important; margin-right: auto !important; }
-          .job-sheet-signoff { break-inside: auto; page-break-inside: auto; }
+          .job-sheet-signoff { break-inside: auto; page-break-inside: auto; padding: 9px !important; }
+          .job-sheet-process-intro { break-after: avoid; page-break-after: avoid; }
+          .job-sheet-process-list { gap: 4px !important; }
           .job-sheet-stock-row, .job-sheet-process-row { break-inside: avoid; page-break-inside: avoid; }
           .job-sheet-stock-row { min-height: 14mm !important; }
-          .job-sheet-process-row { min-height: 15mm !important; }
+          .job-sheet-process-row { min-height: 12mm !important; padding-top: 6px !important; padding-bottom: 6px !important; }
+          .job-sheet-final-notes { gap: 12px !important; }
+          .job-sheet-note-line { min-height: 23px !important; }
+          .job-sheet-footer { margin-top: 8px !important; padding-top: 6px !important; font-size: 8px !important; break-inside: avoid; page-break-inside: avoid; }
           a { color: inherit !important; text-decoration: none !important; }
         }
       `}</style>
@@ -359,11 +364,13 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                 </section>
 
                 <section className="job-sheet-signoff" style={{ border: "1px solid #cfd9e8", borderRadius: 16, padding: 14, background: "#f8fafc" }}>
-                  <div style={{ marginBottom: 10, fontSize: 14, fontWeight: 950 }}>PROCESSES</div>
-                  <div style={{ display: "grid", gridTemplateColumns: "1.45fr 50px 1fr 1.05fr 0.95fr", gap: 10, padding: "0 12px 6px", color: "#667085", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                    <span>Process</span><span style={{ textAlign: "center" }}>Done</span><span>By</span><span>When</span><span>Sign</span>
+                  <div className="job-sheet-process-intro">
+                    <div style={{ marginBottom: 10, fontSize: 14, fontWeight: 950 }}>PROCESSES</div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1.45fr 50px 1fr 1.05fr 0.95fr", gap: 10, padding: "0 12px 6px", color: "#667085", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.04em" }}>
+                      <span>Process</span><span style={{ textAlign: "center" }}>Done</span><span>By</span><span>When</span><span>Sign</span>
+                    </div>
                   </div>
-                  <div style={{ display: "grid", gap: 9 }}>{staffProcesses.map((process, index) => {
+                  <div className="job-sheet-process-list" style={{ display: "grid", gap: 9 }}>{staffProcesses.map((process, index) => {
                     const checked = Boolean(process.step?.checkedAt);
                     const isComplete = process.label === "LINE COMPLETE";
                     return <div className="job-sheet-process-row" key={`${process.label}-${index}`} style={{ display: "grid", gridTemplateColumns: "1.45fr 50px 1fr 1.05fr 0.95fr", gap: 10, alignItems: "center", minHeight: 58, border: isComplete ? "2px solid #94a3b8" : "1px solid #d9e2ef", borderRadius: 13, padding: "10px 12px", background: isComplete ? "#f1f5f9" : "#fff" }}>
@@ -376,9 +383,9 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                   })}</div>
                 </section>
 
-                <section style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 20 }}>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Production notes / issues</div><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 34 }} /><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 34 }} /></div>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Final QC / date</div><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 34 }} /></div>
+                <section className="job-sheet-final-notes" style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 20 }}>
+                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Production notes / issues</div><div className="job-sheet-note-line" style={{ borderBottom: "1px solid #98a2b3", minHeight: 34 }} /><div className="job-sheet-note-line" style={{ borderBottom: "1px solid #98a2b3", minHeight: 34 }} /></div>
+                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Final QC / date</div><div className="job-sheet-note-line" style={{ borderBottom: "1px solid #98a2b3", minHeight: 34 }} /></div>
                 </section>
               </div>
             </article>
@@ -387,7 +394,7 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
         {!items.length ? <div style={{ border: "1px dashed #cfd9e8", borderRadius: 14, padding: 24, background: "#fff" }}>No production items have been generated yet. Sync the production job from its approved artwork pages first.</div> : null}
       </section>
 
-      <footer style={{ marginTop: 18, paddingTop: 10, borderTop: "1px solid #d9e2ef", color: "#667085", fontSize: 10, display: "flex", justifyContent: "space-between", gap: 12 }}>
+      <footer className="job-sheet-footer" style={{ marginTop: 18, paddingTop: 10, borderTop: "1px solid #d9e2ef", color: "#667085", fontSize: 10, display: "flex", justifyContent: "space-between", gap: 12 }}>
         <span>{companyName} · Production Manager</span>
         <span>Generated {new Date().toLocaleString("en-AU", { timeZone: "Australia/Sydney" })}</span>
       </footer>
