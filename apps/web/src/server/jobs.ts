@@ -382,6 +382,7 @@ export async function synchroniseJobsFromCurrentWorkflow(tenantId: string): Prom
   const existingByEnquiry = new Map(existing.filter((job) => job.enquiryId).map((job) => [job.enquiryId!, job]));
   const existingBySurvey = new Map(existing.filter((job) => job.surveyRequestId).map((job) => [job.surveyRequestId!, job]));
   const existingByQuote = new Map(existing.filter((job) => job.quoteId).map((job) => [job.quoteId!, job]));
+  const existingByArtwork = new Map(existing.filter((job) => job.artworkApprovalId).map((job) => [job.artworkApprovalId!, job]));
   const existingByProduction = new Map(existing.filter((job) => job.productionJobId).map((job) => [job.productionJobId!, job]));
   const stepByJob = new Map(stepSummaries.map((row) => [row.jobId, row]));
 
@@ -417,12 +418,14 @@ export async function synchroniseJobsFromCurrentWorkflow(tenantId: string): Prom
   }
 
   for (const artwork of artworkApprovals) {
+    const existingArtworkJob = existingByArtwork.get(artwork.id);
     let draft = byQuote.get(artwork.quoteId);
     if (!draft) {
-      draft = { artwork };
+      draft = { existingId: existingArtworkJob?.id, artwork };
       drafts.push(draft);
     } else {
       draft.artwork = artwork;
+      if (!draft.existingId) draft.existingId = existingArtworkJob?.id;
     }
   }
 
