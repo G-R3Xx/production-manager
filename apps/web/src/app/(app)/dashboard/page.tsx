@@ -5,9 +5,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { listJobsForTenant, listJobTasksForTenant, type JobRecord } from "@/server/jobs";
 import { listUsersForTenant } from "@/server/users";
 import { customerLogoUrl, listCustomerLogoSummariesForTenant } from "@/server/customers";
-import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { refreshDashboardJobsAction } from "./actions";
-import { DashboardJobRow } from "./DashboardJobRow";
+import { DashboardJobsTable, type DashboardRow } from "./DashboardJobsTable";
 
 type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const card = { background: "#fff", border: "1px solid #dfe7f2", borderRadius: 22, boxShadow: "0 12px 34px rgba(15,23,42,.05)" } as const;
@@ -68,9 +67,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const params = (await searchParams) ?? {};
   const stage = readParam(params, "stage");
   const owner = readParam(params, "owner");
-  const q = readParam(params, "q").trim().toLowerCase();
-  const sort = readParam(params, "sort");
-  const direction = readParam(params, "dir") === "desc" ? "desc" : "asc";
+  const q = readParam(params, "q").trim();
   const message = readParam(params, "message");
 
   const [jobs, tasks, staff, customers] = await Promise.all([
@@ -93,22 +90,22 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const ids = Array.from(new Set([...(job.ownerProfileId ? [job.ownerProfileId] : []), ...openTasks.flatMap((task) => task.assigneeProfileIds)]));
     return ids.length ? ids.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ") : "Unassigned";
   };
-  const sortValue = (job: JobRecord, key: string): string => {
-    if (key === "job") return `${job.title} ${job.clientName} ${job.jobNumber}`.toLowerCase();
-    if (key === "stage") return job.currentStageLabel.toLowerCase();
-    if (key === "next") return (job.nextAction || "").toLowerCase();
-    if (key === "due") return job.dueDate || "9999-12-31";
-    if (key === "assigned") return assignedLabel(job).toLowerCase();
-    if (key === "dispatch") return (job.dispatchType || "").toLowerCase();
-    if (key === "myob") return (job.myobOrderNumber || "").toLowerCase();
-    return "";
-  };
-  const filtered = jobs.filter((job) => stageMatches(job, stage)).filter((job) => !owner || job.ownerProfileId === owner || (taskByJob.get(job.id) ?? []).some((task) => task.assigneeProfileIds.includes(owner))).filter((job) => !q || `${job.jobNumber} ${job.title} ${job.clientName} ${job.currentStageLabel} ${job.myobOrderNumber || ""}`.toLowerCase().includes(q));
-  if (sort) filtered.sort((a, b) => sortValue(a, sort).localeCompare(sortValue(b, sort), "en-AU", { numeric: true }) * (direction === "desc" ? -1 : 1));
-  const sortHref = (key: string): string => {
-    const query = new URLSearchParams(Object.fromEntries([["stage", stage], ["owner", owner], ["q", q], ["sort", key], ["dir", sort === key && direction === "asc" ? "desc" : "asc"]].filter(([, value]) => Boolean(value))));
-    return `/dashboard?${query.toString()}`;
-  };
+  const dashboardRows: DashboardRow[] = jobs.map((job) => ({
+    id: job.id,
+    jobNumber: job.jobNumber,
+    title: job.title,
+    clientName: job.clientName,
+    currentStage: job.currentStage,
+    currentStageLabel: job.currentStageLabel,
+    nextAction: job.nextAction,
+    dueDate: job.dueDate,
+    ownerProfileId: job.ownerProfileId,
+    assigneeProfileIds: Array.from(new Set((taskByJob.get(job.id) ?? []).flatMap((task) => task.assigneeProfileIds))),
+    assigneeLabel: assignedLabel(job),
+    dispatchType: job.dispatchType,
+    myobOrderNumber: job.myobOrderNumber,
+    logoUrl: customerLogoUrl(job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null),
+  }));
   const counts = {
     active: jobs.length,
     changes: jobs.filter((job) => job.currentStage.includes("changes_requested")).length,
@@ -135,42 +132,14 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         </div>
       </section>
 
-      <section style={{ ...card, padding: 16, display: "grid", gap: 12 }}>
-        <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{stageFilters.map(([value,label]) => <Link key={value || "all"} href={`/dashboard?${new URLSearchParams(Object.fromEntries([["stage",value],["owner",owner],["q",q]].filter(([,v])=>Boolean(v)))).toString()}`} style={{ borderRadius: 999, padding: "7px 10px", border: stage === value ? "1px solid #155eef" : "1px solid #d0d5dd", background: stage === value ? "#eff6ff" : "#fff", color: stage === value ? "#155eef" : "#475467", fontSize: 12, fontWeight: 900, textDecoration: "none" }}>{label}</Link>)}</div>
-        <form method="get" style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) 220px auto", gap: 8 }}>
-          {stage ? <input type="hidden" name="stage" value={stage} /> : null}
-          {sort ? <><input type="hidden" name="sort" value={sort} /><input type="hidden" name="dir" value={direction} /></> : null}
-          <input name="q" defaultValue={q} placeholder="Search job, client, quote or MYOB order…" style={control} />
-          <select name="owner" defaultValue={owner} style={control}><option value="">All staff</option>{activeStaff.map((person) => <option key={person.userProfileId} value={person.userProfileId}>{person.fullName}</option>)}</select>
-          <button style={{ ...primary, border: 0, cursor: "pointer" }}>Filter</button>
-        </form>
-      </section>
-
-      <section style={{ ...card, overflow: "hidden" }}>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1180 }}>
-            <colgroup><col style={{ width: "25%" }} /><col style={{ width: "14%" }} /><col style={{ width: "16%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} /></colgroup>
-            <thead><tr style={{ background: "#f3f6fa", color: "#475467", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>{[["Job / client","job"],["Current stage","stage"],["Next action","next"],["Due","due"],["Assigned","assigned"],["Dispatch","dispatch"],["MYOB","myob"],["",""]].map(([head,key], index) => <th key={`${head}-${index}`} style={{ padding: 0, textAlign: "left", borderBottom: "1px solid #d9e1eb", borderRight: index < 7 ? "1px solid #e4e9f0" : undefined }}>{key ? <Link href={sortHref(key)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "10px", color: "inherit", textDecoration: "none", cursor: "pointer" }} title={`Sort by ${head}`}>{head}<span aria-hidden="true" style={{ color: sort === key ? "#155eef" : "#98a2b3", fontSize: 10 }}>{sort === key ? direction === "asc" ? "▲" : "▼" : "↕"}</span></Link> : null}</th>)}</tr></thead>
-            <tbody>
-              {filtered.map((job) => {
-                const colors = stageTone(job.currentStage);
-                const overdue = isOverdue(job);
-                return <DashboardJobRow key={job.id} href={`/jobs/${job.id}`}>
-                  <td style={{ padding: "9px 10px", borderRight: "1px solid #edf1f6" }}><Link href={`/jobs/${job.id}`} style={{ display: "grid", gridTemplateColumns: "36px minmax(0,1fr)", gap: 9, alignItems: "center", color: "inherit", textDecoration: "none" }}><ClientLogoBadge logoUrl={customerLogoUrl(job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null)} name={job.clientName} size={36} radius={10} padding={3} /><span style={{ minWidth: 0 }}><strong style={{ display: "block", color: "#101828", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>{job.title}</strong><span style={{ display: "block", marginTop: 2, color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.jobNumber} · {job.clientName}</span></span></Link></td>
-                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6" }}><span style={{ borderRadius: 999, background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}`, padding: "5px 8px", fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{job.currentStageLabel}</span></td>
-                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#344054", fontWeight: 800, fontSize: 13 }}>{job.nextAction}</td>
-                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", fontSize: 12 }}><span style={{ color: overdue ? "#b42318" : "#344054", fontWeight: overdue ? 950 : 800 }}>{fmtDate(job.dueDate)}</span>{overdue ? <span style={{ display: "block", color: "#b42318", fontSize: 9, fontWeight: 950 }}>OVERDUE</span> : null}</td>
-                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 11 }}>{assignedLabel(job)}</td>
-                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 12, textTransform: "capitalize" }}>{job.dispatchType?.replaceAll("_"," ") || "—"}</td>
-                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: job.myobOrderNumber ? "#067647" : "#667085", fontSize: 12, fontWeight: 800 }}>{job.myobOrderNumber || "—"}</td>
-                  <td style={{ padding: 10, textAlign: "center" }}><Link href={`/jobs/${job.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Open →</Link></td>
-                </DashboardJobRow>;
-              })}
-            </tbody>
-          </table>
-        </div>
-        {!filtered.length ? <div style={{ padding: 28, textAlign: "center", color: "#667085" }}>No jobs match these filters.</div> : null}
-      </section>
+      <DashboardJobsTable
+        rows={dashboardRows}
+        staff={activeStaff.map((person) => ({ id: person.userProfileId, name: person.fullName }))}
+        todayKey={australiaTodayKey()}
+        initialStage={stage}
+        initialOwner={owner}
+        initialQuery={q}
+      />
     </div>
   );
 }
