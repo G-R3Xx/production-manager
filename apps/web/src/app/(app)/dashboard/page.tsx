@@ -124,23 +124,24 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       <section style={{ ...card, overflow: "hidden" }}>
         <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1120 }}>
-            <thead><tr style={{ background: "#f8fafc", color: "#475467", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>{["Job / client","Current stage","Next action","Due","Assigned","Dispatch","MYOB",""].map((head) => <th key={head} style={{ padding: "11px 12px", textAlign: "left", borderBottom: "1px solid #e4e7ec" }}>{head}</th>)}</tr></thead>
+          <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1180 }}>
+            <colgroup><col style={{ width: "25%" }} /><col style={{ width: "14%" }} /><col style={{ width: "16%" }} /><col style={{ width: "9%" }} /><col style={{ width: "10%" }} /><col style={{ width: "9%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} /></colgroup>
+            <thead><tr style={{ background: "#f3f6fa", color: "#475467", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>{["Job / client","Current stage","Next action","Due","Assigned","Dispatch","MYOB",""].map((head, index) => <th key={`${head}-${index}`} style={{ padding: "10px", textAlign: "left", borderBottom: "1px solid #d9e1eb", borderRight: index < 7 ? "1px solid #e4e9f0" : undefined }}>{head}</th>)}</tr></thead>
             <tbody>
               {filtered.map((job) => {
                 const colors = stageTone(job.currentStage);
                 const openTasks = taskByJob.get(job.id) ?? [];
                 const assigneeIds = Array.from(new Set([...(job.ownerProfileId ? [job.ownerProfileId] : []), ...openTasks.flatMap((task) => task.assigneeProfileIds)]));
                 const overdue = isOverdue(job);
-                return <tr key={job.id} style={{ borderBottom: "1px solid #eef2f6" }}>
-                  <td style={{ padding: 12, minWidth: 280 }}><Link href={`/jobs/${job.id}`} style={{ display: "grid", gridTemplateColumns: "42px 1fr", gap: 10, alignItems: "center", color: "inherit", textDecoration: "none" }}><ClientLogoBadge logoUrl={customerLogoUrl(job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null)} name={job.clientName} size={42} radius={13} padding={3} /><span style={{ minWidth: 0 }}><strong style={{ display: "block", color: "#101828", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.title}</strong><span style={{ display: "block", marginTop: 2, color: "#667085", fontSize: 12 }}>{job.jobNumber} · {job.clientName}</span></span></Link></td>
-                  <td style={{ padding: 12 }}><span style={{ borderRadius: 999, background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}`, padding: "6px 9px", fontSize: 11, fontWeight: 950, whiteSpace: "nowrap" }}>{job.currentStageLabel}</span></td>
-                  <td style={{ padding: 12, color: "#344054", fontWeight: 800, maxWidth: 240 }}>{job.nextAction}</td>
-                  <td style={{ padding: 12 }}><span style={{ color: overdue ? "#b42318" : "#344054", fontWeight: overdue ? 950 : 800 }}>{fmtDate(job.dueDate)}</span>{overdue ? <span style={{ display: "block", color: "#b42318", fontSize: 10, fontWeight: 950 }}>OVERDUE</span> : null}</td>
-                  <td style={{ padding: 12, color: "#475467", fontSize: 12 }}>{assigneeIds.length ? assigneeIds.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ") : "Unassigned"}</td>
-                  <td style={{ padding: 12, color: "#475467", textTransform: "capitalize" }}>{job.dispatchType?.replaceAll("_"," ") || "—"}</td>
-                  <td style={{ padding: 12, color: job.myobOrderNumber ? "#067647" : "#667085", fontWeight: 800 }}>{job.myobOrderNumber || "—"}</td>
-                  <td style={{ padding: 12 }}><Link href={`/jobs/${job.id}`} style={{ color: "#155eef", fontWeight: 950, textDecoration: "none" }}>Open →</Link></td>
+                return <tr key={job.id} style={{ borderBottom: "1px solid #e6ebf2", background: "#fff" }}>
+                  <td style={{ padding: "9px 10px", borderRight: "1px solid #edf1f6" }}><Link href={`/jobs/${job.id}`} style={{ display: "grid", gridTemplateColumns: "36px minmax(0,1fr)", gap: 9, alignItems: "center", color: "inherit", textDecoration: "none" }}><ClientLogoBadge logoUrl={customerLogoUrl(job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null)} name={job.clientName} size={36} radius={10} padding={3} /><span style={{ minWidth: 0 }}><strong style={{ display: "block", color: "#101828", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>{job.title}</strong><span style={{ display: "block", marginTop: 2, color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{job.jobNumber} · {job.clientName}</span></span></Link></td>
+                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6" }}><span style={{ borderRadius: 999, background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}`, padding: "5px 8px", fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{job.currentStageLabel}</span></td>
+                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#344054", fontWeight: 800, fontSize: 13 }}>{job.nextAction}</td>
+                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", fontSize: 12 }}><span style={{ color: overdue ? "#b42318" : "#344054", fontWeight: overdue ? 950 : 800 }}>{fmtDate(job.dueDate)}</span>{overdue ? <span style={{ display: "block", color: "#b42318", fontSize: 9, fontWeight: 950 }}>OVERDUE</span> : null}</td>
+                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 11 }}>{assigneeIds.length ? assigneeIds.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ") : "Unassigned"}</td>
+                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 12, textTransform: "capitalize" }}>{job.dispatchType?.replaceAll("_"," ") || "—"}</td>
+                  <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: job.myobOrderNumber ? "#067647" : "#667085", fontSize: 12, fontWeight: 800 }}>{job.myobOrderNumber || "—"}</td>
+                  <td style={{ padding: 10, textAlign: "center" }}><Link href={`/jobs/${job.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Open →</Link></td>
                 </tr>;
               })}
             </tbody>
