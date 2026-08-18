@@ -235,5 +235,5 @@ export async function createQuoteFromCompletedSurveyAction(formData: FormData): 
   const message = signs.length
     ? `${existingQuote ? "Opened existing survey quote" : "Quote created"}; ${added} surveyed sign line${added === 1 ? "" : "s"} added with measurements and photos attached internally.`
     : `${existingQuote ? "Opened existing survey quote" : "Quote created"}. No structured sign rows were returned by Install Scheduler, so add quote lines manually.`;
-  redirect(`/quotes?selected=${quote.id}&message=${encodeURIComponent(message)}#saved-lines`);
+  redirect(`/quotes?selected=${quote.id}&message=${encodeURIComponent(message)}#quote-builder`);
 }

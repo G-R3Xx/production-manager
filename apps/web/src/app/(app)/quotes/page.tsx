@@ -641,26 +641,29 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               </div>
 
               {selectedQuote.status !== "deleted" ? (
-                <QuoteMaterialFlowBuilder
-                  key="new-quote-line"
-                  quoteId={selectedQuote.id}
-                  materials={activeMaterials}
-                  savedProducts={savedQuoteProducts}
-                  pricingSettings={{
-                    markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
-                    profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
-                    labourRate: companySettings?.quoteLabourRate ?? "66",
-                    inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
-                    inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
-                    monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
-                    signageSizePresets: companySettings?.quoteSignageSizePresets,
-                    smallSizePresets: companySettings?.quoteSmallSizePresets,
-                    priceLevelFactor: linkedClientPriceFactor,
-                    priceLevelName: linkedClientPriceLevelName,
-                    priceLevelCode: linkedClientPriceLevel,
-                    manualQuoteDiscountPercent: selectedQuote.discountPercent
-                  }}
-                />
+                <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18 }}>
+                  {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Build this quote using the current guided workflow</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey measurements, photos and sign notes are retained as internal references in the saved lines below. Choose the correct product, material and finishing here to price the work.</div></div> : null}
+                  <QuoteMaterialFlowBuilder
+                    key="new-quote-line"
+                    quoteId={selectedQuote.id}
+                    materials={activeMaterials}
+                    savedProducts={savedQuoteProducts}
+                    pricingSettings={{
+                      markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
+                      profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                      labourRate: companySettings?.quoteLabourRate ?? "66",
+                      inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
+                      inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
+                      monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
+                      signageSizePresets: companySettings?.quoteSignageSizePresets,
+                      smallSizePresets: companySettings?.quoteSmallSizePresets,
+                      priceLevelFactor: linkedClientPriceFactor,
+                      priceLevelName: linkedClientPriceLevelName,
+                      priceLevelCode: linkedClientPriceLevel,
+                      manualQuoteDiscountPercent: selectedQuote.discountPercent
+                    }}
+                  />
+                </section>
               ) : (
                 <section style={{ border: "1px solid #fecaca", borderRadius: 18, padding: 16, background: "#fff5f4", color: "#b42318", fontWeight: 800 }}>This quote is deleted. Restore it before editing or sending.</section>
               )}
