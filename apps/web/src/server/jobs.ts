@@ -697,6 +697,17 @@ export async function updateJobMetaForTenant(tenantId: string, input: {
   `, [tenantId, input.jobId, input.title ?? null, input.dueDate ?? null, input.priority ?? null, input.ownerProfileId ?? null, invoiceStatus]);
 }
 
+export async function attachQuoteToJobForTenant(tenantId: string, jobId: string, quoteId: string): Promise<void> {
+  await ensureJobWorkspaceSchema();
+  await pool.query(`
+    UPDATE app.jobs
+    SET quote_id = $3::uuid,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+  `, [tenantId, jobId, quoteId]);
+}
+
 export async function buildJobTimeline(tenantId: string, job: JobRecord): Promise<JobTimelineItem[]> {
   const [enquiries, surveys, quotes, artwork, production, tasks] = await Promise.all([
     job.enquiryId ? listEnquiriesForTenant(tenantId) : Promise.resolve([]),

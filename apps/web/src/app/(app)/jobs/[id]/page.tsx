@@ -8,7 +8,8 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftById, getArtworkApprovalById } from "@/server/quotes";
 import { getProductionJobById } from "@/server/production";
 import { listUsersForTenant } from "@/server/users";
-import { createJobTaskAction, updateJobMetaAction, updateJobTaskAction } from "../actions";
+import { createJobTaskAction, createQuoteFromJobEnquiryAction, updateJobMetaAction, updateJobTaskAction } from "../actions";
+import { createQuoteFromCompletedSurveyAction } from "../../surveys/actions";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -74,6 +75,11 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const activeStaff = staff.filter((row) => row.membershipStatus === "active");
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
   const stageMeta = jobStageMeta(job.currentStage);
+  const quoteAction = quote
+    ? { kind: "link" as const, label: "Open quote", href: `/quotes?selected=${quote.id}` }
+    : survey
+      ? { kind: "survey" as const, label: "Create quote from survey" }
+      : { kind: "enquiry" as const, label: "Create quote from enquiry" };
   const stageLinks = [
     enquiry ? { label: "Enquiry", href: `/enquiries?selected=${enquiry.id}` } : null,
     survey ? { label: "Survey", href: `/surveys?selected=${survey.id}` } : null,
@@ -101,7 +107,14 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          <Link href={job.currentHref} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>Open current stage</Link>
+          {job.currentStage.includes("quote") ? (
+            quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 16px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>{quoteAction.label} →</Link> :
+            <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}>
+              <input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />
+              {quoteAction.kind === "survey" ? <input type="hidden" name="jobId" value={job.id} /> : null}
+              <button type="submit" style={{ ...button, minHeight: 42, background: "#155eef", padding: "0 16px" }}>{quoteAction.label} →</button>
+            </form>
+          ) : <Link href={job.currentHref} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>Open current stage</Link>}
           {stageLinks.map((item) => <a key={item.label} href={item.href} target={item.external ? "_blank" : undefined} rel={item.external ? "noreferrer" : undefined} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</a>)}
         </div>
       </section>
@@ -122,6 +135,9 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
                       <span><strong style={{ color: "#0f172a" }}>{task.title}</strong><span style={{ display: "block", marginTop: 3, color: "#667085", fontSize: 12 }}>{task.stage.replaceAll("_", " ")} · {task.dueDate ? `Due ${fmtDate(task.dueDate)}` : "No due date"}{task.assigneeProfileIds.length ? ` · ${task.assigneeProfileIds.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ")}` : ""}</span></span>
                       <span style={{ alignSelf: "start", borderRadius: 999, padding: "4px 8px", background: "#fff", color: taskTone.fg, border: `1px solid ${taskTone.border}`, fontSize: 11, fontWeight: 950 }}>{task.status.replaceAll("_", " ")}</span>
                     </summary>
+                    {task.stage.includes("quote") && task.status !== "completed" ? <div style={{ padding: "0 13px 13px", display: "flex", justifyContent: "flex-end" }}>
+                      {quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 38, display: "inline-flex", alignItems: "center", padding: "0 13px", borderRadius: 10, background: "#155eef", color: "#fff", fontWeight: 900, textDecoration: "none" }}>{quoteAction.label} →</Link> : <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}><input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />{quoteAction.kind === "survey" ? <input type="hidden" name="jobId" value={job.id} /> : null}<button type="submit" style={{ ...button, minHeight: 38, background: "#155eef" }}>{quoteAction.label} →</button></form>}
+                    </div> : null}
                     <form action={updateJobTaskAction} style={{ borderTop: `1px solid ${taskTone.border}`, background: "#fff", padding: 14, display: "grid", gap: 12 }}>
                       <input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="taskId" value={task.id} />
                       <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr", gap: 10 }}>

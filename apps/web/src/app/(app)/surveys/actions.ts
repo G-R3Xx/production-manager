@@ -9,6 +9,7 @@ import { getEnquiryById } from "@/server/enquiries";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { addQuoteLine, createQuoteDraftForTenant, getQuoteDraftForSurveyRequest, listQuoteLines } from "@/server/quotes";
 import { createSurveyRequestForTenant, getSurveyRequestById, setSurveyRequestStatusForTenant, surveyDimensionMm, surveySignsFromPayload, updateSurveyRequestForTenant } from "@/server/surveys";
+import { attachQuoteToJobForTenant } from "@/server/jobs";
 
 
 async function requireTenant() {
@@ -166,6 +167,7 @@ function surveyLineSnapshot(surveyId: string, sign: ReturnType<typeof surveySign
 export async function createQuoteFromCompletedSurveyAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const surveyId = String(formData.get("surveyId") ?? "").trim();
+  const jobId = String(formData.get("jobId") ?? "").trim();
   if (!surveyId) redirect("/surveys?error=Choose%20a%20completed%20survey%20first");
 
   const survey = await getSurveyRequestById(activeTenant.tenantId, surveyId);
@@ -231,6 +233,8 @@ export async function createQuoteFromCompletedSurveyAction(formData: FormData): 
     });
     added += 1;
   }
+
+  if (jobId) await attachQuoteToJobForTenant(activeTenant.tenantId, jobId, quote.id);
 
   const message = `${existingQuote ? "Opened existing survey quote" : "Quote created"}. ${added ? `${added} surveyed sign line${added === 1 ? "" : "s"} added.` : "All surveyed sign lines are already present."} Open a line below to configure it in the single-page editor.`;
   redirect(`/quotes?selected=${quote.id}&fromSurvey=${survey.id}&message=${encodeURIComponent(message)}#saved-lines`);

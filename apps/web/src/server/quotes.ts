@@ -498,6 +498,20 @@ export async function getQuoteDraftForSurveyRequest(tenantId: string, surveyRequ
   return result.rows[0] ?? null;
 }
 
+export async function getQuoteDraftForEnquiry(tenantId: string, enquiryId: string): Promise<QuoteDraftRecord | null> {
+  await ensureQuoteLifecycleColumns();
+  const result = await pool.query<QuoteDraftRecord>(`
+    SELECT ${quoteSelectSql()}
+    FROM sales.quote_drafts
+    WHERE tenant_id = $1::uuid
+      AND enquiry_id = $2::uuid
+      AND status <> 'deleted'
+    ORDER BY created_at DESC
+    LIMIT 1
+  `, [tenantId, enquiryId]);
+  return result.rows[0] ?? null;
+}
+
 export async function createQuoteDraftForTenant(tenantId: string, input: {
   enquiryId?: string | null;
   surveyRequestId?: string | null;
