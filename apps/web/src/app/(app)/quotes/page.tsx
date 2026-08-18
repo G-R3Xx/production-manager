@@ -417,7 +417,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           </div>
         ) : null}
 
-        <details open={!selectedQuote || Boolean(enquiry || survey)} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
+        <details open={!selectedQuote} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
           <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef" }}>New draft quote</summary>
           <NewQuoteDraftForm
             clients={draftClientOptions}
