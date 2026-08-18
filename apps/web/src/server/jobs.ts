@@ -506,9 +506,9 @@ const workflowSyncPromises = new Map<string, Promise<JobRecord[]>>();
 const workflowSyncCompletedAt = new Map<string, number>();
 const WORKFLOW_SYNC_THROTTLE_MS = 30_000;
 
-export async function synchroniseJobsFromCurrentWorkflow(tenantId: string): Promise<JobRecord[]> {
+export async function synchroniseJobsFromCurrentWorkflow(tenantId: string, options?: { force?: boolean }): Promise<JobRecord[]> {
   const completedAt = workflowSyncCompletedAt.get(tenantId) ?? 0;
-  if (Date.now() - completedAt < WORKFLOW_SYNC_THROTTLE_MS) {
+  if (!options?.force && Date.now() - completedAt < WORKFLOW_SYNC_THROTTLE_MS) {
     return listJobsForTenant(tenantId, { skipSync: true });
   }
 
