@@ -10,7 +10,8 @@ import {
   getProductionJobById,
   listProductionItemsForJob,
   listProductionStepsForJob,
-  type ProductionItemRecord
+  type ProductionItemRecord,
+  type ProductionStepRecord
 } from "@/server/production";
 import {
   getArtworkApprovalById,
@@ -58,55 +59,117 @@ function human(value: unknown): string {
   return text(value).replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function materialRows(snapshot: UnknownRecord): Array<{ role: string; name: string; sku: string; detail: string }> {
-  const materialSnapshots = isRecord(snapshot.materialSnapshots) ? snapshot.materialSnapshots : {};
-  const roles: Array<[string, string]> = [
-    ["main", "Primary stock"],
-    ["media", "Print media"],
-    ["backing", "Backing media"],
-    ["laminate", "Laminate"],
-    ["smallStock", "Paper / small-format stock"],
-    ["smallCoating", "Coating"]
-  ];
-  return roles.flatMap(([key, role]) => {
-    const material = isRecord(materialSnapshots[key]) ? materialSnapshots[key] as UnknownRecord : null;
-    if (!material) return [];
-    const name = text(material.name) || text(material.customerFacingName);
-    if (!name) return [];
-    const dimensions = [
-      text(material.widthMm) ? `${numericText(material.widthMm)}mm wide` : "",
-      text(material.lengthMm) ? `${numericText(material.lengthMm)}mm long` : "",
-      text(material.rollWidthMm) ? `${numericText(material.rollWidthMm)}mm roll` : "",
-      text(material.gsm) ? `${numericText(material.gsm)}gsm` : ""
-    ].filter(Boolean).join(" · ");
-    return [{ role, name, sku: text(material.sku), detail: dimensions }];
-  });
-}
-
-
-function materialDisplayName(snapshot: UnknownRecord, ...keys: string[]): string {
+function friendlyMaterialDisplayName(snapshot: UnknownRecord, ...keys: string[]): string {
   const materialSnapshots = isRecord(snapshot.materialSnapshots) ? snapshot.materialSnapshots : {};
   for (const key of keys) {
     const material = isRecord(materialSnapshots[key]) ? materialSnapshots[key] as UnknownRecord : null;
     if (!material) continue;
-    const name = text(material.name) || text(material.customerFacingName);
+    const name = text(material.customerFacingName) || text(material.name);
     if (name) return name;
   }
   return "";
 }
 
-function pricingRows(snapshot: UnknownRecord): Array<{ label: string; detail: string; usage: string; note: string }> {
+type StockRequiredRow = { role: string; material: string; required: string };
+
+function formatRequiredAmount(amount: number, unit: string): string {
+  const safe = Number.isFinite(amount) ? Math.max(0, amount) : 0;
+  if (unit === "lm") return `${numericText(safe)}m`;
+  if (unit === "sheet") return `${numericText(safe)} sheet${Math.abs(safe - 1) < 0.0001 ? "" : "s"}`;
+  if (unit === "sqm") return `${numericText(safe)}m²`;
+  if (unit === "each") return `${numericText(safe)} each`;
+  return `${numericText(safe)}${unit ? ` ${unit}` : ""}`;
+}
+
+function stockUsageFromPricing(row: UnknownRecord, quantity: number): string {
+  const note = text(row.note);
+  const unit = text(row.unit).toLowerCase();
+  const physicalSheets = note.match(/([0-9]+(?:\.[0-9]+)?)\s+physical parent sheet(?:s)?(?:\s+(?:opened|required))?/i);
+  if (physicalSheets) return formatRequiredAmount(Number(physicalSheets[1]), "sheet");
+  const totalSheets = note.match(/([0-9]+(?:\.[0-9]+)?)\s+sheet(?:s)?\s+total(?:\s+for\s+qty)?/i);
+  if (totalSheets) return formatRequiredAmount(Number(totalSheets[1]), "sheet");
+  const totalLm = note.match(/([0-9]+(?:\.[0-9]+)?)\s*lm\s+total/i);
+  if (totalLm) return formatRequiredAmount(Number(totalLm[1]), "lm");
+  const amount = Number(row.amount);
+  if (!Number.isFinite(amount) || amount <= 0) return "—";
+  return formatRequiredAmount(amount * Math.max(1, quantity), unit);
+}
+
+function stockRequiredRows(snapshot: UnknownRecord, quantity: number): StockRequiredRow[] {
   const pricingSnapshot = isRecord(snapshot.pricingSnapshot) ? snapshot.pricingSnapshot : {};
   const rows = Array.isArray(pricingSnapshot.pricingBreakdown) ? pricingSnapshot.pricingBreakdown : [];
-  return rows.flatMap((row) => {
-    if (!isRecord(row)) return [];
-    const label = text(row.label);
-    if (!label) return [];
-    const amount = Number(row.amount);
-    const unit = text(row.unit);
-    const usage = Number.isFinite(amount) && amount > 0 ? `${numericText(amount)}${unit ? ` ${unit}` : ""}` : unit;
-    return [{ label, detail: text(row.detail), usage, note: text(row.note) }];
-  });
+  const mainIsRoll = (() => {
+    const materialSnapshots = isRecord(snapshot.materialSnapshots) ? snapshot.materialSnapshots : {};
+    const main = isRecord(materialSnapshots.main) ? materialSnapshots.main as UnknownRecord : null;
+    if (!main) return false;
+    return Number(main.rollWidthMm ?? 0) > 0 || /^(?:lm|linear\s*m(?:etre)?s?)$/i.test(text(main.stockUom)) || /\b(roll|vinyl|banner|sav|media)\b/i.test(text(main.materialType));
+  })();
+
+  const result: StockRequiredRow[] = [];
+  for (const value of rows) {
+    if (!isRecord(value)) continue;
+    const label = text(value.label);
+    const unit = text(value.unit).toLowerCase();
+    if (!label || !["sheet", "lm", "sqm", "each"].includes(unit)) continue;
+
+    let role = "";
+    let material = "";
+    if (label === "Base material") {
+      role = mainIsRoll || unit === "lm" ? "Print media" : "Stock";
+      material = friendlyMaterialDisplayName(snapshot, "main", "smallStock") || text(value.detail);
+    } else if (["Roll print media", "Cut vinyl", "Plan media", "Poster media"].includes(label)) {
+      role = "Print media";
+      material = friendlyMaterialDisplayName(snapshot, "media", "smallStock", "main") || text(value.detail);
+    } else if (["Plan stock", "Poster stock", "Paper / card stock", "Carbon/NCR stock"].includes(label)) {
+      role = "Stock";
+      material = friendlyMaterialDisplayName(snapshot, "smallStock", "main") || text(value.detail);
+    } else if (label === "Laminate" || /^(?:Cello \/ coating|Coating \/ laminate)$/i.test(label)) {
+      role = "Laminate";
+      material = friendlyMaterialDisplayName(snapshot, "laminate", "smallCoating") || text(value.detail);
+    } else if (label === "Backing film") {
+      role = "Backing";
+      material = friendlyMaterialDisplayName(snapshot, "backing") || text(value.detail);
+    } else {
+      continue;
+    }
+
+    const required = stockUsageFromPricing(value, quantity);
+    if (!material || required === "—") continue;
+    const key = `${role.toLowerCase()}::${material.toLowerCase()}::${required.toLowerCase()}`;
+    if (!result.some((row) => `${row.role.toLowerCase()}::${row.material.toLowerCase()}::${row.required.toLowerCase()}` === key)) result.push({ role, material, required });
+  }
+  return result;
+}
+
+type ProcessRow = { label: string; step: ProductionStepRecord | null };
+
+function processLabel(label: string): string {
+  const normalized = label.toLowerCase();
+  if (normalized.includes("artwork checked")) return "Artwork received";
+  if (normalized.includes("print-ready file attached")) return "Print-ready files";
+  if (normalized.includes("material") && normalized.includes("stock")) return "Stock allocated";
+  if (normalized === "quality checked") return "Quality check";
+  if (normalized.includes("ready for install")) return "Ready for install / pickup / delivery";
+  return label;
+}
+
+function processRows(itemSteps: ProductionStepRecord[], snapshot: UnknownRecord): ProcessRow[] {
+  const rows: ProcessRow[] = [];
+  const artworkStep = itemSteps.find((step) => /artwork checked/i.test(step.label)) ?? null;
+  const printReadyStep = itemSteps.find((step) => /print-ready file attached/i.test(step.label)) ?? null;
+  rows.push({ label: "Artwork received", step: artworkStep });
+  rows.push({ label: "Print-ready files", step: printReadyStep });
+
+  const printMethod = text(snapshot.printMethod).toLowerCase();
+  const hasPrint = Boolean(printMethod && !/^(?:none|no print)$/.test(printMethod)) || itemSteps.some((step) => /^print$/i.test(step.label));
+  if (hasPrint) rows.push({ label: "RIP setup", step: null });
+
+  for (const step of itemSteps) {
+    if (step === artworkStep || step === printReadyStep) continue;
+    rows.push({ label: processLabel(step.label), step });
+  }
+  rows.push({ label: "LINE COMPLETE", step: null });
+  return rows;
 }
 
 function artworkPageForItem(item: ProductionItemRecord, pages: ArtworkApprovalPageRecord[]): ArtworkApprovalPageRecord | null {
@@ -178,6 +241,7 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           .job-sheet-item { break-inside: auto; page-break-inside: auto; }
           .job-sheet-item + .job-sheet-item { break-before: page; page-break-before: always; }
           .job-sheet-artwork { break-inside: avoid; page-break-inside: avoid; }
+          .job-sheet-artwork img, .job-sheet-artwork canvas { max-height: 220px !important; width: auto !important; max-width: 100% !important; margin-left: auto !important; margin-right: auto !important; }
           .job-sheet-signoff { break-inside: avoid; page-break-inside: avoid; }
           a { color: inherit !important; text-decoration: none !important; }
         }
@@ -210,8 +274,6 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
         {items.map((item, itemIndex) => {
           const line = quoteLineForItem(item, activeQuoteLines);
           const snapshot = line && isRecord(line.configurationSnapshot) ? line.configurationSnapshot : {};
-          const materials = materialRows(snapshot);
-          const requirements = pricingRows(snapshot);
           const artwork = artworkPageForItem(item, artworkPages);
           const itemSteps = steps.filter((step) => step.itemId === item.id);
           const finishedSize = [text(snapshot.widthMm), text(snapshot.heightMm)].every(Boolean)
@@ -226,12 +288,9 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
           const dropInstruction = Number.isFinite(dropCount) && dropCount > 0 && (dropDirection === "vertical" || dropDirection === "horizontal")
             ? `${dropCount} ${dropDirection === "vertical" ? "VERTICAL DROPS" : "HORIZONTAL STRIPS"}${Number.isFinite(dropPanelWidthMm) && Number.isFinite(dropLengthMm) ? ` · approx ${numericText(dropPanelWidthMm)} × ${numericText(dropLengthMm)} mm each` : ""}${Number.isFinite(dropOverlap) && dropOverlap > 0 ? ` · ${numericText(dropOverlap)} mm overlap` : ""}`
             : "";
-          const labour = [
-            Number(snapshot.artworkMinutes) > 0 ? `Artwork ${numericText(snapshot.artworkMinutes)} min` : "",
-            Number(snapshot.printSetupMinutes) > 0 ? `Print setup ${numericText(snapshot.printSetupMinutes)} min (${human(snapshot.printSetupLabourBasis)})` : "",
-            Number(snapshot.laminateMinutes) > 0 ? `Laminate ${numericText(snapshot.laminateMinutes)} min (${human(snapshot.laminateLabourBasis)})` : "",
-            Number(snapshot.finishingMinutes) > 0 ? `Finishing ${numericText(snapshot.finishingMinutes)} min (${human(snapshot.finishingLabourBasis)})` : ""
-          ].filter(Boolean);
+          const itemQuantity = Math.max(1, Number(item.quantity) || 1);
+          const requiredStock = stockRequiredRows(snapshot, itemQuantity);
+          const staffProcesses = processRows(itemSteps, snapshot);
 
           return (
             <article key={item.id} className="job-sheet-item" style={{ border: "1px solid #cfd9e8", borderRadius: 18, background: "#fff", overflow: "hidden" }}>
@@ -251,22 +310,13 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0,1fr))", gap: 8 }}>
                     {[
                       ["Finished size", finishedSize],
-                      ["Primary stock", materialDisplayName(snapshot, "main", "smallStock") || materials.find((material) => material.role === "Primary stock")?.name || "—"],
                       ["Print", [human(snapshot.printMethod), human(snapshot.ink), human(snapshot.sides), human(snapshot.printDirection)].filter(Boolean).join(" · ") || item.colourSummary || "—"],
-                      ["Laminate / finish", [materialDisplayName(snapshot, "laminate", "smallCoating") || human(snapshot.laminate), Array.isArray(snapshot.finishings) ? snapshot.finishings.map(human).join(", ") : item.finishingSummary].filter(Boolean).join(" · ") || "—"]
+                      ["Bleed / spacing", bleedSpacing],
+                      ["Drop layout", dropInstruction || "—"]
                     ].map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: 9, background: "#fff" }}><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>{label}</div><strong style={{ display: "block", marginTop: 4, fontSize: 12, whiteSpace: "pre-wrap" }}>{String(value)}</strong></div>)}
                   </div>
-
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: 8 }}>
-                    {[
-                      ["Bleed / spacing", bleedSpacing],
-                      ["Artwork", human(snapshot.artworkChoice) || "—"],
-                      ["Drop layout", dropInstruction || "—"]
-                    ].map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #e4e7ec", borderRadius: 10, padding: 8, background: "#fafcff" }}><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>{label}</div><strong style={{ display: "block", marginTop: 3, fontSize: 11, whiteSpace: "pre-wrap" }}>{String(value)}</strong></div>)}
-                  </div>
-
                   {dropInstruction ? <div style={{ border: "2px solid #fb923c", background: "#fff7ed", color: "#9a3412", borderRadius: 10, padding: 10, fontSize: 12 }}><strong>INSTALL LAYOUT:</strong> {dropInstruction}</div> : null}
-                  {line?.notes || item.quoteLineNotes ? <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 10, padding: 9, fontSize: 11, whiteSpace: "pre-wrap" }}><strong>Production / quote notes:</strong> {line?.notes || item.quoteLineNotes}</div> : null}
+                  {line?.notes || item.quoteLineNotes ? <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", borderRadius: 10, padding: 9, fontSize: 11, whiteSpace: "pre-wrap" }}><strong>Production notes:</strong> {line?.notes || item.quoteLineNotes}</div> : null}
                 </section>
 
                 {artwork ? (
@@ -284,29 +334,38 @@ export default async function JobSheetPage({ params }: JobSheetPageProps) {
                   </section>
                 ) : null}
 
-                {(materials.length || requirements.length || labour.length) ? (
-                  <section style={{ border: "1px solid #d9e2ef", borderRadius: 12, overflow: "hidden", background: "#fbfcfe" }}>
-                    <div style={{ padding: "8px 11px", borderBottom: "1px solid #d9e2ef", fontSize: 11, fontWeight: 950, color: "#344054" }}>PRODUCTION REQUIREMENTS / ALLOWANCES</div>
-                    {materials.length ? <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}><tbody>{materials.map((material) => <tr key={`${material.role}-${material.name}`}><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 8px", width: "20%", fontWeight: 900 }}>{material.role}</td><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 8px" }}>{material.name}{material.sku ? ` · SKU ${material.sku}` : ""}</td><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 8px", width: "24%", textAlign: "right", color: "#475467" }}>{material.detail}</td></tr>)}</tbody></table> : null}
-                    {requirements.length ? <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 10 }}><tbody>{requirements.map((row, index) => <tr key={`${row.label}-${index}`}><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 8px", width: "20%", fontWeight: 900 }}>{row.label}</td><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 8px" }}>{row.detail}{row.note ? <div style={{ color: "#667085" }}>{row.note}</div> : null}</td><td style={{ borderTop: "1px solid #e4e7ec", padding: "5px 8px", width: "15%", textAlign: "right", fontWeight: 900 }}>{row.usage}</td></tr>)}</tbody></table> : null}
-                    {labour.length ? <div style={{ borderTop: "1px solid #e4e7ec", padding: "7px 8px", fontSize: 10 }}><strong>Labour:</strong> {labour.join(" · ")}</div> : null}
-                  </section>
-                ) : null}
-              </div>
+                <section style={{ border: "1px solid #cfd9e8", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+                  <div style={{ padding: "9px 12px", borderBottom: "1px solid #cfd9e8", background: "#f8fafc", fontSize: 13, fontWeight: 950 }}>STOCK REQUIRED</div>
+                  {requiredStock.length ? (
+                    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                      <tbody>{requiredStock.map((row, index) => <tr key={`${row.role}-${row.material}-${index}`}><td style={{ borderTop: index ? "1px solid #e4e7ec" : "none", padding: "8px 11px", width: "22%", fontWeight: 950, color: "#344054" }}>{row.role}</td><td style={{ borderTop: index ? "1px solid #e4e7ec" : "none", padding: "8px 11px", fontWeight: 800 }}>{row.material}</td><td style={{ borderTop: index ? "1px solid #e4e7ec" : "none", padding: "8px 11px", width: "20%", textAlign: "right", fontWeight: 950 }}>{row.required}</td></tr>)}</tbody>
+                    </table>
+                  ) : <div style={{ padding: 11, color: "#667085", fontSize: 11 }}>No separately allocated stock is required for this line.</div>}
+                </section>
 
-              <section className="job-sheet-signoff" style={{ borderTop: "2px solid #cfd9e8", padding: "12px 16px 14px", display: "grid", gap: 11, background: "#fff" }}>
-                <div><strong style={{ fontSize: 12 }}>Production procedure</strong><div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0,1fr))", gap: "7px 12px", marginTop: 7 }}>{itemSteps.map((step) => <span key={step.id} style={{ fontSize: 11 }}>{step.checkedAt ? "☑" : "☐"} {step.label}</span>)}</div></div>
-                <div style={{ border: "2px solid #111827", borderRadius: 12, padding: 11, display: "grid", gridTemplateColumns: "170px 1fr 1fr 150px", gap: 12, alignItems: "end" }}>
-                  <div style={{ fontSize: 14, fontWeight: 950 }}>☐ LINE COMPLETE</div>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Completed by</div><div style={{ borderBottom: "1px solid #111827", minHeight: 22 }} /></div>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Signature</div><div style={{ borderBottom: "1px solid #111827", minHeight: 22 }} /></div>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Date</div><div style={{ borderBottom: "1px solid #111827", minHeight: 22 }} /></div>
-                </div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 180px", gap: 14 }}>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Production / completion notes</div><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 24 }} /><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 24 }} /></div>
-                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>QC checked by / date</div><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 24 }} /></div>
-                </div>
-              </section>
+                <section className="job-sheet-signoff" style={{ border: "1px solid #cfd9e8", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
+                  <div style={{ padding: "9px 12px", borderBottom: "1px solid #cfd9e8", background: "#f8fafc", fontSize: 13, fontWeight: 950 }}>PROCESSES</div>
+                  <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 11 }}>
+                    <thead><tr style={{ color: "#667085", fontSize: 9, textTransform: "uppercase" }}><th style={{ padding: "7px 8px", textAlign: "left", width: "30%" }}>Process</th><th style={{ padding: "7px 6px", textAlign: "center", width: "7%" }}>Done</th><th style={{ padding: "7px 8px", textAlign: "left", width: "22%" }}>By</th><th style={{ padding: "7px 8px", textAlign: "left", width: "23%" }}>When</th><th style={{ padding: "7px 8px", textAlign: "left", width: "18%" }}>Sign</th></tr></thead>
+                    <tbody>{staffProcesses.map((process, index) => {
+                      const checked = Boolean(process.step?.checkedAt);
+                      const isComplete = process.label === "LINE COMPLETE";
+                      return <tr key={`${process.label}-${index}`} style={{ background: isComplete ? "#f8fafc" : "#fff" }}>
+                        <td style={{ borderTop: "1px solid #e4e7ec", padding: "9px 8px", fontWeight: isComplete ? 950 : 850 }}>{process.label}</td>
+                        <td style={{ borderTop: "1px solid #e4e7ec", padding: "9px 6px", textAlign: "center", fontSize: 16 }}>{checked ? "☑" : "☐"}</td>
+                        <td style={{ borderTop: "1px solid #e4e7ec", padding: "9px 8px" }}>{process.step?.checkedBy ? <span style={{ fontSize: 9 }}>{process.step.checkedBy}</span> : <span style={{ display: "block", borderBottom: "1px solid #667085", minHeight: 17 }} />}</td>
+                        <td style={{ borderTop: "1px solid #e4e7ec", padding: "9px 8px" }}>{process.step?.checkedAt ? <span style={{ fontSize: 9 }}>{formatDateTime(process.step.checkedAt)}</span> : <span style={{ display: "block", borderBottom: "1px solid #667085", minHeight: 17 }} />}</td>
+                        <td style={{ borderTop: "1px solid #e4e7ec", padding: "9px 8px" }}><span style={{ display: "block", borderBottom: "1px solid #111827", minHeight: 17 }} /></td>
+                      </tr>;
+                    })}</tbody>
+                  </table>
+                </section>
+
+                <section style={{ display: "grid", gridTemplateColumns: "1fr 190px", gap: 14 }}>
+                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Production notes / issues</div><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 25 }} /><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 25 }} /></div>
+                  <div><div style={{ fontSize: 9, fontWeight: 950, color: "#667085", textTransform: "uppercase" }}>Final QC / date</div><div style={{ borderBottom: "1px solid #98a2b3", minHeight: 25 }} /></div>
+                </section>
+              </div>
             </article>
           );
         })}
