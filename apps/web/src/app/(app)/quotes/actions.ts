@@ -490,7 +490,7 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
       configurationSnapshot: {
         ...configurationSnapshot,
         linkedDispatchLineId: linkedDispatchLineId || null,
-        ...(surveyContext ? { surveyImported: true, surveyNeedsConfiguration: false, surveyContext } : {})
+        ...(surveyContext ? { surveyImported: true, surveyNeedsConfiguration: configurationSnapshot.surveyNeedsConfiguration !== false, surveyContext } : {})
       }
     });
 
@@ -1095,4 +1095,3 @@ export async function saveMyobSalesDefaultsAction(formData: FormData): Promise<v
   }
   redirect(`/quotes?selected=${encodeURIComponent(quoteId)}&message=${encodeURIComponent("MYOB sales income account saved. You can send the accepted quote to MYOB now.")}`);
 }
-

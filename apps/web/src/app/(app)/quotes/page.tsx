@@ -148,6 +148,14 @@ function surveyLineNeedsConfiguration(value: unknown): boolean {
   return isRecord(value) && value.surveyNeedsConfiguration === true;
 }
 
+function displayedLineSummary(value: string | null, isSurveyLine: boolean): string | null {
+  if (!value || !isSurveyLine) return value;
+  const cleaned = value
+    .replace(/^Survey item\s*[—-]\s*configure material\s*\/\s*print\s*(?:·\s*)?/i, "")
+    .trim();
+  return cleaned || null;
+}
+
 function surveyStatusLabel(status: string | null | undefined, syncStatus: string | null | undefined): string {
   if (syncStatus === "completed" || status === "completed") return "Survey completed · ready to quote";
   if (syncStatus === "created") return "Sent to Install Scheduler · awaiting completion";
@@ -711,7 +719,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 </span>
                               ) : null}
                             </div>
-                            <div style={{ color: "#667085", fontSize: 13 }}>{[line.optionSummary, `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
+                            <div style={{ color: "#667085", fontSize: 13 }}>{[displayedLineSummary(line.optionSummary, Boolean(surveyReference)), `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
                             {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
                           <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>

@@ -2134,6 +2134,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     version: 1,
     source: "quick_quote_builder",
     reconstructed: false,
+    surveyImported: initialSnapshot?.surveyImported,
+    surveyNeedsConfiguration: initialSnapshot?.surveyImported ? !canSave : undefined,
+    surveyContext: initialSnapshot?.surveyContext,
     linkedDispatchLineId: initialSnapshot?.linkedDispatchLineId ?? null,
     builderMode: builderMode === "saved" ? "quick" : builderMode,
     activeStep,
@@ -3525,7 +3528,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   };
 
   const handleBuilderSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (!canSave || (!compactEdit && builderMode !== "quick" && activeStep !== "review")) {
+    if ((!compactEdit && !canSave) || (!compactEdit && builderMode !== "quick" && activeStep !== "review")) {
       event.preventDefault();
     }
   };
@@ -3560,7 +3563,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             {onCompactCancel ? <button type="button" onClick={onCompactCancel} style={{ ...ghostButton, minHeight: 40 }}>Cancel</button> : null}
-            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 40, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save component change" : "Complete required values"}</button>
+            <button type="submit" style={{ ...primaryButton, minHeight: 40 }}>Save component change</button>
           </div>
         </div>
       </form>

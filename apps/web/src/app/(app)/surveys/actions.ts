@@ -225,7 +225,7 @@ export async function createQuoteFromCompletedSurveyAction(formData: FormData): 
     const sizeText = widthMm != null && heightMm != null ? `${widthMm} × ${heightMm}mm` : [sign.width, sign.height].filter(Boolean).join(" × ");
     await addQuoteLine(quote.id, {
       productName: sign.title,
-      optionSummary: ["Survey item — configure material / print", sizeText ? `Finished size: ${sizeText}` : null].filter(Boolean).join(" · "),
+      optionSummary: sizeText ? `Finished size: ${sizeText}` : null,
       quantity: sign.quantity || "1",
       unitPrice: "0",
       notes: surveyLineNotes(sign),

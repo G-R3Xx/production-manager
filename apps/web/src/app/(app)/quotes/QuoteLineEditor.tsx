@@ -475,6 +475,23 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
   const [activeQuickCard, setActiveQuickCard] = useState<string | null>(null);
   const quickComponentCards = useMemo(() => {
     if (!quickSnapshot) return [] as Array<{ key: string; label: string; value: string; step: QuickQuoteStep | null }>;
+    if (quickSnapshot.surveyNeedsConfiguration) {
+      const mainMaterial = quickSnapshot.materialSnapshots?.main;
+      const materialName = mainMaterial?.customerFacingName || mainMaterial?.name || "Not selected";
+      const size = quickSnapshot.widthMm && quickSnapshot.heightMm ? `${quickSnapshot.widthMm} × ${quickSnapshot.heightMm} mm` : "Not set";
+      const values: Array<{ step: QuickQuoteStep; label: string; value: string }> = [
+        { step: "base", label: "Sign type", value: quickSnapshot.baseType || "Not selected" },
+        { step: "thickness", label: "Substrate", value: materialName },
+        { step: "colour", label: "Colour", value: quickSnapshot.colour || "Not selected" },
+        { step: "size", label: "Finished size", value: size },
+        { step: "artwork", label: "Artwork", value: quickSnapshot.artworkChoice || "Not selected" },
+        { step: "print", label: "Print method", value: quickSnapshot.printMethod || "Not selected" },
+        { step: "finishing", label: "Finishing", value: quickSnapshot.finishings?.length ? quickSnapshot.finishings.join(", ") : "Not selected" },
+        { step: "dispatch", label: "Pickup / delivery / install", value: quickSnapshot.serviceType || "Not selected" },
+        { step: "review", label: "Quantity / notes", value: `Qty ${quickSnapshot.quantity || line.quantity}` },
+      ];
+      return values.map((item) => ({ key: `step:${item.step}`, ...item }));
+    }
     const grouped = new Map<string, { key: string; label: string; values: string[]; step: QuickQuoteStep | null }>();
     summaryRows.forEach((row, index) => {
       if (/^qty\s+/i.test(row.value) || normalise(row.label) === "quantity") return;
@@ -493,7 +510,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
       });
     });
     return Array.from(grouped.values()).map((card) => ({ ...card, value: card.values.join(" · ") || "Not set" }));
-  }, [quickSnapshot, summaryRows]);
+  }, [quickSnapshot, summaryRows, line.quantity]);
 
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
   const visibleFieldKeys = new Set(visibleFields.map((field) => field.key));

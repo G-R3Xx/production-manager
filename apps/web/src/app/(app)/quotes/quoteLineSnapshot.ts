@@ -59,6 +59,9 @@ export type QuickQuoteSnapshot = {
   version: 1;
   source: "quick_quote_builder" | "legacy_quote_rebuild";
   reconstructed?: boolean;
+  surveyImported?: boolean;
+  surveyNeedsConfiguration?: boolean;
+  surveyContext?: Record<string, unknown>;
   linkedDispatchLineId?: string | null;
   parentLineId?: string | null;
   builderMode?: "quick" | "advanced";
