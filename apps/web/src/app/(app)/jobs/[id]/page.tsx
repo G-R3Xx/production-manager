@@ -76,14 +76,14 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
   const stageMeta = jobStageMeta(job.currentStage);
   const quoteAction = quote
-    ? { kind: "link" as const, label: "Open quote", href: `/quotes?selected=${quote.id}` }
+    ? { kind: "link" as const, label: "Create Quote", href: `/quotes?selected=${quote.id}` }
     : survey
-      ? { kind: "survey" as const, label: "Create quote from survey" }
-      : { kind: "enquiry" as const, label: "Create quote from enquiry" };
+      ? { kind: "survey" as const, label: "Create Quote" }
+      : { kind: "enquiry" as const, label: "Create Quote" };
   const stageLinks = [
     enquiry ? { label: "Enquiry", href: `/enquiries?selected=${enquiry.id}` } : null,
     survey ? { label: "Survey", href: `/surveys?selected=${survey.id}` } : null,
-    quote ? { label: "Quote", href: `/quotes?selected=${quote.id}` } : null,
+    quote && !job.currentStage.includes("quote") ? { label: "Quote", href: `/quotes?selected=${quote.id}` } : null,
     artwork ? { label: "Artwork", href: `/artwork-approvals?selected=${artwork.id}` } : null,
     production ? { label: "Production", href: `/production?selected=${production.id}` } : null,
     production ? { label: "Job sheet", href: `/job-sheets/${production.id}`, external: true } : null,
@@ -103,16 +103,16 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
           </div>
           <div style={{ display: "grid", gap: 8, justifyItems: "end" }}>
             <span style={{ borderRadius: 999, padding: "8px 12px", background: stageTone.bg, color: stageTone.fg, border: `1px solid ${stageTone.border}`, fontWeight: 950 }}>{job.currentStageLabel}</span>
-            <strong style={{ color: "#344054" }}>Next: {job.nextAction || stageMeta.nextAction}</strong>
+            <strong style={{ color: "#344054" }}>Next: {job.currentStage === "quote_required" ? "Create quote" : job.nextAction || stageMeta.nextAction}</strong>
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {job.currentStage.includes("quote") ? (
-            quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 16px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>{quoteAction.label} →</Link> :
+            quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</Link> :
             <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}>
               <input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />
               {quoteAction.kind === "survey" ? <input type="hidden" name="jobId" value={job.id} /> : null}
-              <button type="submit" style={{ ...button, minHeight: 42, background: "#155eef", padding: "0 16px" }}>{quoteAction.label} →</button>
+              <button type="submit" style={{ ...button, minHeight: 52, background: "#155eef", padding: "0 22px", borderRadius: 14, fontSize: 17, boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</button>
             </form>
           ) : <Link href={job.currentHref} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>Open current stage</Link>}
           {stageLinks.map((item) => <a key={item.label} href={item.href} target={item.external ? "_blank" : undefined} rel={item.external ? "noreferrer" : undefined} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</a>)}
