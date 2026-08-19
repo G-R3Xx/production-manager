@@ -1068,11 +1068,18 @@ export async function pushAcceptedQuoteToMyobOrderAction(formData: FormData): Pr
   if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20to%20send%20to%20MYOB");
 
   let pushError = "";
+  let pushedOrderNumber: string | null = null;
   try {
-    await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    const result = await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+    pushedOrderNumber = result.myobOrderNumber;
   } catch (error) {
     pushError = error instanceof Error ? error.message : String(error);
   }
+
+  // A redirect alone can reuse the previous RSC payload. Explicitly invalidate the
+  // quote page so a successful MYOB push immediately changes orange -> green and
+  // exposes the returned MYOB order number.
+  revalidatePath("/quotes");
 
   if (pushError) {
     const needsCustomerLink = pushError.includes("not mapped to a MYOB customer");
@@ -1082,7 +1089,10 @@ export async function pushAcceptedQuoteToMyobOrderAction(formData: FormData): Pr
     redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent(pushError)}`);
   }
 
-  redirect(`/quotes?selected=${quoteId}&message=Accepted%20quote%20sent%20to%20MYOB%20Item%20Order`);
+  const message = pushedOrderNumber
+    ? `MYOB Item Order ${pushedOrderNumber} created successfully.`
+    : "Accepted quote sent to MYOB Item Order successfully.";
+  redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(message)}`);
 }
 
 export async function saveMyobSalesDefaultsAction(formData: FormData): Promise<void> {

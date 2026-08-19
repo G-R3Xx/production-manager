@@ -1806,6 +1806,20 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
   const quote = await getQuoteDraftById(tenantId, quoteId);
   if (!quote) throw new Error("Quote not found.");
 
+  // A stale browser render must never create a second MYOB order. If this quote
+  // has already been successfully synced, return the stored order instead of
+  // issuing another POST to MYOB.
+  if (quote.myobOrderStatus === "synced" && quote.myobOrderUid) {
+    return {
+      ok: true,
+      quoteId,
+      myobOrderUid: quote.myobOrderUid,
+      myobOrderNumber: quote.myobOrderNumber,
+      endpoint: "/Sale/Order/Item",
+      message: "This accepted quote is already linked to a MYOB Item Order."
+    };
+  }
+
   if (quote.status !== "accepted") {
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, {
       status: "error",
@@ -2619,4 +2633,3 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
   });
   return { uid, number };
 }
-

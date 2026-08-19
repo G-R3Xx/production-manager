@@ -646,7 +646,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {canPush && !needsAnyClientLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
                                 <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                                <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>Send to MYOB Item Order</button>
+                                <MyobSubmitButton label="Send to MYOB Item Order" pendingLabel="Creating MYOB order…" background="#0f766e" />
                               </form>
                             ) : null}
                           </div>
