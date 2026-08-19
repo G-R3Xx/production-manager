@@ -544,6 +544,98 @@ export async function synchroniseJobsFromCurrentWorkflow(tenantId: string, optio
   return promise;
 }
 
+async function dashboardJobsNeedWorkflowSync(tenantId: string): Promise<boolean> {
+  await ensureJobWorkspaceSchema();
+  const result = await pool.query<{ needsSync: boolean }>(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM app.enquiries source
+      LEFT JOIN app.jobs job
+        ON job.tenant_id = source.tenant_id
+       AND job.enquiry_id = source.id
+      WHERE source.tenant_id = $1::uuid
+        AND (
+          job.id IS NULL
+          OR source.updated_at > job.updated_at
+          OR source.created_at < job.received_at
+        )
+
+      UNION ALL
+
+      SELECT 1
+      FROM app.survey_requests source
+      LEFT JOIN app.jobs job
+        ON job.tenant_id = source.tenant_id
+       AND (job.survey_request_id = source.id OR (source.enquiry_id IS NOT NULL AND job.enquiry_id = source.enquiry_id))
+      WHERE source.tenant_id = $1::uuid
+        AND (
+          job.id IS NULL
+          OR job.survey_request_id IS DISTINCT FROM source.id
+          OR source.updated_at > job.updated_at
+          OR source.created_at < job.received_at
+        )
+
+      UNION ALL
+
+      SELECT 1
+      FROM sales.quote_drafts source
+      LEFT JOIN app.jobs job
+        ON job.tenant_id = source.tenant_id
+       AND (
+         job.quote_id = source.id
+         OR (source.enquiry_id IS NOT NULL AND job.enquiry_id = source.enquiry_id)
+         OR (source.survey_request_id IS NOT NULL AND job.survey_request_id = source.survey_request_id)
+       )
+      WHERE source.tenant_id = $1::uuid
+        AND (
+          job.id IS NULL
+          OR job.quote_id IS DISTINCT FROM source.id
+          OR source.updated_at > job.updated_at
+          OR source.created_at < job.received_at
+        )
+
+      UNION ALL
+
+      SELECT 1
+      FROM sales.artwork_approvals source
+      LEFT JOIN app.jobs job
+        ON job.tenant_id = source.tenant_id
+       AND (job.artwork_approval_id = source.id OR job.quote_id = source.quote_id)
+      WHERE source.tenant_id = $1::uuid
+        AND (
+          job.id IS NULL
+          OR job.artwork_approval_id IS DISTINCT FROM source.id
+          OR source.updated_at > job.updated_at
+          OR source.created_at < job.received_at
+        )
+
+      UNION ALL
+
+      SELECT 1
+      FROM production.production_jobs source
+      LEFT JOIN app.jobs job
+        ON job.tenant_id = source.tenant_id
+       AND (job.production_job_id = source.id OR job.quote_id = source.quote_id)
+      WHERE source.tenant_id = $1::uuid
+        AND (
+          job.id IS NULL
+          OR job.production_job_id IS DISTINCT FROM source.id
+          OR source.updated_at > job.updated_at
+          OR source.created_at < job.received_at
+        )
+      LIMIT 1
+    ) AS "needsSync"
+  `, [tenantId]);
+  return Boolean(result.rows[0]?.needsSync);
+}
+
+export async function listCurrentDashboardJobsForTenant(tenantId: string): Promise<JobRecord[]> {
+  if (await dashboardJobsNeedWorkflowSync(tenantId)) {
+    return synchroniseJobsFromCurrentWorkflow(tenantId, { force: true });
+  }
+  return listJobsForTenant(tenantId, { skipSync: true });
+}
+
 function jobSelectSql(): string {
   return `
     id,

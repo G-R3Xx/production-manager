@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listJobsForTenant, listJobTasksForTenant, type JobRecord } from "@/server/jobs";
+import { listCurrentDashboardJobsForTenant, listJobTasksForTenant, type JobRecord } from "@/server/jobs";
 import { listUsersForTenant } from "@/server/users";
 import { customerLogoUrl, listCustomerLogoSummariesForTenant } from "@/server/customers";
 import { refreshDashboardJobsAction } from "./actions";
@@ -71,7 +71,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const message = readParam(params, "message");
 
   const [jobs, tasks, staff, customers] = await Promise.all([
-    listJobsForTenant(activeTenant.tenantId, { skipSync: true }),
+    listCurrentDashboardJobsForTenant(activeTenant.tenantId),
     listJobTasksForTenant(activeTenant.tenantId),
     listUsersForTenant(activeTenant.tenantId),
     listCustomerLogoSummariesForTenant(activeTenant.tenantId),
