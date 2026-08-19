@@ -1048,6 +1048,12 @@ function customerMaterialName(material: QuoteMaterial | null | undefined): strin
   return String(material?.customerFacingName ?? "").trim() || String(material?.name ?? "").trim();
 }
 
+function internalMaterialName(material: QuoteMaterial | null | undefined): string {
+  const name = String(material?.name ?? "").trim();
+  const sku = String(material?.sku ?? "").trim();
+  return name && sku && !name.toLowerCase().includes(sku.toLowerCase()) ? `${name} · ${sku}` : name || sku;
+}
+
 type RollChoiceGroup = {
   key: string;
   label: string;
@@ -3427,7 +3433,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     if (compactStep === "thickness" || compactStep === "colour") {
       const selectedId = selectedMainMaterial?.id ?? "";
       return <div style={compactPanel}>
-        <label style={{ display: "grid", gap: 6 }}><b>Material / substrate</b><select value={selectedId} onChange={(event) => { const material = baseMaterials.find((item) => item.id === event.target.value); if (baseType === "banner") setMediaId(event.target.value); else { setThickness(material ? thicknessFor(material) : ""); setColour(material ? colourFor(material) : ""); } changed(); }} style={inputStyle}><option value="">Choose material</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label>
+        <label style={{ display: "grid", gap: 6 }}><b>Material / substrate</b><select value={selectedId} onChange={(event) => { const material = baseMaterials.find((item) => item.id === event.target.value); if (baseType === "banner") setMediaId(event.target.value); else { setThickness(material ? thicknessFor(material) : ""); setColour(material ? colourFor(material) : ""); } changed(); }} style={inputStyle}><option value="">Choose material</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label>
         {selectedMainMaterial ? <small style={{ color: "#64748b" }}>{materialCardMeta(selectedMainMaterial)}</small> : null}
       </div>;
     }
@@ -3445,7 +3451,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "media") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll stock / media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label>{activeRollMaterial ? renderDropLayoutControls(true) : null}</div>;
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll stock / media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label>{activeRollMaterial ? renderDropLayoutControls(true) : null}</div>;
     }
 
     if (compactStep === "ink") {
@@ -3457,7 +3463,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "laminate") {
-      return <div style={compactPanel}><div style={compactGrid}>{backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}</option>)}</select></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label></div>{printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={labourRate} quantity={quantityNumber} /> : null}</div>;
+      return <div style={compactPanel}><div style={compactGrid}>{backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}</option>)}</select></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label></div>{printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={labourRate} quantity={quantityNumber} /> : null}</div>;
     }
 
     if (compactStep === "finishing") {
@@ -3473,7 +3479,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "small_stock") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label>{customSmallStockEnabled ? <small style={{ color: "#b54708" }}>This line currently uses a custom stock. Choosing a library material will replace it.</small> : null}</div>;
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label>{customSmallStockEnabled ? <small style={{ color: "#b54708" }}>This line currently uses a custom stock. Choosing a library material will replace it.</small> : null}</div>;
     }
 
     if (compactStep === "small_print") {
@@ -3481,7 +3487,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "small_coating") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Cello / coating</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose coating</option><option value="none">None</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{customerMaterialName(material) || material.name}</option>)}</select></label></div>;
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Cello / coating</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose coating</option><option value="none">None</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label></div>;
     }
 
     if (compactStep === "small_finishing") {

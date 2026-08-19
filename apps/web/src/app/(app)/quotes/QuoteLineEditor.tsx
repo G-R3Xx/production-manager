@@ -477,7 +477,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
     if (!quickSnapshot) return [] as Array<{ key: string; label: string; value: string; step: QuickQuoteStep | null }>;
     if (quickSnapshot.surveyNeedsConfiguration) {
       const mainMaterial = quickSnapshot.materialSnapshots?.main;
-      const materialName = mainMaterial?.customerFacingName || mainMaterial?.name || "Not selected";
+      const materialName = mainMaterial?.name || "Not selected";
       const size = quickSnapshot.widthMm && quickSnapshot.heightMm ? `${quickSnapshot.widthMm} × ${quickSnapshot.heightMm} mm` : "Not set";
       const values: Array<{ step: QuickQuoteStep; label: string; value: string }> = [
         { step: "base", label: "Sign type", value: quickSnapshot.baseType || "Not selected" },
