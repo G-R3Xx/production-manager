@@ -6,13 +6,13 @@ import { AppNavLink } from "@/components/AppNavLink";
 import { SafeAppAutoRefresh } from "@/components/SafeAppAutoRefresh";
 import { AlertsPopover } from "@/components/AlertsPopover";
 import { signOutAction, switchTenantAction } from "./actions";
-import { listNotificationsWithUnreadForTenant } from "@/server/notifications";
+import { getAppActivityPulseForTenant, listNotificationsWithUnreadForTenant } from "@/server/notifications";
 
 type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.19.20";
+const APP_VERSION = "V26.08.19.22";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -36,9 +36,12 @@ export default async function AppLayout({ children }: AppLayoutProps) {
     listMembershipsForAuthUser(user.id),
     resolveActiveTenantForAuthUserId(user.id)
   ]);
-  const notificationSnapshot = activeTenant
-    ? await listNotificationsWithUnreadForTenant(activeTenant.tenantId)
-    : { notifications: [], unreadCount: 0 };
+  const [notificationSnapshot, initialActivityPulse] = activeTenant
+    ? await Promise.all([
+        listNotificationsWithUnreadForTenant(activeTenant.tenantId),
+        getAppActivityPulseForTenant(activeTenant.tenantId),
+      ])
+    : [{ notifications: [], unreadCount: 0 }, ""];
   const { notifications, unreadCount } = notificationSnapshot;
 
   return (
@@ -199,7 +202,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12, position: "relative", zIndex: 20 }}>
           <AlertsPopover initialNotifications={notifications} initialUnreadCount={unreadCount} />
         </div>
-        <SafeAppAutoRefresh />
+        <SafeAppAutoRefresh initialPulse={initialActivityPulse} />
         {children}
       </main>
     </div>

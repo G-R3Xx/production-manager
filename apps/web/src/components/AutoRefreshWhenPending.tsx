@@ -1,14 +1,14 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { requestAppActivityCheck } from "@/lib/auto-refresh-client";
 
 export function AutoRefreshWhenPending({ active }: { active: boolean }) {
-  const router = useRouter();
   useEffect(() => {
     if (!active) return;
-    const timer = window.setTimeout(() => router.refresh(), 1500);
-    return () => window.clearTimeout(timer);
-  }, [active, router]);
+    requestAppActivityCheck();
+    const timer = window.setInterval(requestAppActivityCheck, 2_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
   return null;
 }

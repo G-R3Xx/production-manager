@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const processes = [
   { key: "enquiry", label: "Enquiry", description: "Review and qualify the request." },
@@ -40,7 +40,23 @@ export function JobProcessAssignments({
   const [saved, setSaved] = useState<Record<ProcessKey, Draft>>(initial);
   const [state, setState] = useState<Partial<Record<ProcessKey, "saving" | "saved" | "error">>>({});
   const [errors, setErrors] = useState<Partial<Record<ProcessKey, string>>>({});
+  const draftsRef = useRef(drafts);
+  const savedRef = useRef(saved);
   const currentIndex = processes.findIndex((process) => process.key === currentProcessKey);
+
+  useEffect(() => { draftsRef.current = drafts; }, [drafts]);
+  useEffect(() => { savedRef.current = saved; }, [saved]);
+  useEffect(() => {
+    const currentDrafts = draftsRef.current;
+    const currentSaved = savedRef.current;
+    const mergedDrafts = { ...currentDrafts };
+    for (const process of processes) {
+      const locallyChanged = JSON.stringify(currentDrafts[process.key]) !== JSON.stringify(currentSaved[process.key]);
+      if (!locallyChanged) mergedDrafts[process.key] = initial[process.key];
+    }
+    setDrafts(mergedDrafts);
+    setSaved(initial);
+  }, [initial]);
 
   function updateDraft(processKey: ProcessKey, next: Partial<Draft>) {
     setDrafts((current) => ({ ...current, [processKey]: { ...current[processKey], ...next } }));

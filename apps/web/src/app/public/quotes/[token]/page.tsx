@@ -5,7 +5,8 @@ import { getCompanySettingsByTenantId } from "@/server/company";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
-import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
+import { getQuoteDraftByPublicToken, listQuoteLines, markQuoteViewedByToken, quoteActivityFingerprint, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
+import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
 import { PrintQuoteButton } from "./PrintQuoteButton";
 import { QuoteLineResponseControls } from "./QuoteLineResponseControls";
 import { QuoteLiveTotals } from "./QuoteLiveTotals";
@@ -358,9 +359,11 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
         ? "changes requested"
         : null;
   const lineResponsesLocked = quote.status === "accepted" || quote.status === "declined";
+  const statusFingerprint = quoteActivityFingerprint(quote, allLines);
 
   return (
     <main className="quote-print-page" style={{ minHeight: "100vh", background: "linear-gradient(180deg,#f8fbff,#eef2f7)", padding: 24 }}>
+      <PublicStatusAutoRefresh statusUrl={`/api/public/quotes/${encodeURIComponent(token)}/status`} fingerprint={statusFingerprint} />
       <style>{`@media (max-width: 760px) { .quote-header-top, .quote-header-info { grid-template-columns: 1fr !important; } .quote-header-meta { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-job { border-left: 0 !important; border-top: 1px solid #e4e7ec !important; padding-left: 0 !important; padding-top: 16px !important; margin-top: 16px !important; } .quote-header-client { padding-left: 0 !important; } .quote-company-row { grid-template-columns: 1fr !important; } .quote-line-grid { grid-template-columns: 1fr !important; } .quote-line-price { text-align: left !important; justify-items: start !important; } .quote-line-actions { justify-items: start !important; } } @media print { @page { margin: 12mm; } body { background: #fff !important; } .quote-print-hide { display: none !important; } .quote-print-page { background: #fff !important; padding: 0 !important; min-height: 0 !important; } .quote-print-wrap { max-width: none !important; gap: 12px !important; } .quote-print-card { box-shadow: none !important; break-inside: avoid; } .quote-print-line { break-inside: avoid; } .quote-line-grid { grid-template-columns: minmax(0,1fr) auto !important; } }`}</style>
       <div className="quote-print-wrap" style={{ maxWidth: 980, margin: "0 auto", display: "grid", gap: 18 }}>
         {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}

@@ -1,20 +1,18 @@
 import { NextResponse } from "next/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getQuoteDraftById, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
+import { getSurveyRequestsActivityFingerprintForTenant } from "@/server/surveys";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+export async function GET() {
   const user = await getRequiredSessionUser();
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!tenant) return NextResponse.json({ error: "No active workspace" }, { status: 403 });
-  const { id } = await params;
-  const quote = await getQuoteDraftById(tenant.tenantId, id);
-  if (!quote) return NextResponse.json({ error: "Quote not found" }, { status: 404 });
-  const lines = await listQuoteLines(quote.id);
+
+  const fingerprint = await getSurveyRequestsActivityFingerprintForTenant(tenant.tenantId);
   return NextResponse.json(
-    { fingerprint: quoteActivityFingerprint(quote, lines), updatedAt: quote.updatedAt, status: quote.status },
+    { fingerprint },
     { headers: { "Cache-Control": "no-store, max-age=0", Pragma: "no-cache" } },
   );
 }

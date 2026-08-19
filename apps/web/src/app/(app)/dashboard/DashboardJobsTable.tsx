@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
+import { requestAppActivityCheck } from "@/lib/auto-refresh-client";
 import { DashboardJobRow } from "./DashboardJobRow";
 import type { DashboardJobType } from "@/server/jobs";
 
@@ -109,7 +109,6 @@ function fmtDate(value: string | null): string {
 }
 
 export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", initialOwner = "", initialQuery = "", reconciliationScheduled = false }: { rows: DashboardRow[]; staff: StaffOption[]; todayKey: string; initialStage?: string; initialOwner?: string; initialQuery?: string; reconciliationScheduled?: boolean }) {
-  const router = useRouter();
   const [stage, setStage] = useState(initialStage);
   const [owner, setOwner] = useState(initialOwner);
   const [age, setAge] = useState("");
@@ -120,9 +119,10 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
 
   useEffect(() => {
     if (!reconciliationScheduled) return;
-    const timer = window.setTimeout(() => router.refresh(), 8000);
-    return () => window.clearTimeout(timer);
-  }, [reconciliationScheduled, router]);
+    requestAppActivityCheck();
+    const timer = window.setInterval(requestAppActivityCheck, 2_000);
+    return () => window.clearInterval(timer);
+  }, [reconciliationScheduled]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();

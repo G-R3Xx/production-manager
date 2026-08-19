@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { markAllNotificationsReadAction } from "@/app/(app)/actions";
 
 type AlertItem = {
@@ -32,6 +32,11 @@ export function AlertsPopover({ initialNotifications, initialUnreadCount }: { in
   const [unreadCount, setUnreadCount] = useState(initialUnreadCount);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setNotifications(initialNotifications);
+    setUnreadCount(initialUnreadCount);
+  }, [initialNotifications, initialUnreadCount]);
 
   const markAllRead = async () => {
     if (!unreadCount || saving) return;

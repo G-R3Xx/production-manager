@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type Props = {
   stepId: string;
@@ -26,6 +26,12 @@ export function ProductionStepToggle({ stepId, label, initialStatus, initialChec
   const [checkedBy, setCheckedBy] = useState<string | null>(initialCheckedBy);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    setStatus(initialStatus === "done" ? "done" : "pending");
+    setCheckedAt(initialCheckedAt);
+    setCheckedBy(initialCheckedBy);
+  }, [initialStatus, initialCheckedAt, initialCheckedBy]);
 
   async function toggle() {
     if (busy) return;

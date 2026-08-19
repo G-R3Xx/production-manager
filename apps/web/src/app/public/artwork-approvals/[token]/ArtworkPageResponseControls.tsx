@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useFormStatus } from "react-dom";
 import { approveArtworkPageAction, requestArtworkPageChangesAction } from "./actions";
 
@@ -27,6 +27,10 @@ export function ArtworkPageResponseControls({
   const [showChanges, setShowChanges] = useState(status === "changes_requested");
   const approved = status === "approved";
   const changesRequested = status === "changes_requested";
+
+  useEffect(() => {
+    setShowChanges(status === "changes_requested");
+  }, [status]);
 
   return (
     <section style={{ borderTop: "1px solid #d0d5dd", paddingTop: 12, display: "grid", gap: 9 }}>

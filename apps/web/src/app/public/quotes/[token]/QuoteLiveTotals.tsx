@@ -11,6 +11,10 @@ export function QuoteLiveTotals({ subtotal, gst, total }: { subtotal: number; gs
   const [values, setValues] = useState({ subtotal, gst, total });
 
   useEffect(() => {
+    setValues({ subtotal, gst, total });
+  }, [subtotal, gst, total]);
+
+  useEffect(() => {
     const onSaved = (event: Event) => {
       const detail = (event as CustomEvent<FastQuoteLineResponseResult>).detail;
       if (!detail?.ok || detail.subtotal == null || detail.gst == null || detail.total == null) return;

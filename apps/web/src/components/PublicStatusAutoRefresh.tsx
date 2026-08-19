@@ -2,40 +2,42 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { claimAppRefresh, pageHasUnsavedEdits } from "@/lib/auto-refresh-client";
+import { claimAppRefresh, installAutoRefreshFormTracking, pageHasUnsavedEdits } from "@/lib/auto-refresh-client";
 
-const STATUS_POLL_MS = 6_000;
+const STATUS_POLL_MS = 5_000;
 
-export function QuoteStatusAutoRefresh({ quoteId, fingerprint }: { quoteId: string; fingerprint: string }) {
+export function PublicStatusAutoRefresh({ statusUrl, fingerprint }: { statusUrl: string; fingerprint: string }) {
   const router = useRouter();
   const latestRef = useRef(fingerprint);
-  const refreshingRef = useRef(false);
   const checkingRef = useRef(false);
+  const refreshingRef = useRef(false);
 
   useEffect(() => {
     latestRef.current = fingerprint;
   }, [fingerprint]);
 
   useEffect(() => {
+    const removeFormTracking = installAutoRefreshFormTracking();
+
     async function checkStatus() {
-      if (document.visibilityState !== "visible" || refreshingRef.current || checkingRef.current) return;
+      if (document.visibilityState !== "visible" || checkingRef.current || refreshingRef.current) return;
       checkingRef.current = true;
       try {
-        const response = await fetch(`/api/quotes/${encodeURIComponent(quoteId)}/status`, {
+        const response = await fetch(statusUrl, {
           cache: "no-store",
           credentials: "same-origin",
           headers: { "Cache-Control": "no-cache" },
         });
         if (!response.ok) return;
-        const data = await response.json() as { fingerprint?: string; updatedAt?: string };
-        const nextFingerprint = String(data.fingerprint ?? data.updatedAt ?? "");
+        const payload = await response.json() as { fingerprint?: string };
+        const nextFingerprint = String(payload.fingerprint ?? "");
         if (!nextFingerprint || nextFingerprint === latestRef.current || pageHasUnsavedEdits() || !claimAppRefresh()) return;
         latestRef.current = nextFingerprint;
         refreshingRef.current = true;
         router.refresh();
         window.setTimeout(() => { refreshingRef.current = false; }, 1_200);
       } catch {
-        // A temporary status-check failure should not interrupt quote editing.
+        // The public portal remains usable if a background status request briefly fails.
       } finally {
         checkingRef.current = false;
       }
@@ -55,8 +57,9 @@ export function QuoteStatusAutoRefresh({ quoteId, fingerprint }: { quoteId: stri
       window.removeEventListener("focus", checkWhenVisible);
       window.removeEventListener("pageshow", checkWhenVisible);
       document.removeEventListener("visibilitychange", checkWhenVisible);
+      removeFormTracking();
     };
-  }, [quoteId, router]);
+  }, [router, statusUrl]);
 
   return null;
 }

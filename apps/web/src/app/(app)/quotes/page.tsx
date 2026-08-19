@@ -11,7 +11,7 @@ import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
-import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines } from "@/server/quotes";
+import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
@@ -342,6 +342,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null),
     selectedQuote ? getProductionJobForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
   ]);
+  const selectedQuoteFingerprint = selectedQuote ? quoteActivityFingerprint(selectedQuote, quoteLines) : "";
   const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
   const importedMyobCustomers = clients.filter((client) => client.isActive && Boolean(client.myobUid) && !client.myobUid.startsWith("manual-"));
   const linkedClientMyobUid = linkedClient
@@ -531,7 +532,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       <section style={{ ...cardStyle(), display: "grid", gap: 16 }}>
           {selectedQuote ? (
             <div style={{ display: "grid", gap: 16 }}>
-              <QuoteStatusAutoRefresh quoteId={selectedQuote.id} updatedAt={selectedQuote.updatedAt} />
+              <QuoteStatusAutoRefresh quoteId={selectedQuote.id} fingerprint={selectedQuoteFingerprint} />
               <div style={{ display: "grid", gap: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                   <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>

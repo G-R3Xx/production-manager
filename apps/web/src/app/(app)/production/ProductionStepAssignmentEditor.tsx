@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type StaffOption = { id: string; name: string };
 type Assignment = {
@@ -17,7 +17,26 @@ export function ProductionStepAssignmentEditor({ stepId, initial, staff }: { ste
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const pendingInitialRef = useRef<Assignment | null>(null);
+  const latestInitialRef = useRef(initial);
+  latestInitialRef.current = initial;
+  const initialFingerprint = JSON.stringify(initial);
   const names = assignment.assigneeProfileIds.map((id) => staff.find((person) => person.id === id)?.name || "Staff");
+
+  useEffect(() => {
+    pendingInitialRef.current = latestInitialRef.current;
+  }, [initialFingerprint]);
+
+  useEffect(() => {
+    const next = pendingInitialRef.current;
+    const locallyChanged = JSON.stringify(draftIds) !== JSON.stringify(assignment.assigneeProfileIds)
+      || dueDate !== (assignment.dueDate ?? "");
+    if (!next || busy || locallyChanged) return;
+    pendingInitialRef.current = null;
+    setAssignment(next);
+    setDraftIds(next.assigneeProfileIds ?? []);
+    setDueDate(next.dueDate ?? "");
+  }, [assignment, busy, draftIds, dueDate, initialFingerprint]);
 
   function toggleStaff(id: string) {
     setDraftIds((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
@@ -38,6 +57,7 @@ export function ProductionStepAssignmentEditor({ stepId, initial, staff }: { ste
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || "Step assignment could not be saved.");
       const next = result.step as Assignment;
+      pendingInitialRef.current = null;
       setAssignment(next);
       setDraftIds(next.assigneeProfileIds ?? []);
       setDueDate(next.dueDate ?? "");

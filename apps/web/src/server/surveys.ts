@@ -67,6 +67,27 @@ export async function listSurveyRequestsForTenant(tenantId: string, options?: { 
   return result.rows;
 }
 
+export function surveyRequestsActivityFingerprint(records: Array<Pick<SurveyRequestRecord, "updatedAt">>): string {
+  const latest = records.reduce((current, record) => {
+    const timestamp = new Date(record.updatedAt).getTime();
+    return Number.isFinite(timestamp) ? Math.max(current, timestamp) : current;
+  }, 0);
+  return `${records.length}|${latest ? new Date(latest).toISOString() : ""}`;
+}
+
+export async function getSurveyRequestsActivityFingerprintForTenant(tenantId: string): Promise<string> {
+  const result = await pool.query<{ count: string; updatedAt: string | Date | null }>(`
+    SELECT
+      count(*)::text AS count,
+      max(updated_at) AS "updatedAt"
+    FROM app.survey_requests
+    WHERE tenant_id = $1::uuid
+  `, [tenantId]);
+  const row = result.rows[0];
+  const updatedAt = row?.updatedAt ? new Date(row.updatedAt).toISOString() : "";
+  return `${Number(row?.count ?? 0)}|${updatedAt}`;
+}
+
 export async function getSurveyRequestById(tenantId: string, surveyId: string): Promise<SurveyRequestRecord | null> {
   const result = await pool.query<SurveyRequestRecord>(`${surveyRequestSelect}
     WHERE tenant_id = $1::uuid AND id = $2::uuid

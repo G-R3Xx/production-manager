@@ -40,6 +40,14 @@ export function QuoteLineResponseControls({ token, lineId, status, notes, locked
   const label = statusLabel(localStatus);
 
   useEffect(() => {
+    if (isPending || showChanges) return;
+    setLocalStatus(status);
+    setLocalNotes(notes ?? null);
+    setQuoteLocked(locked);
+    setChangeNote(status === "changes_requested" ? notes ?? "" : "");
+  }, [isPending, locked, notes, showChanges, status]);
+
+  useEffect(() => {
     const onSaved = (event: Event) => {
       const detail = (event as CustomEvent<FastQuoteLineResponseResult>).detail;
       if (detail?.quoteStatus === "accepted" || detail?.quoteStatus === "declined") setQuoteLocked(true);

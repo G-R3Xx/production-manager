@@ -2,13 +2,14 @@ export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { artworkQuoteLineInScope, getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, listQuoteLines, markArtworkApprovalViewedByToken, quoteUsesLineResponses, type ArtworkApprovalPageRecord, type QuoteLineRecord } from "@/server/quotes";
+import { artworkApprovalStatusFingerprint, artworkQuoteLineInScope, getArtworkApprovalByPublicToken, getQuoteDraftById, listArtworkApprovalPages, listQuoteLines, markArtworkApprovalViewedByToken, quoteUsesLineResponses, type ArtworkApprovalPageRecord, type QuoteLineRecord } from "@/server/quotes";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { ArtworkResponsePanel } from "./ArtworkResponsePanel";
 import { ArtworkProofPreview } from "./ArtworkProofPreview";
 import { ArtworkPageResponseControls } from "./ArtworkPageResponseControls";
+import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
 
 type PageProps = { params: Promise<{ token: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
@@ -200,9 +201,11 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
   const approvedPageCount = pages.filter((page) => page.clientResponseStatus === "approved").length;
   const changesPageCount = pages.filter((page) => page.clientResponseStatus === "changes_requested").length;
   const allPagesApproved = pages.length > 0 && approvedPageCount === pages.length;
+  const statusFingerprint = artworkApprovalStatusFingerprint(approval, allPages);
 
   return (
     <main style={{ minHeight: "100vh", background: "#f5f7fa", padding: "20px 18px 46px" }}>
+      <PublicStatusAutoRefresh statusUrl={`/api/public/artwork-approvals/${encodeURIComponent(token)}/status`} fingerprint={statusFingerprint} />
       <div style={{ maxWidth: 1320, margin: "0 auto", display: "grid", gap: 14 }}>
         <style>{`
           .public-artwork-head{display:grid;grid-template-columns:190px minmax(0,1fr) auto;gap:18px;align-items:center}

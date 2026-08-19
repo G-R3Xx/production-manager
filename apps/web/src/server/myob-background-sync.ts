@@ -58,14 +58,14 @@ async function markStatus(
   };
 
   if (type === "customer") {
-    await pool.query(`UPDATE app.customers SET payload_json=COALESCE(payload_json,'{}'::jsonb)||$3::jsonb WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, id, JSON.stringify(patch)]);
+    await pool.query(`UPDATE app.customers SET payload_json=COALESCE(payload_json,'{}'::jsonb)||$3::jsonb,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, id, JSON.stringify(patch)]);
     return;
   }
   if (type === "supplier") {
-    await pool.query(`UPDATE app.suppliers SET payload_json=COALESCE(payload_json,'{}'::jsonb)||$3::jsonb WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, id, JSON.stringify(patch)]);
+    await pool.query(`UPDATE app.suppliers SET payload_json=COALESCE(payload_json,'{}'::jsonb)||$3::jsonb,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, id, JSON.stringify(patch)]);
     return;
   }
-  await pool.query(`UPDATE catalog.materials SET myob_sync_state=$3::varchar,myob_payload_json=COALESCE(myob_payload_json,'{}'::jsonb)||$4::jsonb WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, id, status, JSON.stringify(patch)]);
+  await pool.query(`UPDATE catalog.materials SET myob_sync_state=$3::varchar,myob_payload_json=COALESCE(myob_payload_json,'{}'::jsonb)||$4::jsonb,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, id, status, JSON.stringify(patch)]);
 }
 
 async function currentQueueToken(tenantId: string, type: MyobMasterEntityType, id: string): Promise<string> {

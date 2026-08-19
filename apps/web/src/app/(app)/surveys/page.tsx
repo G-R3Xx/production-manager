@@ -5,7 +5,8 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { createQuoteFromCompletedSurveyAction, createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
-import { listSurveyRequestsForTenant } from "@/server/surveys";
+import { listSurveyRequestsForTenant, surveyRequestsActivityFingerprint } from "@/server/surveys";
+import { SurveyStatusAutoRefresh } from "./SurveyStatusAutoRefresh";
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
@@ -171,8 +172,9 @@ export default async function SurveysPage({ searchParams }: PageProps) {
     listSurveyRequestsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     listCustomersForTenant(activeTenant.tenantId),
-    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
+    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
   ]);
+  const surveyFingerprint = surveyRequestsActivityFingerprint(allSurveyRequests);
   const deletedCount = allSurveyRequests.filter((survey) => survey.status === "deleted").length;
   const surveyRequests = filter === "deleted"
     ? allSurveyRequests.filter((survey) => survey.status === "deleted")
@@ -183,6 +185,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 16 }}>
+      <SurveyStatusAutoRefresh fingerprint={surveyFingerprint} />
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
       <section style={{ ...cardStyle(), display: "grid", gap: 8 }}>
@@ -238,7 +241,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
               const surveySourceEnquiry = survey.enquiryId ? enquiryById.get(survey.enquiryId) : null;
               const surveyLogoUrl = surveySourceEnquiry?.clientLogoUrl || customerLogoUrl(survey.linkedCustomerId ? customerById.get(survey.linkedCustomerId) : null);
               return (
-                <article key={survey.id} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
+                <article key={`${survey.id}:${survey.updatedAt}`} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                     <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
                       <ClientLogoBadge logoUrl={surveyLogoUrl} name={survey.clientName} size={48} radius={14} padding={4} />

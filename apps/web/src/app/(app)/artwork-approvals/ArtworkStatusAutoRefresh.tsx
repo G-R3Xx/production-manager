@@ -2,26 +2,9 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { claimAppRefresh, pageHasUnsavedEdits } from "@/lib/auto-refresh-client";
 
 const STATUS_POLL_MS = 5_000;
-
-function pageHasUnsavedEdits(): boolean {
-  const active = document.activeElement;
-  if (active instanceof HTMLElement && active.isContentEditable) return true;
-
-  const controls = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>("input, textarea, select");
-  return Array.from(controls).some((control) => {
-    if (control instanceof HTMLSelectElement) {
-      return Array.from(control.options).some((option) => option.selected !== option.defaultSelected);
-    }
-    if (control instanceof HTMLTextAreaElement) return control.value !== control.defaultValue;
-
-    const type = control.type.toLowerCase();
-    if (["hidden", "button", "submit", "reset", "file"].includes(type)) return false;
-    if (type === "checkbox" || type === "radio") return control.checked !== control.defaultChecked;
-    return control.value !== control.defaultValue;
-  });
-}
 
 export function ArtworkStatusAutoRefresh({ approvalId, fingerprint }: { approvalId: string; fingerprint: string }) {
   const router = useRouter();
@@ -46,7 +29,7 @@ export function ArtworkStatusAutoRefresh({ approvalId, fingerprint }: { approval
         if (!response.ok) return;
         const data = await response.json() as { fingerprint?: string; updatedAt?: string };
         const nextFingerprint = String(data.fingerprint ?? data.updatedAt ?? "");
-        if (!nextFingerprint || nextFingerprint === latestRef.current || pageHasUnsavedEdits()) return;
+        if (!nextFingerprint || nextFingerprint === latestRef.current || pageHasUnsavedEdits() || !claimAppRefresh()) return;
         latestRef.current = nextFingerprint;
         refreshingRef.current = true;
         router.refresh();

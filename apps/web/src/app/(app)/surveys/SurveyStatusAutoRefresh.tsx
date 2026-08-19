@@ -4,9 +4,9 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { claimAppRefresh, pageHasUnsavedEdits } from "@/lib/auto-refresh-client";
 
-const STATUS_POLL_MS = 6_000;
+const STATUS_POLL_MS = 5_000;
 
-export function QuoteStatusAutoRefresh({ quoteId, fingerprint }: { quoteId: string; fingerprint: string }) {
+export function SurveyStatusAutoRefresh({ fingerprint }: { fingerprint: string }) {
   const router = useRouter();
   const latestRef = useRef(fingerprint);
   const refreshingRef = useRef(false);
@@ -21,21 +21,22 @@ export function QuoteStatusAutoRefresh({ quoteId, fingerprint }: { quoteId: stri
       if (document.visibilityState !== "visible" || refreshingRef.current || checkingRef.current) return;
       checkingRef.current = true;
       try {
-        const response = await fetch(`/api/quotes/${encodeURIComponent(quoteId)}/status`, {
+        const response = await fetch("/api/surveys/status", {
           cache: "no-store",
           credentials: "same-origin",
           headers: { "Cache-Control": "no-cache" },
         });
         if (!response.ok) return;
-        const data = await response.json() as { fingerprint?: string; updatedAt?: string };
-        const nextFingerprint = String(data.fingerprint ?? data.updatedAt ?? "");
+        const data = await response.json() as { fingerprint?: string };
+        const nextFingerprint = String(data.fingerprint ?? "");
         if (!nextFingerprint || nextFingerprint === latestRef.current || pageHasUnsavedEdits() || !claimAppRefresh()) return;
+
         latestRef.current = nextFingerprint;
         refreshingRef.current = true;
         router.refresh();
         window.setTimeout(() => { refreshingRef.current = false; }, 1_200);
       } catch {
-        // A temporary status-check failure should not interrupt quote editing.
+        // A temporary check failure must not interrupt survey entry or editing.
       } finally {
         checkingRef.current = false;
       }
@@ -56,7 +57,7 @@ export function QuoteStatusAutoRefresh({ quoteId, fingerprint }: { quoteId: stri
       window.removeEventListener("pageshow", checkWhenVisible);
       document.removeEventListener("visibilitychange", checkWhenVisible);
     };
-  }, [quoteId, router]);
+  }, [router]);
 
   return null;
 }

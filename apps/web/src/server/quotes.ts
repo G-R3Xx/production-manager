@@ -60,6 +60,7 @@ export type QuoteLineRecord = {
   clientRespondedAt: string | null;
   clientRevisionExcluded: boolean;
   createdAt: string;
+  updatedAt: string;
 };
 
 export type ArtworkApprovalRecord = {
@@ -125,6 +126,37 @@ function statusTimestamp(value: string | Date | null | undefined): string {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+export function quoteActivityFingerprint(
+  quote: Pick<QuoteDraftRecord,
+    "status" | "updatedAt" | "sentAt" | "emailStatus" | "emailSentAt" | "emailLastError" |
+    "viewedAt" | "acceptedAt" | "declinedAt" | "changesRequestedAt" |
+    "myobOrderStatus" | "myobOrderSyncedAt" | "myobOrderSyncError"
+  >,
+  lines: Array<Pick<QuoteLineRecord, "id" | "clientResponseStatus" | "clientRespondedAt" | "updatedAt">>,
+): string {
+  return JSON.stringify({
+    status: quote.status,
+    updatedAt: statusTimestamp(quote.updatedAt),
+    sentAt: statusTimestamp(quote.sentAt),
+    emailStatus: quote.emailStatus,
+    emailSentAt: statusTimestamp(quote.emailSentAt),
+    emailLastError: quote.emailLastError ?? "",
+    viewedAt: statusTimestamp(quote.viewedAt),
+    acceptedAt: statusTimestamp(quote.acceptedAt),
+    declinedAt: statusTimestamp(quote.declinedAt),
+    changesRequestedAt: statusTimestamp(quote.changesRequestedAt),
+    myobOrderStatus: quote.myobOrderStatus ?? "",
+    myobOrderSyncedAt: statusTimestamp(quote.myobOrderSyncedAt),
+    myobOrderSyncError: quote.myobOrderSyncError ?? "",
+    lines: lines.map((line) => [
+      line.id,
+      line.clientResponseStatus,
+      statusTimestamp(line.clientRespondedAt),
+      statusTimestamp(line.updatedAt),
+    ]),
+  });
 }
 
 export function artworkApprovalStatusFingerprint(
@@ -523,7 +555,8 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]
       client_response_notes as "clientResponseNotes",
       client_responded_at as "clientRespondedAt",
       COALESCE(client_revision_excluded, false) as "clientRevisionExcluded",
-      created_at as "createdAt"
+      created_at as "createdAt",
+      updated_at as "updatedAt"
     FROM sales.quote_lines
     WHERE quote_id = $1::uuid
     ORDER BY created_at ASC
@@ -771,7 +804,8 @@ export async function getQuoteLineForTenant(tenantId: string, quoteId: string, l
       ql.client_response_notes as "clientResponseNotes",
       ql.client_responded_at as "clientRespondedAt",
       COALESCE(ql.client_revision_excluded, false) as "clientRevisionExcluded",
-      ql.created_at as "createdAt"
+      ql.created_at as "createdAt",
+      ql.updated_at as "updatedAt"
     FROM sales.quote_lines ql
     JOIN sales.quote_drafts qd ON qd.id = ql.quote_id
     WHERE qd.tenant_id = $1::uuid
@@ -945,6 +979,7 @@ export async function markQuoteViewedByToken(token: string): Promise<void> {
         status = CASE WHEN status = 'sent' THEN 'viewed' ELSE status END,
         updated_at = now()
     WHERE public_token = $1
+      AND (viewed_at IS NULL OR status = 'sent')
   `, [token]);
 }
 
@@ -2054,6 +2089,7 @@ export async function markArtworkApprovalViewedByToken(token: string): Promise<v
         status = CASE WHEN status = 'sent' THEN 'viewed' ELSE status END,
         updated_at = now()
     WHERE public_token = $1
+      AND (viewed_at IS NULL OR status = 'sent')
   `, [token]);
 }
 
