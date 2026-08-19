@@ -649,37 +649,44 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               </div>
 
               {selectedQuote.status !== "deleted" ? (
-                <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18 }}>
-                  {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Build this quote using the current guided workflow</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey measurements, photos and sign notes are retained as internal references in the saved lines below. Choose the correct product, material and finishing here to price the work.</div></div> : null}
-                  <QuoteMaterialFlowBuilder
-                    key="new-quote-line"
-                    quoteId={selectedQuote.id}
-                    materials={activeMaterials}
-                    savedProducts={savedQuoteProducts}
-                    pricingSettings={{
-                      markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
-                      profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
-                      labourRate: companySettings?.quoteLabourRate ?? "66",
-                      inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
-                      inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
-                      monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
-                      signageSizePresets: companySettings?.quoteSignageSizePresets,
-                      smallSizePresets: companySettings?.quoteSmallSizePresets,
-                      priceLevelFactor: linkedClientPriceFactor,
-                      priceLevelName: linkedClientPriceLevelName,
-                      priceLevelCode: linkedClientPriceLevel,
-                      manualQuoteDiscountPercent: selectedQuote.discountPercent
-                    }}
-                  />
+                <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 2 }}>
+                  <details style={{ border: "1px solid #b9cdfc", borderRadius: 18, background: "#fff", overflow: "hidden" }}>
+                    <summary style={{ listStyle: "none", cursor: "pointer", padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#f8fbff)", color: "#155eef", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}><span>＋ Add quote line</span><span style={{ fontSize: 12, color: "#475467" }}>Open line editor</span></summary>
+                    <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
+                      {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
+                      <QuoteMaterialFlowBuilder
+                        key="new-quote-line"
+                        quoteId={selectedQuote.id}
+                        materials={activeMaterials}
+                        savedProducts={savedQuoteProducts}
+                        compactEdit
+                        compactAll
+                        pricingSettings={{
+                          markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
+                          profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                          labourRate: companySettings?.quoteLabourRate ?? "66",
+                          inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
+                          inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
+                          monoRatePerSqm: companySettings?.quoteMonoRatePerSqm ?? "4",
+                          signageSizePresets: companySettings?.quoteSignageSizePresets,
+                          smallSizePresets: companySettings?.quoteSmallSizePresets,
+                          priceLevelFactor: linkedClientPriceFactor,
+                          priceLevelName: linkedClientPriceLevelName,
+                          priceLevelCode: linkedClientPriceLevel,
+                          manualQuoteDiscountPercent: selectedQuote.discountPercent
+                        }}
+                      />
+                    </div>
+                  </details>
                 </section>
               ) : (
                 <section style={{ border: "1px solid #fecaca", borderRadius: 18, padding: 16, background: "#fff5f4", color: "#b42318", fontWeight: 800 }}>This quote is deleted. Restore it before editing or sending.</section>
               )}
 
-              <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18 }}>
+              <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 1 }}>
                 <div style={{ display: "grid", gap: 4 }}>
-                  <h4 style={{ margin: 0 }}>Saved quote lines</h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Click any editable component card to change it in place. Saved products and quick-built lines now use the same inline editing workflow; older lines are recovered automatically.</p>
+                  <h4 style={{ margin: 0 }}>Current quote lines <span style={{ color: "#667085", fontWeight: 750 }}>({quoteLines.length})</span></h4>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Lines stay collapsed until you open one. Survey-created and manually added lines use the same one-page field layout.</p>
                 </div>
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
@@ -782,7 +789,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No saved quote lines yet. Build a line above, then save it to the quote.</p> : null}
               </div>
 
-              <section style={{ border: "1px solid #e9d5ff", borderRadius: 22, padding: 16, background: "linear-gradient(135deg,#ffffff,#faf5ff)", display: "grid", gap: 12 }}>
+              <section style={{ border: "1px solid #e9d5ff", borderRadius: 22, padding: 16, background: "linear-gradient(135deg,#ffffff,#faf5ff)", display: "grid", gap: 12, order: 3 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                   <div style={{ display: "grid", gap: 4 }}>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approval</p>

@@ -3541,40 +3541,65 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
   };
 
-  if (compactEdit && editingLine) {
-    const allSignageSteps: QuickQuoteStep[] = [
-      "base",
-      "thickness",
-      "size",
-      "artwork",
-      "print",
-      ...(needsMediaStep ? ["media" as QuickQuoteStep] : []),
-      ...(needsInkStep ? ["ink" as QuickQuoteStep] : []),
-      ...(printed ? ["sides" as QuickQuoteStep, "laminate" as QuickQuoteStep] : []),
-      "finishing",
-      "dispatch",
-      "review",
-    ];
+  if (compactEdit && (editingLine || compactAll)) {
+    const allSignageSteps: QuickQuoteStep[] = flowType === "service"
+      ? ["flow", "service_type", "service_details", "service_fixings", "review"]
+      : flowType === "component"
+        ? ["flow", "component_details", "component_parts", "component_labour", "review"]
+        : flowType === "small_format"
+          ? ["flow", "small_type", ...(isDuplicateBook ? ["ncr_details" as QuickQuoteStep] : []), "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", "small_quantity"]
+          : isPrintDepartment
+            ? ["flow", "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", "small_quantity"]
+            : [
+              "flow",
+              "base",
+              "thickness",
+              "size",
+              "artwork",
+              "print",
+              ...(!isRollStockBase && needsMediaStep ? ["media" as QuickQuoteStep] : []),
+              ...(needsInkStep ? ["ink" as QuickQuoteStep] : []),
+              ...(printed ? ["sides" as QuickQuoteStep, "laminate" as QuickQuoteStep] : []),
+              "finishing",
+              "dispatch",
+              "review",
+            ];
     const allStepLabels: Partial<Record<QuickQuoteStep, string>> = {
-      base: "1. Sign type",
-      thickness: "2. Substrate / material",
-      size: "3. Finished size",
-      artwork: "4. Artwork",
-      print: "5. Print method",
-      media: "6. Roll stock / media",
-      ink: "7. Ink",
-      sides: "8. Sides / print direction",
-      laminate: "9. Laminate / backing",
-      finishing: "10. Finishing",
-      dispatch: "11. Pickup / delivery / install",
-      review: "12. Quantity and internal notes",
+      flow: "Quote line type",
+      base: "Sign type",
+      thickness: "Substrate / material",
+      size: "Finished size",
+      artwork: "Artwork",
+      print: "Print method",
+      media: "Roll stock / media",
+      ink: "Ink",
+      sides: "Sides / print direction",
+      laminate: "Laminate / backing",
+      finishing: "Finishing",
+      small_type: "Print item",
+      ncr_details: "NCR book details",
+      small_stock: "Stock",
+      small_size: "Finished size",
+      small_print: "Print colour",
+      small_sides: "Sides",
+      small_coating: "Cello / coating",
+      small_finishing: "Finishing",
+      small_quantity: "Quantity and internal notes",
+      service_type: "Service type",
+      service_details: "Service details",
+      service_fixings: "Fixings and consumables",
+      component_details: "Component details",
+      component_parts: "Materials and parts",
+      component_labour: "Assembly labour",
+      dispatch: "Pickup / delivery / install",
+      review: "Quantity and internal notes",
     };
     return (
       <form action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
         <input type="hidden" name="quoteId" value={quoteId} />
-        <input type="hidden" name="editingLineId" value={editingLine.id} />
+        {editingLine ? <input type="hidden" name="editingLineId" value={editingLine.id} /> : null}
         <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
-        <input type="hidden" name="productName" value={editingLine.productName} />
+        <input type="hidden" name="productName" value={editingLine?.productName || lineName} />
         <input type="hidden" name="optionSummary" value={optionSummary} />
         <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
         <input type="hidden" name="quantity" value={quantity} />
@@ -3595,9 +3620,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               <strong style={{ color: "#1d4ed8" }}>Configure the complete quote line</strong>
               <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line.</div>
             </div>
-            {allSignageSteps.map((step) => (
+            {allSignageSteps.map((step, index) => (
               <section key={step} style={{ display: "grid", gap: 7 }}>
-                <strong style={{ color: "#344054", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em" }}>{allStepLabels[step] ?? step.replaceAll("_", " ")}</strong>
+                <strong style={{ color: "#344054", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em" }}>{index + 1}. {allStepLabels[step] ?? step.replaceAll("_", " ")}</strong>
                 {renderCompactStep(step)}
               </section>
             ))}
