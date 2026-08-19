@@ -12,11 +12,16 @@ export async function approveArtworkPageAction(formData: FormData): Promise<void
   const token = String(formData.get("token") ?? "").trim();
   const pageId = String(formData.get("pageId") ?? "").trim();
   if (!token || !pageId) redirect("/");
+  let allPagesApproved = false;
   try {
-    await respondToArtworkApprovalPageByToken(token, pageId, "approved", text(formData.get("notes")));
+    const result = await respondToArtworkApprovalPageByToken(token, pageId, "approved", text(formData.get("notes")));
+    allPagesApproved = result.allPagesApproved;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     redirect(`/public/artwork-approvals/${token}?error=${encodeURIComponent(message)}`);
+  }
+  if (allPagesApproved) {
+    redirect(`/public/artwork-approvals/${token}?message=${encodeURIComponent("All proof pages are approved. Complete the final production sign-off below.")}#respond`);
   }
   redirect(`/public/artwork-approvals/${token}?message=${encodeURIComponent("Proof page approved. Continue reviewing the remaining pages.")}`);
 }

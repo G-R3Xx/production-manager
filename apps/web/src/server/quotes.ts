@@ -118,7 +118,33 @@ export type ArtworkApprovalPageRecord = {
   clientResponseNotes: string | null;
   clientRespondedAt: string | null;
   createdAt: string;
+  updatedAt: string;
 };
+
+function statusTimestamp(value: string | Date | null | undefined): string {
+  if (!value) return "";
+  const date = value instanceof Date ? value : new Date(value);
+  return Number.isNaN(date.getTime()) ? String(value) : date.toISOString();
+}
+
+export function artworkApprovalStatusFingerprint(
+  approval: Pick<ArtworkApprovalRecord, "status" | "updatedAt" | "viewedAt" | "approvedAt" | "changesRequestedAt">,
+  pages: Array<Pick<ArtworkApprovalPageRecord, "id" | "clientResponseStatus" | "clientRespondedAt" | "updatedAt">>
+): string {
+  return JSON.stringify({
+    status: approval.status,
+    updatedAt: statusTimestamp(approval.updatedAt),
+    viewedAt: statusTimestamp(approval.viewedAt),
+    approvedAt: statusTimestamp(approval.approvedAt),
+    changesRequestedAt: statusTimestamp(approval.changesRequestedAt),
+    pages: pages.map((page) => [
+      page.id,
+      page.clientResponseStatus,
+      statusTimestamp(page.clientRespondedAt),
+      statusTimestamp(page.updatedAt)
+    ])
+  });
+}
 
 export type ArtworkApprovalDetailsInput = {
   clientName: string;
@@ -1614,7 +1640,8 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
       COALESCE(client_response_status, 'pending') as "clientResponseStatus",
       client_response_notes as "clientResponseNotes",
       client_responded_at as "clientRespondedAt",
-      created_at as "createdAt"
+      created_at as "createdAt",
+      updated_at as "updatedAt"
     FROM sales.artwork_approval_pages
     WHERE approval_id = $1::uuid
     ORDER BY sort_order ASC, created_at ASC
@@ -2048,7 +2075,7 @@ export async function respondToArtworkApprovalPageByToken(
   pageId: string,
   response: "approved" | "changes_requested",
   notes: string | null
-): Promise<void> {
+): Promise<{ allPagesApproved: boolean; hasChanges: boolean }> {
   await ensureArtworkApprovalTables();
   const approval = await getArtworkApprovalByPublicToken(token);
   if (!approval || !["sent", "viewed", "changes_requested"].includes(approval.status)) {
@@ -2093,6 +2120,11 @@ export async function respondToArtworkApprovalPageByToken(
       payloadJson: { artworkApprovalId: approval.id, artworkPageId: pageId, response }
     });
   }
+
+  return {
+    allPagesApproved: statuses.length > 0 && statuses.every((status) => status === "approved"),
+    hasChanges
+  };
 }
 
 export async function respondToArtworkApprovalByToken(token: string, response: "approved" | "changes_requested", notes: string | null, signatoryName?: string | null, signatureDataUrl?: string | null): Promise<void> {

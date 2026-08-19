@@ -199,6 +199,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
   const tone = statusTone(approval.status);
   const approvedPageCount = pages.filter((page) => page.clientResponseStatus === "approved").length;
   const changesPageCount = pages.filter((page) => page.clientResponseStatus === "changes_requested").length;
+  const allPagesApproved = pages.length > 0 && approvedPageCount === pages.length;
 
   return (
     <main style={{ minHeight: "100vh", background: "#f5f7fa", padding: "20px 18px 46px" }}>
@@ -230,6 +231,16 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             {isOpenForResponse ? <a href="#respond" style={{ minHeight: 38, borderRadius: 11, padding: "0 14px", background: "#111827", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", fontWeight: 900, whiteSpace: "nowrap" }}>Go to decision</a> : null}
           </div>
         </section>
+
+        {isOpenForResponse && allPagesApproved && !hasChanges ? (
+          <section style={{ border: "2px solid #12b76a", borderRadius: 18, background: "#ecfdf3", padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap", boxShadow: "0 10px 26px rgba(6,118,71,0.12)" }}>
+            <div style={{ display: "grid", gap: 4 }}>
+              <strong style={{ color: "#067647", fontSize: 18 }}>✓ All proof pages approved</strong>
+              <span style={{ color: "#344054", fontSize: 13 }}>One final production sign-off is required before the artwork is released.</span>
+            </div>
+            <a href="#respond" style={{ minHeight: 44, borderRadius: 12, padding: "0 16px", background: "#067647", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", fontWeight: 950, whiteSpace: "nowrap" }}>Complete final approval →</a>
+          </section>
+        ) : null}
 
         {showProofs && pages.length > 1 ? <nav style={{ border: "1px solid #d0d5dd", borderRadius: 16, background: "#fff", padding: 10, display: "flex", gap: 7, overflowX: "auto" }}>{pages.map((page, index) => { const pageTone = pageStatusTone(page.clientResponseStatus); return <a key={page.id} href={`#proof-${index + 1}`} style={{ border: `1px solid ${pageTone.border}`, borderRadius: 10, padding: "8px 10px", textDecoration: "none", color: pageTone.fg, background: pageTone.bg, fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>{page.clientResponseStatus === "approved" ? "✓ " : page.clientResponseStatus === "changes_requested" ? "! " : ""}{page.signCode || `S${index + 1}`} · {page.title}</a>; })}</nav> : null}
 

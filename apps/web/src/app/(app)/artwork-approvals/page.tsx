@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
+  artworkApprovalStatusFingerprint,
   artworkQuoteLineInScope,
   quoteUsesLineResponses,
   getArtworkApprovalById,
@@ -271,6 +272,18 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const viewed = Boolean(selectedApproval?.viewedAt);
   const approved = selectedApproval?.status === "approved";
   const changesRequested = selectedApproval?.status === "changes_requested";
+  const awaitingFinalSignoff = Boolean(
+    selectedApproval
+    && sent
+    && !approved
+    && !changesRequested
+    && activeProofPages.length > 0
+    && approvedProofCount === activeProofPages.length
+  );
+  const finalSignoffTone = { bg: "#fffaeb", fg: "#b54708", border: "#fedf89" } as const;
+  const selectedDisplayTone = awaitingFinalSignoff ? finalSignoffTone : selectedTone;
+  const selectedStatusLabel = awaitingFinalSignoff ? "final sign-off pending" : selectedApproval?.status.replace(/_/g, " ") ?? "draft";
+  const initialStatusFingerprint = selectedApproval ? artworkApprovalStatusFingerprint(selectedApproval, proofPages) : "";
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 14 }}>
@@ -315,9 +328,11 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
           </div>
           <div style={{ display: "grid", gap: 7 }}>
             {approvals.map((approval) => {
-              const tone = statusTone(approval.status);
               const quote = quoteDrafts.find((item) => item.id === approval.quoteId);
               const selected = selectedApproval?.id === approval.id;
+              const itemAwaitingFinalSignoff = selected && awaitingFinalSignoff;
+              const tone = itemAwaitingFinalSignoff ? finalSignoffTone : statusTone(approval.status);
+              const statusLabel = itemAwaitingFinalSignoff ? "final sign-off pending" : approval.status.replace(/_/g, " ");
               return (
                 <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
                   <div style={{ border: selected ? "2px solid #344054" : "1px solid #e4e7ec", borderRadius: 14, padding: 10, background: selected ? "#f8fafc" : "#fff", display: "grid", gap: 6 }}>
@@ -327,7 +342,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     </div>
                     <span style={{ color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote?.quoteNumber ?? "Quote"} · {approval.projectName || "Artwork"}</span>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 6, alignItems: "center" }}>
-                      <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "3px 7px", fontSize: 10, fontWeight: 950 }}>{approval.status.replace(/_/g, " ")}</span>
+                      <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "3px 7px", fontSize: 10, fontWeight: 950 }}>{statusLabel}</span>
                       <span style={{ color: "#98a2b3", fontSize: 10 }}>{formatDate(quote?.createdAt ?? approval.createdAt, "")}</span>
                     </div>
                   </div>
@@ -352,7 +367,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
         <main style={{ minWidth: 0, display: "grid", gap: 14 }}>
           {selectedApproval && selectedQuote ? (
             <>
-              <ArtworkStatusAutoRefresh approvalId={selectedApproval.id} updatedAt={selectedApproval.updatedAt} />
+              <ArtworkStatusAutoRefresh approvalId={selectedApproval.id} fingerprint={initialStatusFingerprint} />
               <section style={{ ...card, overflow: "hidden" }}>
                 <div style={{ padding: 18, display: "flex", justifyContent: "space-between", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
@@ -364,7 +379,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                    <span style={{ borderRadius: 999, background: selectedTone.bg, color: selectedTone.fg, border: `1px solid ${selectedTone.border}`, padding: "7px 10px", fontSize: 11, fontWeight: 950 }}>{selectedApproval.status.replace(/_/g, " ")}</span>
+                    <span style={{ borderRadius: 999, background: selectedDisplayTone.bg, color: selectedDisplayTone.fg, border: `1px solid ${selectedDisplayTone.border}`, padding: "7px 10px", fontSize: 11, fontWeight: 950 }}>{selectedStatusLabel}</span>
                     {publicUrl ? <a href={`${publicUrl}?preview=1`} target="_blank" rel="noreferrer" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Client preview</a> : null}
                     <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Source quote</Link>
                   </div>
@@ -388,6 +403,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     ["Viewed", formatDate(selectedApproval.viewedAt)]
                   ].map(([k, v]) => <div key={k} style={{ background: "#f8fafc", borderRadius: 12, padding: "9px 10px", minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase" }}>{k}</p><strong style={{ fontSize: 12, display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", marginTop: 3 }}>{v}</strong></div>)}
                 </div>
+                {awaitingFinalSignoff ? <div style={{ margin: "0 14px 14px", border: "1px solid #fedf89", borderRadius: 13, background: "#fffaeb", color: "#93370d", padding: "11px 13px", display: "grid", gap: 3 }}><strong>Every proof page is approved — final production sign-off is still required</strong><span style={{ fontSize: 12, lineHeight: 1.45 }}>The client now needs to enter their name, confirm the approval and sign at the bottom of the emailed artwork link. The overall status will then change to Approved automatically.</span></div> : null}
               </section>
 
               {changesRequested ? (
