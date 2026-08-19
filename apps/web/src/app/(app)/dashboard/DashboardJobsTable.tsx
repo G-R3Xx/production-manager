@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { DashboardJobRow } from "./DashboardJobRow";
 
@@ -95,13 +96,20 @@ function fmtDate(value: string | null): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Sydney" });
 }
 
-export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", initialOwner = "", initialQuery = "" }: { rows: DashboardRow[]; staff: StaffOption[]; todayKey: string; initialStage?: string; initialOwner?: string; initialQuery?: string }) {
+export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", initialOwner = "", initialQuery = "", reconciliationScheduled = false }: { rows: DashboardRow[]; staff: StaffOption[]; todayKey: string; initialStage?: string; initialOwner?: string; initialQuery?: string; reconciliationScheduled?: boolean }) {
+  const router = useRouter();
   const [stage, setStage] = useState(initialStage);
   const [owner, setOwner] = useState(initialOwner);
   const [age, setAge] = useState("");
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState<SortKey | null>(null);
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
+
+  useEffect(() => {
+    if (!reconciliationScheduled) return;
+    const timer = window.setTimeout(() => router.refresh(), 8000);
+    return () => window.clearTimeout(timer);
+  }, [reconciliationScheduled, router]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();

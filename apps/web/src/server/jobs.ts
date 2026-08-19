@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { after } from "next/server";
 import { listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
 import { listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
 import {
@@ -629,11 +630,19 @@ async function dashboardJobsNeedWorkflowSync(tenantId: string): Promise<boolean>
   return Boolean(result.rows[0]?.needsSync);
 }
 
-export async function listCurrentDashboardJobsForTenant(tenantId: string): Promise<JobRecord[]> {
-  if (await dashboardJobsNeedWorkflowSync(tenantId)) {
-    return synchroniseJobsFromCurrentWorkflow(tenantId, { force: true });
+export async function listCurrentDashboardJobsForTenant(tenantId: string): Promise<{ jobs: JobRecord[]; reconciliationScheduled: boolean }> {
+  const [jobs, needsSync] = await Promise.all([
+    listJobsForTenant(tenantId, { skipSync: true }),
+    dashboardJobsNeedWorkflowSync(tenantId),
+  ]);
+  if (needsSync) {
+    after(async () => {
+      await synchroniseJobsFromCurrentWorkflow(tenantId, { force: true }).catch((error) => {
+        console.error("Dashboard workflow reconciliation failed", error);
+      });
+    });
   }
-  return listJobsForTenant(tenantId, { skipSync: true });
+  return { jobs, reconciliationScheduled: needsSync };
 }
 
 function jobSelectSql(): string {

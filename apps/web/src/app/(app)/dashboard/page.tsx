@@ -70,12 +70,13 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const q = readParam(params, "q").trim();
   const message = readParam(params, "message");
 
-  const [jobs, tasks, staff, customers] = await Promise.all([
+  const [jobSnapshot, tasks, staff, customers] = await Promise.all([
     listCurrentDashboardJobsForTenant(activeTenant.tenantId),
     listJobTasksForTenant(activeTenant.tenantId),
     listUsersForTenant(activeTenant.tenantId),
     listCustomerLogoSummariesForTenant(activeTenant.tenantId),
   ]);
+  const jobs = jobSnapshot.jobs;
   const activeStaff = staff.filter((row) => row.membershipStatus === "active");
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
   const customerById = new Map(customers.map((row) => [row.id, row]));
@@ -140,6 +141,7 @@ export default async function DashboardPage({ searchParams }: PageProps) {
         initialStage={stage}
         initialOwner={owner}
         initialQuery={q}
+        reconciliationScheduled={jobSnapshot.reconciliationScheduled}
       />
     </div>
   );
