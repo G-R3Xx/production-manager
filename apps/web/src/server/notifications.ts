@@ -102,6 +102,7 @@ export async function getAppActivityPulseForTenant(tenantId: string): Promise<st
     const result = await pool.query<{ pulse: string }>(`
       SELECT concat_ws('|',
         COALESCE((SELECT max(created_at)::text FROM app.notifications WHERE tenant_id=$1::uuid), ''),
+        COALESCE((SELECT max(updated_at)::text FROM sales.quote_drafts WHERE tenant_id=$1::uuid), ''),
         COALESCE((SELECT max(updated_at)::text FROM production.production_jobs WHERE tenant_id=$1::uuid), ''),
         COALESCE((SELECT max(updated_at)::text FROM app.jobs WHERE tenant_id=$1::uuid), '')
       ) AS pulse

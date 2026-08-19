@@ -15,6 +15,7 @@ import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
+import { QuoteStatusAutoRefresh } from "./QuoteStatusAutoRefresh";
 import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
 import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
 import { getProductionJobForQuote } from "@/server/production";
@@ -239,6 +240,35 @@ function quoteStatusTone(status: string): { bg: string; fg: string; border: stri
   return { bg: "#f8fafc", fg: "#475467", border: "#e2e8f0" };
 }
 
+type QuoteLifecycleStep = {
+  label: string;
+  detail: string;
+  complete: boolean;
+  current: boolean;
+  tone?: "green" | "orange" | "red";
+};
+
+function QuoteLifecycleStrip({ steps }: { steps: QuoteLifecycleStep[] }) {
+  return (
+    <section style={{ border: "1px solid #dbe5f1", borderRadius: 16, background: "linear-gradient(135deg,#f8fbff,#ffffff)", padding: 12, overflowX: "auto" }}>
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${steps.length}, minmax(130px, 1fr))`, minWidth: steps.length * 130, alignItems: "start" }}>
+        {steps.map((step, index) => {
+          const colour = step.tone === "red" ? "#b42318" : step.tone === "orange" ? "#c2410c" : step.complete ? "#067647" : step.current ? "#155eef" : "#98a2b3";
+          const background = step.tone === "red" ? "#fee4e2" : step.tone === "orange" ? "#ffedd5" : step.complete ? "#dcfae6" : step.current ? "#dbeafe" : "#f2f4f7";
+          return (
+            <div key={step.label} style={{ position: "relative", display: "grid", justifyItems: "center", gap: 5, textAlign: "center", padding: "0 6px" }}>
+              {index > 0 ? <span aria-hidden="true" style={{ position: "absolute", top: 15, right: "50%", width: "100%", height: 3, background: steps[index - 1]?.complete ? "#86efac" : "#d0d5dd", zIndex: 0 }} /> : null}
+              <span style={{ width: 32, height: 32, borderRadius: 999, display: "inline-flex", alignItems: "center", justifyContent: "center", background, color: colour, border: `2px solid ${colour}`, fontWeight: 950, position: "relative", zIndex: 1 }}>{step.complete ? "✓" : index + 1}</span>
+              <strong style={{ color: step.current || step.complete ? "#101828" : "#667085", fontSize: 12 }}>{step.label}</strong>
+              <span style={{ color: colour, fontSize: 10, fontWeight: 800, whiteSpace: "nowrap" }}>{step.detail}</span>
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 export default async function QuotesPage({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -334,6 +364,30 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const suggestedMyobCustomer = suggestedMyobCustomers.length === 1 ? suggestedMyobCustomers[0] : null;
 
   const quoteSubtotal = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
+  const activeQuoteLines = quoteLines.filter((line) => line.clientResponseStatus !== "cancelled");
+  const quoteIsPriced = activeQuoteLines.length > 0 && activeQuoteLines.every((line) => parseMoney(line.unitPrice) > 0 && !surveyLineNeedsConfiguration(line.configurationSnapshot));
+  const quoteResponseLabel = selectedQuote?.acceptedAt
+    ? "Accepted"
+    : selectedQuote?.changesRequestedAt
+      ? "Changes requested"
+      : selectedQuote?.declinedAt
+        ? "Declined"
+        : selectedQuote?.viewedAt
+          ? "Awaiting response"
+          : "Pending";
+  const quoteLifecycleSteps: QuoteLifecycleStep[] = selectedQuote ? [
+    { label: "Created", detail: formatDateTime(selectedQuote.createdAt), complete: true, current: false },
+    { label: "Priced", detail: quoteIsPriced ? `${activeQuoteLines.length} line${activeQuoteLines.length === 1 ? "" : "s"}` : "Complete pricing", complete: quoteIsPriced, current: !quoteIsPriced },
+    { label: "Sent", detail: selectedQuote.sentAt ? formatDateTime(selectedQuote.sentAt) : "Not sent", complete: Boolean(selectedQuote.sentAt), current: Boolean(quoteIsPriced && !selectedQuote.sentAt) },
+    { label: "Viewed", detail: selectedQuote.viewedAt ? formatDateTime(selectedQuote.viewedAt) : "Not viewed", complete: Boolean(selectedQuote.viewedAt), current: Boolean(selectedQuote.sentAt && !selectedQuote.viewedAt) },
+    {
+      label: "Client response",
+      detail: quoteResponseLabel,
+      complete: Boolean(selectedQuote.acceptedAt || selectedQuote.changesRequestedAt || selectedQuote.declinedAt),
+      current: Boolean(selectedQuote.viewedAt && !selectedQuote.acceptedAt && !selectedQuote.changesRequestedAt && !selectedQuote.declinedAt),
+      tone: selectedQuote.acceptedAt ? "green" : selectedQuote.changesRequestedAt ? "orange" : selectedQuote.declinedAt ? "red" : undefined,
+    },
+  ] : [];
   const requestedChangeLines = quoteLines.filter((line) => line.clientResponseStatus === "changes_requested");
   const quotePublicUrl = selectedQuote ? publicQuoteUrl(selectedQuote.publicToken) : "";
   const artworkAdminUrl = selectedArtworkApproval ? `/artwork-approvals?selected=${selectedArtworkApproval.id}` : `/artwork-approvals?quote=${selectedQuote?.id ?? ""}`;
@@ -469,6 +523,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       <section style={{ ...cardStyle(), display: "grid", gap: 16 }}>
           {selectedQuote ? (
             <div style={{ display: "grid", gap: 16 }}>
+              <QuoteStatusAutoRefresh quoteId={selectedQuote.id} updatedAt={selectedQuote.updatedAt} />
               <div style={{ display: "grid", gap: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                   <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
@@ -514,6 +569,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <button type="submit" style={{ ...buttonStyle, minWidth: 132 }}>Save job name</button>
                     <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
                   </form>
+                  <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}><strong>{quoteLines.length}</strong> line item{quoteLines.length === 1 ? "" : "s"}</span>
