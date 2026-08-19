@@ -12,7 +12,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.08.19.15";
+const APP_VERSION = "V26.08.19.16";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },

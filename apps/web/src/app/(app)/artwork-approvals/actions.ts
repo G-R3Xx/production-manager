@@ -21,6 +21,7 @@ import {
   markArtworkApprovalSentForTenant,
   prefillArtworkApprovalPagesFromQuoteLines,
   removeArtworkApprovalPageForTenant,
+  reopenArtworkApprovalPageForTenant,
   replaceArtworkApprovalPageProofForTenant,
   setArtworkApprovalStatusForTenant,
   startArtworkApprovalRevisionForTenant,
@@ -120,12 +121,18 @@ export async function prefillArtworkApprovalPagesFromQuoteAction(formData: FormD
   const approvalId = oneLine(formData.get("approvalId"));
   if (!approvalId) redirect("/artwork-approvals?error=Select%20an%20artwork%20approval%20first");
 
+  const before = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   const result = await prefillArtworkApprovalPagesFromQuoteLines(activeTenant.tenantId, approvalId);
+  const after = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   const synced = result.created + result.updated;
   const quoteLabel = result.quoteNumber || "Source quote";
-  const message = synced > 0
+  let message = synced > 0
     ? `${quoteLabel} synced: ${result.created} added, ${result.updated} refreshed${result.outOfScope > 0 ? `, ${result.outOfScope} out of scope preserved` : ""}`
     : `${quoteLabel}: 0 artwork lines synced (${result.total} quote lines; ${result.approved} approved, ${result.cancelled} cancelled, ${result.pending} pending; quote status ${result.quoteStatus || "unknown"}).`;
+  if (before?.status === "approved" && after?.status === "draft") {
+    message += ` Approval reopened as Revision ${after.revision || "A"}; existing page decisions were retained and new pages require approval.`;
+  }
+  revalidatePath("/artwork-approvals");
   redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 
@@ -152,13 +159,19 @@ export async function replaceArtworkApprovalPageProofAction(formData: FormData):
     redirect(`/artwork-approvals?selected=${approvalId}&error=Upload%20a%20proof%20image%20or%20paste%20a%20proof%20URL`);
   }
 
+  const before = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   await replaceArtworkApprovalPageProofForTenant(activeTenant.tenantId, approvalId, pageId, {
     imageUrl,
     imageStoragePath: uploaded.storagePath ?? directStoragePath,
     fileName: uploaded.fileName ?? directFileName
   });
+  const after = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
 
-  redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20image%20updated`);
+  const message = before?.status === "approved" && after?.status === "draft"
+    ? `Proof updated. Approval reopened as Revision ${after.revision || "A"}; this page returned to pending and other page approvals were retained.`
+    : "Proof updated. This page returned to pending approval.";
+  revalidatePath("/artwork-approvals");
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 
 export async function saveArtworkApprovalDetailsAction(formData: FormData): Promise<void> {
@@ -341,6 +354,33 @@ export async function startArtworkApprovalRevisionAction(formData: FormData): Pr
   redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(`Revision ${revision} started. Upload the revised proofs, then resend the client link.`)}`);
 }
 
+export async function reopenArtworkApprovalPageAction(formData: FormData): Promise<void> {
+  const { user, activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  const pageId = oneLine(formData.get("pageId"));
+  const pageLabel = oneLine(formData.get("pageLabel"), "Proof page");
+  if (!approvalId || !pageId) redirect("/artwork-approvals?error=Select%20an%20artwork%20proof%20page%20first");
+
+  let result: Awaited<ReturnType<typeof reopenArtworkApprovalPageForTenant>> | null = null;
+  try {
+    result = await reopenArtworkApprovalPageForTenant(
+      activeTenant.tenantId,
+      approvalId,
+      pageId,
+      `${pageLabel} was reopened by ${user.email || "staff"}.`
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent(message)}`);
+  }
+
+  revalidatePath("/artwork-approvals");
+  const message = result?.reopened
+    ? `${pageLabel} reopened. Revision ${result.revision} started and active production paused pending re-approval.`
+    : `${pageLabel} approval cleared and returned to pending.`;
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
+}
+
 export async function directApproveArtworkApprovalAction(formData: FormData): Promise<void> {
   const { user, activeTenant } = await requireTenant();
   const approvalId = String(formData.get("approvalId") ?? "").trim();
@@ -393,6 +433,7 @@ export async function addArtworkApprovalPageFromPageAction(formData: FormData): 
     redirect(`/artwork-approvals?selected=${approvalId}&error=Proof%20title%20and%20image%20are%20required`);
   }
 
+  const before = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   await addArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, {
     title,
     signCode: nullable(formData.get("signCode")),
@@ -409,8 +450,13 @@ export async function addArtworkApprovalPageFromPageAction(formData: FormData): 
     installSummary: nullable(formData.get("installSummary")),
     smallFormatSummary: nullable(formData.get("smallFormatSummary"))
   });
+  const after = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
 
-  redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20page%20added`);
+  const message = before?.status === "approved" && after?.status === "draft"
+    ? `Proof page added. Approval reopened as Revision ${after.revision || "A"}; existing page approvals were retained and the new page is pending.`
+    : "Proof page added and awaiting a client decision.";
+  revalidatePath("/artwork-approvals");
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 
 export async function removeArtworkApprovalPageFromPageAction(formData: FormData): Promise<void> {
@@ -422,8 +468,14 @@ export async function removeArtworkApprovalPageFromPageAction(formData: FormData
     redirect("/artwork-approvals?error=Select%20an%20artwork%20page%20to%20remove");
   }
 
+  const before = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   await removeArtworkApprovalPageForTenant(activeTenant.tenantId, approvalId, pageId);
-  redirect(`/artwork-approvals?selected=${approvalId}&message=Proof%20page%20removed`);
+  const after = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
+  const message = before?.status === "approved" && after?.status === "draft"
+    ? `Proof page removed. Approval reopened as Revision ${after.revision || "A"}; remaining page approvals were retained.`
+    : "Proof page removed.";
+  revalidatePath("/artwork-approvals");
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 
 

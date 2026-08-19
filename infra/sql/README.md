@@ -43,3 +43,5 @@ pnpm db:studio
 - `039_quote_line_client_responses.sql` — adds persistent per-line client quote response status, notes and timestamps for approve/change/cancel workflows.
 
 - `040_artwork_revision_proof_tracking.sql` — tracks which artwork revision each uploaded proof belongs to so revised packs cannot accidentally resend an older proof.
+
+- `044_artwork_page_responses.sql` — adds independent client decisions and notes to each artwork proof page, with a compatibility backfill for already-approved proof sets.

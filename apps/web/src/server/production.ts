@@ -1292,6 +1292,10 @@ export async function createProductionJobFromArtworkApprovalForTenant(tenantId: 
       client_name = EXCLUDED.client_name,
       contact_name = EXCLUDED.contact_name,
       project_name = EXCLUDED.project_name,
+      status = CASE
+        WHEN existing_job.status IN ('completed', 'deleted') THEN existing_job.status
+        ELSE 'ready_to_start'
+      END,
       updated_at = now()
     RETURNING id
   `, [tenantId, approvalId, triggeredBy ?? null]);

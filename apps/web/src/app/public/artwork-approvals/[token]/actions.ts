@@ -1,11 +1,41 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { respondToArtworkApprovalByToken } from "@/server/quotes";
+import { respondToArtworkApprovalByToken, respondToArtworkApprovalPageByToken } from "@/server/quotes";
 
 function text(value: FormDataEntryValue | null): string | null {
   const trimmed = String(value ?? "").trim();
   return trimmed.length ? trimmed : null;
+}
+
+export async function approveArtworkPageAction(formData: FormData): Promise<void> {
+  const token = String(formData.get("token") ?? "").trim();
+  const pageId = String(formData.get("pageId") ?? "").trim();
+  if (!token || !pageId) redirect("/");
+  try {
+    await respondToArtworkApprovalPageByToken(token, pageId, "approved", text(formData.get("notes")));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/public/artwork-approvals/${token}?error=${encodeURIComponent(message)}`);
+  }
+  redirect(`/public/artwork-approvals/${token}?message=${encodeURIComponent("Proof page approved. Continue reviewing the remaining pages.")}`);
+}
+
+export async function requestArtworkPageChangesAction(formData: FormData): Promise<void> {
+  const token = String(formData.get("token") ?? "").trim();
+  const pageId = String(formData.get("pageId") ?? "").trim();
+  if (!token || !pageId) redirect("/");
+  const notes = text(formData.get("notes"));
+  if (!notes) {
+    redirect(`/public/artwork-approvals/${token}?error=${encodeURIComponent("Please describe the changes needed for this proof page.")}`);
+  }
+  try {
+    await respondToArtworkApprovalPageByToken(token, pageId, "changes_requested", notes);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/public/artwork-approvals/${token}?error=${encodeURIComponent(message)}`);
+  }
+  redirect(`/public/artwork-approvals/${token}?message=${encodeURIComponent("Changes requested for this proof page.")}`);
 }
 
 export async function approveArtworkAction(formData: FormData): Promise<void> {

@@ -22,6 +22,7 @@ import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import { ArtworkEmailSendButton } from "./ArtworkEmailSendButton";
 import { ArtworkStatusAutoRefresh } from "./ArtworkStatusAutoRefresh";
+import { ReopenArtworkPageButton } from "./ReopenArtworkPageButton";
 import {
   addArtworkApprovalPageFromPageAction,
   createArtworkApprovalFromQuoteAction,
@@ -32,6 +33,7 @@ import {
   removeArtworkApprovalPageFromPageAction,
   replaceArtworkApprovalPageProofAction,
   restoreArtworkApprovalAction,
+  reopenArtworkApprovalPageAction,
   saveArtworkApprovalDetailsAction,
   sendArtworkApprovalFromPageAction,
   startArtworkApprovalRevisionAction
@@ -106,6 +108,12 @@ function statusTone(status: string): { bg: string; fg: string; border: string } 
   if (status === "sent" || status === "viewed") return { bg: "#eef4ff", fg: "#3538cd", border: "#c7d7fe" };
   if (status === "deleted") return { bg: "#fff5f4", fg: "#b42318", border: "#fecaca" };
   return { bg: "#f8fafc", fg: "#475467", border: "#d0d5dd" };
+}
+
+function pageDecisionTone(status: ArtworkApprovalPageRecord["clientResponseStatus"]): { bg: string; fg: string; border: string; label: string } {
+  if (status === "approved") return { bg: "#ecfdf3", fg: "#067647", border: "#abefc6", label: "CLIENT APPROVED" };
+  if (status === "changes_requested") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa", label: "CHANGES REQUESTED" };
+  return { bg: "#f8fafc", fg: "#475467", border: "#d0d5dd", label: "AWAITING DECISION" };
 }
 
 function summaryKey(value: string): string {
@@ -250,6 +258,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const missingLinePages = inScopeLines.filter((line) => !linkedPages.has(line.id));
   const currentRevision = selectedApproval?.revision ?? null;
   const realProofCount = activeProofPages.filter((page) => isProofReadyForRevision(page, currentRevision)).length;
+  const approvedProofCount = activeProofPages.filter((page) => page.clientResponseStatus === "approved").length;
   const readyToSend = activeProofPages.length > 0 && realProofCount === activeProofPages.length && missingLinePages.length === 0;
   const quoteTotal = quoteLines.filter((line) => line.clientResponseStatus !== "cancelled").reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const publicUrl = selectedApproval ? publicArtworkUrl(selectedApproval.publicToken) : "";
@@ -269,7 +278,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
         .artwork-workspace-grid{display:grid;grid-template-columns:300px minmax(0,1fr);gap:14px;align-items:start}
         .artwork-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;align-items:start}
         .artwork-proof-row{display:grid;grid-template-columns:240px minmax(0,1fr) 250px;overflow:hidden;min-height:190px}
-        .artwork-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+        .artwork-metrics{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:8px}
         .artwork-email-send{width:100%;min-height:68px;border:1px solid rgba(255,255,255,.22);border-radius:16px;background:linear-gradient(135deg,#155eef 0%,#004eeb 55%,#3538cd 100%);color:#fff;box-shadow:0 10px 22px rgba(21,94,239,.25),inset 0 1px 0 rgba(255,255,255,.2);padding:10px 12px;display:grid;grid-template-columns:42px minmax(0,1fr) 24px;gap:10px;align-items:center;text-align:left;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease}
         .artwork-email-send:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 14px 28px rgba(21,94,239,.34),inset 0 1px 0 rgba(255,255,255,.24);filter:saturate(1.08)}
         .artwork-email-send:focus-visible{outline:3px solid #84adff;outline-offset:3px}
@@ -373,6 +382,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                   {[
                     ["Revision", selectedApproval.revision || "A"],
                     ["Proofs", `${realProofCount}/${activeProofPages.length || 0} ready`],
+                    ["Page decisions", `${approvedProofCount}/${activeProofPages.length || 0} approved`],
                     ["Recipient", selectedApproval.email || "No email"],
                     ["Sent", formatDate(selectedApproval.sentAt)],
                     ["Viewed", formatDate(selectedApproval.viewedAt)]
@@ -407,12 +417,14 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                         const placeholder = isPlaceholderProof(page);
                         const currentProof = isProofReadyForRevision(page, currentRevision);
                         const needsRevision = !placeholder && !currentProof;
+                        const decisionTone = pageDecisionTone(page.clientResponseStatus);
                         return (
                           <article key={page.id} className="artwork-proof-row" style={{ border: currentProof ? "1px solid #d0d5dd" : "1px solid #fdb022", borderRadius: 17, background: "#fff" }}>
                             <div className="proof-preview" style={{ background: "#f8fafc", borderRight: "1px solid #e4e7ec", padding: 10, display: "grid", placeItems: "center", minHeight: 188 }}>{proofArtworkPreview(page, 190)}</div>
                             <div style={{ padding: 13, minWidth: 0 }}>
                               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                                 <span style={{ borderRadius: 999, background: currentProof ? "#ecfdf3" : "#fffaeb", color: currentProof ? "#067647" : "#b54708", padding: "4px 7px", fontSize: 10, fontWeight: 950 }}>{placeholder ? "PROOF NEEDED" : needsRevision ? `UPDATE FOR REV ${currentRevision || ""}` : "READY"}</span>
+                                <span style={{ borderRadius: 999, border: `1px solid ${decisionTone.border}`, background: decisionTone.bg, color: decisionTone.fg, padding: "4px 7px", fontSize: 9, fontWeight: 950 }}>{decisionTone.label}</span>
                                 <span style={{ color: "#667085", fontSize: 11, fontWeight: 900 }}>{page.signCode || `S${index + 1}`}</span>
                               </div>
                               <h3 style={{ margin: "7px 0 4px", fontSize: 18 }}>{page.title}</h3>
@@ -428,6 +440,8 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                                 <AutoSubmitProofInputs />
                               </form>
                               {!placeholder ? <a href={page.imageUrl} target="_blank" rel="noreferrer" style={{ ...secondaryButton, minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontSize: 11 }}>Open full size</a> : null}
+                              {page.clientResponseNotes ? <div style={{ border: `1px solid ${decisionTone.border}`, background: decisionTone.bg, color: decisionTone.fg, borderRadius: 10, padding: 8, fontSize: 10, lineHeight: 1.35, whiteSpace: "pre-wrap" }}><strong>{decisionTone.label}:</strong> {page.clientResponseNotes}</div> : null}
+                              {page.clientResponseStatus === "approved" ? <form action={reopenArtworkApprovalPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><input type="hidden" name="pageId" value={page.id} /><input type="hidden" name="pageLabel" value={page.signCode || page.title} /><ReopenArtworkPageButton pageLabel={page.signCode || page.title} /></form> : null}
                               <form action={removeArtworkApprovalPageFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><input type="hidden" name="pageId" value={page.id} /><button type="submit" style={{ ...secondaryButton, minHeight: 32, width: "100%", color: "#b42318", fontSize: 11 }}>Remove page</button></form>
                             </div>
                           </article>
