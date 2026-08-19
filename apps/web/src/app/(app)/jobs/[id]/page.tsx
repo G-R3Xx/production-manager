@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getJobById, listJobTasksForTenant, buildJobTimeline, jobStageMeta } from "@/server/jobs";
+import { getJobById, listJobTasksForTenant, listJobProcessAssignmentsForTenant, buildJobTimeline, jobStageMeta, jobProcessKeyForStage } from "@/server/jobs";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftById, getArtworkApprovalById } from "@/server/quotes";
@@ -10,6 +10,7 @@ import { getProductionJobById } from "@/server/production";
 import { listUsersForTenant } from "@/server/users";
 import { createJobTaskAction, createQuoteFromJobEnquiryAction, updateJobMetaAction, updateJobTaskAction } from "../actions";
 import { createQuoteFromCompletedSurveyAction } from "../../surveys/actions";
+import { JobProcessAssignments } from "./JobProcessAssignments";
 
 type PageProps = {
   params: Promise<{ id: string }>;
@@ -60,8 +61,9 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const job = await getJobById(activeTenant.tenantId, id);
   if (!job) { notFound(); return null; }
 
-  const [tasks, staff, enquiry, survey, quote, artwork, production, timeline] = await Promise.all([
+  const [tasks, processAssignments, staff, enquiry, survey, quote, artwork, production, timeline] = await Promise.all([
     listJobTasksForTenant(activeTenant.tenantId, { jobId: job.id }),
+    listJobProcessAssignmentsForTenant(activeTenant.tenantId, { jobId: job.id }),
     listUsersForTenant(activeTenant.tenantId),
     job.enquiryId ? getEnquiryById(activeTenant.tenantId, job.enquiryId) : Promise.resolve(null),
     job.surveyRequestId ? getSurveyRequestById(activeTenant.tenantId, job.surveyRequestId) : Promise.resolve(null),
@@ -73,6 +75,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
 
   const stageTone = tone(job.currentStage);
   const activeStaff = staff.filter((row) => row.membershipStatus === "active");
+  const manualTasks = tasks.filter((task) => !task.isSystem);
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
   const stageMeta = jobStageMeta(job.currentStage);
   const quoteAction = quote
@@ -119,15 +122,22 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
         </div>
       </section>
 
+      <JobProcessAssignments
+        jobId={job.id}
+        currentProcessKey={jobProcessKeyForStage(job.currentStage)}
+        assignments={processAssignments}
+        staff={activeStaff.map((person) => ({ id: person.userProfileId, name: person.shortName || person.fullName, role: person.tenantRole }))}
+      />
+
       <section style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.5fr) minmax(320px, .8fr)", gap: 16, alignItems: "start" }}>
         <div style={{ display: "grid", gap: 16 }}>
           <section style={card}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
-              <div><p style={{ margin: 0, fontSize: 12, fontWeight: 950, color: "#4f46e5", textTransform: "uppercase" }}>Tasks + milestones</p><h2 style={{ margin: "4px 0 0" }}>What needs to happen next</h2></div>
+              <div><p style={{ margin: 0, fontSize: 12, fontWeight: 950, color: "#4f46e5", textTransform: "uppercase" }}>Extra tasks + milestones</p><h2 style={{ margin: "4px 0 0" }}>Additional job actions</h2></div>
               <Link href="/calendar" style={{ color: "#155eef", fontWeight: 900, textDecoration: "none" }}>Open calendar →</Link>
             </div>
             <div style={{ display: "grid", gap: 10 }}>
-              {tasks.map((task) => {
+              {manualTasks.map((task) => {
                 const taskTone = task.status === "completed" ? { bg: "#ecfdf3", fg: "#067647", border: "#abefc6" } : task.status === "in_progress" ? { bg: "#eff6ff", fg: "#1d4ed8", border: "#bfdbfe" } : { bg: "#f8fafc", fg: "#344054", border: "#e2e8f0" };
                 return (
                   <details key={task.id} style={{ border: `1px solid ${taskTone.border}`, borderRadius: 16, background: taskTone.bg, overflow: "hidden" }}>
@@ -156,7 +166,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
                   </details>
                 );
               })}
-              {!tasks.length ? <p style={{ margin: 0, color: "#667085" }}>No tasks yet. Add the first one below.</p> : null}
+              {!manualTasks.length ? <p style={{ margin: 0, color: "#667085" }}>No extra tasks. Process ownership and due dates are managed above.</p> : null}
             </div>
             <details style={{ marginTop: 14, border: "1px dashed #a5b4fc", borderRadius: 16, padding: 12, background: "#fafaff" }}>
               <summary style={{ cursor: "pointer", fontWeight: 950, color: "#4338ca" }}>+ Add job task / milestone</summary>

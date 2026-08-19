@@ -70,6 +70,10 @@ export type ProductionStepRecord = {
   checkedAt: string | null;
   checkedBy: string | null;
   notes: string | null;
+  assigneeProfileIds: string[];
+  dueDate: string | null;
+  assignmentSource: "inherited" | "manual" | string;
+  assignmentProcessKey: "production" | "dispatch" | string;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -653,6 +657,10 @@ export async function ensureProductionTables(): Promise<void> {
       checked_at timestamptz,
       checked_by varchar(255),
       notes text,
+      assignee_profile_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
+      due_date date,
+      assignment_source varchar(24) NOT NULL DEFAULT 'inherited',
+      assignment_process_key varchar(40) NOT NULL DEFAULT 'production',
       sort_order integer NOT NULL DEFAULT 0,
       payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
       created_at timestamptz NOT NULL DEFAULT now(),
@@ -666,6 +674,10 @@ export async function ensureProductionTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS checked_at timestamptz,
       ADD COLUMN IF NOT EXISTS checked_by varchar(255),
       ADD COLUMN IF NOT EXISTS notes text,
+      ADD COLUMN IF NOT EXISTS assignee_profile_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
+      ADD COLUMN IF NOT EXISTS due_date date,
+      ADD COLUMN IF NOT EXISTS assignment_source varchar(24) NOT NULL DEFAULT 'inherited',
+      ADD COLUMN IF NOT EXISTS assignment_process_key varchar(40) NOT NULL DEFAULT 'production',
       ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
 
@@ -837,7 +849,77 @@ export async function listProductionItemsForJob(jobId: string): Promise<Producti
   `, [jobId]);
   return result.rows;
 }
+
+async function syncInheritedProductionStepAssignments(input: {
+  productionJobId?: string | null;
+  tenantId?: string | null;
+  workflowJobId?: string | null;
+}): Promise<void> {
+  const schema = await pool.query<{ jobsTable: string | null; assignmentsTable: string | null }>(`
+    SELECT
+      to_regclass('app.jobs')::text as "jobsTable",
+      to_regclass('app.job_process_assignments')::text as "assignmentsTable"
+  `);
+  if (!schema.rows[0]?.jobsTable || !schema.rows[0]?.assignmentsTable) return;
+
+  await pool.query(`
+    WITH step_defaults AS (
+      SELECT
+        step.id,
+        CASE
+          WHEN lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(ready|install|delivery|deliver|pickup|collect|dispatch)'
+            THEN 'dispatch'
+          ELSE 'production'
+        END AS process_key
+      FROM production.production_steps step
+      INNER JOIN production.production_jobs production_job ON production_job.id = step.job_id
+      INNER JOIN app.jobs workflow_job
+        ON workflow_job.tenant_id = production_job.tenant_id
+       AND workflow_job.production_job_id = production_job.id
+      WHERE step.assignment_source = 'inherited'
+        AND (NULLIF($1::text, '') IS NULL OR production_job.id = NULLIF($1::text, '')::uuid)
+        AND (NULLIF($2::text, '') IS NULL OR production_job.tenant_id = NULLIF($2::text, '')::uuid)
+        AND (NULLIF($3::text, '') IS NULL OR workflow_job.id = NULLIF($3::text, '')::uuid)
+    ), resolved_defaults AS (
+      SELECT
+        defaults.id,
+        defaults.process_key,
+        COALESCE(assignment.assignee_profile_ids, '{}'::uuid[]) AS assignee_profile_ids,
+        assignment.due_date
+      FROM step_defaults defaults
+      LEFT JOIN production.production_steps step ON step.id = defaults.id
+      LEFT JOIN production.production_jobs production_job ON production_job.id = step.job_id
+      LEFT JOIN app.jobs workflow_job
+        ON workflow_job.tenant_id = production_job.tenant_id
+       AND workflow_job.production_job_id = production_job.id
+      LEFT JOIN app.job_process_assignments assignment
+        ON assignment.job_id = workflow_job.id
+       AND assignment.process_key = defaults.process_key
+    )
+    UPDATE production.production_steps step
+    SET assignment_process_key = defaults.process_key,
+        assignee_profile_ids = defaults.assignee_profile_ids,
+        due_date = defaults.due_date,
+        updated_at = CASE
+          WHEN step.assignment_process_key IS DISTINCT FROM defaults.process_key
+            OR step.assignee_profile_ids IS DISTINCT FROM defaults.assignee_profile_ids
+            OR step.due_date IS DISTINCT FROM defaults.due_date
+          THEN now()
+          ELSE step.updated_at
+        END
+    FROM resolved_defaults defaults
+    WHERE step.id = defaults.id
+  `, [input.productionJobId ?? "", input.tenantId ?? "", input.workflowJobId ?? ""]);
+}
+
+export async function syncProductionStepAssignmentsFromJobProcessForTenant(tenantId: string, workflowJobId: string): Promise<void> {
+  await ensureProductionTables();
+  await syncInheritedProductionStepAssignments({ tenantId, workflowJobId });
+}
+
 export async function listProductionStepsForJob(jobId: string): Promise<ProductionStepRecord[]> {
+  await ensureProductionTables();
+  await syncInheritedProductionStepAssignments({ productionJobId: jobId });
   const result = await pool.query<ProductionStepRecord>(`
     SELECT
       id,
@@ -849,6 +931,10 @@ export async function listProductionStepsForJob(jobId: string): Promise<Producti
       checked_at as "checkedAt",
       checked_by as "checkedBy",
       notes,
+      COALESCE(assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds",
+      due_date::text as "dueDate",
+      assignment_source as "assignmentSource",
+      assignment_process_key as "assignmentProcessKey",
       sort_order as "sortOrder",
       created_at as "createdAt",
       updated_at as "updatedAt"
@@ -857,6 +943,81 @@ export async function listProductionStepsForJob(jobId: string): Promise<Producti
     ORDER BY item_id NULLS FIRST, sort_order ASC, created_at ASC
   `, [jobId]);
   return result.rows;
+}
+
+export async function updateProductionStepAssignmentForTenant(tenantId: string, input: {
+  stepId: string;
+  assigneeProfileIds?: string[];
+  dueDate?: string | null;
+  inherit?: boolean;
+}): Promise<ProductionStepRecord | null> {
+  await ensureProductionTables();
+  if (input.inherit) {
+    const reset = await pool.query<{ jobId: string }>(`
+      UPDATE production.production_steps step
+      SET assignment_source = 'inherited', updated_at = now()
+      FROM production.production_jobs production_job
+      WHERE production_job.id = step.job_id
+        AND production_job.tenant_id = $1::uuid
+        AND step.id = $2::uuid
+      RETURNING step.job_id as "jobId"
+    `, [tenantId, input.stepId]);
+    if (!reset.rows[0]) return null;
+    await syncInheritedProductionStepAssignments({ productionJobId: reset.rows[0].jobId, tenantId });
+  } else {
+    const requestedIds = Array.from(new Set((input.assigneeProfileIds ?? []).map((id) => id.trim()).filter(Boolean)));
+    const validStaff = requestedIds.length
+      ? await pool.query<{ id: string }>(`
+          SELECT DISTINCT profile.id
+          FROM app.memberships membership
+          INNER JOIN app.user_profiles profile ON profile.id = membership.user_profile_id
+          WHERE membership.tenant_id = $1::uuid
+            AND membership.status = 'active'
+            AND profile.id = ANY($2::uuid[])
+        `, [tenantId, requestedIds])
+      : { rows: [] as Array<{ id: string }> };
+    if (validStaff.rows.length !== requestedIds.length) {
+      throw new Error("One or more selected staff members are no longer active in this workspace.");
+    }
+    const updated = await pool.query<{ id: string }>(`
+      UPDATE production.production_steps step
+      SET assignee_profile_ids = $3::uuid[],
+          due_date = NULLIF($4::text,'')::date,
+          assignment_source = 'manual',
+          updated_at = now()
+      FROM production.production_jobs production_job
+      WHERE production_job.id = step.job_id
+        AND production_job.tenant_id = $1::uuid
+        AND step.id = $2::uuid
+      RETURNING step.id
+    `, [tenantId, input.stepId, requestedIds, input.dueDate ?? null]);
+    if (!updated.rows[0]) return null;
+  }
+
+  const result = await pool.query<ProductionStepRecord>(`
+    SELECT
+      step.id,
+      step.job_id as "jobId",
+      step.item_id as "itemId",
+      step.label,
+      step.step_type as "stepType",
+      step.status,
+      step.checked_at as "checkedAt",
+      step.checked_by as "checkedBy",
+      step.notes,
+      COALESCE(step.assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds",
+      step.due_date::text as "dueDate",
+      step.assignment_source as "assignmentSource",
+      step.assignment_process_key as "assignmentProcessKey",
+      step.sort_order as "sortOrder",
+      step.created_at as "createdAt",
+      step.updated_at as "updatedAt"
+    FROM production.production_steps step
+    INNER JOIN production.production_jobs production_job ON production_job.id = step.job_id
+    WHERE production_job.tenant_id = $1::uuid AND step.id = $2::uuid
+    LIMIT 1
+  `, [tenantId, input.stepId]);
+  return result.rows[0] ?? null;
 }
 
 

@@ -90,10 +90,56 @@ export type JobTaskRecord = {
   notes: string | null;
   isSystem: boolean;
   systemKey: string | null;
+  processKey: JobProcessKey | null;
   completedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
+
+export const JOB_PROCESS_KEYS = [
+  "enquiry",
+  "survey",
+  "quote",
+  "artwork",
+  "production",
+  "dispatch",
+  "invoicing",
+] as const;
+
+export type JobProcessKey = (typeof JOB_PROCESS_KEYS)[number];
+
+export type JobProcessAssignmentRecord = {
+  id: string;
+  tenantId: string;
+  jobId: string;
+  processKey: JobProcessKey;
+  assigneeProfileIds: string[];
+  dueDate: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export const JOB_PROCESS_META: Record<JobProcessKey, { label: string; description: string }> = {
+  enquiry: { label: "Enquiry", description: "Review and qualify the incoming request." },
+  survey: { label: "Survey", description: "Schedule and complete any site survey." },
+  quote: { label: "Quote", description: "Prepare, send and revise the quote." },
+  artwork: { label: "Artwork", description: "Prepare proofs and obtain page approvals." },
+  production: { label: "Production", description: "Own the production work and its procedure steps." },
+  dispatch: { label: "Pickup / delivery / install", description: "Complete the final handoff or installation." },
+  invoicing: { label: "Invoicing", description: "Create the invoice and close the job." },
+};
+
+export function jobProcessKeyForStage(stage: JobStage | string): JobProcessKey | null {
+  if (stage === "new_enquiry") return "enquiry";
+  if (stage.startsWith("survey_")) return "survey";
+  if (stage.startsWith("quote_")) return "quote";
+  if (stage.startsWith("artwork_")) return "artwork";
+  if (stage === "production") return "production";
+  if (stage.startsWith("ready_for_")) return "dispatch";
+  if (stage === "invoice_required" || stage === "invoiced" || stage === "closed") return "invoicing";
+  return null;
+}
 
 export type JobTimelineItem = {
   key: string;
@@ -168,6 +214,25 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_production_uidx ON app.jobs (tenant_id, production_job_id) WHERE production_job_id IS NOT NULL`);
 
     await pool.query(`
+      CREATE TABLE IF NOT EXISTS app.job_process_assignments (
+        id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+        tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
+        job_id uuid NOT NULL REFERENCES app.jobs(id) ON DELETE CASCADE,
+        process_key varchar(40) NOT NULL,
+        assignee_profile_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
+        due_date date,
+        notes text,
+        created_at timestamptz NOT NULL DEFAULT now(),
+        updated_at timestamptz NOT NULL DEFAULT now(),
+        CONSTRAINT job_process_assignments_process_key_chk CHECK (
+          process_key IN ('enquiry','survey','quote','artwork','production','dispatch','invoicing')
+        )
+      )
+    `);
+    await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS job_process_assignments_job_process_uidx ON app.job_process_assignments (job_id, process_key)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS job_process_assignments_tenant_due_idx ON app.job_process_assignments (tenant_id, due_date, process_key)`);
+
+    await pool.query(`
       CREATE TABLE IF NOT EXISTS app.job_tasks (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
         tenant_id uuid NOT NULL REFERENCES app.tenants(id) ON DELETE CASCADE,
@@ -184,10 +249,26 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
         notes text,
         is_system boolean NOT NULL DEFAULT false,
         system_key varchar(160),
+        process_key varchar(40),
         completed_at timestamptz,
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now()
       )
+    `);
+    await pool.query(`ALTER TABLE app.job_tasks ADD COLUMN IF NOT EXISTS process_key varchar(40)`);
+    await pool.query(`
+      UPDATE app.job_tasks
+      SET process_key = CASE
+        WHEN stage = 'new_enquiry' THEN 'enquiry'
+        WHEN stage LIKE 'survey_%' THEN 'survey'
+        WHEN stage LIKE 'quote_%' THEN 'quote'
+        WHEN stage LIKE 'artwork_%' THEN 'artwork'
+        WHEN stage = 'production' THEN 'production'
+        WHEN stage LIKE 'ready_for_%' THEN 'dispatch'
+        WHEN stage IN ('invoice_required','invoiced','closed') THEN 'invoicing'
+        ELSE NULL
+      END
+      WHERE is_system = true AND process_key IS NULL
     `);
     await pool.query(`CREATE INDEX IF NOT EXISTS job_tasks_tenant_due_idx ON app.job_tasks (tenant_id, due_date, status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS job_tasks_job_idx ON app.job_tasks (job_id, status, due_date)`);
@@ -370,6 +451,7 @@ async function upsertSystemStageTask(job: JobRecord, dueDate?: string | null): P
   if (job.currentStage === "closed" || job.currentStage === "invoiced") return;
   const meta = jobStageMeta(job.currentStage);
   const systemKey = `stage:${job.currentStage}`;
+  const processKey = jobProcessKeyForStage(job.currentStage);
   await pool.query(`
     UPDATE app.job_tasks
     SET status = 'completed', completed_at = COALESCE(completed_at, now()), updated_at = now()
@@ -378,18 +460,31 @@ async function upsertSystemStageTask(job: JobRecord, dueDate?: string | null): P
 
   await pool.query(`
     INSERT INTO app.job_tasks AS jt (
-      tenant_id, job_id, title, stage, status, priority, due_date, is_system, system_key, created_at, updated_at
-    ) VALUES ($1::uuid,$2::uuid,$3,$4,'pending',$5,NULLIF($6::text,'')::date,true,$7,now(),now())
+      tenant_id, job_id, title, stage, status, priority, due_date, assignee_profile_ids, is_system, system_key, process_key, created_at, updated_at
+    ) VALUES (
+      $1::uuid,$2::uuid,$3,$4,'pending',$5,
+      COALESCE(
+        (SELECT assignment.due_date FROM app.job_process_assignments assignment WHERE assignment.job_id = $2::uuid AND assignment.process_key = $8),
+        NULLIF($6::text,'')::date
+      ),
+      COALESCE(
+        (SELECT assignment.assignee_profile_ids FROM app.job_process_assignments assignment WHERE assignment.job_id = $2::uuid AND assignment.process_key = $8),
+        '{}'::uuid[]
+      ),
+      true,$7,$8,now(),now()
+    )
     ON CONFLICT (job_id, system_key) WHERE system_key IS NOT NULL
     DO UPDATE SET
       title = EXCLUDED.title,
       stage = EXCLUDED.stage,
+      process_key = EXCLUDED.process_key,
       priority = CASE WHEN jt.priority = 'normal' THEN EXCLUDED.priority ELSE jt.priority END,
-      due_date = COALESCE(jt.due_date, EXCLUDED.due_date),
+      due_date = EXCLUDED.due_date,
+      assignee_profile_ids = EXCLUDED.assignee_profile_ids,
       status = jt.status,
       completed_at = jt.completed_at,
       updated_at = now()
-  `, [job.tenantId, job.id, meta.nextAction, job.currentStage, job.priority || "normal", dueDate ?? job.dueDate ?? null, systemKey]);
+  `, [job.tenantId, job.id, meta.nextAction, job.currentStage, job.priority || "normal", dueDate ?? job.dueDate ?? null, systemKey, processKey]);
 }
 
 async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobRecord[]> {
@@ -781,6 +876,108 @@ export async function getJobById(tenantId: string, jobId: string): Promise<JobRe
   return result.rows[0] ?? null;
 }
 
+function processAssignmentSelectSql(): string {
+  return `
+    id,
+    tenant_id as "tenantId",
+    job_id as "jobId",
+    process_key as "processKey",
+    COALESCE(assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds",
+    due_date::text as "dueDate",
+    notes,
+    created_at::text as "createdAt",
+    updated_at::text as "updatedAt"
+  `;
+}
+
+export async function listJobProcessAssignmentsForTenant(
+  tenantId: string,
+  input?: { jobId?: string; month?: string },
+): Promise<JobProcessAssignmentRecord[]> {
+  await ensureJobWorkspaceSchema();
+  const params: unknown[] = [tenantId];
+  const conditions = ["tenant_id = $1::uuid"];
+  if (input?.jobId) {
+    params.push(input.jobId);
+    conditions.push(`job_id = $${params.length}::uuid`);
+  }
+  if (input?.month && /^\d{4}-\d{2}$/.test(input.month)) {
+    params.push(`${input.month}-01`);
+    const index = params.length;
+    conditions.push(`due_date >= $${index}::date AND due_date < ($${index}::date + interval '1 month')`);
+  }
+  const result = await pool.query<JobProcessAssignmentRecord>(`
+    SELECT ${processAssignmentSelectSql()}
+    FROM app.job_process_assignments
+    WHERE ${conditions.join(" AND ")}
+    ORDER BY due_date NULLS LAST, created_at ASC
+  `, params);
+  return result.rows;
+}
+
+function isJobProcessKey(value: string): value is JobProcessKey {
+  return (JOB_PROCESS_KEYS as readonly string[]).includes(value);
+}
+
+export async function updateJobProcessAssignmentForTenant(tenantId: string, input: {
+  jobId: string;
+  processKey: string;
+  assigneeProfileIds?: string[];
+  dueDate?: string | null;
+  notes?: string | null;
+}): Promise<JobProcessAssignmentRecord> {
+  await ensureJobWorkspaceSchema();
+  const processKey = input.processKey.trim().toLowerCase();
+  if (!isJobProcessKey(processKey)) throw new Error("Choose a valid job process.");
+
+  const requestedIds = Array.from(new Set((input.assigneeProfileIds ?? []).map((id) => id.trim()).filter(Boolean)));
+  const validStaff = requestedIds.length
+    ? await pool.query<{ id: string }>(`
+        SELECT DISTINCT up.id
+        FROM app.memberships membership
+        INNER JOIN app.user_profiles up ON up.id = membership.user_profile_id
+        WHERE membership.tenant_id = $1::uuid
+          AND membership.status = 'active'
+          AND up.id = ANY($2::uuid[])
+      `, [tenantId, requestedIds])
+    : { rows: [] as Array<{ id: string }> };
+  if (validStaff.rows.length !== requestedIds.length) {
+    throw new Error("One or more selected staff members are no longer active in this workspace.");
+  }
+
+  const result = await pool.query<JobProcessAssignmentRecord>(`
+    INSERT INTO app.job_process_assignments AS assignment (
+      tenant_id, job_id, process_key, assignee_profile_ids, due_date, notes, created_at, updated_at
+    )
+    SELECT $1::uuid, job.id, $3, $4::uuid[], NULLIF($5::text,'')::date, NULLIF($6::text,''), now(), now()
+    FROM app.jobs job
+    WHERE job.tenant_id = $1::uuid AND job.id = $2::uuid
+    ON CONFLICT (job_id, process_key)
+    DO UPDATE SET
+      assignee_profile_ids = EXCLUDED.assignee_profile_ids,
+      due_date = EXCLUDED.due_date,
+      notes = EXCLUDED.notes,
+      updated_at = now()
+    RETURNING ${processAssignmentSelectSql()}
+  `, [tenantId, input.jobId, processKey, requestedIds, input.dueDate ?? null, input.notes ?? null]);
+  const assignment = result.rows[0];
+  if (!assignment) throw new Error("Job not found in this workspace.");
+
+  await pool.query(`
+    UPDATE app.job_tasks
+    SET assignee_profile_ids = $4::uuid[],
+        due_date = NULLIF($5::text,'')::date,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND job_id = $2::uuid
+      AND process_key = $3
+      AND is_system = true
+      AND status NOT IN ('completed','cancelled')
+  `, [tenantId, input.jobId, processKey, requestedIds, input.dueDate ?? null]);
+
+  return assignment;
+}
+
 export async function listJobTasksForTenant(tenantId: string, input?: { jobId?: string; month?: string }): Promise<JobTaskRecord[]> {
   await ensureJobWorkspaceSchema();
   const params: unknown[] = [tenantId];
@@ -799,6 +996,7 @@ export async function listJobTasksForTenant(tenantId: string, input?: { jobId?: 
       id, tenant_id as "tenantId", job_id as "jobId", title, stage, status, priority,
       due_date::text as "dueDate", start_at::text as "startAt", end_at::text as "endAt", all_day as "allDay",
       COALESCE(assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds", notes, is_system as "isSystem", system_key as "systemKey",
+      process_key as "processKey",
       completed_at::text as "completedAt", created_at::text as "createdAt", updated_at::text as "updatedAt"
     FROM app.job_tasks
     WHERE ${conditions.join(" AND ")}

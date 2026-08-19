@@ -45,3 +45,5 @@ pnpm db:studio
 - `040_artwork_revision_proof_tracking.sql` — tracks which artwork revision each uploaded proof belongs to so revised packs cannot accidentally resend an older proof.
 
 - `044_artwork_page_responses.sql` — adds independent client decisions and notes to each artwork proof page, with a compatibility backfill for already-approved proof sets.
+
+- `045_job_process_staff_assignments.sql` — adds multi-staff ownership and due dates for each job process, plus inherited or overridden production-step assignments.

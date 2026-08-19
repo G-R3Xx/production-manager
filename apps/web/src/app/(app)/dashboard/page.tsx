@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listCurrentDashboardJobsForTenant, listDashboardJobMetadataForTenant, listJobTasksForTenant, type JobRecord } from "@/server/jobs";
+import { listCurrentDashboardJobsForTenant, listDashboardJobMetadataForTenant, listJobProcessAssignmentsForTenant, jobProcessKeyForStage, type JobRecord } from "@/server/jobs";
 import { listUsersForTenant } from "@/server/users";
 import { customerLogoUrl, listCustomerLogoSummariesForTenant } from "@/server/customers";
 import { refreshDashboardJobsAction } from "./actions";
@@ -77,9 +77,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const q = readParam(params, "q").trim();
   const message = readParam(params, "message");
 
-  const [jobSnapshot, tasks, staff, customers, jobMetadata] = await Promise.all([
+  const [jobSnapshot, processAssignments, staff, customers, jobMetadata] = await Promise.all([
     listCurrentDashboardJobsForTenant(activeTenant.tenantId),
-    listJobTasksForTenant(activeTenant.tenantId),
+    listJobProcessAssignmentsForTenant(activeTenant.tenantId),
     listUsersForTenant(activeTenant.tenantId),
     listCustomerLogoSummariesForTenant(activeTenant.tenantId),
     listDashboardJobMetadataForTenant(activeTenant.tenantId),
@@ -93,15 +93,18 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     return Array.from(keys).map((key) => [key, row] as const);
   }));
   const metadataByJobId = new Map(jobMetadata.map((row) => [row.jobId, row]));
-  const taskByJob = new Map<string, typeof tasks>();
-  for (const task of tasks.filter((row) => row.status !== "completed" && row.status !== "cancelled")) {
-    const rows = taskByJob.get(task.jobId) ?? [];
-    rows.push(task); taskByJob.set(task.jobId, rows);
-  }
+  const assignmentByJobAndProcess = new Map(processAssignments.map((assignment) => [`${assignment.jobId}:${assignment.processKey}`, assignment]));
+  const currentAssignment = (job: JobRecord) => {
+    const processKey = jobProcessKeyForStage(job.currentStage);
+    return processKey ? assignmentByJobAndProcess.get(`${job.id}:${processKey}`) : undefined;
+  };
+  const assignedIds = (job: JobRecord): string[] => {
+    const processIds = currentAssignment(job)?.assigneeProfileIds ?? [];
+    return processIds.length ? processIds : job.ownerProfileId ? [job.ownerProfileId] : [];
+  };
 
   const assignedLabel = (job: JobRecord): string => {
-    const openTasks = taskByJob.get(job.id) ?? [];
-    const ids = Array.from(new Set([...(job.ownerProfileId ? [job.ownerProfileId] : []), ...openTasks.flatMap((task) => task.assigneeProfileIds)]));
+    const ids = assignedIds(job);
     return ids.length ? ids.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ") : "Unassigned";
   };
   const dashboardRows: DashboardRow[] = jobs.map((job) => {
@@ -120,9 +123,9 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       currentStageLabel: job.currentStageLabel,
       nextAction: job.nextAction,
       receivedAt: job.receivedAt,
-      dueDate: job.dueDate,
+      dueDate: currentAssignment(job)?.dueDate || job.dueDate,
       ownerProfileId: job.ownerProfileId,
-      assigneeProfileIds: Array.from(new Set((taskByJob.get(job.id) ?? []).flatMap((task) => task.assigneeProfileIds))),
+      assigneeProfileIds: assignedIds(job),
       assigneeLabel: assignedLabel(job),
       dispatchType: job.dispatchType,
       myobOrderNumber: job.myobOrderNumber,

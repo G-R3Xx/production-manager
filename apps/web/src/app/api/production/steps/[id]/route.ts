@@ -4,7 +4,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import {
   getProductionInstallSchedulerPayloadForStep,
   recordProductionInstallSchedulerBridgeResultForStep,
-  setProductionStepStatusForTenant
+  setProductionStepStatusForTenant,
+  updateProductionStepAssignmentForTenant,
 } from "@/server/production";
 import { createInstallSchedulerInstallJob } from "@/server/installSchedulerBridge";
 
@@ -44,4 +45,33 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
     ? await completeInstallHandoff(tenant.tenantId, id)
     : null;
   return NextResponse.json({ ok: true, status, ...result, bridgeMessage });
+}
+
+export async function PATCH(request: Request, context: { params: Promise<{ id: string }> }) {
+  const user = await getAuthenticatedAppUser();
+  if (!user) return NextResponse.json({ error: "Sign in again before assigning production work." }, { status: 401 });
+  const tenant = await resolveActiveTenantForAuthUserId(user.id);
+  if (!tenant) return NextResponse.json({ error: "Active workspace not found." }, { status: 401 });
+  const { id } = await context.params;
+  let body: { assigneeProfileIds?: unknown; dueDate?: unknown; inherit?: unknown } = {};
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid production assignment request." }, { status: 400 });
+  }
+  const assigneeProfileIds = Array.isArray(body.assigneeProfileIds)
+    ? body.assigneeProfileIds.filter((value): value is string => typeof value === "string")
+    : [];
+  try {
+    const step = await updateProductionStepAssignmentForTenant(tenant.tenantId, {
+      stepId: id,
+      assigneeProfileIds,
+      dueDate: typeof body.dueDate === "string" ? body.dueDate : null,
+      inherit: body.inherit === true,
+    });
+    if (!step) return NextResponse.json({ error: "Production step not found." }, { status: 404 });
+    return NextResponse.json({ ok: true, step }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Production assignment could not be saved." }, { status: 400 });
+  }
 }

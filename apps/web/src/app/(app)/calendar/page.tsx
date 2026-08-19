@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listUsersForTenant } from "@/server/users";
-import { listJobsForTenant, listJobTasksForTenant, type JobTaskRecord, type JobRecord } from "@/server/jobs";
+import { listJobsForTenant, listJobTasksForTenant, listJobProcessAssignmentsForTenant, JOB_PROCESS_META, type JobTaskRecord, type JobRecord } from "@/server/jobs";
 
 type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const card = { background: "#fff", border: "1px solid #dfe7f2", borderRadius: 22, boxShadow: "0 12px 34px rgba(15,23,42,.05)" } as const;
@@ -57,15 +57,51 @@ export default async function CalendarPage({ searchParams }: PageProps) {
   const focusMonth = parseMonth(requestedMonth || auToday.slice(0, 7));
   const focusKey = monthKey(focusMonth);
 
-  const [jobs, tasks, staff] = await Promise.all([
+  const [jobs, allTasks, processAssignments, staff] = await Promise.all([
     listJobsForTenant(activeTenant.tenantId, { skipSync: true }),
-    listJobTasksForTenant(activeTenant.tenantId, { month: focusKey }),
+    listJobTasksForTenant(activeTenant.tenantId),
+    listJobProcessAssignmentsForTenant(activeTenant.tenantId),
     listUsersForTenant(activeTenant.tenantId),
   ]);
   const jobById = new Map(jobs.map((job) => [job.id, job]));
   const activeStaff = staff.filter((row) => row.membershipStatus === "active");
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
-  const visibleTasks = staffFilter ? tasks.filter((task) => task.assigneeProfileIds.includes(staffFilter)) : tasks;
+  const processOrder = ["enquiry", "survey", "quote", "artwork", "production", "dispatch", "invoicing"];
+  const processTasks: JobTaskRecord[] = processAssignments.map((assignment) => {
+    const currentStage = jobById.get(assignment.jobId)?.currentStage ?? "";
+    const currentProcess = currentStage === "new_enquiry" ? "enquiry"
+      : currentStage.startsWith("survey_") ? "survey"
+        : currentStage.startsWith("quote_") ? "quote"
+          : currentStage.startsWith("artwork_") ? "artwork"
+            : currentStage === "production" ? "production"
+              : currentStage.startsWith("ready_for_") ? "dispatch"
+                : currentStage === "invoice_required" || currentStage === "invoiced" ? "invoicing" : "";
+    const complete = currentProcess && processOrder.indexOf(assignment.processKey) < processOrder.indexOf(currentProcess);
+    return ({
+    id: `process:${assignment.id}`,
+    tenantId: assignment.tenantId,
+    jobId: assignment.jobId,
+    title: `${JOB_PROCESS_META[assignment.processKey].label} process`,
+    stage: assignment.processKey,
+    status: complete ? "completed" : "pending",
+    priority: jobById.get(assignment.jobId)?.priority ?? "normal",
+    dueDate: assignment.dueDate,
+    startAt: null,
+    endAt: null,
+    allDay: true,
+    assigneeProfileIds: assignment.assigneeProfileIds,
+    notes: assignment.notes,
+    isSystem: true,
+    systemKey: `process:${assignment.processKey}`,
+    processKey: assignment.processKey,
+    completedAt: null,
+    createdAt: assignment.createdAt,
+    updatedAt: assignment.updatedAt,
+    });
+  });
+  const calendarTasks = [...allTasks.filter((task) => !task.isSystem), ...processTasks];
+  const monthTasks = calendarTasks.filter((task) => task.dueDate?.startsWith(`${focusKey}-`));
+  const visibleTasks = staffFilter ? monthTasks.filter((task) => task.assigneeProfileIds.includes(staffFilter)) : monthTasks;
   const byDate = new Map<string, JobTaskRecord[]>();
   for (const task of visibleTasks) {
     if (!task.dueDate) continue;
@@ -80,13 +116,13 @@ export default async function CalendarPage({ searchParams }: PageProps) {
   const days = Array.from({ length: 42 }, (_, index) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index));
   const monthLabel = focusMonth.toLocaleDateString("en-AU", { month: "long", year: "numeric" });
 
-  const unscheduled = (await listJobTasksForTenant(activeTenant.tenantId)).filter((task) => !task.dueDate && task.status !== "completed" && (!staffFilter || task.assigneeProfileIds.includes(staffFilter))).slice(0, 20);
+  const unscheduled = calendarTasks.filter((task) => !task.dueDate && task.status !== "completed" && (!staffFilter || task.assigneeProfileIds.includes(staffFilter))).slice(0, 20);
 
   return (
     <div style={{ maxWidth: 1540, margin: "0 auto", display: "grid", gap: 16 }}>
       <section style={{ ...card, padding: 22, background: "linear-gradient(135deg,#fff,#f7fbff)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "center", flexWrap: "wrap" }}>
-          <div><p style={{ margin: 0, color: "#2563eb", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".08em" }}>Job calendar</p><h1 style={{ margin: "5px 0 3px", fontSize: 34 }}>{monthLabel}</h1><p style={{ margin: 0, color: "#667085" }}>Every dated job task and milestone in one place. Assign stages to one or multiple staff from the Job workspace.</p></div>
+          <div><p style={{ margin: 0, color: "#2563eb", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".08em" }}>Job calendar</p><h1 style={{ margin: "5px 0 3px", fontSize: 34 }}>{monthLabel}</h1><p style={{ margin: 0, color: "#667085" }}>Process deadlines and extra job milestones in one place. Assign one or multiple staff from the Job workspace.</p></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <Link href={`/calendar?month=${monthKey(addMonths(focusMonth, -1))}${staffFilter ? `&staff=${encodeURIComponent(staffFilter)}` : ""}`} style={navButton}>← Previous</Link>
             <Link href={`/calendar?month=${auToday.slice(0, 7)}${staffFilter ? `&staff=${encodeURIComponent(staffFilter)}` : ""}`} style={navButton}>Today</Link>

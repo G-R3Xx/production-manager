@@ -29,10 +29,12 @@ import {
 import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
 import { OpenFullscreenBoardButton } from "./OpenFullscreenBoardButton";
 import { ProductionStepToggle } from "./ProductionStepToggle";
+import { ProductionStepAssignmentEditor } from "./ProductionStepAssignmentEditor";
 import { getQuoteDraftById, listQuoteDraftsForTenant } from "@/server/quotes";
 import { customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
 import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
+import { listUsersForTenant } from "@/server/users";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -682,19 +684,22 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
   let steps: ProductionStepRecord[] = [];
   let selectedQuote = null as Awaited<ReturnType<typeof getQuoteDraftById>>;
   let selectedJobLogoUrl: string | null = null;
+  let productionStaff: Awaited<ReturnType<typeof listUsersForTenant>> = [];
 
   if (detailOnly && selectedParam) {
     selectedJob = await getProductionJobById(tenantId, selectedParam);
     if (selectedJob) {
-      const [loadedItems, loadedSteps, loadedQuote, selectedCustomer] = await Promise.all([
+      const [loadedItems, loadedSteps, loadedQuote, selectedCustomer, loadedStaff] = await Promise.all([
         listProductionItemsForJob(selectedJob.id),
         listProductionStepsForJob(selectedJob.id),
         getQuoteDraftById(tenantId, selectedJob.quoteId),
-        selectedJob.linkedCustomerId ? getCustomerById(tenantId, selectedJob.linkedCustomerId) : Promise.resolve(null)
+        selectedJob.linkedCustomerId ? getCustomerById(tenantId, selectedJob.linkedCustomerId) : Promise.resolve(null),
+        listUsersForTenant(tenantId),
       ]);
       items = loadedItems;
       steps = loadedSteps;
       selectedQuote = loadedQuote;
+      productionStaff = loadedStaff.filter((person) => person.membershipStatus === "active");
       const selectedEnquiry = selectedQuote?.enquiryId ? await getEnquiryById(tenantId, selectedQuote.enquiryId) : null;
       selectedJobLogoUrl = selectedEnquiry?.clientLogoUrl || customerLogoUrl(selectedCustomer);
     }
@@ -1017,6 +1022,13 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                             <div key={step.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 10, alignItems: "center", border: "1px solid #e4e7ec", borderRadius: 14, padding: 10, background: step.status === "done" ? "#ecfdf3" : "#fff" }}>
                               <ProductionStepToggle stepId={step.id} label={step.label} initialStatus={step.status} initialCheckedAt={step.checkedAt} initialCheckedBy={step.checkedBy} />
                               <span style={{ color: "#667085", fontSize: 11, fontWeight: 850 }}>{step.stepType.replace(/_/g, " ")}</span>
+                              <div style={{ gridColumn: "1 / -1" }}>
+                                <ProductionStepAssignmentEditor
+                                  stepId={step.id}
+                                  initial={{ assigneeProfileIds: step.assigneeProfileIds, dueDate: step.dueDate, assignmentSource: step.assignmentSource, assignmentProcessKey: step.assignmentProcessKey }}
+                                  staff={productionStaff.map((person) => ({ id: person.userProfileId, name: person.shortName || person.fullName }))}
+                                />
+                              </div>
                             </div>
                           ))}
                         </div>
