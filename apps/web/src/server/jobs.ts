@@ -66,6 +66,14 @@ export type JobRecord = {
   updatedAt: string;
 };
 
+export type DashboardJobType = "signage" | "small_format" | "plans_posters" | "installation" | "mixed" | "other";
+
+export type DashboardJobMetadata = {
+  jobId: string;
+  enquiryLogoUrl: string | null;
+  jobType: DashboardJobType;
+};
+
 export type JobTaskRecord = {
   id: string;
   tenantId: string;
@@ -643,6 +651,73 @@ export async function listCurrentDashboardJobsForTenant(tenantId: string): Promi
     });
   }
   return { jobs, reconciliationScheduled: needsSync };
+}
+
+function dashboardJobTypeFromText(values: string[]): DashboardJobType {
+  const categories = new Set<Exclude<DashboardJobType, "mixed" | "other">>();
+  for (const raw of values) {
+    const value = raw.toLowerCase().replaceAll("-", "_");
+    if (value === "small_format" || /\b(business cards?|flyers?|brochures?|booklets?|ncr|duplicate|triplicate|letterheads?|small format)\b/.test(value)) categories.add("small_format");
+    else if (value === "plan_printing" || value === "poster_printing" || /\b(plans?|posters?|architectural drawings?|wide format plans?)\b/.test(value)) categories.add("plans_posters");
+    else if (value === "service" || /\b(install(?:ation)?|site labour|client supplied signage)\b/.test(value)) categories.add("installation");
+    else if (value === "signage" || /\b(signs?|signage|banner|vinyl|acrylic|corflute|acm|aluminium composite|wall graphic|window graphic|vehicle wrap|lightbox)\b/.test(value)) categories.add("signage");
+  }
+  if (categories.size > 1) return "mixed";
+  return categories.values().next().value ?? "other";
+}
+
+export async function listDashboardJobMetadataForTenant(tenantId: string): Promise<DashboardJobMetadata[]> {
+  await ensureJobWorkspaceSchema();
+  const result = await pool.query<{
+    jobId: string;
+    enquiryLogoUrl: string | null;
+    title: string;
+    enquirySummary: string | null;
+    enquiryNotes: string | null;
+    surveyDetails: string | null;
+    surveyNotes: string | null;
+    lineTypes: string[] | null;
+  }>(`
+    WITH line_types AS (
+      SELECT
+        ql.quote_id,
+        array_agg(DISTINCT COALESCE(NULLIF(ql.configuration_snapshot ->> 'flowType', ''), ql.product_name)) as line_types
+      FROM sales.quote_lines ql
+      INNER JOIN app.jobs relevant_job
+        ON relevant_job.tenant_id = $1::uuid
+       AND relevant_job.quote_id = ql.quote_id
+      WHERE COALESCE(ql.configuration_snapshot ->> 'parentLineId', '') = ''
+        AND COALESCE(ql.client_response_status, 'pending') <> 'cancelled'
+      GROUP BY ql.quote_id
+    )
+    SELECT
+      j.id as "jobId",
+      e.client_logo_url as "enquiryLogoUrl",
+      j.title,
+      e.request_summary as "enquirySummary",
+      e.notes as "enquiryNotes",
+      s.survey_details as "surveyDetails",
+      s.notes as "surveyNotes",
+      COALESCE(lines.line_types, ARRAY[]::text[]) as "lineTypes"
+    FROM app.jobs j
+    LEFT JOIN app.enquiries e ON e.tenant_id = j.tenant_id AND e.id = j.enquiry_id
+    LEFT JOIN app.survey_requests s ON s.tenant_id = j.tenant_id AND s.id = j.survey_request_id
+    LEFT JOIN line_types lines ON lines.quote_id = j.quote_id
+    WHERE j.tenant_id = $1::uuid
+  `, [tenantId]);
+
+  return result.rows.map((row) => ({
+    jobId: row.jobId,
+    enquiryLogoUrl: row.enquiryLogoUrl,
+    jobType: dashboardJobTypeFromText([
+      ...(row.lineTypes ?? []),
+      row.title,
+      row.enquirySummary ?? "",
+      row.enquiryNotes ?? "",
+      row.surveyDetails ?? "",
+      row.surveyNotes ?? "",
+    ].filter(Boolean)),
+  }));
 }
 
 function jobSelectSql(): string {

@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { DashboardJobRow } from "./DashboardJobRow";
+import type { DashboardJobType } from "@/server/jobs";
 
 export type DashboardRow = {
   id: string;
@@ -21,6 +22,7 @@ export type DashboardRow = {
   assigneeLabel: string;
   dispatchType: string | null;
   myobOrderNumber: string | null;
+  jobType: DashboardJobType;
   logoUrl: string | null;
 };
 
@@ -71,6 +73,16 @@ function ageMatches(days: number, age: string): boolean {
   return days >= 61;
 }
 
+const jobTypeOptions: Array<["" | DashboardJobType, string]> = [
+  ["", "All job types"],
+  ["signage", "Signage"],
+  ["small_format", "Small format"],
+  ["plans_posters", "Plans / posters"],
+  ["installation", "Installation / service"],
+  ["mixed", "Mixed work"],
+  ["other", "Unclassified / other"],
+];
+
 function fmtReceived(value: string): string {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "2-digit", timeZone: "Australia/Sydney" });
@@ -101,6 +113,7 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
   const [stage, setStage] = useState(initialStage);
   const [owner, setOwner] = useState(initialOwner);
   const [age, setAge] = useState("");
+  const [jobType, setJobType] = useState<"" | DashboardJobType>("");
   const [query, setQuery] = useState(initialQuery);
   const [sort, setSort] = useState<SortKey | null>(null);
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
@@ -116,10 +129,11 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
     const filtered = rows.filter((row) => stageMatches(row, stage, todayKey))
       .filter((row) => !owner || row.ownerProfileId === owner || row.assigneeProfileIds.includes(owner))
       .filter((row) => ageMatches(jobAgeDays(row.receivedAt, todayKey), age))
+      .filter((row) => !jobType || row.jobType === jobType)
       .filter((row) => !q || `${row.jobNumber} ${row.title} ${row.clientName} ${row.currentStageLabel} ${row.myobOrderNumber || ""}`.toLowerCase().includes(q));
     if (!sort) return filtered;
     return [...filtered].sort((a, b) => sortValue(a, sort).localeCompare(sortValue(b, sort), "en-AU", { numeric: true }) * (direction === "desc" ? -1 : 1));
-  }, [rows, stage, owner, age, query, sort, direction, todayKey]);
+  }, [rows, stage, owner, age, jobType, query, sort, direction, todayKey]);
 
   const changeSort = (key: SortKey) => {
     if (sort === key) setDirection((current) => current === "asc" ? "desc" : "asc");
@@ -130,11 +144,12 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
     <>
       <section style={{ ...card, padding: 16, display: "grid", gap: 12 }}>
         <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{stageFilters.map(([value, label]) => <button type="button" key={value || "all"} onClick={() => setStage(value)} style={{ borderRadius: 999, padding: "7px 10px", border: stage === value ? "1px solid #155eef" : "1px solid #d0d5dd", background: stage === value ? "#eff6ff" : "#fff", color: stage === value ? "#155eef" : "#475467", fontSize: 12, fontWeight: 900, cursor: "pointer" }}>{label}</button>)}</div>
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) 200px 180px auto", gap: 8 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) 190px 170px 180px auto", gap: 8 }}>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search job, client, quote or MYOB order…" style={control} />
           <select value={owner} onChange={(event) => setOwner(event.target.value)} style={control}><option value="">All staff</option>{staff.map((person) => <option key={person.id} value={person.id}>{person.name}</option>)}</select>
           <select value={age} onChange={(event) => setAge(event.target.value)} style={control}><option value="">Any job age</option><option value="0-7">0–7 days old</option><option value="8-14">8–14 days old</option><option value="15-30">15–30 days old</option><option value="31-60">31–60 days old</option><option value="61+">61+ days old</option></select>
-          <button type="button" onClick={() => { setQuery(""); setOwner(""); setAge(""); setStage(""); }} style={{ ...primary, border: 0, cursor: "pointer" }}>Clear</button>
+          <select value={jobType} onChange={(event) => setJobType(event.target.value as "" | DashboardJobType)} style={control}>{jobTypeOptions.map(([value, label]) => <option key={value || "all-types"} value={value}>{label}</option>)}</select>
+          <button type="button" onClick={() => { setQuery(""); setOwner(""); setAge(""); setJobType(""); setStage(""); }} style={{ ...primary, border: 0, cursor: "pointer" }}>Clear</button>
         </div>
       </section>
 

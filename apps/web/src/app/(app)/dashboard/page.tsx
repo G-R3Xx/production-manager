@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listCurrentDashboardJobsForTenant, listJobTasksForTenant, type JobRecord } from "@/server/jobs";
+import { listCurrentDashboardJobsForTenant, listDashboardJobMetadataForTenant, listJobTasksForTenant, type JobRecord } from "@/server/jobs";
 import { listUsersForTenant } from "@/server/users";
 import { customerLogoUrl, listCustomerLogoSummariesForTenant } from "@/server/customers";
 import { refreshDashboardJobsAction } from "./actions";
@@ -14,6 +14,13 @@ const card = { background: "#fff", border: "1px solid #dfe7f2", borderRadius: 22
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
   const value = params[key];
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
+}
+
+function normaliseClientName(value: string): string {
+  return value.toLowerCase()
+    .replace(/\b(pty|proprietary|limited|ltd|incorporated|inc)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
 }
 
 function fmtDate(value: string | null): string {
@@ -70,16 +77,22 @@ export default async function DashboardPage({ searchParams }: PageProps) {
   const q = readParam(params, "q").trim();
   const message = readParam(params, "message");
 
-  const [jobSnapshot, tasks, staff, customers] = await Promise.all([
+  const [jobSnapshot, tasks, staff, customers, jobMetadata] = await Promise.all([
     listCurrentDashboardJobsForTenant(activeTenant.tenantId),
     listJobTasksForTenant(activeTenant.tenantId),
     listUsersForTenant(activeTenant.tenantId),
     listCustomerLogoSummariesForTenant(activeTenant.tenantId),
+    listDashboardJobMetadataForTenant(activeTenant.tenantId),
   ]);
   const jobs = jobSnapshot.jobs;
   const activeStaff = staff.filter((row) => row.membershipStatus === "active");
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
   const customerById = new Map(customers.map((row) => [row.id, row]));
+  const customerByName = new Map(customers.flatMap((row) => {
+    const keys = new Set([normaliseClientName(row.displayName), normaliseClientName(row.companyName ?? "")].filter(Boolean));
+    return Array.from(keys).map((key) => [key, row] as const);
+  }));
+  const metadataByJobId = new Map(jobMetadata.map((row) => [row.jobId, row]));
   const taskByJob = new Map<string, typeof tasks>();
   for (const task of tasks.filter((row) => row.status !== "completed" && row.status !== "cancelled")) {
     const rows = taskByJob.get(task.jobId) ?? [];
@@ -91,23 +104,32 @@ export default async function DashboardPage({ searchParams }: PageProps) {
     const ids = Array.from(new Set([...(job.ownerProfileId ? [job.ownerProfileId] : []), ...openTasks.flatMap((task) => task.assigneeProfileIds)]));
     return ids.length ? ids.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ") : "Unassigned";
   };
-  const dashboardRows: DashboardRow[] = jobs.map((job) => ({
-    id: job.id,
-    jobNumber: job.jobNumber,
-    title: job.title,
-    clientName: job.clientName,
-    currentStage: job.currentStage,
-    currentStageLabel: job.currentStageLabel,
-    nextAction: job.nextAction,
-    receivedAt: job.receivedAt,
-    dueDate: job.dueDate,
-    ownerProfileId: job.ownerProfileId,
-    assigneeProfileIds: Array.from(new Set((taskByJob.get(job.id) ?? []).flatMap((task) => task.assigneeProfileIds))),
-    assigneeLabel: assignedLabel(job),
-    dispatchType: job.dispatchType,
-    myobOrderNumber: job.myobOrderNumber,
-    logoUrl: customerLogoUrl(job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null),
-  }));
+  const dashboardRows: DashboardRow[] = jobs.map((job) => {
+    const linkedCustomer = job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null;
+    const jobClientKey = normaliseClientName(job.clientName);
+    const linkedClientKeys = linkedCustomer ? new Set([normaliseClientName(linkedCustomer.displayName), normaliseClientName(linkedCustomer.companyName ?? "")].filter(Boolean)) : new Set<string>();
+    const matchingCustomer = customerByName.get(jobClientKey);
+    const metadata = metadataByJobId.get(job.id);
+    const linkedLogo = linkedCustomer && linkedClientKeys.has(jobClientKey) ? customerLogoUrl(linkedCustomer) : "";
+    return ({
+      id: job.id,
+      jobNumber: job.jobNumber,
+      title: job.title,
+      clientName: job.clientName,
+      currentStage: job.currentStage,
+      currentStageLabel: job.currentStageLabel,
+      nextAction: job.nextAction,
+      receivedAt: job.receivedAt,
+      dueDate: job.dueDate,
+      ownerProfileId: job.ownerProfileId,
+      assigneeProfileIds: Array.from(new Set((taskByJob.get(job.id) ?? []).flatMap((task) => task.assigneeProfileIds))),
+      assigneeLabel: assignedLabel(job),
+      dispatchType: job.dispatchType,
+      myobOrderNumber: job.myobOrderNumber,
+      jobType: metadata?.jobType ?? "other",
+      logoUrl: linkedLogo || metadata?.enquiryLogoUrl || customerLogoUrl(matchingCustomer) || null,
+    });
+  });
   const counts = {
     active: jobs.length,
     changes: jobs.filter((job) => job.currentStage.includes("changes_requested")).length,

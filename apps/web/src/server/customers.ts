@@ -131,10 +131,12 @@ export async function listCustomersForTenant(tenantId: string, options?: { inclu
 
 export async function listCustomerLogoSummariesForTenant(
   tenantId: string
-): Promise<Array<Pick<CustomerRecord, "id" | "payloadJson">>> {
-  const result = await pool.query<{ id: string; payloadJson: CustomerPayload }>(`
+): Promise<Array<Pick<CustomerRecord, "id" | "displayName" | "companyName" | "payloadJson">>> {
+  const result = await pool.query<{ id: string; displayName: string; companyName: string | null; payloadJson: CustomerPayload }>(`
     SELECT
       id,
+      display_name as "displayName",
+      company_name as "companyName",
       jsonb_build_object('logoUrl', NULLIF(payload_json ->> 'logoUrl', '')) AS "payloadJson"
     FROM app.customers
     WHERE tenant_id = $1::uuid
