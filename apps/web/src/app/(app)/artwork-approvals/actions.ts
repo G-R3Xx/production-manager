@@ -1,6 +1,7 @@
 "use server";
 
 import { Buffer } from "node:buffer";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
@@ -214,6 +215,7 @@ export async function sendArtworkApprovalFromPageAction(formData: FormData): Pro
   }
 
   await markArtworkApprovalSentForTenant(activeTenant.tenantId, approvalId);
+  revalidatePath("/artwork-approvals");
   redirect(`/artwork-approvals?selected=${approvalId}&message=Artwork%20approval%20marked%20as%20sent`);
 }
 
@@ -316,6 +318,7 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
       ]
     });
     await markArtworkApprovalSentForTenant(activeTenant.tenantId, approvalId);
+    revalidatePath("/artwork-approvals");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent(`Artwork email failed: ${message}`)}`);

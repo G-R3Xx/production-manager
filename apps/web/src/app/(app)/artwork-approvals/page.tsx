@@ -20,6 +20,8 @@ import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
+import { ArtworkEmailSendButton } from "./ArtworkEmailSendButton";
+import { ArtworkStatusAutoRefresh } from "./ArtworkStatusAutoRefresh";
 import {
   addArtworkApprovalPageFromPageAction,
   createArtworkApprovalFromQuoteAction,
@@ -268,6 +270,16 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
         .artwork-detail-grid{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:14px;align-items:start}
         .artwork-proof-row{display:grid;grid-template-columns:240px minmax(0,1fr) 250px;overflow:hidden;min-height:190px}
         .artwork-metrics{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:8px}
+        .artwork-email-send{width:100%;min-height:68px;border:1px solid rgba(255,255,255,.22);border-radius:16px;background:linear-gradient(135deg,#155eef 0%,#004eeb 55%,#3538cd 100%);color:#fff;box-shadow:0 10px 22px rgba(21,94,239,.25),inset 0 1px 0 rgba(255,255,255,.2);padding:10px 12px;display:grid;grid-template-columns:42px minmax(0,1fr) 24px;gap:10px;align-items:center;text-align:left;cursor:pointer;transition:transform .16s ease,box-shadow .16s ease,filter .16s ease}
+        .artwork-email-send:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 14px 28px rgba(21,94,239,.34),inset 0 1px 0 rgba(255,255,255,.24);filter:saturate(1.08)}
+        .artwork-email-send:focus-visible{outline:3px solid #84adff;outline-offset:3px}
+        .artwork-email-send:disabled{cursor:not-allowed;opacity:.45;box-shadow:none;transform:none}
+        .artwork-email-send-icon{width:42px;height:42px;border-radius:12px;background:rgba(255,255,255,.17);display:grid;place-items:center}
+        .artwork-email-send-copy{min-width:0;display:grid;gap:3px}
+        .artwork-email-send-copy strong{font-size:14px;line-height:1.2;letter-spacing:-.01em}
+        .artwork-email-send-copy small{font-size:10px;line-height:1.25;color:#dbeafe;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+        .artwork-email-send-arrow{font-size:22px;font-weight:900;text-align:center;transition:transform .16s ease}
+        .artwork-email-send:hover:not(:disabled) .artwork-email-send-arrow{transform:translateX(3px)}
         @media(max-width:1180px){.artwork-detail-grid{grid-template-columns:1fr}.artwork-detail-grid>aside{position:static!important}.artwork-proof-row{grid-template-columns:210px minmax(0,1fr)}.artwork-proof-row>.proof-actions{grid-column:1/-1;border-left:0!important;border-top:1px solid #e4e7ec}}
         @media(max-width:900px){.artwork-workspace-grid{grid-template-columns:1fr}.artwork-workspace-grid>aside{position:static!important;max-height:none!important}.artwork-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.artwork-proof-row{grid-template-columns:1fr}.artwork-proof-row>.proof-preview{border-right:0!important;border-bottom:1px solid #e4e7ec}.artwork-proof-row>.proof-actions{grid-column:auto}}
       `}</style>
@@ -331,6 +343,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
         <main style={{ minWidth: 0, display: "grid", gap: 14 }}>
           {selectedApproval && selectedQuote ? (
             <>
+              <ArtworkStatusAutoRefresh approvalId={selectedApproval.id} updatedAt={selectedApproval.updatedAt} />
               <section style={{ ...card, overflow: "hidden" }}>
                 <div style={{ padding: 18, display: "flex", justifyContent: "space-between", gap: 16, alignItems: "start", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", gap: 12, alignItems: "center", minWidth: 0 }}>
@@ -452,8 +465,9 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     {!readyToSend && selectedApproval.status !== "deleted" ? <div style={{ border: "1px solid #fedf89", background: "#fffaeb", borderRadius: 12, padding: 10, color: "#93370d", fontSize: 11 }}><strong>Not ready to send.</strong> Upload every required proof and sync any missing quote lines first.</div> : null}
                     {selectedApproval.status !== "deleted" ? (
                       <>
-                        <form action={sendArtworkApprovalFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...primaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Mark sent to client</button></form>
-                        {publicUrl && selectedApproval.email ? <form action={emailArtworkApprovalClientAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Email client link</button></form> : null}
+                        {publicUrl && selectedApproval.email ? <form action={emailArtworkApprovalClientAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><ArtworkEmailSendButton disabled={!readyToSend || approved} recipient={selectedApproval.email} alreadySent={sent} /></form> : null}
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#98a2b3", fontSize: 9, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}><span style={{ height: 1, background: "#e4e7ec", flex: 1 }} />Other actions<span style={{ height: 1, background: "#e4e7ec", flex: 1 }} /></div>
+                        <form action={sendArtworkApprovalFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Mark sent without email</button></form>
                         <form action={directApproveArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", color: "#067647", opacity: !readyToSend || approved ? 0.45 : 1 }}>Approve internally</button></form>
                       </>
                     ) : <form action={restoreArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" style={{ ...primaryButton, width: "100%", background: "#067647" }}>Restore approval</button></form>}
