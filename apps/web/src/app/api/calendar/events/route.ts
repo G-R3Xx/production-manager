@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAuthenticatedAppUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { JOB_PROCESS_KEYS, updateJobProcessAssignmentForTenant, updateJobTaskScheduleForTenant } from "@/server/jobs";
-import { syncProductionStepAssignmentsFromJobProcessForTenant } from "@/server/production";
+import { syncProductionStepAssignmentsFromJobProcessForTenant, updateProductionStepAssignmentForTenant } from "@/server/production";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +26,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid calendar update." }, { status: 400 });
   }
 
-  const kind = body.kind === "process" || body.kind === "task" ? body.kind : null;
+  const kind = body.kind === "process" || body.kind === "task" || body.kind === "production_step" ? body.kind : null;
   const jobId = typeof body.jobId === "string" ? body.jobId : "";
   const assigneeProfileIds = Array.isArray(body.assigneeProfileIds)
     ? body.assigneeProfileIds.filter((value): value is string => typeof value === "string")
@@ -50,6 +50,25 @@ export async function PATCH(request: Request) {
         await syncProductionStepAssignmentsFromJobProcessForTenant(tenant.tenantId, jobId);
       }
       return NextResponse.json({ ok: true, dueDate: assignment.dueDate, assigneeProfileIds: assignment.assigneeProfileIds }, { headers: { "Cache-Control": "no-store" } });
+    }
+
+    if (kind === "production_step") {
+      const productionStepId = typeof body.productionStepId === "string" ? body.productionStepId : "";
+      if (!productionStepId) throw new Error("Production procedure could not be identified.");
+      const step = await updateProductionStepAssignmentForTenant(tenant.tenantId, {
+        stepId: productionStepId,
+        dueDate,
+        assigneeProfileIds,
+        inherit: body.inherit === true,
+      });
+      if (!step) throw new Error("Production procedure not found.");
+      return NextResponse.json({
+        ok: true,
+        dueDate: step.dueDate,
+        assigneeProfileIds: step.assigneeProfileIds,
+        assignmentSource: step.assignmentSource,
+        assignmentProcessKey: step.assignmentProcessKey,
+      }, { headers: { "Cache-Control": "no-store" } });
     }
 
     const taskId = typeof body.taskId === "string" ? body.taskId : "";

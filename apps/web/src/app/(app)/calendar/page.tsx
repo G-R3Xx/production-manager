@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listUsersForTenant } from "@/server/users";
+import { listProductionCalendarStepsForTenant } from "@/server/production";
 import {
   JOB_PROCESS_KEYS,
   JOB_PROCESS_META,
@@ -49,18 +50,20 @@ export default async function CalendarPage({ searchParams }: PageProps) {
   const todayKey = australiaTodayKey();
   const initialDate = validDate(readParam(params, "date") || readParam(params, "month"), todayKey);
 
-  const [jobs, tasks, processAssignments, users, metadata] = await Promise.all([
+  const [jobs, tasks, processAssignments, users, metadata, productionSteps] = await Promise.all([
     listJobsForTenant(activeTenant.tenantId, { skipSync: true }),
     listJobTasksForTenant(activeTenant.tenantId),
     listJobProcessAssignmentsForTenant(activeTenant.tenantId),
     listUsersForTenant(activeTenant.tenantId),
     listDashboardJobMetadataForTenant(activeTenant.tenantId),
+    listProductionCalendarStepsForTenant(activeTenant.tenantId),
   ]);
 
   const activeStaff = users.filter((person) => person.membershipStatus === "active");
   const metadataByJob = new Map(metadata.map((item) => [item.jobId, item]));
   const jobById = new Map(jobs.map((job) => [job.id, job]));
   const assignmentByJobProcess = new Map(processAssignments.map((assignment) => [`${assignment.jobId}:${assignment.processKey}`, assignment]));
+  const jobsWithProductionProcedures = new Set(productionSteps.map((step) => step.workflowJobId));
   const events: CalendarEvent[] = [];
 
   for (const job of jobs) {
@@ -71,6 +74,7 @@ export default async function CalendarPage({ searchParams }: PageProps) {
     const currentPosition = processPosition(currentProcess);
 
     for (const processKey of processKeys) {
+      if (processKey === "production" && jobsWithProductionProcedures.has(job.id)) continue;
       const assignment = assignmentByJobProcess.get(`${job.id}:${processKey}`);
       const passed = (currentPosition >= 0 && processPosition(processKey) < currentPosition)
         || (job.currentStage === "invoiced" && processKey === "invoicing");
@@ -78,6 +82,7 @@ export default async function CalendarPage({ searchParams }: PageProps) {
         id: `process:${job.id}:${processKey}`,
         kind: "process",
         taskId: null,
+        productionStepId: null,
         jobId: job.id,
         jobNumber: job.jobNumber,
         jobTitle: job.title,
@@ -91,8 +96,38 @@ export default async function CalendarPage({ searchParams }: PageProps) {
         assigneeProfileIds: assignment?.assigneeProfileIds ?? (processKey === currentProcess && job.ownerProfileId ? [job.ownerProfileId] : []),
         notes: assignment?.notes ?? null,
         currentStage: job.currentStage,
+        assignmentSource: null,
+        assignmentProcessKey: null,
       });
     }
+  }
+
+  for (const step of productionSteps) {
+    const job = jobById.get(step.workflowJobId);
+    if (!job) continue;
+    const itemLabel = step.itemCode || step.itemTitle;
+    const processKey = step.assignmentProcessKey === "dispatch" ? "dispatch" : "production";
+    events.push({
+      id: `production-step:${step.id}`,
+      kind: "production_step",
+      taskId: null,
+      productionStepId: step.id,
+      jobId: job.id,
+      jobNumber: job.jobNumber,
+      jobTitle: job.title,
+      clientName: job.clientName,
+      jobType: metadataByJob.get(job.id)?.jobType ?? "other",
+      processKey,
+      title: itemLabel ? `${step.label} · ${itemLabel}` : step.label,
+      status: step.status === "done" ? "completed" : step.status,
+      priority: job.priority,
+      dueDate: step.dueDate,
+      assigneeProfileIds: step.assigneeProfileIds,
+      notes: step.notes,
+      currentStage: job.currentStage,
+      assignmentSource: step.assignmentSource,
+      assignmentProcessKey: processKey,
+    });
   }
 
   for (const task of tasks.filter((item) => !item.isSystem)) {
@@ -102,6 +137,7 @@ export default async function CalendarPage({ searchParams }: PageProps) {
       id: `task:${task.id}`,
       kind: "task",
       taskId: task.id,
+      productionStepId: null,
       jobId: job.id,
       jobNumber: job.jobNumber,
       jobTitle: job.title,
@@ -115,6 +151,8 @@ export default async function CalendarPage({ searchParams }: PageProps) {
       assigneeProfileIds: task.assigneeProfileIds,
       notes: task.notes,
       currentStage: job.currentStage,
+      assignmentSource: null,
+      assignmentProcessKey: null,
     });
   }
 

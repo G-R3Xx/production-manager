@@ -86,6 +86,24 @@ export type ProductionJobStepSummary = {
   stepsTotal: number;
 };
 
+export type ProductionCalendarStepRecord = {
+  id: string;
+  workflowJobId: string;
+  productionJobId: string;
+  itemId: string | null;
+  itemTitle: string | null;
+  itemCode: string | null;
+  label: string;
+  stepType: string;
+  status: string;
+  notes: string | null;
+  assigneeProfileIds: string[];
+  dueDate: string | null;
+  assignmentSource: "inherited" | "manual" | string;
+  assignmentProcessKey: "production" | "dispatch" | string;
+  sortOrder: number;
+};
+
 export type ApprovedArtworkOptionRecord = {
   approvalId: string;
   quoteId: string;
@@ -917,8 +935,95 @@ export async function syncProductionStepAssignmentsFromJobProcessForTenant(tenan
   await syncInheritedProductionStepAssignments({ tenantId, workflowJobId });
 }
 
+async function ensureRipSetupSteps(input: { productionJobId?: string | null; tenantId?: string | null }): Promise<void> {
+  await pool.query(`
+    INSERT INTO production.production_steps (
+      job_id,
+      item_id,
+      label,
+      step_type,
+      status,
+      checked_at,
+      checked_by,
+      assignee_profile_ids,
+      due_date,
+      assignment_source,
+      assignment_process_key,
+      sort_order,
+      created_at,
+      updated_at
+    )
+    SELECT
+      print_step.job_id,
+      print_step.item_id,
+      'RIP / setup',
+      'rip_setup',
+      CASE WHEN print_step.status = 'done' THEN 'done' ELSE 'pending' END,
+      CASE WHEN print_step.status = 'done' THEN print_step.checked_at ELSE NULL END,
+      CASE WHEN print_step.status = 'done' THEN print_step.checked_by ELSE NULL END,
+      '{}'::uuid[],
+      NULL,
+      'inherited',
+      'production',
+      GREATEST(print_step.sort_order - 1, 0),
+      now(),
+      now()
+    FROM production.production_steps print_step
+    INNER JOIN production.production_jobs production_job ON production_job.id = print_step.job_id
+    WHERE print_step.item_id IS NOT NULL
+      AND (lower(print_step.label) = 'print' OR lower(print_step.step_type) = 'print')
+      AND (NULLIF($1::text, '') IS NULL OR production_job.id = NULLIF($1::text, '')::uuid)
+      AND (NULLIF($2::text, '') IS NULL OR production_job.tenant_id = NULLIF($2::text, '')::uuid)
+      AND NOT EXISTS (
+        SELECT 1
+        FROM production.production_steps existing
+        WHERE existing.job_id = print_step.job_id
+          AND existing.item_id = print_step.item_id
+          AND (lower(existing.label) = 'rip / setup' OR lower(existing.step_type) = 'rip_setup')
+      )
+    ON CONFLICT (job_id, item_id, (lower(label)))
+    WHERE item_id IS NOT NULL
+    DO NOTHING
+  `, [input.productionJobId ?? "", input.tenantId ?? ""]);
+}
+
+export async function listProductionCalendarStepsForTenant(tenantId: string): Promise<ProductionCalendarStepRecord[]> {
+  await ensureProductionTables();
+  await ensureRipSetupSteps({ tenantId });
+  await syncInheritedProductionStepAssignments({ tenantId });
+  const result = await pool.query<ProductionCalendarStepRecord>(`
+    SELECT
+      step.id,
+      workflow_job.id as "workflowJobId",
+      production_job.id as "productionJobId",
+      step.item_id as "itemId",
+      item.title as "itemTitle",
+      item.item_code as "itemCode",
+      step.label,
+      step.step_type as "stepType",
+      step.status,
+      step.notes,
+      COALESCE(step.assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds",
+      step.due_date::text as "dueDate",
+      step.assignment_source as "assignmentSource",
+      step.assignment_process_key as "assignmentProcessKey",
+      step.sort_order as "sortOrder"
+    FROM production.production_steps step
+    INNER JOIN production.production_jobs production_job ON production_job.id = step.job_id
+    INNER JOIN app.jobs workflow_job
+      ON workflow_job.tenant_id = production_job.tenant_id
+     AND workflow_job.production_job_id = production_job.id
+    LEFT JOIN production.production_items item ON item.id = step.item_id
+    WHERE production_job.tenant_id = $1::uuid
+      AND production_job.status <> 'deleted'
+    ORDER BY workflow_job.id, item.sort_order NULLS FIRST, step.sort_order, step.created_at
+  `, [tenantId]);
+  return result.rows;
+}
+
 export async function listProductionStepsForJob(jobId: string): Promise<ProductionStepRecord[]> {
   await ensureProductionTables();
+  await ensureRipSetupSteps({ productionJobId: jobId });
   await syncInheritedProductionStepAssignments({ productionJobId: jobId });
   const result = await pool.query<ProductionStepRecord>(`
     SELECT
@@ -1256,7 +1361,7 @@ function stepPlanForItem(input: {
   const steps: string[] = ["Artwork checked", "Print-ready file attached", "Material / stock allocated"];
 
   if (input.productionType === "small_format" || input.productionType === "plan_printing" || input.productionType === "poster_printing") {
-    steps.push("Print");
+    steps.push("RIP / setup", "Print");
     if (/\b(cello|laminate|lamination|coating|gloss|matt|matte)\b/.test(combined)) steps.push("Cello / laminate");
     if (/\b(fold|folding|score|scoring|crease|creasing)\b/.test(combined)) steps.push("Fold / score");
     if (/\b(staple|saddle|book|booklet|bind|binding)\b/.test(combined)) steps.push("Bind / staple");
@@ -1270,7 +1375,7 @@ function stepPlanForItem(input: {
   const hasPrintedOrCutMedia = /\b(roll stock|print vinyl|printed vinyl|vinyl|sav|cut vinyl|banner media|banner|self adhesive|apply|applied|mount|mounted)\b/.test(combined);
   const hasSeparateSubstrate = /\b(acm|aluminium composite|acrylic|pvc|foamboard|substrate|panel)\b/.test(combined);
 
-  if (/\b(roll|vinyl|banner|cmyk|mono|direct print|white ink|print)\b/.test(combined)) steps.push("Print");
+  if (/\b(roll|vinyl|banner|cmyk|mono|direct print|white ink|print)\b/.test(combined)) steps.push("RIP / setup", "Print");
   if (/\b(laminate|lamination|gloss|matt|matte|anti graffiti|whiteboard)\b/.test(combined)) steps.push("Laminate");
   if (!isDirectPrint && hasPrintedOrCutMedia && hasSeparateSubstrate) steps.push("Apply / mount to substrate");
   if (/\b(jingwei|router|cnc|cut|cutting|drill|holes|eyelet|eyelets)\b/.test(combined)) steps.push("Cut / route / finish");

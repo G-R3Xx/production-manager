@@ -6,8 +6,9 @@ import { useEffect, useMemo, useState } from "react";
 export type CalendarView = "week" | "month" | "agenda";
 export type CalendarEvent = {
   id: string;
-  kind: "process" | "task";
+  kind: "process" | "task" | "production_step";
   taskId: string | null;
+  productionStepId: string | null;
   jobId: string;
   jobNumber: string;
   jobTitle: string;
@@ -21,6 +22,8 @@ export type CalendarEvent = {
   assigneeProfileIds: string[];
   notes: string | null;
   currentStage: string;
+  assignmentSource: string | null;
+  assignmentProcessKey: string | null;
 };
 
 export type CalendarStaff = { id: string; name: string; shortName: string };
@@ -43,7 +46,7 @@ const processOptions = [
   ["survey", "Survey"],
   ["quote", "Quote"],
   ["artwork", "Artwork"],
-  ["production", "Production"],
+  ["production", "Production / procedures"],
   ["dispatch", "Pickup / delivery / install"],
   ["invoicing", "Invoicing"],
   ["task", "Extra tasks"],
@@ -122,6 +125,12 @@ function formatDay(value: string, options: Intl.DateTimeFormatOptions): string {
 
 function processForEvent(event: CalendarEvent): string {
   return event.kind === "task" ? "task" : event.processKey || "task";
+}
+
+function eventKindLabel(event: CalendarEvent): string {
+  if (event.kind === "production_step") return "Production procedure";
+  if (event.kind === "process") return `${processLabels[event.processKey ?? ""] || "Job"} process`;
+  return "Extra task";
 }
 
 function toneForEvent(event: CalendarEvent) {
@@ -208,13 +217,13 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  async function saveSchedule(event: CalendarEvent, dueDate: string | null, assigneeProfileIds: string[]) {
+  async function saveSchedule(event: CalendarEvent, dueDate: string | null, assigneeProfileIds: string[], inherit = false) {
     const previous = events;
     const nextDate = dueDate || null;
     setSavingId(event.id);
     setError("");
     setNotice("");
-    setEvents((current) => current.map((item) => item.id === event.id ? { ...item, dueDate: nextDate, assigneeProfileIds } : item));
+    if (!inherit) setEvents((current) => current.map((item) => item.id === event.id ? { ...item, dueDate: nextDate, assigneeProfileIds } : item));
     try {
       const response = await fetch("/api/calendar/events", {
         method: "PATCH",
@@ -223,18 +232,27 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
           kind: event.kind,
           jobId: event.jobId,
           taskId: event.taskId,
+          productionStepId: event.productionStepId,
           processKey: event.processKey,
           dueDate: nextDate,
           assigneeProfileIds,
           notes: event.notes,
+          inherit,
         }),
       });
       const result = await response.json();
       if (!response.ok || !result.ok) throw new Error(result.error || "Calendar item could not be saved.");
-      setEvents((current) => current.map((item) => item.id === event.id ? { ...item, dueDate: result.dueDate ?? null, assigneeProfileIds: result.assigneeProfileIds ?? [] } : item));
+      setEvents((current) => current.map((item) => item.id === event.id ? {
+        ...item,
+        dueDate: result.dueDate ?? null,
+        assigneeProfileIds: result.assigneeProfileIds ?? [],
+        assignmentSource: result.assignmentSource ?? item.assignmentSource,
+        assignmentProcessKey: result.assignmentProcessKey ?? item.assignmentProcessKey,
+        processKey: result.assignmentProcessKey ?? item.processKey,
+      } : item));
       setDraftDate(result.dueDate ?? "");
       setDraftStaff(result.assigneeProfileIds ?? []);
-      setNotice(`${event.title} updated`);
+      setNotice(inherit ? `${event.title} now uses process defaults` : `${event.title} updated`);
     } catch (cause) {
       setEvents(previous);
       setError(cause instanceof Error ? cause.message : "Calendar item could not be saved.");
@@ -309,7 +327,7 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
           <div>
             <p style={{ margin: 0, color: "#2563eb", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".08em" }}>Operations calendar</p>
             <h1 style={{ margin: "5px 0 3px", fontSize: 34, letterSpacing: "-.035em" }}>{rangeLabel}</h1>
-            <p style={{ margin: 0, color: "#667085" }}>Schedule job processes and extra tasks across the team. Changes save here without reloading the page.</p>
+            <p style={{ margin: 0, color: "#667085" }}>Schedule job processes, individual production procedures and extra tasks across the team. Changes save here without reloading the page.</p>
           </div>
           <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
             {(["week", "month", "agenda"] as CalendarView[]).map((option) => <button key={option} type="button" onClick={() => setView(option)} style={{ minHeight: 40, borderRadius: 11, border: view === option ? "1px solid #155eef" : "1px solid #d0d5dd", background: view === option ? "#eff6ff" : "#fff", color: view === option ? "#155eef" : "#344054", padding: "0 13px", fontWeight: 900, cursor: "pointer", textTransform: "capitalize" }}>{option}</button>)}
@@ -385,7 +403,7 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
           <div style={{ display: "grid", gap: 8 }}>
             {scheduled.filter((event) => event.dueDate! >= weekStart && event.dueDate! <= agendaEnd).sort((a, b) => a.dueDate!.localeCompare(b.dueDate!) || a.title.localeCompare(b.title)).map((event) => {
               const tone = toneForEvent(event);
-              return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} style={{ display: "grid", gridTemplateColumns: "110px minmax(190px,1fr) minmax(180px,.8fr) auto", gap: 12, alignItems: "center", border: "1px solid #e4e7ec", borderLeft: `5px solid ${tone.solid}`, borderRadius: 13, background: "#fff", padding: 11, textAlign: "left", cursor: "pointer" }}><span><strong style={{ display: "block", color: event.dueDate! < todayKey && !completed(event) ? "#b42318" : "#101828" }}>{formatDay(event.dueDate!, { weekday: "short", day: "numeric", month: "short" })}</strong>{event.dueDate! < todayKey && !completed(event) ? <small style={{ color: "#b42318", fontWeight: 900 }}>OVERDUE</small> : null}</span><span><strong style={{ display: "block" }}>{event.title}</strong><small style={{ color: "#667085" }}>{processLabels[event.processKey ?? ""] || "Extra task"}</small></span><span><strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.jobTitle}</strong><small style={{ color: "#667085" }}>{event.jobNumber} · {event.clientName}</small></span><span style={{ color: "#155eef", fontWeight: 900 }}>Edit →</span></button>;
+              return <button key={event.id} type="button" onClick={() => setSelectedId(event.id)} style={{ display: "grid", gridTemplateColumns: "110px minmax(190px,1fr) minmax(180px,.8fr) auto", gap: 12, alignItems: "center", border: "1px solid #e4e7ec", borderLeft: `5px solid ${tone.solid}`, borderRadius: 13, background: "#fff", padding: 11, textAlign: "left", cursor: "pointer" }}><span><strong style={{ display: "block", color: event.dueDate! < todayKey && !completed(event) ? "#b42318" : "#101828" }}>{formatDay(event.dueDate!, { weekday: "short", day: "numeric", month: "short" })}</strong>{event.dueDate! < todayKey && !completed(event) ? <small style={{ color: "#b42318", fontWeight: 900 }}>OVERDUE</small> : null}</span><span><strong style={{ display: "block" }}>{event.title}</strong><small style={{ color: "#667085" }}>{eventKindLabel(event)}</small></span><span><strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{event.jobTitle}</strong><small style={{ color: "#667085" }}>{event.jobNumber} · {event.clientName}</small></span><span style={{ color: "#155eef", fontWeight: 900 }}>Edit →</span></button>;
             })}
             {!scheduled.some((event) => event.dueDate! >= weekStart && event.dueDate! <= agendaEnd) ? <div style={{ padding: 28, textAlign: "center", color: "#667085" }}>No scheduled work matches this 30-day agenda.</div> : null}
           </div>
@@ -393,7 +411,7 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
       </section>
 
       <section style={{ background: "#fff", border: "1px solid #dfe7f2", borderRadius: 20, padding: 18, boxShadow: "0 10px 28px rgba(15,23,42,.04)", display: "grid", gap: 11 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}><div><p style={{ margin: 0, color: "#4f46e5", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Unscheduled work</p><h2 style={{ margin: "3px 0 0" }}>Give every active process a date</h2></div><span style={{ borderRadius: 999, background: unscheduled.length ? "#fffbeb" : "#ecfdf3", color: unscheduled.length ? "#a16207" : "#067647", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>{unscheduled.length}</span></div>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}><div><p style={{ margin: 0, color: "#4f46e5", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Unscheduled work</p><h2 style={{ margin: "3px 0 0" }}>Give every active process and procedure a date</h2></div><span style={{ borderRadius: 999, background: unscheduled.length ? "#fffbeb" : "#ecfdf3", color: unscheduled.length ? "#a16207" : "#067647", padding: "6px 10px", fontSize: 12, fontWeight: 950 }}>{unscheduled.length}</span></div>
         <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>Drag a card directly onto the week or month calendar, or click it to set its date and team.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(245px,1fr))", gap: 8 }}>
           {unscheduled.map((event) => <EventCard key={event.id} event={event} onSelect={() => setSelectedId(event.id)} onDragStart={(dragEvent) => beginDrag(event, dragEvent)} onDragEnd={() => { setDraggingId(null); setDropTarget(null); }} />)}
@@ -405,13 +423,14 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
         <button className="calendar-backdrop" type="button" aria-label="Close calendar details" onClick={() => setSelectedId(null)} />
         <aside className="calendar-drawer" aria-label="Calendar item details">
           <div style={{ display: "grid", gap: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}><div><p style={{ margin: 0, color: toneForEvent(selected).solid, fontSize: 11, fontWeight: 950, textTransform: "uppercase" }}>{selected.kind === "process" ? `${processLabels[selected.processKey ?? ""]} process` : "Extra task"}</p><h2 style={{ margin: "4px 0 0", fontSize: 25 }}>{selected.title}</h2></div><button type="button" onClick={() => setSelectedId(null)} style={{ width: 38, height: 38, borderRadius: 11, border: "1px solid #d0d5dd", background: "#fff", fontSize: 20, cursor: "pointer" }}>×</button></div>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}><div><p style={{ margin: 0, color: toneForEvent(selected).solid, fontSize: 11, fontWeight: 950, textTransform: "uppercase" }}>{eventKindLabel(selected)}</p><h2 style={{ margin: "4px 0 0", fontSize: 25 }}>{selected.title}</h2></div><button type="button" onClick={() => setSelectedId(null)} style={{ width: 38, height: 38, borderRadius: 11, border: "1px solid #d0d5dd", background: "#fff", fontSize: 20, cursor: "pointer" }}>×</button></div>
             <section style={{ border: "1px solid #e4e7ec", borderRadius: 15, background: "#f8fafc", padding: 13 }}><strong style={{ display: "block", fontSize: 16 }}>{selected.jobTitle}</strong><span style={{ display: "block", marginTop: 4, color: "#667085", fontSize: 12 }}>{selected.jobNumber} · {selected.clientName}</span><span style={{ display: "inline-block", marginTop: 8, borderRadius: 999, background: "#fff", border: "1px solid #d0d5dd", padding: "4px 8px", color: "#475467", fontSize: 10, fontWeight: 900 }}>{selected.jobType.replaceAll("_", " ")}</span></section>
+            {selected.kind === "production_step" ? <section style={{ border: `1px solid ${selected.assignmentSource === "manual" ? "#bfdbfe" : "#a5f3fc"}`, borderRadius: 13, background: selected.assignmentSource === "manual" ? "#eff6ff" : "#ecfeff", color: selected.assignmentSource === "manual" ? "#1d4ed8" : "#0e7490", padding: 12, fontSize: 12 }}><strong style={{ display: "block" }}>{selected.assignmentSource === "manual" ? "This procedure has its own schedule" : `Inherited from ${selected.assignmentProcessKey === "dispatch" ? "Pickup / delivery / install" : "Production"}`}</strong><span style={{ display: "block", marginTop: 3 }}>{selected.assignmentSource === "manual" ? "Change it here, or restore the main process defaults below." : "Changing the date or staff here creates an override for this procedure only."}</span></section> : null}
             <label style={labelStyle}>Due date<input type="date" value={draftDate} onChange={(event) => setDraftDate(event.target.value)} style={controlStyle} /></label>
             <fieldset style={{ border: "1px solid #dbe4f0", borderRadius: 15, padding: 12 }}><legend style={{ color: "#344054", fontSize: 11, fontWeight: 950, textTransform: "uppercase" }}>Assigned staff</legend><div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{staff.map((person) => { const active = draftStaff.includes(person.id); return <button key={person.id} type="button" onClick={() => setDraftStaff((current) => active ? current.filter((id) => id !== person.id) : [...current, person.id])} style={filterChip(active, "#155eef", "#eff6ff", "#bfdbfe")}>{active ? "✓ " : "+ "}{person.name}</button>; })}{!staff.length ? <span style={{ color: "#b42318", fontSize: 12 }}>No active staff are available.</span> : null}</div></fieldset>
             {selected.notes ? <section style={{ border: "1px solid #e4e7ec", borderRadius: 13, padding: 12 }}><strong style={{ display: "block", fontSize: 11, color: "#667085", textTransform: "uppercase" }}>Notes</strong><p style={{ margin: "5px 0 0", whiteSpace: "pre-wrap", color: "#344054", fontSize: 13 }}>{selected.notes}</p></section> : null}
             {error ? <div style={{ border: "1px solid #fda29b", borderRadius: 12, background: "#fff5f4", color: "#b42318", padding: 10, fontSize: 12, fontWeight: 800 }}>{error}</div> : null}
-            <div style={{ display: "grid", gap: 8 }}><button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, draftDate || null, draftStaff)} style={{ minHeight: 46, border: 0, borderRadius: 12, background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer" }}>{savingId === selected.id ? "Saving…" : "Save schedule"}</button>{draftDate ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, null, draftStaff)} style={{ minHeight: 42, border: "1px solid #fed7aa", borderRadius: 12, background: "#fff", color: "#c2410c", fontWeight: 900, cursor: "pointer" }}>Move back to unscheduled</button> : null}<Link href={`/jobs/${selected.jobId}`} style={{ minHeight: 44, border: "1px solid #cfd9e8", borderRadius: 12, background: "#fff", color: "#155eef", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontWeight: 950 }}>Open complete job →</Link></div>
+            <div style={{ display: "grid", gap: 8 }}><button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, draftDate || null, draftStaff)} style={{ minHeight: 46, border: 0, borderRadius: 12, background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer" }}>{savingId === selected.id ? "Saving…" : selected.kind === "production_step" ? "Save procedure schedule" : "Save schedule"}</button>{draftDate ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, null, draftStaff)} style={{ minHeight: 42, border: "1px solid #fed7aa", borderRadius: 12, background: "#fff", color: "#c2410c", fontWeight: 900, cursor: "pointer" }}>Move back to unscheduled</button> : null}{selected.kind === "production_step" && selected.assignmentSource === "manual" ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, selected.dueDate, selected.assigneeProfileIds, true)} style={{ minHeight: 42, border: "1px solid #a5f3fc", borderRadius: 12, background: "#fff", color: "#0e7490", fontWeight: 900, cursor: "pointer" }}>Use {selected.assignmentProcessKey === "dispatch" ? "dispatch" : "Production"} defaults</button> : null}<Link href={`/jobs/${selected.jobId}`} style={{ minHeight: 44, border: "1px solid #cfd9e8", borderRadius: 12, background: "#fff", color: "#155eef", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontWeight: 950 }}>Open complete job →</Link></div>
           </div>
         </aside>
       </> : null}
