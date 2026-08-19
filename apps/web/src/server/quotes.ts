@@ -590,6 +590,36 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
   return result.rows[0];
 }
 
+export async function updateQuoteLinkedCustomerForTenant(tenantId: string, quoteId: string, customerId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const quote = await client.query<{ enquiryId: string | null; surveyRequestId: string | null }>(`
+      UPDATE sales.quote_drafts
+      SET linked_customer_id = $3::uuid,
+          updated_at = now()
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+      RETURNING enquiry_id as "enquiryId", survey_request_id as "surveyRequestId"
+    `, [tenantId, quoteId, customerId]);
+    if (!quote.rowCount) throw new Error("The quote could not be found.");
+    const source = quote.rows[0];
+    if (source?.enquiryId) {
+      await client.query(`UPDATE app.enquiries SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, source.enquiryId, customerId]);
+    }
+    if (source?.surveyRequestId) {
+      await client.query(`UPDATE app.survey_requests SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, source.surveyRequestId, customerId]);
+    }
+    await client.query(`UPDATE app.jobs SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND quote_id=$2::uuid`, [tenantId, quoteId, customerId]);
+    await client.query(`UPDATE production.production_jobs SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND quote_id=$2::uuid`, [tenantId, quoteId, customerId]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function addQuoteLine(quoteId: string, input: {
   productId?: string | null;
   productName: string;

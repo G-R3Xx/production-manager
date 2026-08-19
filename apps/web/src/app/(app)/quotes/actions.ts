@@ -25,7 +25,8 @@ import {
   setQuoteDraftStatusForTenant,
   getQuoteDraftById,
   updateQuoteMyobOrderSyncForTenant,
-  updateQuoteJobNameForTenant
+  updateQuoteJobNameForTenant,
+  updateQuoteLinkedCustomerForTenant
 } from "@/server/quotes";
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
@@ -987,6 +988,23 @@ export async function linkQuoteClientToMyobAction(formData: FormData): Promise<v
   }
 
   redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`MYOB customer linked: ${myobCustomer.displayName}`)}`);
+}
+
+export async function linkQuoteToProductionManagerClientAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const customerId = String(formData.get("customerId") ?? "").trim();
+  if (!quoteId || !customerId) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Choose a Production Manager client first.")}`);
+  const customer = await getCustomerById(activeTenant.tenantId, customerId);
+  if (!customer) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("The selected Production Manager client could not be found.")}`);
+  await updateQuoteLinkedCustomerForTenant(activeTenant.tenantId, quoteId, customer.id);
+  await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {
+    status: "ready_to_sync",
+    error: null,
+    payloadJson: { localCustomerLinkedAt: new Date().toISOString(), linkedCustomerId: customer.id }
+  });
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent(`Quote linked to Production Manager client: ${customer.displayName}`)}`);
 }
 
 
