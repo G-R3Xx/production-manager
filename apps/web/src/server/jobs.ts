@@ -1052,6 +1052,44 @@ export async function updateJobTaskForTenant(tenantId: string, input: {
   `, [tenantId, input.taskId, input.title ?? null, input.stage ?? null, status, input.priority ?? null, input.dueDate ?? null, input.assigneeProfileIds ?? [], input.notes ?? null]);
 }
 
+export async function updateJobTaskScheduleForTenant(tenantId: string, input: {
+  taskId: string;
+  dueDate?: string | null;
+  assigneeProfileIds?: string[];
+}): Promise<JobTaskRecord> {
+  await ensureJobWorkspaceSchema();
+  const requestedIds = Array.from(new Set((input.assigneeProfileIds ?? []).map((id) => id.trim()).filter(Boolean)));
+  const validStaff = requestedIds.length
+    ? await pool.query<{ id: string }>(`
+        SELECT DISTINCT up.id
+        FROM app.memberships membership
+        INNER JOIN app.user_profiles up ON up.id = membership.user_profile_id
+        WHERE membership.tenant_id = $1::uuid
+          AND membership.status = 'active'
+          AND up.id = ANY($2::uuid[])
+      `, [tenantId, requestedIds])
+    : { rows: [] as Array<{ id: string }> };
+  if (validStaff.rows.length !== requestedIds.length) {
+    throw new Error("One or more selected staff members are no longer active in this workspace.");
+  }
+
+  const result = await pool.query<JobTaskRecord>(`
+    UPDATE app.job_tasks
+    SET due_date = NULLIF($3::text,'')::date,
+        assignee_profile_ids = $4::uuid[],
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid AND is_system = false
+    RETURNING
+      id, tenant_id as "tenantId", job_id as "jobId", title, stage, status, priority,
+      due_date::text as "dueDate", start_at::text as "startAt", end_at::text as "endAt", all_day as "allDay",
+      COALESCE(assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds", notes, is_system as "isSystem", system_key as "systemKey",
+      process_key as "processKey", completed_at::text as "completedAt", created_at::text as "createdAt", updated_at::text as "updatedAt"
+  `, [tenantId, input.taskId, input.dueDate ?? null, requestedIds]);
+  const task = result.rows[0];
+  if (!task) throw new Error("Calendar task not found in this workspace.");
+  return task;
+}
+
 export async function updateJobMetaForTenant(tenantId: string, input: {
   jobId: string;
   title?: string | null;
