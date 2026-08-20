@@ -2,7 +2,6 @@
 
 import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
-import { QuoteLineBuilder } from "./QuoteLineBuilder";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
 
 export type QuoteMaterial = {
@@ -49,78 +48,6 @@ export type PricingSettings = {
   manualQuoteDiscountPercent?: string | number | null;
 };
 
-type SavedQuoteChoice = {
-  id?: string | null;
-  label?: string | null;
-  value?: string | null;
-  widthMm?: string | null;
-  heightMm?: string | null;
-};
-
-type SavedQuoteQuestion = {
-  id?: string | null;
-  key: string;
-  label: string;
-  type: string;
-  required?: boolean;
-  defaultValue?: string | null;
-  helpText?: string | null;
-  options?: SavedQuoteChoice[];
-  showWhen?: {
-    optionKey?: string | null;
-    optionValues?: string[] | null;
-    numericGreaterThan?: number | null;
-  } | null;
-};
-
-type SavedQuoteComponent = {
-  id?: string | null;
-  label?: string | null;
-  kind?: string | null;
-  materialId?: string | null;
-  quantity?: string | null;
-  unit?: string | null;
-  ruleType?: string | null;
-  wastePercent?: string | null;
-  notes?: string | null;
-  stockUsage?: {
-    usageBasis?: string | null;
-    dimensionSource?: string | null;
-    optionKey?: string | null;
-    optionValues?: string[] | null;
-    widthMm?: string | null;
-    heightMm?: string | null;
-    rollWidthMm?: string | null;
-    partsPerSheet?: string | null;
-    metresPerUnit?: string | null;
-    sheetsPerUnit?: string | null;
-    sellRate?: string | null;
-    chargeName?: string | null;
-    quantitySource?: string | null;
-    quantityPrompt?: string | null;
-    quantityPresets?: Array<{ id?: string | null; label?: string | null; value?: string | null; qty?: string | number | null }> | null;
-    allowCustomQuantity?: boolean | null;
-    customQuantityLabel?: string | null;
-    quantityOptionKey?: string | null;
-    quantityCustomFieldKey?: string | null;
-    quantityValueMap?: Record<string, string | number | null> | null;
-    quantityUnitLabel?: string | null;
-  } | null;
-  trigger?: {
-    optionKey?: string | null;
-    optionValues?: string[] | null;
-    numericGreaterThan?: number | null;
-  } | null;
-};
-
-type SavedQuoteProduct = {
-  id: string;
-  name: string;
-  sku?: string | null;
-  fields: SavedQuoteQuestion[];
-  components: SavedQuoteComponent[];
-};
-
 type EditableQuoteLine = {
   id: string;
   productName: string;
@@ -136,19 +63,13 @@ type QuoteMaterialFlowBuilderProps = {
   quoteId: string;
   materials: QuoteMaterial[];
   pricingSettings?: PricingSettings;
-  savedProducts?: SavedQuoteProduct[];
   editingLine?: EditableQuoteLine | null;
-  editingStep?: QuickQuoteStep | null;
-  compactEdit?: boolean;
-  compactAll?: boolean;
-  onCompactCancel?: () => void;
 };
 
 type FlowType = QuickQuoteFlowType;
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
 type ServiceType = "" | "pickup" | "delivery" | "install";
-type BuilderMode = "quick" | "saved" | "advanced";
 type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl";
 type InkChoice = "" | "none" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
@@ -157,7 +78,6 @@ type DropDirection = "auto" | "vertical" | "horizontal";
 type ArtworkChoice = "" | "required" | "client_supplied";
 type LabourBasis = "per_item" | "line_total";
 type SmallPrintColour = "" | "mono" | "cmyk" | "special";
-type StepKey = QuickQuoteStep;
 
 type CostRow = {
   label: string;
@@ -318,7 +238,6 @@ const eyeletPresets = [
 const inputStyle = { minHeight: 48, borderRadius: 16, border: "1px solid #cfd9e8", padding: "0 14px", width: "100%", boxSizing: "border-box" as const, background: "#fff", color: "#0f172a", fontWeight: 700 };
 const textareaStyle = { minHeight: 92, borderRadius: 16, border: "1px solid #cfd9e8", padding: "12px 14px", width: "100%", boxSizing: "border-box" as const, fontFamily: "inherit", background: "#fff" };
 const primaryButton = { minHeight: 46, borderRadius: 16, border: "none", background: "#155eef", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 18px" };
-const darkButton = { minHeight: 46, borderRadius: 16, border: "none", background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 18px" };
 const ghostButton = { minHeight: 42, borderRadius: 14, border: "1px solid #d0d7e2", background: "#fff", color: "#1e293b", fontWeight: 900, cursor: "pointer", padding: "0 14px" };
 
 function numberValue(value: string | number | null | undefined, fallback = 0): number {
@@ -981,22 +900,6 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
   };
 }
 
-function cardButtonStyle(selected: boolean, accent = "#2563eb") {
-  return {
-    border: selected ? `2px solid ${accent}` : "1px solid #dbe5f3",
-    borderRadius: 22,
-    padding: 16,
-    background: selected ? "linear-gradient(135deg, #eff6ff, #ffffff)" : "#ffffff",
-    boxShadow: selected ? "0 16px 34px rgba(37,99,235,0.14)" : "0 10px 26px rgba(15,23,42,0.05)",
-    textAlign: "left" as const,
-    cursor: "pointer",
-    display: "grid",
-    gap: 8,
-    minHeight: 122,
-    color: "#0f172a"
-  };
-}
-
 function selectedKeys<T extends { key: string; label: string }>(items: T[], keys: string[]): string {
   return items.filter((item) => keys.includes(item.key)).map((item) => item.label).join(", ");
 }
@@ -1093,7 +996,7 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, savedProducts = [], editingLine = null, editingStep = null, compactEdit = false, compactAll = false, onCompactCancel }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, editingLine = null }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const materialPool = useMemo(() => {
     const restoredMaterials = materialsFromSnapshot(initialSnapshot);
@@ -1118,11 +1021,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       }))
     : [createBlankComponentPart()];
 
-  const [builderMode, setBuilderMode] = useState<BuilderMode>(editingLine ? "advanced" : initialSnapshot?.builderMode ?? "quick");
-  const [activeStep, setActiveStepState] = useState<StepKey>(editingStep ?? initialSnapshot?.activeStep ?? (initialSnapshot?.flowType === "service" ? "service_type" : initialSnapshot?.flowType === "small_format" ? "small_type" : initialSnapshot?.flowType === "plan_printing" || initialSnapshot?.flowType === "poster_printing" ? "small_stock" : "base"));
-  const setActiveStep = (next: StepKey) => {
-    if (!compactEdit) setActiveStepState(next);
-  };
+  const activeStep: QuickQuoteStep = initialSnapshot?.activeStep ?? (initialSnapshot?.flowType === "service" ? "service_type" : initialSnapshot?.flowType === "small_format" ? "small_type" : initialSnapshot?.flowType === "plan_printing" || initialSnapshot?.flowType === "poster_printing" ? "small_stock" : "base");
   const [flowType, setFlowType] = useState<FlowType>(initialSnapshot?.flowType || "signage");
   const isPrintDepartment = isPrintDepartmentFlow(flowType);
 
@@ -1183,6 +1082,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [deliveryCharge, setDeliveryCharge] = useState(snapshotString(initialSnapshot, "deliveryCharge"));
   const [installCrewSize, setInstallCrewSize] = useState(snapshotString(initialSnapshot, "installCrewSize", "1"));
   const [installMinutes, setInstallMinutes] = useState(snapshotString(initialSnapshot, "installMinutes"));
+  const [installLabourBasis, setInstallLabourBasis] = useState<LabourBasis>(labourBasisValue(initialSnapshot?.installLabourBasis, "line_total"));
   const [travelCharge, setTravelCharge] = useState(snapshotString(initialSnapshot, "travelCharge"));
   const [serviceFixings, setServiceFixings] = useState<string[]>(snapshotStringArray(initialSnapshot, "serviceFixings"));
   const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingQty"));
@@ -1210,6 +1110,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const smallSizePresets = useMemo(() => normaliseSizePresets(pricingSettings?.smallSizePresets, defaultSmallSizePresets), [pricingSettings?.smallSizePresets]);
   const planSizePresets = useMemo(() => defaultPlanSizePresets, []);
   const posterSizePresets = useMemo(() => defaultPosterSizePresets, []);
+  const activeSizePresets = flowType === "small_format"
+    ? smallSizePresets
+    : flowType === "plan_printing"
+      ? planSizePresets
+      : flowType === "poster_printing"
+        ? posterSizePresets
+        : signageSizePresets;
+  const activeSizePresetValue = activeSizePresets.some((preset) => preset.width === widthMm && preset.height === heightMm)
+    ? `${widthMm}x${heightMm}`
+    : "";
   const inkChoices = useMemo<Array<{ key: Exclude<InkChoice, "">; label: string; icon: string; description: string }>>(() => [
     { key: "none", label: "No print", icon: "—", description: "Use the selected stock without printing or ink charges." },
     { key: "cmyk", label: "CMYK", icon: "●", description: `${money(inkRatePerSqm)}/m² colour ink charge.` },
@@ -1348,228 +1258,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     return qty > 0 && rate > 0 && (part.name.trim() || material);
   });
   const componentHasCost = pricedComponentParts.length > 0 || numberValue(componentLabourMinutes, 0) > 0;
-
-  const steps = useMemo(() => {
-    const next: Array<{ key: StepKey; label: string; complete: boolean; icon: string }> = [
-      { key: "flow", label: "Type", complete: Boolean(flowType), icon: "1" }
-    ];
-
-    if (flowType === "service") {
-      next.push({ key: "service_type", label: "Service", complete: Boolean(serviceType), icon: "2" });
-      next.push({ key: "service_details", label: serviceType === "install" ? "Crew / time" : serviceType === "delivery" ? "Charge" : "Details", complete: serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) >= 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0), icon: "3" });
-      if (serviceType === "install") next.push({ key: "service_fixings", label: "Fixings", complete: true, icon: "4" });
-      next.push({ key: "review", label: "Review", complete: Boolean(serviceType), icon: "✓" });
-      return next;
-    }
-
-    if (flowType === "component") {
-      next.push({ key: "component_details", label: "Component", complete: Boolean(componentName.trim()), icon: "2" });
-      next.push({ key: "component_parts", label: "Parts", complete: pricedComponentParts.length > 0, icon: "3" });
-      next.push({ key: "component_labour", label: "Labour", complete: true, icon: "4" });
-      next.push({ key: "review", label: "Review", complete: Boolean(componentName.trim() && componentHasCost), icon: "✓" });
-      return next;
-    }
-
-
-    if (isPrintDepartment) {
-      next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: "2" });
-      next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: "3" });
-      next.push({ key: "artwork", label: "Artwork", complete: Boolean(artworkChoice), icon: "4" });
-      next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "5" });
-      next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "6" });
-      next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "7" });
-      next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: "8" });
-      next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: "9" });
-      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
-      next.push({ key: "review", label: "Review", complete: Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && serviceType), icon: "✓" });
-      return next;
-    }
-
-    if (flowType === "small_format") {
-      next.push({ key: "small_type", label: "Print item", complete: Boolean(smallType), icon: "2" });
-      if (isDuplicateBook) next.push({ key: "ncr_details", label: "Book details", complete: ncrDetailsComplete, icon: "3" });
-      next.push({ key: "small_stock", label: "Stock", complete: Boolean(selectedSmallStock), icon: isDuplicateBook ? "4" : "3" });
-      next.push({ key: "small_size", label: "Size", complete: width > 0 && height > 0, icon: isDuplicateBook ? "5" : "4" });
-      next.push({ key: "artwork", label: "Artwork", complete: Boolean(artworkChoice), icon: isDuplicateBook ? "6" : "5" });
-      if (!isDuplicateBook) {
-        next.push({ key: "small_sides", label: "Sides", complete: Boolean(sides), icon: "6" });
-        next.push({ key: "small_print", label: "Print colour", complete: Boolean(smallPrintColour), icon: "7" });
-        next.push({ key: "small_coating", label: "Coating", complete: Boolean(smallCoatingId), icon: "8" });
-      }
-      next.push({ key: "small_finishing", label: "Finishing", complete: true, icon: isDuplicateBook ? "7" : "9" });
-      next.push({ key: "small_quantity", label: "Quantity", complete: quantityNumber > 0, icon: isDuplicateBook ? "8" : "10" });
-      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
-      next.push({ key: "review", label: "Review", complete: Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && serviceType), icon: "✓" });
-      return next;
-    }
-
-    if (flowType === "signage") {
-      next.push({ key: "base", label: "Base material", complete: Boolean(baseType), icon: "2" });
-      if (isRollStockBase) {
-        next.push({ key: "media", label: "Roll stock", complete: Boolean(mediaId && selectedMainMaterial), icon: "3" });
-      } else {
-        next.push({ key: "thickness", label: "Thickness", complete: Boolean(thickness), icon: "3" });
-        next.push({ key: "colour", label: "Colour", complete: Boolean(colour && selectedMainMaterial), icon: "4" });
-      }
-      next.push({ key: "size", label: "Size", complete: width > 0 && height > 0, icon: "5" });
-      next.push({ key: "artwork", label: "Artwork", complete: Boolean(artworkChoice), icon: "6" });
-      next.push({ key: "print", label: isRollStockBase ? "Print setup" : "Print method", complete: Boolean(resolvedPrintMethod), icon: "7" });
-      if (!isRollStockBase && needsMediaStep) next.push({ key: "media", label: resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media", complete: Boolean(mediaId), icon: "8" });
-      if (needsInkStep) next.push({ key: "ink", label: "Ink", complete: Boolean(ink), icon: "9" });
-      if (printed) next.push({ key: "sides", label: canChooseReversePrint ? "Sides / direction" : "Sides", complete: Boolean(sides && (!canChooseReversePrint || printDirection)), icon: "•" });
-      if (printed) next.push({ key: "laminate", label: backingApplicable ? "Backing / laminate" : "Laminate", complete: Boolean(laminateId && (!backingApplicable || backingId)), icon: "•" });
-      next.push({ key: "finishing", label: "Finishing", complete: true, icon: "•" });
-      next.push({ key: "dispatch", label: "Dispatch", complete: Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0))), icon: "→" });
-      next.push({ key: "review", label: "Review", complete: Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && serviceType), icon: "✓" });
-    }
-
-    return next;
-  }, [flowType, isPrintDepartment, componentName, pricedComponentParts.length, componentHasCost, smallType, isDuplicateBook, ncrDetailsComplete, selectedSmallStock, width, height, artworkChoice, artworkMinutes, sides, smallPrintColour, smallCoatingId, quantityNumber, baseType, thickness, colour, selectedMainMaterial, resolvedPrintMethod, needsMediaStep, needsInkStep, mediaId, ink, printed, isClearAcrylic, isRollStockBase, canChooseReversePrint, backingApplicable, backingId, printDirection, laminateId, laminateMinutes, serviceType, deliveryCharge, installCrewSize, installMinutes]);
-
-  const activeStepIndex = Math.max(0, steps.findIndex((step) => step.key === activeStep));
-  const nextStep = steps[activeStepIndex + 1]?.key;
-  const previousStep = steps[activeStepIndex - 1]?.key;
-
-  function jumpToNext(current: StepKey) {
-    const index = steps.findIndex((step) => step.key === current);
-    const next = steps[index + 1]?.key;
-    if (next) setActiveStep(next);
-  }
-
-  function chooseFlow(nextFlow: FlowType) {
-    setFlowType(nextFlow);
-    setBaseType("");
-    setThickness("");
-    setColour("");
-    setSmallType("");
-    setSmallStockId("");
-    setCustomSmallStockEnabled(false);
-    setCustomSmallStockName("");
-    setCustomSmallStockSupplier("");
-    setCustomSmallStockCost("");
-    setCustomSmallStockWidthMm("");
-    setCustomSmallStockLengthMm("");
-    setCustomSmallStockGsm("");
-    setNcrCopies("");
-    setNcrSetsPerBook("");
-    setNcrPageColours(["White", "Yellow", "Pink", "Blue"]);
-    setNcrCoverColour("");
-    setNcrTapeColour("");
-    setWidthMm("");
-    setHeightMm("");
-    setBleedSpacingMm("");
-    setDropDirection("auto");
-    setDropOverlapMm("0");
-    setArtworkChoice("");
-    setArtworkMinutes("");
-    setPrintMethod("");
-    setPrintSetupMinutes("");
-    setPrintSetupLabourBasis("line_total");
-    setMediaId("");
-    setInk("");
-    setSides("");
-    setPrintDirection("");
-    setBackingId("");
-    setLaminateId("");
-    setLaminateMinutes("");
-    setLaminateLabourBasis("line_total");
-    setFinishingLabourBasis({});
-    setSmallFinishingLabourBasis({});
-    setSmallPrintColour("");
-    setSmallCoatingId("");
-    setFinishings([]);
-    setSmallFinishings([]);
-    setQuantity("1");
-    setServiceType("");
-    setDeliveryCharge("");
-    setInstallCrewSize("1");
-    setInstallMinutes("");
-    setTravelCharge("");
-    setServiceFixings([]);
-    setServiceFixingQty({});
-    setServiceFixingRate({});
-    setComponentName("");
-    setComponentDescription("");
-    setComponentParts([createBlankComponentPart()]);
-    setComponentLabourLabel("Build / assembly labour");
-    setComponentLabourMinutes("");
-    setUnitPriceOverridden(false);
-    setActiveStep(nextFlow === "small_format" ? "small_type" : isPrintDepartmentFlow(nextFlow) ? "small_stock" : nextFlow === "service" ? "service_type" : nextFlow === "component" ? "component_details" : "base");
-  }
-
-  function resetAfterBase(nextBase: BaseType) {
-    const rollStockBase = nextBase === "banner";
-    setBaseType(nextBase);
-    setThickness("");
-    setColour("");
-    setWidthMm("");
-    setHeightMm("");
-    setBleedSpacingMm("");
-    setDropDirection("auto");
-    setDropOverlapMm("0");
-    setArtworkChoice("");
-    setArtworkMinutes("");
-    setPrintMethod(rollStockBase ? "roll_stock" : "");
-    setPrintSetupMinutes("");
-    setPrintSetupLabourBasis("line_total");
-    setMediaId("");
-    setInk("");
-    setSides("");
-    setPrintDirection("");
-    setBackingId("");
-    setLaminateId("");
-    setLaminateMinutes("");
-    setLaminateLabourBasis("line_total");
-    setFinishings([]);
-    setFinishingLabourBasis({});
-    setUnitPriceOverridden(false);
-    setActiveStep(rollStockBase ? "media" : "thickness");
-  }
-
-  function setPresetSize(widthValue: string, heightValue: string, next: StepKey) {
-    setWidthMm(widthValue);
-    setHeightMm(heightValue);
-    setActiveStep(next);
-  }
-
-  function nextStepAfterPrint(method: PrintMethod): StepKey {
-    if (isRollStockBase) return "ink";
-    if (method === "roll_stock" || method === "cut_vinyl") return "media";
-    if (method === "direct_print") return "ink";
-    return "finishing";
-  }
-
-  function setPrint(nextMethod: Exclude<PrintMethod, "">) {
-    setPrintMethod(nextMethod);
-    setPrintSetupMinutes("");
-    setMediaId("");
-    if (nextMethod === "no_print" || nextMethod === "cut_vinyl" || (nextMethod !== "roll_stock" && ink === "none")) setInk("");
-    if (nextMethod === "no_print") {
-      setSides("");
-      setPrintDirection("");
-      setBackingId("");
-      setLaminateId("none");
-      setLaminateMinutes("");
-      setActiveStep("finishing");
-    }
-    setUnitPriceOverridden(false);
-  }
-
-  function chooseInk(nextInk: InkChoice, nextStep?: StepKey) {
-    setInk(nextInk);
-    if (nextInk === "none") {
-      setPrintSetupMinutes("");
-      setSides("");
-      setPrintDirection("");
-      setBackingId("");
-      setLaminateId("none");
-      setLaminateMinutes("");
-      if (nextStep) setActiveStep("finishing");
-    } else if (nextStep) {
-      setActiveStep(nextStep);
-    }
-    setUnitPriceOverridden(false);
-  }
 
   function toggleFinishing(key: string) {
     setFinishings((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
@@ -1911,17 +1599,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         const people = Math.max(1, numberValue(installCrewSize, 1));
         const minutes = numberValue(installMinutes, 0);
         if (minutes > 0) {
-          const amount = people * minutes;
+          const amount = people * labourMinutesPerUnit(minutes, installLabourBasis, quantityNumber);
           const rate = labourRate / 60;
-          rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount, unit: "min", rate, cost: amount * rate, note: `${minutesLabel(minutes)} on site per installer · ${money(labourRate)}/hr` });
+          rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount, unit: "person-min", rate, cost: amount * rate, note: labourChargeNote(minutes, installLabourBasis, labourRate) });
         }
         const travel = numberValue(travelCharge, 0);
-        if (travel > 0) rows.push({ label: "Travel / delivery", detail: "Travel or call-out allowance", amount: 1, unit: "each", rate: travel, cost: travel });
+        if (travel > 0) rows.push({ label: "Travel / call-out", detail: "One dollar charge for the complete quote line", amount: 1 / Math.max(1, quantityNumber), unit: "charge", rate: travel, cost: travel / Math.max(1, quantityNumber), note: `${money(travel)} total; not multiplied by quantity` });
         for (const item of fixingOptions) {
           if (!serviceFixings.includes(item.key)) continue;
           const qty = numberValue(serviceFixingQty[item.key], 0);
           const rate = numberValue(serviceFixingRate[item.key], 0);
-          if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable", amount: qty, unit: item.unit, rate, cost: qty * rate });
+          if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable total", amount: qty / Math.max(1, quantityNumber), unit: item.unit, rate, cost: (qty * rate) / Math.max(1, quantityNumber), note: `${usage(qty)} ${item.unit} total for the quote line` });
         }
       }
     }
@@ -1954,7 +1642,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1969,6 +1657,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const selectedBackingName = backingApplicable ? (backingId === "none" ? "None" : selectedBackingGroup?.label ?? customerMaterialName(selectedBacking)) : "";
   const selectedLaminateName = laminateId === "none" ? "None" : customerMaterialName(selectedLaminate);
   const selectedSmallCoatingName = smallCoatingId === "none" ? "None" : customerMaterialName(selectedSmallCoating);
+  const dispatchLineQuantity = serviceType === "install" && installLabourBasis === "per_item" ? Math.max(1, quantityNumber) : 1;
   const dispatchCosts = useMemo<CostRow[]>(() => {
     const rows: CostRow[] = [];
 
@@ -1983,28 +1672,29 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       if (minutes > 0) {
         const amount = people * minutes;
         const rate = labourRate / 60;
-        rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount, unit: "min", rate, cost: amount * rate, note: `${minutesLabel(minutes)} on site per installer · ${money(labourRate)}/hr` });
+        rows.push({ label: "Install labour", detail: `${usage(people)} installer${people === 1 ? "" : "s"}`, amount, unit: "person-min", rate, cost: amount * rate, note: labourChargeNote(minutes, installLabourBasis, labourRate) });
       }
       const travel = numberValue(travelCharge, 0);
-      if (travel > 0) rows.push({ label: "Travel / delivery", detail: "Travel or call-out allowance", amount: 1, unit: "each", rate: travel, cost: travel });
+      if (travel > 0) rows.push({ label: "Travel / call-out", detail: "One dollar charge for the complete quote line", amount: 1 / dispatchLineQuantity, unit: "charge", rate: travel, cost: travel / dispatchLineQuantity, note: `${money(travel)} total; not multiplied by quantity` });
       for (const item of fixingOptions) {
         if (!serviceFixings.includes(item.key)) continue;
         const qty = numberValue(serviceFixingQty[item.key], 0);
         const rate = numberValue(serviceFixingRate[item.key], 0);
-        if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable", amount: qty, unit: item.unit, rate, cost: qty * rate });
+        if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable total", amount: qty / dispatchLineQuantity, unit: item.unit, rate, cost: (qty * rate) / dispatchLineQuantity, note: `${usage(qty)} ${item.unit} total for the quote line` });
       }
     }
 
     return rows;
-  }, [serviceType, deliveryCharge, installCrewSize, installMinutes, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate]);
+  }, [serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate, dispatchLineQuantity]);
   const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
   const dispatchUnitPrice = dispatchRawCost * pricingMultiplier;
+  const dispatchLineTotal = dispatchUnitPrice * dispatchLineQuantity;
   const dispatchSummary = serviceType === "pickup"
     ? "Pickup"
     : serviceType === "delivery"
       ? `Delivery${deliveryCharge ? ` · allowance ${money(numberValue(deliveryCharge, 0))}` : ""}`
       : serviceType === "install"
-        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? minutesLabel(installMinutes) : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
+        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${minutesLabel(installMinutes)} ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
         : "";
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
   const baseSheetUse = flowType === "signage" ? costs.find((row) => row.label === "Base material" && row.unit === "sheet") : undefined;
@@ -2072,8 +1762,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       serviceType === "install" ? "Install only — client-supplied signage" : serviceLabel,
       serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
-      serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install` : null,
-      serviceType === "install" && travelCharge ? `Travel ${money(numberValue(travelCharge, 0))}` : null,
+      serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null,
+      serviceType === "install" && travelCharge ? `Travel / call-out charge ${money(numberValue(travelCharge, 0))} total` : null,
       serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
     ].filter(Boolean).join(" · ")
     : isPrintDepartment
@@ -2145,7 +1835,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     surveyNeedsConfiguration: initialSnapshot?.surveyImported ? !canSave : undefined,
     surveyContext: initialSnapshot?.surveyContext,
     linkedDispatchLineId: initialSnapshot?.linkedDispatchLineId ?? null,
-    builderMode: builderMode === "saved" ? "quick" : builderMode,
+    builderMode: "quick",
     activeStep,
     flowType,
     baseType,
@@ -2200,6 +1890,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     deliveryCharge,
     installCrewSize,
     installMinutes,
+    installLabourBasis,
     travelCharge,
     serviceFixings,
     serviceFixingQty,
@@ -2247,18 +1938,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     version: 1,
     source: "quick_quote_builder",
     parentLineId: editingLine?.id ?? null,
-    builderMode: "advanced",
+    builderMode: "quick",
     activeStep: "service_details",
     flowType: "service",
     serviceType,
     deliveryCharge,
     installCrewSize,
     installMinutes,
+    installLabourBasis,
     travelCharge,
     serviceFixings,
     serviceFixingQty,
     serviceFixingRate,
-    quantity: "1",
+    quantity: String(dispatchLineQuantity),
     unitPriceOverridden: false,
     manualUnitPrice: dispatchUnitPrice.toFixed(2),
     notes: "",
@@ -2276,11 +1968,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       pricingBreakdown: dispatchCosts.map((row) => ({ ...row }))
     }
   };
-
-  function stepTitle(): string {
-    const current = steps.find((step) => step.key === activeStep);
-    return current?.label ?? "Quote builder";
-  }
 
   function renderDropLayoutControls(compact = false) {
     if (!activeRollMaterial) return null;
@@ -2319,1102 +2006,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     );
   }
 
-  function renderArtworkStep(nextAfterChoice: StepKey) {
-    return (
-      <div style={{ display: "grid", gap: 16 }}>
-        <StepIntro icon="✎" title="Does this item need artwork?" text="Every quote line now asks this. Client-supplied artwork adds no labour; required artwork charges the minutes you enter." />
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
-          <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); setActiveStep(nextAfterChoice); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#64748b")}>
-            <span style={{ fontSize: 32 }}>✓</span>
-            <strong>No - client supplied</strong>
-            <span style={{ color: "#64748b" }}>No artwork charge is added.</span>
-          </button>
-          <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}>
-            <span style={{ fontSize: 32 }}>✎</span>
-            <strong>Yes - artwork required</strong>
-            <span style={{ color: "#64748b" }}>Enter the design/artwork time for this item.</span>
-          </button>
-        </div>
-        {artworkChoice === "required" ? (
-          <div style={{ border: "1px solid #fecdd3", borderRadius: 20, padding: 14, background: "#fff1f2", display: "grid", gap: 10 }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes (optional)</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="Optional, eg 30" type="number" min="0" step="1" style={inputStyle} /></label>
-            <small style={{ color: "#64748b" }}>Leave blank or enter 0 when no artwork labour charge is needed.</small>
-            <button type="button" onClick={() => setActiveStep(nextAfterChoice)} style={primaryButton}>Continue</button>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  function chooseInstallOnly() {
-    chooseFlow("service");
-    setServiceType("install");
-    setQuantity("1");
-    setActiveStep("service_details");
-  }
-
-  function chooseQuickFlow(nextFlow: FlowType) {
-    if (nextFlow === flowType) return;
-    if (nextFlow === "service") {
-      chooseInstallOnly();
-      return;
-    }
-    chooseFlow(nextFlow);
-  }
-
-  function renderDispatchSection(installOnly = false) {
-    return (
-      <div style={{ display: "grid", gap: 14 }}>
-        <div style={{ display: "grid", gap: 4 }}>
-          <strong style={{ fontSize: 18 }}>{installOnly ? "Install client-supplied signage" : "How can we get your order to you?"}</strong>
-          <span style={{ color: "#64748b", fontSize: 13 }}>{installOnly ? "No substrate or production material is added. Quote only the installation labour, travel and fixings." : "Pickup is no charge. Delivery and install add their own clear line to the quote."}</span>
-        </div>
-        {!installOnly ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-            {serviceTypes.map((choice) => (
-              <button
-                key={choice.key}
-                type="button"
-                onClick={() => { setServiceType(choice.key); setUnitPriceOverridden(false); }}
-                style={{
-                  ...cardButtonStyle(serviceType === choice.key, choice.key === "install" ? "#ea580c" : choice.key === "delivery" ? "#0891b2" : "#16a34a"),
-                  minHeight: 96,
-                  padding: 14
-                }}
-              >
-                <span style={{ fontSize: 28 }}>{choice.icon}</span>
-                <strong>{choice.label}</strong>
-                <span style={{ color: "#64748b", fontSize: 13 }}>{choice.description}</span>
-              </button>
-            ))}
-          </div>
-        ) : null}
-        {serviceType === "delivery" ? (
-          <div style={{ border: "1px solid #bae6fd", borderRadius: 18, padding: 14, background: "#f0f9ff", display: "grid", gap: 10 }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Delivery / courier cost</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="0.01" style={inputStyle} /></label>
-            <span style={{ color: "#475467", fontSize: 13 }}>This becomes a separate Delivery line on the quote.</span>
-          </div>
-        ) : null}
-        {serviceType === "install" ? (
-          <div style={{ border: "1px solid #fed7aa", borderRadius: 18, padding: 14, background: "#fff7ed", display: "grid", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-              <label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 2" type="number" min="1" step="1" style={inputStyle} /></label>
-              <label style={{ display: "grid", gap: 6 }}><b>Install minutes</b><input value={installMinutes} onChange={(event) => { setInstallMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 120" type="number" min="0" step="1" style={inputStyle} /></label>
-              <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out cost</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="optional" type="number" min="0" step="0.01" style={inputStyle} /></label>
-            </div>
-            <div style={{ display: "grid", gap: 10 }}>
-              <strong>Fixings / install consumables</strong>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
-                {fixingOptions.map((item) => {
-                  const selected = serviceFixings.includes(item.key);
-                  return (
-                    <div key={item.key} style={{ border: selected ? "2px solid #ea580c" : "1px solid #fed7aa", borderRadius: 16, padding: 12, background: selected ? "#ffedd5" : "#fff", display: "grid", gap: 8 }}>
-                      <button type="button" onClick={() => toggleServiceFixing(item.key)} style={{ border: "none", background: "transparent", color: "#0f172a", display: "flex", gap: 8, alignItems: "center", padding: 0, fontWeight: 950, cursor: "pointer", textAlign: "left" }}>
-                        <span>{selected ? "✓" : "+"}</span><span>{item.label}</span>
-                      </button>
-                      {selected ? (
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                          <input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={`Qty ${item.placeholderQty}`} type="number" min="0" step="0.01" style={inputStyle} />
-                          <input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={`Cost ${item.placeholderRate}`} type="number" min="0" step="0.01" style={inputStyle} />
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            <span style={{ color: "#475467", fontSize: 13 }}>{installOnly ? "This is saved as one Sign Install quote line and can later hand off to Install Scheduler." : "Install becomes a separate Sign Install line on the quote and can later hand off to Install Scheduler."}</span>
-          </div>
-        ) : null}
-      </div>
-    );
-  }
-
-  function renderQuickQuoteLayout() {
-    const sizePresetValue = widthMm && heightMm ? `${widthMm}x${heightMm}` : "";
-    const signagePresets = signageSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
-    const smallPresets = smallSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
-    const planPresets = planSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
-    const posterPresets = posterSizePresets.map((preset) => ({ ...preset, value: `${preset.width}x${preset.height}` }));
-    const currentPresets = flowType === "small_format" ? smallPresets : flowType === "plan_printing" ? planPresets : flowType === "poster_printing" ? posterPresets : signagePresets;
-
-    return (
-      <div style={{ display: "grid", gap: 0 }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #dfe7f2" }}>
-          <button type="button" onClick={() => setBuilderMode("quick")} style={{ border: "none", borderTop: "4px solid #65a30d", background: "#ffffff", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#65a30d", cursor: "pointer" }}>Build a quick quote item</button>
-          <button type="button" onClick={() => setBuilderMode("saved")} style={{ border: "none", borderLeft: "1px solid #dfe7f2", background: "#f3f4f6", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#1f2937", cursor: "pointer" }}>Use saved product</button>
-        </div>
-
-        <div style={{ padding: 22, display: "grid", gridTemplateColumns: "minmax(0, 1fr) 320px", gap: 20, alignItems: "start" }}>
-          <section style={{ display: "grid", gap: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-              <div>
-                <p style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 12, fontWeight: 950, color: "#65a30d" }}>Fast quote builder</p>
-                <h3 style={{ margin: "4px 0 0", fontSize: 28, letterSpacing: "-0.04em" }}>{flowType === "service" ? "Quote installation of client-supplied signage without adding a substrate." : "Build the item, choose artwork, then choose pickup / delivery / install."}</h3>
-              </div>
-              <span style={{ borderRadius: 999, background: "#ecfccb", color: "#3f6212", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>Quick layout</span>
-            </div>
-
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
-              <label style={{ display: "grid", gap: 6 }}>
-                <b>Quote type</b>
-                <select value={flowType} onChange={(event) => chooseQuickFlow(event.target.value as FlowType)} style={inputStyle}>
-                  <option value="signage">Large format / signage</option>
-                  <option value="service">↳ Install only — client-supplied signage</option>
-                  {printDepartments.filter((department) => department.key !== "signage").map((department) => <option key={department.key} value={department.key}>{department.label}</option>)}
-                  <option value="component">Custom component / assembly</option>
-                </select>
-              </label>
-              {flowType === "service" ? (
-                <div style={{ minHeight: 48, borderRadius: 16, border: "1px solid #fed7aa", padding: "0 14px", background: "#fff7ed", display: "flex", alignItems: "center", color: "#9a3412", fontWeight: 900 }}>Quantity: 1 install job</div>
-              ) : (
-                <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="1" style={inputStyle} /></label>
-              )}
-            </div>
-
-            {flowType === "component" ? (
-              <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
-                <strong>Custom component / assembly</strong>
-                <p style={{ margin: 0, color: "#9a3412" }}>Components can be more detailed, so use the advanced flow for parts, labour and assembly breakdowns.</p>
-                <button type="button" onClick={() => { setBuilderMode("advanced"); setActiveStep("component_details"); }} style={{ ...primaryButton, justifySelf: "start" }}>Open component builder</button>
-              </div>
-            ) : null}
-
-            {flowType === "signage" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
-                <label style={{ display: "grid", gap: 6 }}><b>Product / base</b><select value={baseType} onChange={(event) => event.target.value === "install_only" ? chooseInstallOnly() : resetAfterBase(event.target.value as BaseType)} style={inputStyle}><option value="">Choose product type</option><option value="install_only">Install only — client-supplied signage</option>{baseTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-                {isRollStockBase ? (
-                  <label style={{ display: "grid", gap: 6 }}><b>Roll stock / media</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll stock</option>{baseMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
-                ) : (
-                  <label style={{ display: "grid", gap: 6 }}><b>Thickness / stock</b><select value={thickness} onChange={(event) => { setThickness(event.target.value); setColour(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose thickness</option>{thicknessOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
-                )}
-                {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Colour</b><select value={colour} onChange={(event) => { setColour(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose colour</option>{colourOptions.map((item) => <option key={item} value={item}>{item}</option>)}</select></label> : null}
-                <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 6000" type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 1220" type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
-                {!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => setPrint(event.target.value as Exclude<PrintMethod, "">)} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
-                {printed ? <InlineLabourField label="Print setup labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }} labourRate={labourRate} quantity={quantityNumber} /> : null}
-                {!isRollStockBase && needsMediaStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "cut_vinyl" ? "Cut vinyl" : "Roll media"}</b><select value={mediaId} onChange={(event) => { setMediaId(event.target.value); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose roll material</option>{rollMedia.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
-                {activeRollMaterial ? renderDropLayoutControls(true) : null}
-                {needsInkStep ? <label style={{ display: "grid", gap: 6 }}><b>{resolvedPrintMethod === "roll_stock" ? "Print / Ink" : "Ink"}</b><select value={ink} onChange={(event) => chooseInk(event.target.value as InkChoice)} style={inputStyle}><option value="">{resolvedPrintMethod === "roll_stock" ? "Choose print / ink" : "Choose ink"}</option>{availableInkChoices.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : null}
-                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label> : null}
-                {canChooseReversePrint && printed ? <label style={{ display: "grid", gap: 6 }}><b>Print direction</b><select value={printDirection} onChange={(event) => { const value = event.target.value as PrintDirection; setPrintDirection(value); if (value !== "reverse") setBackingId(""); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose direction</option><option value="positive">{selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive / face print"}</option><option value="reverse">Reverse print</option></select></label> : null}
-                {backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}{group.materials.length > 1 ? ` (auto-select ${group.materials.length} widths)` : ""}</option>)}</select><small style={{ color: "#64748b" }}>Shown because Reverse print is selected. Only Materials marked Used for backing are listed; matching widths are chosen automatically by finished size and cost.</small></label> : null}
-                {printed ? <label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label> : null}
-                {printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); setUnitPriceOverridden(false); }} labourRate={labourRate} quantity={quantityNumber} /> : null}
-              </div>
-            ) : null}
-
-            {isPrintDepartment ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
-                <label style={{ display: "grid", gap: 6 }}><b>Department</b><input value={flowDepartmentProductName(flowType)} readOnly style={{ ...inputStyle, background: "#f8fafc" }} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => { setSides(event.target.value as SidesChoice); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder={flowType === "plan_printing" ? "eg 841" : "eg 600"} type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder={flowType === "plan_printing" ? "eg 1189" : "eg 900"} type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => { setSmallPrintColour(event.target.value as SmallPrintColour); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose print colour</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Coating / laminate</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}><option value="">Choose coating</option><option value="none">No coating</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
-              </div>
-            ) : null}
-
-
-            {flowType === "small_format" ? (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(220px, 1fr))", gap: 14 }}>
-                <label style={{ display: "grid", gap: 6 }}><b>Product type</b><select value={smallType} onChange={(event) => setSmallType(event.target.value as SmallFormatType)} style={inputStyle}><option value="">Choose product type</option>{smallFormatTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); }} style={inputStyle}><option value="">Choose stock</option>{smallStocks.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Finished size</b><select value={sizePresetValue} onChange={(event) => { const preset = currentPresets.find((item) => item.value === event.target.value); if (preset) setPresetSize(preset.width, preset.height, "artwork"); }} style={inputStyle}><option value="">Choose preset or type custom</option>{currentPresets.map((preset) => <option key={preset.label} value={preset.value}>{preset.label}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Sides</b><select value={sides} onChange={(event) => setSides(event.target.value as SidesChoice)} style={inputStyle}><option value="">Choose sides</option><option value="single">Single sided</option><option value="double">Double sided</option></select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => setWidthMm(event.target.value)} placeholder="eg 90" type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => setHeightMm(event.target.value)} placeholder="eg 55" type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm (optional)</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `Material nesting uses ${nestingFootprintLabel}; finished size stays ${dimensionMm(width)} × ${dimensionMm(height)}mm.` : "Adds this amount to every side for material nesting/yield only."}</small></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => setSmallPrintColour(event.target.value as SmallPrintColour)} style={inputStyle}><option value="">Choose print colour</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Coating / laminate</b><select value={smallCoatingId} onChange={(event) => setSmallCoatingId(event.target.value)} style={inputStyle}><option value="">Choose coating</option><option value="none">No coating</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{material.name}</option>)}</select></label>
-              </div>
-            ) : null}
-
-            {flowType === "signage" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <strong>Finishing</strong>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-                  {finishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleFinishing(item.key)} style={cardButtonStyle(finishings.includes(item.key), "#0f766e")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
-                </div>
-                <SelectedLabourMinutes options={finishingOptions.filter((item) => item.key !== "eyelets")} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis="line_total" labourRate={labourRate} quantity={quantityNumber} />
-                {finishings.includes("eyelets") ? <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}><label style={{ display: "grid", gap: 6 }}><b>Eyelet placement</b><select value={eyeletPresetLabel} onChange={(event) => setEyeletPresetLabel(event.target.value)} style={inputStyle}>{eyeletPresets.map((preset) => <option key={preset.label} value={preset.label}>{preset.label}</option>)}</select></label>{eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} type="number" min="0" step="1" style={inputStyle} /></label> : null}</div> : null}
-              </div>
-            ) : null}
-
-            {(flowType === "small_format" || isPrintDepartment) && !isDuplicateBook ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <strong>Finishing</strong>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
-                  {smallFinishingOptions.map((item) => <button key={item.key} type="button" onClick={() => toggleSmallFinishing(item.key)} style={cardButtonStyle(smallFinishings.includes(item.key), "#7c3aed")}><span style={{ fontSize: 26 }}>{item.icon}</span><strong>{item.label}</strong><span style={{ color: "#64748b", fontSize: 13 }}>{item.description}</span></button>)}
-                </div>
-                <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} quantity={quantityNumber} />
-              </div>
-            ) : null}
-
-            {flowType !== "service" && flowType !== "component" ? (
-              <div style={{ display: "grid", gap: 10 }}>
-                <strong>How will print-ready artwork be supplied?</strong>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                  <button type="button" onClick={() => { setArtworkChoice("client_supplied"); setArtworkMinutes(""); }} style={cardButtonStyle(artworkChoice === "client_supplied", "#65a30d")}><span style={{ fontSize: 30 }}>✓</span><strong>Customer supplied</strong><span style={{ color: "#64748b" }}>No artwork charge added.</span></button>
-                  <button type="button" onClick={() => setArtworkChoice("required")} style={cardButtonStyle(artworkChoice === "required", "#e11d48")}><span style={{ fontSize: 30 }}>✎</span><strong>Artwork required</strong><span style={{ color: "#64748b" }}>Add artwork/design labour.</span></button>
-                </div>
-                {artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes (optional)</b><input value={artworkMinutes} onChange={(event) => setArtworkMinutes(event.target.value)} placeholder="Optional, eg 30" type="number" min="0" step="1" style={inputStyle} /><small style={{ color: "#64748b" }}>Leave blank or enter 0 for no artwork labour charge.</small></label> : null}
-              </div>
-            ) : null}
-
-            {flowType === "service" ? renderDispatchSection(true) : flowType !== "component" ? renderDispatchSection() : null}
-
-            <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} placeholder="Optional notes for this line" style={textareaStyle} /></label>
-
-            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 58, justifySelf: "center", minWidth: 240, fontSize: 18, background: "#65a30d", opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? editingLine ? "Update quote line" : "Add item to quote" : "Complete required fields"}</button>
-          </section>
-
-          <aside style={{ position: "sticky", top: 18, display: "grid", gap: 14 }}>
-            <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
-              <strong>Current item</strong>
-              <SummaryRow label="Type" value={flowType === "service" && serviceType === "install" ? "Install only — client-supplied signage" : flowTypeLabel(flowType)} />
-              {flowType === "signage" ? <SummaryRow label="Material" value={selectedMainMaterial?.name} /> : null}
-              {flowType === "signage" && sheetUseLabel ? <SummaryRow label="Sheet use" value={sheetUseLabel} /> : null}
-              {flowType === "signage" && rollUseLabel ? <SummaryRow label="Roll use" value={rollUseLabel} /> : null}
-              {flowType === "signage" && inkUseLabel ? <SummaryRow label="Ink use" value={inkUseLabel} /> : null}
-              {flowType === "small_format" || isPrintDepartment ? <SummaryRow label="Material" value={selectedSmallStock?.name} /> : null}
-              <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-              <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
-              {flowType === "signage" && activeRollMaterial ? <SummaryRow label="Drop layout" value={dropLayoutSummary || undefined} /> : null}
-              <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `${minutesLabel(artworkMinutes)} required` : "Artwork required" : artworkChoice === "client_supplied" ? "Customer supplied" : undefined} />
-              <SummaryRow label="Dispatch" value={dispatchSummary || undefined} />
-            </div>
-            <div style={{ border: "1px solid #bbf7d0", borderRadius: 22, padding: 16, background: "#f0fdf4", display: "grid", gap: 8 }}>
-              <span style={{ fontSize: 12, fontWeight: 950, color: "#067647", textTransform: "uppercase" }}>Item price</span>
-              <strong style={{ fontSize: 28 }}>{money(unitPrice)}</strong>
-              <span style={{ color: "#475467", fontSize: 13 }}>Qty {usage(quantityNumber)} · line total {money(lineTotal)}</span>
-            </div>
-            {shouldCreateDispatchLine ? (
-              <div style={{ border: "1px solid #fed7aa", borderRadius: 22, padding: 16, background: "#fff7ed", display: "grid", gap: 8 }}>
-                <span style={{ fontSize: 12, fontWeight: 950, color: "#c2410c", textTransform: "uppercase" }}>Extra service line</span>
-                <strong style={{ fontSize: 22 }}>{serviceType === "install" ? "Sign Install" : "Delivery"}</strong>
-                <span style={{ color: "#475467", fontSize: 13 }}>{dispatchSummary}</span>
-                <strong>{money(dispatchUnitPrice)}</strong>
-              </div>
-            ) : null}
-            <div style={{ border: "1px solid #e5e7eb", borderRadius: 18, padding: 14, background: "#f8fafc", display: "grid", gap: 5 }}>
-              <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Summary</span>
-              <span style={{ color: optionSummary ? "#111827" : "#667085", lineHeight: 1.5 }}>{optionSummary || "Complete the fields to build this quote line."}</span>
-            </div>
-          </aside>
-        </div>
-      </div>
-    );
-  }
-
-  function renderSavedProductLayout() {
-    return (
-      <div style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid" }}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", borderBottom: "1px solid #dfe7f2" }}>
-          <button type="button" onClick={() => setBuilderMode("quick")} style={{ border: "none", background: "#f3f4f6", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#1f2937", cursor: "pointer" }}>Build a quick quote item</button>
-          <button type="button" onClick={() => setBuilderMode("saved")} style={{ border: "none", borderTop: "4px solid #65a30d", borderLeft: "1px solid #dfe7f2", background: "#ffffff", minHeight: 58, fontWeight: 950, fontSize: 16, color: "#65a30d", cursor: "pointer" }}>Use saved product</button>
-        </div>
-
-        <div style={{ padding: 22, display: "grid", gap: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-            <div>
-              <p style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.12em", fontSize: 12, fontWeight: 950, color: "#65a30d" }}>Saved product picker</p>
-              <h3 style={{ margin: "4px 0 0", fontSize: 28, letterSpacing: "-0.04em" }}>Pick a pre-built product, set the options, then add it to the quote.</h3>
-              <p style={{ margin: "6px 0 0", color: "#667085", lineHeight: 1.55 }}>Use this for standard products that have already been configured on the Products page. It keeps quoting fast without opening the old step-by-step builder.</p>
-            </div>
-            <span style={{ borderRadius: 999, background: "#ecfccb", color: "#3f6212", padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{savedProducts.length} saved product{savedProducts.length === 1 ? "" : "s"}</span>
-          </div>
-
-          <QuoteLineBuilder
-            quoteId={quoteId}
-            products={savedProducts}
-            materials={materialPool}
-            pricingSettings={{
-              markupMultiplier: pricingSettings?.markupMultiplier,
-              profitMultiplier: pricingSettings?.profitMultiplier,
-              priceLevelFactor: pricingSettings?.priceLevelFactor,
-              priceLevelName: pricingSettings?.priceLevelName,
-              priceLevelCode: pricingSettings?.priceLevelCode,
-              manualQuoteDiscountPercent: pricingSettings?.manualQuoteDiscountPercent
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  function renderStep() {
-    if (activeStep === "dispatch") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="→" title="How can we get this order to the client?" text="Choose pickup, delivery or install. Install asks for crew, minutes and fixings so it can become a separate install quote line." />
-          {renderDispatchSection()}
-          <button type="button" onClick={() => setActiveStep("review")} disabled={!dispatchComplete} style={{ ...primaryButton, opacity: dispatchComplete ? 1 : 0.45, justifySelf: "start" }}>Continue to review</button>
-        </div>
-      );
-    }
-
-    if (activeStep === "flow") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="1" title="What are you quoting?" text="Choose the correct flow first. Signage and small format share the same pricing engine, but the screens stay separate." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 14 }}>
-            <button type="button" onClick={() => chooseFlow("signage")} style={cardButtonStyle(flowType === "signage", "#155eef")}>
-              <span style={{ fontSize: 38 }}>▣</span>
-              <strong style={{ fontSize: 22 }}>Large format / signage</strong>
-              <span style={{ color: "#64748b", lineHeight: 1.5 }}>Acrylic, ACM, corflute, PVC, banner, roll media, ink, laminate and finishing.</span>
-            </button>
-            <button type="button" onClick={() => chooseFlow("small_format")} style={cardButtonStyle(flowType === "small_format", "#7c3aed")}>
-              <span style={{ fontSize: 38 }}>▤</span>
-              <strong style={{ fontSize: 22 }}>Small format / print</strong>
-              <span style={{ color: "#64748b", lineHeight: 1.5 }}>Cards, flyers, brochures, booklets, duplicate books, paper stock, cello and bindery.</span>
-            </button>
-            <button type="button" onClick={() => chooseFlow("service")} style={cardButtonStyle(flowType === "service", "#059669")}>
-              <span style={{ fontSize: 38 }}>⚒</span>
-              <strong style={{ fontSize: 22 }}>Pickup / delivery / install</strong>
-              <span style={{ color: "#64748b", lineHeight: 1.5 }}>Pickup notes, delivery charges, install crew time and fixing consumables.</span>
-            </button>
-            <button type="button" onClick={() => chooseFlow("component")} style={cardButtonStyle(flowType === "component", "#f97316")}>
-              <span style={{ fontSize: 38 }}>▦</span>
-              <strong style={{ fontSize: 22 }}>Custom component / assembly</strong>
-              <span style={{ color: "#64748b", lineHeight: 1.5 }}>Frames, special builds, panels with parts A+B+C, hardware and assembly labour.</span>
-            </button>
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "component_details") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="▦" title="Name the custom component" text="Use this when the quote line is an assembly made from multiple parts, like a frame, bracket set, special build or one-off fabrication." />
-          <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
-            <label style={{ display: "grid", gap: 6 }}>
-              <b>Component name</b>
-              <input value={componentName} onChange={(event) => setComponentName(event.target.value)} placeholder="eg Aluminium frame" style={inputStyle} />
-            </label>
-            <label style={{ display: "grid", gap: 6 }}>
-              <b>Description / internal note</b>
-              <textarea value={componentDescription} onChange={(event) => setComponentDescription(event.target.value)} placeholder="eg Frame made from 25mm tube, brackets, screws and assembly labour" style={textareaStyle} />
-            </label>
-            <button type="button" onClick={() => setActiveStep("component_parts")} disabled={!componentName.trim()} style={{ ...primaryButton, opacity: componentName.trim() ? 1 : 0.45 }}>Continue to parts</button>
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "component_parts") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="3" title="Add parts used" text="Add each part that makes up the component. Pick an existing material or type a custom part. Quantity × cost is added to the quote line." />
-          <div style={{ display: "grid", gap: 12 }}>
-            {componentParts.map((part, index) => {
-              const selectedPartMaterial = materialPool.find((item) => item.id === part.materialId);
-              const suggested = rateForComponentUnit(selectedPartMaterial, part.unit);
-              const shownRate = part.unitCost.trim() ? numberValue(part.unitCost, 0) : suggested.rate;
-              return (
-                <div key={part.id} style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 14, background: "#fffaf0", display: "grid", gap: 12 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                    <strong>Part {index + 1}</strong>
-                    <button type="button" onClick={() => removeComponentPart(part.id)} style={{ ...ghostButton, color: "#b42318" }}>Remove</button>
-                  </div>
-                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 }}>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <b>From material library</b>
-                      <select value={part.materialId} onChange={(event) => {
-                        const material = materialPool.find((item) => item.id === event.target.value);
-                        updateComponentPart(part.id, {
-                          materialId: event.target.value,
-                          name: part.name.trim() || material?.name || "",
-                          unit: material ? (isRollMaterial(material) ? "lm" : isSheetMaterial(material) ? "sheet" : "each") : part.unit,
-                          unitCost: part.unitCost
-                        });
-                      }} style={inputStyle}>
-                        <option value="">Custom / not in materials</option>
-                        {materialPool.map((material) => <option key={material.id} value={material.id}>{material.name}{material.supplierName ? ` · ${material.supplierName}` : ""}</option>)}
-                      </select>
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <b>Part name</b>
-                      <input value={part.name} onChange={(event) => updateComponentPart(part.id, { name: event.target.value })} placeholder="eg 25mm aluminium tube" style={inputStyle} />
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <b>Quantity</b>
-                      <input value={part.qty} onChange={(event) => updateComponentPart(part.id, { qty: event.target.value })} placeholder="eg 4" type="number" min="0" step="0.01" style={inputStyle} />
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <b>Unit</b>
-                      <select value={part.unit} onChange={(event) => updateComponentPart(part.id, { unit: event.target.value, unitCost: part.unitCost })} style={inputStyle}>
-                        <option value="each">each</option>
-                        <option value="lm">lm</option>
-                        <option value="sheet">sheet</option>
-                        <option value="sqm">sqm</option>
-                        <option value="pack">pack</option>
-                      </select>
-                    </label>
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <b>Cost per unit</b>
-                      <input value={part.unitCost} onChange={(event) => updateComponentPart(part.id, { unitCost: event.target.value })} placeholder={selectedPartMaterial && suggested.rate > 0 ? `${money(suggested.rate)} from material` : "eg 12.50"} type="number" min="0" step="0.01" style={inputStyle} />
-                    </label>
-                  </div>
-                  <label style={{ display: "grid", gap: 6 }}>
-                    <b>Part note</b>
-                    <input value={part.note} onChange={(event) => updateComponentPart(part.id, { note: event.target.value })} placeholder="optional, eg left and right uprights" style={inputStyle} />
-                  </label>
-                  <span style={{ color: "#9a3412", fontSize: 13, fontWeight: 800 }}>
-                    {numberValue(part.qty, 0) > 0 && shownRate > 0 ? `${usage(numberValue(part.qty, 0))} ${part.unit} × ${money(shownRate)} = ${money(numberValue(part.qty, 0) * shownRate)}` : "Enter a quantity and cost, or pick a material with a usable cost."}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button type="button" onClick={addComponentPart} style={ghostButton}>+ Add another part</button>
-            <button type="button" onClick={() => setActiveStep("component_labour")} disabled={pricedComponentParts.length === 0} style={{ ...primaryButton, opacity: pricedComponentParts.length > 0 ? 1 : 0.45 }}>Continue to labour</button>
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "component_labour") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="4" title="Add assembly labour" text="Add the time to cut, assemble, weld, screw, tape, pack or prepare this component. Leave minutes blank if the parts only need to be charged." />
-          <div style={{ border: "1px solid #fed7aa", borderRadius: 20, padding: 16, background: "#fff7ed", display: "grid", gap: 12 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12 }}>
-              <label style={{ display: "grid", gap: 6 }}>
-                <b>Labour label</b>
-                <input value={componentLabourLabel} onChange={(event) => setComponentLabourLabel(event.target.value)} placeholder="eg Frame assembly labour" style={inputStyle} />
-              </label>
-              <label style={{ display: "grid", gap: 6 }}>
-                <b>Minutes</b>
-                <input value={componentLabourMinutes} onChange={(event) => { setComponentLabourMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="1" style={inputStyle} />
-              </label>
-            </div>
-            <span style={{ color: "#9a3412", fontSize: 13 }}>Charged at {money(labourRate)}/hr before global markup and profit.</span>
-            <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review component line</button>
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "service_type") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="2" title="Choose service line type" text="Use this for non-production quote lines like pickup, delivery, installation and onsite consumables." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 12 }}>
-            {serviceTypes.map((item) => (
-              <button key={item.key} type="button" onClick={() => { setServiceType(item.key); setActiveStep("service_details"); }} style={cardButtonStyle(serviceType === item.key, "#059669")}>
-                <span style={{ fontSize: 34 }}>{item.icon}</span>
-                <strong style={{ fontSize: 20 }}>{item.label}</strong>
-                <span style={{ color: "#64748b", lineHeight: 1.45 }}>{item.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "service_details") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="3" title={serviceType === "install" ? "Set install crew and time" : serviceType === "delivery" ? "Set delivery charge" : "Pickup details"} text={serviceType === "install" ? "Install labour is calculated from people × minutes, converted internally to hours against the global labour rate, then markup/profit are applied." : serviceType === "delivery" ? "Enter the delivery/courier charge as a cost price. Markup and profit are applied on the review step." : "Pickup can be saved as a no-charge line if you want it visible on the quote."} />
-          {serviceType === "pickup" ? (
-            <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 10 }}>
-              <strong>Pickup / client collection</strong>
-              <span style={{ color: "#475467" }}>No charge is added unless you override the unit sell price on review.</span>
-              <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review pickup line</button>
-            </div>
-          ) : null}
-          {serviceType === "delivery" ? (
-            <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 16, background: "#f8fbff", display: "grid", gap: 12 }}>
-              <label style={{ display: "grid", gap: 6 }}><b>Delivery charge / courier cost</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 45" type="number" min="0" step="0.01" style={inputStyle} /></label>
-              <span style={{ color: "#475467", fontSize: 13 }}>Enter the cost price. The quote sell price applies global markup × profit.</span>
-              <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review delivery line</button>
-            </div>
-          ) : null}
-          {serviceType === "install" ? (
-            <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 12 }}>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
-                <label style={{ display: "grid", gap: 6 }}><b>Installers</b><select value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); setUnitPriceOverridden(false); }} style={inputStyle}>{["1", "2", "3", "4"].map((count) => <option key={count} value={count}>{count} {count === "1" ? "person" : "people"}</option>)}</select></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Install minutes</b><input value={installMinutes} onChange={(event) => { setInstallMinutes(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 120" type="number" min="0" step="1" style={inputStyle} /></label>
-                <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out cost</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); setUnitPriceOverridden(false); }} placeholder="optional" type="number" min="0" step="0.01" style={inputStyle} /></label>
-              </div>
-              <span style={{ color: "#475467", fontSize: 13 }}>Labour cost: installers × minutes, converted at {money(labourRate)}/hr.</span>
-              <button type="button" onClick={() => setActiveStep("service_fixings")} disabled={numberValue(installMinutes, 0) <= 0} style={{ ...primaryButton, opacity: numberValue(installMinutes, 0) > 0 ? 1 : 0.45 }}>Continue to fixings</button>
-            </div>
-          ) : null}
-        </div>
-      );
-    }
-
-    if (activeStep === "service_fixings") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="4" title="Add fixings / consumables" text="Tick what the install needs, then enter quantity and cost. Leave everything unticked if there are no extras." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {fixingOptions.map((item) => (
-              <button key={item.key} type="button" onClick={() => toggleServiceFixing(item.key)} style={cardButtonStyle(serviceFixings.includes(item.key), "#059669")}>
-                <span style={{ fontSize: 30 }}>{item.icon}</span>
-                <strong>{item.label}</strong>
-                <span style={{ color: "#64748b" }}>Charge by {item.unit}.</span>
-              </button>
-            ))}
-          </div>
-          {serviceFixings.length > 0 ? (
-            <div style={{ border: "1px solid #dbeafe", borderRadius: 20, padding: 14, background: "#f8fbff", display: "grid", gap: 10 }}>
-              <strong>Quantities and costs</strong>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 10 }}>
-                {fixingOptions.filter((item) => serviceFixings.includes(item.key)).map((item) => (
-                  <div key={item.key} style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 12, background: "#fff", display: "grid", gap: 8 }}>
-                    <b>{item.label}</b>
-                    <label style={{ display: "grid", gap: 5 }}><span>Quantity ({item.unit})</span><input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={item.placeholderQty} type="number" min="0" step="0.01" style={inputStyle} /></label>
-                    <label style={{ display: "grid", gap: 5 }}><span>Cost per {item.unit}</span><input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); setUnitPriceOverridden(false); }} placeholder={item.placeholderRate} type="number" min="0" step="0.01" style={inputStyle} /></label>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review install line</button>
-        </div>
-      );
-    }
-
-    if (activeStep === "base") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="2" title="Start with the base material" text="No product setup first. Choose the material family for this quote line." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-            <button type="button" onClick={chooseInstallOnly} style={cardButtonStyle(false, "#ea580c")}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                <span style={{ width: 42, height: 42, borderRadius: 14, display: "grid", placeItems: "center", background: "#ea580c1a", color: "#ea580c", fontWeight: 950, fontSize: 22 }}>⚒</span>
-                <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 9px", fontSize: 12, fontWeight: 900 }}>No material</span>
-              </div>
-              <strong style={{ fontSize: 18 }}>Install only</strong>
-              <span style={{ color: "#64748b", lineHeight: 1.45 }}>Install client-supplied signage. Add crew time, travel, fixings and onsite consumables only.</span>
-            </button>
-            {baseTypes.map((item) => {
-              const count = materialPool.filter((material) => materialMatchesBase(material, item.key)).length;
-              return (
-                <button key={item.key} type="button" onClick={() => resetAfterBase(item.key)} style={cardButtonStyle(baseType === item.key, item.accent)}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
-                    <span style={{ width: 42, height: 42, borderRadius: 14, display: "grid", placeItems: "center", background: `${item.accent}1a`, color: item.accent, fontWeight: 950, fontSize: 22 }}>{item.icon}</span>
-                    <span style={{ borderRadius: 999, background: "#f1f5f9", padding: "4px 9px", fontSize: 12, fontWeight: 900 }}>{count} materials</span>
-                  </div>
-                  <strong style={{ fontSize: 18 }}>{item.label}</strong>
-                  <span style={{ color: "#64748b", lineHeight: 1.45 }}>{item.description}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "thickness") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="3" title={`Choose ${selectedBase?.label ?? "material"} thickness`} text="These choices come from the materials you have already created." />
-          {thicknessOptions.length === 0 ? <EmptyStep text="No matching materials found. Add the material first, then come back to quote." /> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-            {thicknessOptions.map((option) => (
-              <button key={option} type="button" onClick={() => { setThickness(option); setColour(""); setActiveStep("colour"); }} style={cardButtonStyle(thickness === option, "#7c3aed")}>
-                <span style={{ fontSize: 30 }}>▥</span>
-                <strong style={{ fontSize: 20 }}>{option}</strong>
-                <span style={{ color: "#64748b" }}>{baseMaterials.filter((material) => thicknessFor(material) === option).length} matching material{baseMaterials.filter((material) => thicknessFor(material) === option).length === 1 ? "" : "s"}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "colour") {
-      const materialPool = thickness ? baseMaterials.filter((material) => thicknessFor(material) === thickness) : baseMaterials;
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="4" title="Choose colour / finish" text="This picks the actual material sheet used for the quote line." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-            {colourOptions.map((option) => {
-              const matched = materialPool.find((material) => colourFor(material) === option);
-              return (
-                <button key={option} type="button" onClick={() => { setColour(option); setActiveStep("size"); }} style={cardButtonStyle(colour === option, "#0891b2")}>
-                  <span style={{ fontSize: 30 }}>{option.toLowerCase() === "clear" ? "◇" : "■"}</span>
-                  <strong style={{ fontSize: 20 }}>{option}</strong>
-                  <span style={{ color: "#64748b" }}>{matched ? materialCardMeta(matched) : "No matching material"}</span>
-                  {matched ? <span style={{ color: "#0f172a", fontWeight: 900 }}>{money(numberValue(matched.purchaseCost, 0))}/{matched.purchaseUom || "unit"}</span> : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "size") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="5" title="Enter sign size" text="Finished size stays client-facing. Optional bleed / spacing enlarges each item in both directions for material nesting and yield." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-            {signageSizePresets.map((preset) => {
-              const selected = widthMm === preset.width && heightMm === preset.height;
-              return (
-                <button key={preset.label} type="button" onClick={() => setPresetSize(preset.width, preset.height, "artwork")} style={cardButtonStyle(selected, "#2563eb")}>
-                  <span style={{ fontSize: 30 }}>▭</span>
-                  <strong>{preset.label}</strong>
-                  <span style={{ color: "#64748b" }}>{((numberValue(preset.width) / 1000) * (numberValue(preset.height) / 1000)).toFixed(2)}m²</span>
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 600" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 900" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `${nestingFootprintLabel} for material yield` : "Optional"}</small></label>
-            <button type="button" onClick={() => setActiveStep("artwork")} style={primaryButton}>Continue</button>
-          </div>
-          {isRollStockBase ? renderDropLayoutControls() : null}
-        </div>
-      );
-    }
-
-    if (activeStep === "artwork") return renderArtworkStep(flowType === "small_format" ? (isDuplicateBook ? "small_finishing" : "small_sides") : "print");
-
-    if (activeStep === "print") {
-      if (isRollStockBase) {
-        return (
-          <div style={{ display: "grid", gap: 16 }}>
-            <StepIntro icon="7" title="Roll stock print setup" text="The selected product is already roll stock, so there is no separate print-method choice." />
-            <LabourPrompt
-              label="Print setup labour"
-              value={printSetupMinutes}
-              basis={printSetupLabourBasis}
-              onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
-              onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }}
-              onContinue={() => setActiveStep("ink")}
-              labourRate={labourRate}
-              quantity={quantityNumber}
-            />
-          </div>
-        );
-      }
-
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="7" title="Is it printed?" text="Choose the print method for this quote line. No option is selected by default." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-            {printMethods.map((method) => (
-              <button key={method.key} type="button" onClick={() => setPrint(method.key)} style={cardButtonStyle(printMethod === method.key, method.key === "no_print" ? "#64748b" : "#2563eb")}>
-                <span style={{ fontSize: 32 }}>{method.icon}</span>
-                <strong style={{ fontSize: 18 }}>{method.label}</strong>
-                <span style={{ color: "#64748b", lineHeight: 1.45 }}>{method.description}</span>
-              </button>
-            ))}
-          </div>
-          {printed ? (
-            <LabourPrompt
-              label="Print setup labour"
-              value={printSetupMinutes}
-              basis={printSetupLabourBasis}
-              onChange={(value) => { setPrintSetupMinutes(value); setUnitPriceOverridden(false); }}
-              onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); setUnitPriceOverridden(false); }}
-              onContinue={() => setActiveStep(nextStepAfterPrint(resolvedPrintMethod))}
-              labourRate={labourRate}
-              quantity={quantityNumber}
-            />
-          ) : null}
-        </div>
-      );
-    }
-
-    if (activeStep === "media") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="8" title={resolvedPrintMethod === "cut_vinyl" ? "Choose cut vinyl" : "Choose roll stock"} text="Pick the actual roll material from Materials. Roll stock is shown as a linear metre cost where possible." />
-          {rollMedia.length === 0 ? <EmptyStep text="No roll media found. Create roll stock in Materials first." /> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, maxHeight: 480, overflow: "auto", paddingRight: 4 }}>
-            {rollMedia.map((material) => {
-              const rate = rollRate(material);
-              return (
-                <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); setUnitPriceOverridden(false); setActiveStep(isRollStockBase ? "size" : resolvedPrintMethod === "cut_vinyl" ? "sides" : "ink"); }} style={cardButtonStyle(mediaId === material.id, "#ea580c")}>
-                  <span style={{ fontSize: 28 }}>↻</span>
-                  <strong>{material.name}</strong>
-                  <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
-                  <span style={{ color: "#0f172a", fontWeight: 950 }}>{money(rate.rate)}/lm</span>
-                  {rate.note ? <small style={{ color: "#64748b" }}>{rate.note}</small> : null}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "ink") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="9" title={resolvedPrintMethod === "roll_stock" ? "Choose print / ink" : "Choose ink"} text={resolvedPrintMethod === "roll_stock" ? "Choose No print for unprinted roll stock, or select the ink mode to be charged per square metre." : "Choose the ink mode to be charged per square metre."} />
-          {!isRollStockBase && activeRollMaterial ? renderDropLayoutControls() : null}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 12 }}>
-            {availableInkChoices.map((choice) => (
-              <button key={choice.key} type="button" onClick={() => chooseInk(choice.key, "sides")} style={cardButtonStyle(ink === choice.key, choice.key === "white" ? "#64748b" : "#f97316")}>
-                <span style={{ fontSize: 34 }}>{choice.icon}</span>
-                <strong>{choice.label}</strong>
-                <span style={{ color: "#64748b" }}>{choice.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "sides") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title={canChooseReversePrint ? "Choose sides and print direction" : "Choose sides"} text={canChooseReversePrint ? (isClearAcrylic ? "Clear acrylic needs a positive/reverse print choice." : "This roll media is marked Reverse printable, so choose Standard or Reverse print.") : "Single or double sided printing affects ink, roll media and laminate usage."} />
-          {resolvedPrintMethod === "cut_vinyl" && activeRollMaterial ? renderDropLayoutControls() : null}
-          <SidesCards onComplete={() => canChooseReversePrint ? undefined : setActiveStep("laminate")} sides={sides} setSides={setSides} />
-          {canChooseReversePrint ? (
-            <div style={{ display: "grid", gap: 10 }}>
-              <strong>{isClearAcrylic ? "Clear acrylic print direction" : "Print direction"}</strong>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-                {[{ key: "positive", label: selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive print", note: "Print/read from the front." }, { key: "reverse", label: "Reverse print", note: isClearAcrylic ? "Reverse printed for viewing through clear acrylic." : "Reverse printed for viewing through the clear media." }].map((choice) => (
-                  <button key={choice.key} type="button" onClick={() => { const direction = choice.key as PrintDirection; setPrintDirection(direction); if (direction !== "reverse") setBackingId(""); setUnitPriceOverridden(false); setActiveStep("laminate"); }} style={cardButtonStyle(printDirection === choice.key, "#7c3aed")}>
-                    <span style={{ fontSize: 30 }}>{choice.key === "reverse" ? "⇄" : "→"}</span>
-                    <strong>{choice.label}</strong>
-                    <span style={{ color: "#64748b" }}>{choice.note}</span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          ) : null}
-        </div>
-      );
-    }
-
-    if (activeStep === "laminate") {
-      const laminateSelected = Boolean(laminateId && laminateId !== "none");
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title={backingApplicable ? "Choose backing and laminate" : "Choose laminate"} text={backingApplicable ? "Reverse print is selected. Choose the optional backing film, then choose laminate independently." : "Choose None or select an actual laminate material from Materials. Laminate labour is optional and may be left blank or set to 0."} />
-          {backingApplicable ? <div style={{ display: "grid", gap: 10, padding: 14, border: "1px solid #bae6fd", borderRadius: 18, background: "#f0f9ff" }}>
-            <strong>Backing film</strong>
-            <span style={{ color: "#475569", fontSize: 13 }}>Choose No backing or a roll stock marked Used for backing. Same customer-facing stock names are grouped and the best width is selected automatically.</span>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 10 }}>
-              <button type="button" onClick={() => { setBackingId("none"); setUnitPriceOverridden(false); }} style={cardButtonStyle(backingId === "none", "#0284c7")}>
-                <span style={{ fontSize: 28 }}>—</span><strong>No backing</strong><span style={{ color: "#64748b" }}>Reverse print only, with no backing film.</span>
-              </button>
-              {backingGroups.map((group) => {
-                const widths = group.materials.map((material) => numberValue(material.rollWidthMm, 0)).filter((value) => value > 0);
-                return <button key={group.key} type="button" onClick={() => { setBackingId(group.representative.id); setUnitPriceOverridden(false); }} style={cardButtonStyle(Boolean(selectedBackingGroup?.key === group.key), "#0284c7")}>
-                  <span style={{ fontSize: 28 }}>▰</span><strong>{group.label}</strong><span style={{ color: "#64748b" }}>{widths.length > 1 ? `Auto-select ${widths.join(" / ")}mm widths` : widths.length === 1 ? `${widths[0]}mm roll` : "Roll backing film"}</span>
-                </button>;
-              })}
-            </div>
-            {!backingId ? <span style={{ color: "#9a3412", fontWeight: 800 }}>Choose a backing option before continuing.</span> : null}
-          </div> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            <button type="button" onClick={() => { setLaminateId("none"); setLaminateMinutes(""); if (!backingApplicable || backingId) setActiveStep("finishing"); }} style={cardButtonStyle(laminateId === "none", "#64748b")}>
-              <span style={{ fontSize: 30 }}>—</span>
-              <strong>None</strong>
-              <span style={{ color: "#64748b" }}>No laminate added.</span>
-            </button>
-            {laminateMaterials.map((material) => {
-              const rate = rollRate(material);
-              return (
-                <button key={material.id} type="button" onClick={() => { setLaminateId(material.id); setLaminateMinutes(""); }} style={cardButtonStyle(laminateId === material.id, "#16a34a")}>
-                  <span style={{ fontSize: 30 }}>▱</span>
-                  <strong>{material.name}</strong>
-                  <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
-                  <span style={{ fontWeight: 950 }}>{money(rate.rate)}/lm</span>
-                </button>
-              );
-            })}
-          </div>
-          {laminateSelected ? (
-            <LabourPrompt label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); setUnitPriceOverridden(false); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); setUnitPriceOverridden(false); }} onContinue={() => { if (!backingApplicable || backingId) setActiveStep("finishing"); }} labourRate={labourRate} quantity={quantityNumber} />
-          ) : null}
-        </div>
-      );
-    }
-
-    if (activeStep === "finishing") {
-      const eyeletsSelected = finishings.includes("eyelets");
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="•" title="Choose finishing" text="Tick all finishing processes required, then enter the labour time in minutes." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {finishingOptions.map((item) => (
-              <button key={item.key} type="button" onClick={() => toggleFinishing(item.key)} style={cardButtonStyle(finishings.includes(item.key), "#f59e0b")}>
-                <span style={{ fontSize: 30 }}>{item.icon}</span>
-                <strong>{item.label}</strong>
-                <span style={{ color: "#64748b" }}>{item.description}</span>
-                <span style={{ fontWeight: 900 }}>Enter minutes when selected</span>
-              </button>
-            ))}
-          </div>
-          {eyeletsSelected ? (
-            <div style={{ border: "1px solid #fde68a", borderRadius: 20, padding: 14, background: "#fffbeb", display: "grid", gap: 12 }}>
-              <strong>Eyelet placement / quantity</strong>
-              <select value={eyeletPresetLabel} onChange={(event) => setEyeletPresetLabel(event.target.value)} style={inputStyle}>
-                {eyeletPresets.map((preset) => <option key={preset.label} value={preset.label}>{preset.label}{preset.qty > 0 ? ` (${preset.qty})` : ""}</option>)}
-              </select>
-              {eyeletPresets.find((preset) => preset.label === eyeletPresetLabel)?.qty === 0 ? <input value={customEyeletQty} onChange={(event) => setCustomEyeletQty(event.target.value)} placeholder="Custom eyelet quantity" type="number" min="0" step="1" style={inputStyle} /> : null}
-            </div>
-          ) : null}
-          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} quantity={quantityNumber} />
-          <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review quote line</button>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_type") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="2" title="Choose small format item" text="Small format has its own flow and does not use signage material questions." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {smallFormatTypes.map((item) => (
-              <button key={item.key} type="button" onClick={() => { setSmallType(item.key); setSmallStockId(""); setCustomSmallStockEnabled(false); setNcrCopies(""); setNcrSetsPerBook(""); setNcrCoverColour(""); setNcrTapeColour(""); setActiveStep(item.key === "duplicate_books" ? "ncr_details" : "small_stock"); }} style={cardButtonStyle(smallType === item.key, "#7c3aed")}>
-                <span style={{ fontSize: 34 }}>{item.icon}</span>
-                <strong>{item.label}</strong>
-                <span style={{ color: "#64748b", lineHeight: 1.45 }}>{item.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "ncr_details") {
-      const copyOptions = [
-        { key: "duplicate", label: "Duplicate", detail: "2 parts: page 1 + page 2" },
-        { key: "triplicate", label: "Triplicate", detail: "3 parts: page 1 + page 2 + page 3" },
-        { key: "quadruplicate", label: "Quadruplicate", detail: "4 parts: page 1 + page 2 + page 3 + page 4" }
-      ];
-      const colourOptions = ["White", "Yellow", "Pink", "Blue", "Green", "Canary", "Custom"];
-      const coverOptions = ["None", "White", "Yellow", "Pink", "Blue", "Green", "Manilla", "Custom"];
-      const tapeOptions = ["Black", "White", "Red", "Blue", "Green", "Yellow", "Clear", "Custom"];
-      const count = ncrCopyCount(ncrCopies);
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="3" title="Set up the carbon book" text="Choose duplicate/triplicate, page colours, cover colour and tape colour before choosing stock." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-            {copyOptions.map((option) => (
-              <button key={option.key} type="button" onClick={() => setNcrCopies(option.key)} style={cardButtonStyle(ncrCopies === option.key, "#7c3aed")}>
-                <span style={{ fontSize: 34 }}>▱</span>
-                <strong>{option.label}</strong>
-                <span style={{ color: "#64748b" }}>{option.detail}</span>
-              </button>
-            ))}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Sets / pages per book</b><input value={ncrSetsPerBook} onChange={(event) => setNcrSetsPerBook(event.target.value)} placeholder="eg 50" type="number" min="1" step="1" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Cover colour</b><select value={ncrCoverColour} onChange={(event) => setNcrCoverColour(event.target.value)} style={inputStyle}><option value="">Choose cover colour</option>{coverOptions.map((colourName) => <option key={colourName} value={colourName}>{colourName}</option>)}</select></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Tape colour</b><select value={ncrTapeColour} onChange={(event) => setNcrTapeColour(event.target.value)} style={inputStyle}><option value="">Choose tape colour</option>{tapeOptions.map((colourName) => <option key={colourName} value={colourName}>{colourName}</option>)}</select></label>
-          </div>
-          {count > 0 ? (
-            <div style={{ border: "1px solid #e9d5ff", borderRadius: 20, padding: 14, background: "#faf5ff", display: "grid", gap: 10 }}>
-              <strong>Page colours</strong>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
-                {Array.from({ length: count }).map((_, index) => (
-                  <label key={index} style={{ display: "grid", gap: 6 }}>
-                    <b>Page {index + 1}</b>
-                    <select value={ncrPageColours[index] ?? ""} onChange={(event) => setNcrPageColours((current) => current.map((colourName, colourIndex) => colourIndex === index ? event.target.value : colourName))} style={inputStyle}>
-                      {colourOptions.map((colourName) => <option key={colourName} value={colourName}>{colourName}</option>)}
-                    </select>
-                  </label>
-                ))}
-              </div>
-            </div>
-          ) : null}
-          <button type="button" onClick={() => setActiveStep("small_stock")} disabled={!ncrDetailsComplete} style={{ ...primaryButton, opacity: ncrDetailsComplete ? 1 : 0.45 }}>Continue to stock</button>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_stock") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon={isDuplicateBook ? "4" : "3"} title={isDuplicateBook ? "Choose NCR / carbonless stock" : "Choose paper / card stock"} text="Only small-format stock is shown here. Signage sheets like ACM, acrylic and corflute are hidden from this step." />
-          {smallStocks.length === 0 ? <EmptyStep text="No small-format paper/card/NCR stock found. Use Custom stock below or create a small-format material first." /> : null}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 12, maxHeight: 420, overflow: "auto", paddingRight: 4 }}>
-            {smallStocks.map((material) => {
-              const rate = sheetUnitRate(material);
-              return (
-                <button key={material.id} type="button" onClick={() => { setCustomSmallStockEnabled(false); setSmallStockId(material.id); setActiveStep("small_size"); }} style={cardButtonStyle(!customSmallStockEnabled && smallStockId === material.id, "#7c3aed")}>
-                  <span style={{ fontSize: 30 }}>▤</span>
-                  <strong>{material.name}</strong>
-                  <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
-                  <span style={{ color: "#0f172a", fontWeight: 950 }}>{money(rate.rate)}/sheet</span>
-                  {rate.note ? <small style={{ color: "#64748b" }}>{rate.note}</small> : null}
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ border: "1px solid #e9d5ff", borderRadius: 22, padding: 16, background: customSmallStockEnabled ? "#faf5ff" : "#fff", display: "grid", gap: 12 }}>
-            <button type="button" onClick={() => { setCustomSmallStockEnabled(!customSmallStockEnabled); setSmallStockId(""); }} style={{ ...ghostButton, justifySelf: "start" }}>{customSmallStockEnabled ? "Hide custom stock" : "+ Use custom stock for this quote"}</button>
-            {customSmallStockEnabled ? (
-              <div style={{ display: "grid", gap: 12 }}>
-                <p style={{ margin: 0, color: "#64748b" }}>Use this when the material is not in the library yet. It prices this quote line only.</p>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 12 }}>
-                  <label style={{ display: "grid", gap: 6 }}><b>Stock name</b><input value={customSmallStockName} onChange={(event) => setCustomSmallStockName(event.target.value)} placeholder="eg NCR White/Yellow/Pink" style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 6 }}><b>Supplier</b><input value={customSmallStockSupplier} onChange={(event) => setCustomSmallStockSupplier(event.target.value)} placeholder="eg Custom supplier" style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 6 }}><b>Cost per sheet</b><input value={customSmallStockCost} onChange={(event) => setCustomSmallStockCost(event.target.value)} placeholder="eg 0.18" type="number" min="0" step="0.01" style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 6 }}><b>Sheet width mm</b><input value={customSmallStockWidthMm} onChange={(event) => setCustomSmallStockWidthMm(event.target.value)} placeholder="eg 210" type="number" min="0" step="1" style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 6 }}><b>Sheet height mm</b><input value={customSmallStockLengthMm} onChange={(event) => setCustomSmallStockLengthMm(event.target.value)} placeholder="eg 297" type="number" min="0" step="1" style={inputStyle} /></label>
-                  <label style={{ display: "grid", gap: 6 }}><b>GSM / thickness</b><input value={customSmallStockGsm} onChange={(event) => setCustomSmallStockGsm(event.target.value)} placeholder="eg 80gsm" style={inputStyle} /></label>
-                </div>
-                <button type="button" disabled={!customSmallStock} onClick={() => setActiveStep("small_size")} style={{ ...primaryButton, opacity: customSmallStock ? 1 : 0.45 }}>Use this custom stock</button>
-              </div>
-            ) : null}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_size") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon={isDuplicateBook ? "5" : "4"} title="Choose finished size" text={isDuplicateBook ? "Choose the finished form size. The book details decide how many copies/sheets are required." : "Finished size stays client-facing. Optional bleed / spacing enlarges each item in both directions for material nesting and yield."} />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-            {smallSizePresets.map((preset) => {
-              const selected = widthMm === preset.width && heightMm === preset.height;
-              return (
-                <button key={preset.label} type="button" onClick={() => setPresetSize(preset.width, preset.height, "artwork")} style={cardButtonStyle(selected, "#7c3aed")}>
-                  <span style={{ fontSize: 30 }}>▭</span>
-                  <strong>{preset.label}</strong>
-                  <span style={{ color: "#64748b" }}>{((numberValue(preset.width) / 1000) * (numberValue(preset.height) / 1000)).toFixed(3)}m² each</span>
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr auto", gap: 12, alignItems: "end" }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 90" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 55" style={inputStyle} /></label>
-            <label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); setUnitPriceOverridden(false); }} placeholder="eg 5" type="number" min="0" step="0.5" style={inputStyle} /><small style={{ color: "#64748b" }}>{bleedSpacingPerSideMm > 0 && nestingFootprintLabel ? `${nestingFootprintLabel} for material yield` : "Optional"}</small></label>
-            <button type="button" onClick={() => setActiveStep("artwork")} style={primaryButton}>Continue</button>
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_sides") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="6" title="Choose sides" text="Single or double sided affects print and coating usage." />
-          <SidesCards onComplete={() => setActiveStep("small_print")} sides={sides} setSides={setSides} />
-        </div>
-      );
-    }
-
-    if (activeStep === "small_print") {
-      const choices: Array<{ key: SmallPrintColour; label: string; icon: string; description: string }> = [
-        { key: "mono", label: "Mono", icon: "●", description: "Lower print charge for black-only work." },
-        { key: "cmyk", label: "CMYK", icon: "◉", description: "Colour print charge." },
-        { key: "special", label: "CMYK + special", icon: "◐", description: "Use for white/special ink or extra print pass." }
-      ];
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="7" title="Choose print colour" text="This is separate from signage ink so small format doesn't feel like an add-on." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
-            {choices.map((choice) => (
-              <button key={choice.key} type="button" onClick={() => { setSmallPrintColour(choice.key); setActiveStep("small_coating"); }} style={cardButtonStyle(smallPrintColour === choice.key, "#7c3aed")}>
-                <span style={{ fontSize: 34 }}>{choice.icon}</span>
-                <strong>{choice.label}</strong>
-                <span style={{ color: "#64748b" }}>{choice.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_coating") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="8" title="Choose cello / coating" text="Choose None or pick a cello/laminate material from Materials." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 12 }}>
-            <button type="button" onClick={() => { setSmallCoatingId("none"); setActiveStep("small_finishing"); }} style={cardButtonStyle(smallCoatingId === "none", "#64748b")}>
-              <span style={{ fontSize: 30 }}>—</span>
-              <strong>None</strong>
-              <span style={{ color: "#64748b" }}>No cello or coating.</span>
-            </button>
-            {laminateMaterials.map((material) => {
-              const rate = isRollMaterial(material) ? rollRate(material) : sheetUnitRate(material);
-              return (
-                <button key={material.id} type="button" onClick={() => { setSmallCoatingId(material.id); setActiveStep("small_finishing"); }} style={cardButtonStyle(smallCoatingId === material.id, "#a855f7")}>
-                  <span style={{ fontSize: 30 }}>▱</span>
-                  <strong>{material.name}</strong>
-                  <span style={{ color: "#64748b" }}>{materialCardMeta(material)}</span>
-                  <span style={{ fontWeight: 950 }}>{money(rate.rate)}/{isRollMaterial(material) ? "lm" : "sheet"}</span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_finishing") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="9" title="Choose small format finishing" text="Tick all bindery/finishing processes required, then enter how long each takes." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {smallFinishingOptions.map((item) => (
-              <button key={item.key} type="button" onClick={() => toggleSmallFinishing(item.key)} style={cardButtonStyle(smallFinishings.includes(item.key), "#7c3aed")}>
-                <span style={{ fontSize: 30 }}>{item.icon}</span>
-                <strong>{item.label}</strong>
-                <span style={{ color: "#64748b" }}>{item.description}</span>
-                <span style={{ fontWeight: 900 }}>Enter minutes when selected</span>
-              </button>
-            ))}
-          </div>
-          <SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); setUnitPriceOverridden(false); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); setUnitPriceOverridden(false); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} quantity={quantityNumber} />
-          <button type="button" onClick={() => setActiveStep("small_quantity")} style={primaryButton}>Continue to quantity</button>
-        </div>
-      );
-    }
-
-    if (activeStep === "small_quantity") {
-      return (
-        <div style={{ display: "grid", gap: 16 }}>
-          <StepIntro icon="10" title="Choose quantity" text="Quantity drives stock, print and coating usage for small format items." />
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12 }}>
-            {["50", "100", "250", "500", "1000"].map((amount) => (
-              <button key={amount} type="button" onClick={() => { setQuantity(amount); setActiveStep("review"); }} style={cardButtonStyle(quantity === amount, "#7c3aed")}>
-                <span style={{ fontSize: 28 }}>#</span>
-                <strong>{amount}</strong>
-                <span style={{ color: "#64748b" }}>items</span>
-              </button>
-            ))}
-          </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, alignItems: "end" }}>
-            <label style={{ display: "grid", gap: 6 }}><b>Custom quantity</b><input value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="1" style={inputStyle} /></label>
-            <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review</button>
-          </div>
-        </div>
-      );
-    }
-
-    return (
-      <div style={{ display: "grid", gap: 16 }}>
-        <StepIntro icon="✓" title="Review and save" text="This is the current quote line. It is not saved until you press the button below." />
-        <PricePanel rows={costs} rawCost={rawCost} markupMultiplier={markupMultiplier} profitMultiplier={profitMultiplier} priceLevelFactor={priceLevelFactor} priceLevelName={pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"} priceLevelCode={pricingSettings?.priceLevelCode || "Level A"} manualQuoteDiscountPercent={manualQuoteDiscountPercent} unitPrice={unitPrice} lineTotal={lineTotal} quantity={quantityNumber} />
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input name="quantity" value={quantity} onChange={(event) => setQuantity(event.target.value)} type="number" min="1" step="any" style={inputStyle} /></label>
-          <label style={{ display: "grid", gap: 6 }}><b>Unit sell price</b><input name="unitPrice" value={unitPriceOverridden ? manualUnitPrice : autoUnitPrice.toFixed(2)} onChange={(event) => { setManualUnitPrice(event.target.value); setUnitPriceOverridden(true); }} type="number" min="0" step="0.01" style={inputStyle} /></label>
-        </div>
-        {unitPriceOverridden ? <button type="button" onClick={() => setUnitPriceOverridden(false)} style={ghostButton}>Use calculated price</button> : null}
-      </div>
-    );
-  }
-
-
   function renderCompactStep(stepOverride?: QuickQuoteStep) {
     const compactStep = stepOverride ?? activeStep;
     const compactGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 10 } as const;
@@ -3439,7 +2030,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "size" || compactStep === "small_size") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}{compactStep === "size" && isRollStockBase ? renderDropLayoutControls(true) : null}</div>;
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Preset finished size</b><select value={activeSizePresetValue} onChange={(event) => { const preset = activeSizePresets.find((item) => `${item.width}x${item.height}` === event.target.value); if (preset) { setWidthMm(preset.width); setHeightMm(preset.height); changed(); } }} style={inputStyle}><option value="">Custom size</option>{activeSizePresets.map((preset) => <option key={`${preset.label}-${preset.width}-${preset.height}`} value={`${preset.width}x${preset.height}`}>{preset.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}{compactStep === "size" && isRollStockBase ? renderDropLayoutControls(true) : null}</div>;
     }
 
     if (compactStep === "artwork") {
@@ -3503,7 +2094,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "service_details" || compactStep === "dispatch") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Pickup / delivery / install</b><select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}><option value="">Choose</option>{serviceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>{serviceType === "delivery" ? <label style={{ display: "grid", gap: 6 }}><b>Delivery charge</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label> : null}{serviceType === "install" ? <><label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Install minutes</b><input value={installMinutes} onChange={(event) => { setInstallMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Travel / call-out</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label></> : null}</div></div>;
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Pickup / delivery / install</b><select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}><option value="">Choose</option>{serviceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>{serviceType === "delivery" ? <label style={{ display: "grid", gap: 6 }}><b>Delivery charge ($)</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} /></label> : null}{serviceType === "install" ? <><label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Travel / call-out charge ($)</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); changed(); }} placeholder="Dollar amount, not minutes" type="number" min="0" step="0.01" style={inputStyle} /><small style={{ color: "#64748b" }}>Enter the total dollar charge once for this quote line.</small></label></> : null}</div>{serviceType === "install" ? <InstallLabourField value={installMinutes} basis={installLabourBasis} crewSize={installCrewSize} quantity={quantityNumber} labourRate={labourRate} onChange={(value) => { setInstallMinutes(value); changed(); }} onBasisChange={(basis) => { setInstallLabourBasis(basis); changed(); }} /> : null}</div>;
     }
 
     if (compactStep === "service_fixings") {
@@ -3536,13 +2127,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   };
 
   const handleBuilderSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if ((!compactEdit && !canSave) || (!compactEdit && builderMode !== "quick" && activeStep !== "review")) {
+    if (!canSave) {
       event.preventDefault();
     }
   };
 
-  if (compactEdit && (editingLine || compactAll)) {
-    const allSignageSteps: QuickQuoteStep[] = flowType === "service"
+  const allSignageSteps: QuickQuoteStep[] = flowType === "service"
       ? ["flow", "service_type", "service_details", "service_fixings", "review"]
       : flowType === "component"
         ? ["flow", "component_details", "component_parts", "component_labour", "review"]
@@ -3609,218 +2199,36 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <input type="hidden" name="serviceLineProductName" value={serviceType === "install" ? "Sign Install" : "Delivery"} />
             <input type="hidden" name="serviceLineOptionSummary" value={dispatchSummary} />
             <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
-            <input type="hidden" name="serviceLineQuantity" value="1" />
+            <input type="hidden" name="serviceLineQuantity" value={String(dispatchLineQuantity)} />
             <input type="hidden" name="serviceLineConfigurationSnapshot" value={JSON.stringify(dispatchConfigurationSnapshot)} />
           </>
         ) : null}
 
-        {compactAll ? (
-          <div style={{ display: "grid", gap: 14 }}>
-            <div style={{ borderRadius: 14, background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 14px" }}>
-              <strong style={{ color: "#1d4ed8" }}>Configure the complete quote line</strong>
-              <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line.</div>
-            </div>
-            {allSignageSteps.map((step, index) => (
-              <section key={step} style={{ display: "grid", gap: 7 }}>
-                <strong style={{ color: "#344054", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em" }}>{index + 1}. {allStepLabels[step] ?? step.replaceAll("_", " ")}</strong>
-                {renderCompactStep(step)}
-              </section>
-            ))}
+        <div style={{ display: "grid", gap: 14 }}>
+          <div style={{ borderRadius: 14, background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 14px" }}>
+            <strong style={{ color: "#1d4ed8" }}>Configure the complete quote line</strong>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line.</div>
           </div>
-        ) : renderCompactStep()}
+          {allSignageSteps.map((step, index) => (
+            <section key={step} style={{ display: "grid", gap: 7 }}>
+              <strong style={{ color: "#344054", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em" }}>{index + 1}. {allStepLabels[step] ?? step.replaceAll("_", " ")}</strong>
+              {renderCompactStep(step)}
+            </section>
+          ))}
+        </div>
 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
             <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>
+            {shouldCreateDispatchLine ? <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>Plus {serviceType === "install" ? "Sign Install" : "Delivery"}: qty {usage(dispatchLineQuantity)} × {money(dispatchUnitPrice)} = {money(dispatchLineTotal)}</span> : null}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {onCompactCancel ? <button type="button" onClick={onCompactCancel} style={{ ...ghostButton, minHeight: 40 }}>Cancel</button> : null}
-            <button type="submit" style={{ ...primaryButton, minHeight: 40 }}>{compactAll ? "Save Quote Line" : "Save component change"}</button>
+            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 40, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save Quote Line" : "Complete required fields"}</button>
           </div>
         </div>
       </form>
     );
-  }
-
-  if (builderMode === "saved") {
-    return renderSavedProductLayout();
-  }
-
-  const headerGradient = flowType === "component"
-    ? "linear-gradient(135deg, #7c2d12 0%, #f97316 58%, #fdba74 100%)"
-    : flowType === "service"
-    ? "linear-gradient(135deg, #064e3b 0%, #059669 58%, #34d399 100%)"
-    : flowType === "small_format"
-      ? "linear-gradient(135deg, #581c87 0%, #7c3aed 58%, #c084fc 100%)"
-      : flowType === "plan_printing"
-        ? "linear-gradient(135deg, #064e3b 0%, #0f766e 58%, #5eead4 100%)"
-        : flowType === "poster_printing"
-          ? "linear-gradient(135deg, #7f1d1d 0%, #dc2626 58%, #fca5a5 100%)"
-          : "linear-gradient(135deg, #0f172a 0%, #172554 58%, #155eef 100%)";
-
-  return (
-    <form id="quote-builder" action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ border: "1px solid #dbeafe", borderRadius: 28, overflow: "hidden", background: "#ffffff", display: "grid", scrollMarginTop: 18 }}>
-      <input type="hidden" name="quoteId" value={quoteId} />
-      <input type="hidden" name="editingLineId" value={editingLine?.id ?? ""} />
-      <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
-      <input type="hidden" name="productName" value={lineName} />
-      <input type="hidden" name="optionSummary" value={optionSummary} />
-      <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
-      <input type="hidden" name="quantity" value={quantity} />
-      {shouldCreateDispatchLine ? (
-        <>
-          <input type="hidden" name="serviceLineProductName" value={serviceType === "install" ? "Sign Install" : "Delivery"} />
-          <input type="hidden" name="serviceLineOptionSummary" value={dispatchSummary} />
-          <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
-          <input type="hidden" name="serviceLineQuantity" value="1" />
-          <input type="hidden" name="serviceLineConfigurationSnapshot" value={JSON.stringify(dispatchConfigurationSnapshot)} />
-        </>
-      ) : null}
-      {editingLine ? (
-        <section style={{ borderBottom: "1px solid #bfdbfe", background: initialSnapshot?.reconstructed ? "#fff7ed" : "#eff6ff", color: initialSnapshot?.reconstructed ? "#9a3412" : "#1d4ed8", padding: "14px 18px", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-          <div style={{ display: "grid", gap: 3 }}>
-            <strong>{initialSnapshot?.reconstructed ? "Rebuilding an older quote line" : `Editing ${editingLine.productName}`}</strong>
-            <span style={{ fontSize: 13 }}>{initialSnapshot?.reconstructed ? "Known values were reconstructed from the old summary. Check each selection before saving; the original line remains unchanged until you update it." : "This is the original structured configuration. Changing selections recalculates the price and updates the same quote line."}</span>
-          </div>
-          <a href={`/quotes?selected=${quoteId}#saved-lines`} style={{ minHeight: 38, borderRadius: 12, border: "1px solid currentColor", color: "inherit", background: "#fff", padding: "0 12px", display: "inline-flex", alignItems: "center", textDecoration: "none", fontWeight: 900 }}>Cancel edit</a>
-        </section>
-      ) : null}
-      {builderMode === "quick" ? renderQuickQuoteLayout() : (
-        <>
-      <div style={{ background: headerGradient, color: "#fff", padding: 22, display: "grid", gap: 14 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-          <div>
-            <p style={{ margin: 0, textTransform: "uppercase", letterSpacing: "0.14em", fontSize: 12, fontWeight: 950, color: flowType === "small_format" ? "#f3e8ff" : "#bfdbfe" }}>Quote-side builder</p>
-            <h3 style={{ margin: "6px 0 0", fontSize: 30, letterSpacing: "-0.04em" }}>{stepTitle()}</h3>
-            <p style={{ margin: "6px 0 0", color: flowType === "small_format" ? "#f3e8ff" : "#dbeafe" }}>Build the quote line from materials, labour and real quoting choices.</p>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ borderRadius: 999, background: "rgba(255,255,255,0.12)", padding: "9px 12px", fontSize: 12, fontWeight: 950 }}>{steps.filter((step) => step.complete).length}/{steps.length} steps</span>
-            <span style={{ borderRadius: 999, background: "rgba(255,255,255,0.12)", padding: "9px 12px", fontSize: 12, fontWeight: 950 }}>Sell ×{usage(sellMultiplier)}</span>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {steps.map((step) => (
-            <button key={step.key} type="button" onClick={() => setActiveStep(step.key)} style={{ border: step.key === activeStep ? "1px solid #fff" : "1px solid rgba(255,255,255,0.22)", borderRadius: 999, background: step.key === activeStep ? "#ffffff" : "rgba(255,255,255,0.1)", color: step.key === activeStep ? "#0f172a" : "#e0f2fe", padding: "8px 11px", fontWeight: 950, cursor: "pointer", fontSize: 12 }}>
-              {step.complete ? "✓" : step.icon} {step.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "270px minmax(0, 1fr)", gap: 18, padding: 20, background: flowType === "component" ? "#fff7ed" : flowType === "service" ? "#f0fdf4" : flowType === "small_format" ? "#fbf7ff" : "#f8fbff" }}>
-        <aside style={{ display: "grid", gap: 14, alignSelf: "start" }}>
-          <div style={{ border: "1px solid #dfe7f2", borderRadius: 22, padding: 16, background: "#fff", display: "grid", gap: 10 }}>
-            <strong>Current build</strong>
-            <SummaryRow label="Flow" value={flowType ? flowTypeLabel(flowType) : undefined} />
-            {flowType === "component" ? (
-              <>
-                <SummaryRow label="Component" value={componentName || undefined} />
-                <SummaryRow label="Parts" value={pricedComponentParts.length ? `${pricedComponentParts.length} costed part${pricedComponentParts.length === 1 ? "" : "s"}` : undefined} />
-                <SummaryRow label="Labour" value={componentLabourMinutes ? minutesLabel(componentLabourMinutes) : undefined} />
-              </>
-            ) : flowType === "service" ? (
-              <>
-                <SummaryRow label="Service" value={serviceLabel} />
-                {serviceType === "delivery" ? <SummaryRow label="Delivery charge" value={deliveryCharge ? money(numberValue(deliveryCharge, 0)) : undefined} /> : null}
-                {serviceType === "install" ? <SummaryRow label="Crew" value={`${installCrewSize || "1"} person${numberValue(installCrewSize, 1) === 1 ? "" : "s"}`} /> : null}
-                {serviceType === "install" ? <SummaryRow label="Install time" value={installMinutes ? minutesLabel(installMinutes) : undefined} /> : null}
-                {serviceType === "install" ? <SummaryRow label="Travel" value={travelCharge ? money(numberValue(travelCharge, 0)) : undefined} /> : null}
-                {serviceType === "install" ? <SummaryRow label="Fixings" value={serviceFixings.length ? selectedKeys(fixingOptions, serviceFixings) : undefined} /> : null}
-              </>
-            ) : flowType === "small_format" ? (
-              <>
-                <SummaryRow label="Item" value={selectedSmallType?.label} />
-                <SummaryRow label="Stock" value={selectedSmallStock?.name} />
-                {isDuplicateBook ? <SummaryRow label="Book" value={ncrCopies ? `${ncrCopiesCount} part · ${ncrSetsPerBook || "?"} sets/book` : undefined} /> : null}
-                {isDuplicateBook ? <SummaryRow label="Page colours" value={ncrCopiesCount ? pageColourSummary(ncrCopiesCount, ncrPageColours) : undefined} /> : null}
-                {isDuplicateBook ? <SummaryRow label="Cover / tape" value={ncrCoverColour && ncrTapeColour ? `${ncrCoverColour} cover · ${ncrTapeColour} tape` : undefined} /> : null}
-                <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-                <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
-                <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? minutesLabel(artworkMinutes) : "Required" : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
-                {!isDuplicateBook ? <SummaryRow label="Sides" value={sides ? `${sides === "double" ? "Double" : "Single"} sided` : undefined} /> : null}
-                {!isDuplicateBook ? <SummaryRow label="Print" value={smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : undefined} /> : null}
-                {!isDuplicateBook ? <SummaryRow label="Coating" value={selectedSmallCoatingName || undefined} /> : null}
-                <SummaryRow label="Finishing" value={smallFinishingSummary || undefined} />
-              </>
-            ) : (
-              <>
-                <SummaryRow label="Base" value={selectedBase?.label} />
-                <SummaryRow label="Material" value={selectedMainMaterial?.name} />
-                <SummaryRow label="Sheet use" value={sheetUseLabel || undefined} />
-                <SummaryRow label="Size" value={width > 0 && height > 0 ? `${dimensionMm(width)} × ${dimensionMm(height)}mm` : undefined} />
-                <SummaryRow label="Bleed / spacing" value={bleedSpacingPerSideMm > 0 ? `${dimensionMm(bleedSpacingPerSideMm)}mm each side · ${nestingFootprintLabel}` : undefined} />
-                <SummaryRow label="Artwork" value={artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? minutesLabel(artworkMinutes) : "Required" : artworkChoice === "client_supplied" ? "Client supplied" : undefined} />
-                {!isRollStockBase ? <SummaryRow label="Print" value={printMethods.find((item) => item.key === resolvedPrintMethod)?.label} /> : null}
-                <SummaryRow label="Print setup" value={printed && printSetupMinutes ? minutesLabel(printSetupMinutes) : undefined} />
-                {!isRollStockBase ? <SummaryRow label="Media" value={selectedMedia?.name} /> : null}
-                <SummaryRow label="Ink" value={inkChoices.find((item) => item.key === ink)?.label} />
-                {canChooseReversePrint ? <SummaryRow label="Print direction" value={printDirection ? (printDirection === "reverse" ? "Reverse print" : selectedReversePrintableRoll && !isClearAcrylic ? "Standard print" : "Positive print") : undefined} /> : null}
-                {backingApplicable ? <SummaryRow label="Backing" value={selectedBackingName || "Choose backing"} /> : null}
-                <SummaryRow label="Laminate" value={selectedLaminateName || undefined} />
-                <SummaryRow label="Finishing" value={finishingSummary || undefined} />
-              </>
-            )}
-          </div>
-          <div style={{ border: "1px solid #bbf7d0", borderRadius: 22, padding: 16, background: "#f0fdf4", display: "grid", gap: 8 }}>
-            <span style={{ fontSize: 12, fontWeight: 950, color: "#067647", textTransform: "uppercase" }}>Live price</span>
-            <strong style={{ fontSize: 26 }}>{money(unitPrice)}</strong>
-            <span style={{ color: "#475467", fontSize: 13 }}>cost {money(rawCost)} × markup {usage(markupMultiplier)} × profit {usage(profitMultiplier)} × {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"} {usage(priceLevelFactor)}{manualQuoteDiscountPercent ? ` - ${usage(manualQuoteDiscountPercent)}% manual quote discount` : ""}</span>
-          </div>
-        </aside>
-
-        <section style={{ border: "1px solid #dfe7f2", borderRadius: 24, padding: 18, background: "#fff", minHeight: 520, display: "grid", gap: 16, alignContent: "start" }}>
-          {renderStep()}
-          <div style={{ display: "flex", justifyContent: "space-between", gap: 10, borderTop: "1px solid #e5e7eb", paddingTop: 14 }}>
-            <button type="button" disabled={!previousStep} onClick={() => previousStep && setActiveStep(previousStep)} style={{ ...ghostButton, opacity: previousStep ? 1 : 0.45 }}>Back</button>
-            <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-              {activeStep !== "review" && nextStep ? <button type="button" onClick={() => setActiveStep(nextStep)} style={ghostButton}>Skip / next</button> : null}
-              {activeStep === "review" ? (
-                <button type="submit" disabled={!canSave} style={{ ...primaryButton, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? editingLine ? "Update quote line" : "Save quote line" : "Complete required cards"}</button>
-              ) : <button type="button" onClick={() => setActiveStep("review")} style={primaryButton}>Review</button>}
-            </div>
-          </div>
-        </section>
-      </div>
-
-      <div style={{ borderTop: "1px solid #e5e7eb", padding: 18, display: "grid", gap: 12, background: "#fff" }}>
-        <label style={{ display: "grid", gap: 6 }}><b>Line notes</b><textarea name="notes" value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} placeholder="Optional notes for this line" style={textareaStyle} /></label>
-        <div style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 14, background: "#f8fafc", display: "grid", gap: 5 }}>
-          <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.05em" }}>Current unsaved line</span>
-          <span style={{ color: optionSummary ? "#111827" : "#667085" }}>{optionSummary || "Complete the card flow above to build this quote line."}</span>
-        </div>
-        <button type="submit" disabled={!canSave || activeStep !== "review"} style={{ ...darkButton, opacity: canSave && activeStep === "review" ? 1 : 0.45, cursor: canSave && activeStep === "review" ? "pointer" : "not-allowed" }}>{activeStep === "review" ? canSave ? editingLine ? "Update quote line" : "Save quote line" : "Complete required cards before saving" : "Review before saving"}</button>
-      </div>
-        </>
-      )}
-    </form>
-  );
-}
-
-function StepIntro({ icon, title, text }: { icon: string; title: string; text: string }) {
-  return (
-    <div style={{ display: "flex", gap: 14, alignItems: "start" }}>
-      <span style={{ width: 48, height: 48, borderRadius: 18, display: "grid", placeItems: "center", background: "#eff6ff", color: "#155eef", fontWeight: 950, fontSize: 20 }}>{icon}</span>
-      <div>
-        <h4 style={{ margin: 0, fontSize: 24, letterSpacing: "-0.03em" }}>{title}</h4>
-        <p style={{ margin: "5px 0 0", color: "#64748b", lineHeight: 1.55 }}>{text}</p>
-      </div>
-    </div>
-  );
-}
-
-function EmptyStep({ text }: { text: string }) {
-  return <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: 18, padding: 14, fontWeight: 800 }}>{text}</div>;
-}
-
-function SummaryRow({ label, value }: { label: string; value?: string | null }) {
-  return (
-    <div style={{ display: "grid", gap: 2, padding: "8px 0", borderTop: "1px solid #eef2f7" }}>
-      <span style={{ fontSize: 11, fontWeight: 950, color: "#64748b", textTransform: "uppercase" }}>{label}</span>
-      <span style={{ fontWeight: 900, color: value ? "#0f172a" : "#94a3b8" }}>{value || "Choose later"}</span>
-    </div>
-  );
 }
 
 function labourPreviewText(minutes: number, basis: LabourBasis, labourRate: number, quantity: number, perItemLabel = "per item"): string {
@@ -3849,26 +2257,30 @@ function InlineLabourField({ label, value, basis, onChange, onBasisChange, labou
   );
 }
 
-function LabourPrompt({ label, value, basis, onChange, onBasisChange, onContinue, labourRate, quantity, perItemLabel = "Per item" }: { label: string; value: string; basis: LabourBasis; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void; onContinue: () => void; labourRate: number; quantity: number; perItemLabel?: string }) {
-  return (
-    <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 14, background: "#f0fdf4", display: "grid", gap: 10 }}>
-      <InlineLabourField label={label} value={value} basis={basis} onChange={onChange} onBasisChange={onBasisChange} labourRate={labourRate} quantity={quantity} perItemLabel={perItemLabel} />
-      <span style={{ color: "#475467", fontSize: 13 }}>0.5 minutes = 30 seconds. Choose Total line item when the entered time covers the complete quantity.</span>
-      <button type="button" onClick={onContinue} style={primaryButton}>Continue</button>
-    </div>
-  );
-}
+function InstallLabourField({ value, basis, crewSize, quantity, labourRate, onChange, onBasisChange }: { value: string; basis: LabourBasis; crewSize: string; quantity: number; labourRate: number; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void }) {
+  const minutes = numberValue(value, 0);
+  const crew = Math.max(1, numberValue(crewSize, 1));
+  const safeQuantity = Math.max(1, quantity);
+  const totalSiteMinutes = basis === "per_item" ? minutes * safeQuantity : minutes;
+  const personMinutes = totalSiteMinutes * crew;
+  const labourCost = personMinutes * (labourRate / 60);
+  const preview = minutes <= 0
+    ? "Enter the installation time, then choose whether it covers the complete line or each quoted item."
+    : basis === "per_item"
+      ? `${minutesLabel(minutes)} per item × qty ${usage(safeQuantity)} × ${usage(crew)} installer${crew === 1 ? "" : "s"} = ${minutesLabel(personMinutes)} person-time · ${money(labourCost)} labour`
+      : `${minutesLabel(minutes)} for the complete line × ${usage(crew)} installer${crew === 1 ? "" : "s"} = ${minutesLabel(personMinutes)} person-time · ${money(labourCost)} labour`;
 
-function SidesCards({ sides, setSides, onComplete }: { sides: SidesChoice; setSides: (value: SidesChoice) => void; onComplete: () => void }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-      {[{ key: "single", label: "Single sided", icon: "◧" }, { key: "double", label: "Double sided", icon: "◨" }].map((choice) => (
-        <button key={choice.key} type="button" onClick={() => { setSides(choice.key as SidesChoice); onComplete(); }} style={cardButtonStyle(sides === choice.key, "#0ea5e9")}>
-          <span style={{ fontSize: 34 }}>{choice.icon}</span>
-          <strong>{choice.label}</strong>
-          <span style={{ color: "#64748b" }}>{choice.key === "double" ? "Doubles print-related usage." : "One printed face."}</span>
-        </button>
-      ))}
+    <div style={{ display: "grid", gap: 6 }}>
+      <b>Install labour time</b>
+      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 170px", gap: 8 }}>
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Minutes, eg 60" type="number" min="0" step="0.5" style={inputStyle} />
+        <select value={basis} onChange={(event) => onBasisChange(event.target.value as LabourBasis)} style={inputStyle}>
+          <option value="line_total">Total line item</option>
+          <option value="per_item">Per item</option>
+        </select>
+      </div>
+      <small style={{ color: "#64748b" }}>{preview}</small>
     </div>
   );
 }
@@ -3901,31 +2313,6 @@ function SelectedLabourMinutes<T extends { key: string; label: string }>({ optio
         })}
       </div>
       <span style={{ color: "#475467", fontSize: 13 }}>Decimal minutes are supported: 0.5 = 30 seconds. Total line item charges the entered time once for the complete quantity.</span>
-    </div>
-  );
-}
-
-function PricePanel({ rows, rawCost, markupMultiplier, profitMultiplier, priceLevelFactor, priceLevelName, priceLevelCode, manualQuoteDiscountPercent, unitPrice, lineTotal, quantity }: { rows: CostRow[]; rawCost: number; markupMultiplier: number; profitMultiplier: number; priceLevelFactor: number; priceLevelName: string; priceLevelCode: string; manualQuoteDiscountPercent: number; unitPrice: number; lineTotal: number; quantity: number }) {
-  return (
-    <div style={{ border: "1px solid #bbf7d0", borderRadius: 20, padding: 16, background: "#f0fdf4", display: "grid", gap: 10 }}>
-      <span style={{ fontSize: 12, fontWeight: 950, color: "#067647", textTransform: "uppercase", letterSpacing: "0.05em" }}>Calculated quote price</span>
-      <strong style={{ fontSize: 22 }}>{money(unitPrice)} sell price per unit · {money(lineTotal)} line total at qty {usage(quantity)}</strong>
-      <div style={{ color: "#344054", fontSize: 13, display: "grid", gap: 4 }}>
-        <div><b>Raw cost:</b> {money(rawCost)}</div>
-        <div><b>Global markup:</b> ×{usage(markupMultiplier)}</div>
-        <div><b>Global profit:</b> ×{usage(profitMultiplier)}</div>
-        <div><b>MYOB price level:</b> {priceLevelName}{priceLevelName !== priceLevelCode ? ` (${priceLevelCode})` : ""} · ×{usage(priceLevelFactor)}</div>
-        {manualQuoteDiscountPercent > 0 ? <div><b>Manual quote discount:</b> -{usage(manualQuoteDiscountPercent)}%</div> : null}
-      </div>
-      {rows.length > 0 ? (
-        <div style={{ display: "grid", gap: 7 }}>
-          {rows.map((row, index) => (
-            <div key={`${row.label}-${index}`} style={{ color: "#344054", fontSize: 13 }}>
-              <b>{row.label}</b>: {row.detail} · {usage(row.amount)} {row.unit} × {money(row.rate)}/{row.unit} = <b>{money(row.cost)}</b>{row.note ? <span style={{ color: "#667085" }}> · {row.note}</span> : null}
-            </div>
-          ))}
-        </div>
-      ) : <span style={{ color: "#667085", fontSize: 13 }}>No cost yet. Complete the cards to see the live calculation.</span>}
     </div>
   );
 }

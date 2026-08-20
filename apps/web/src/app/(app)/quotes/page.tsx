@@ -740,9 +740,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         key="new-quote-line"
                         quoteId={selectedQuote.id}
                         materials={activeMaterials}
-                        savedProducts={savedQuoteProducts}
-                        compactEdit
-                        compactAll
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",

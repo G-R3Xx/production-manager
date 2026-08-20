@@ -119,6 +119,7 @@ export type QuickQuoteSnapshot = {
   deliveryCharge?: string;
   installCrewSize?: string;
   installMinutes?: string;
+  installLabourBasis?: QuickQuoteLabourBasis;
   travelCharge?: string;
   serviceFixings?: string[];
   serviceFixingQty?: Record<string, string>;
@@ -271,6 +272,7 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
     smallFinishings: stringArray(sourceValue.smallFinishings),
     smallFinishingMinutes: recordOfStrings(sourceValue.smallFinishingMinutes),
     smallFinishingLabourBasis: recordOfLabourBasis(sourceValue.smallFinishingLabourBasis),
+    installLabourBasis: labourBasisValue(sourceValue.installLabourBasis),
     serviceFixings: stringArray(sourceValue.serviceFixings),
     serviceFixingQty: recordOfStrings(sourceValue.serviceFixingQty),
     serviceFixingRate: recordOfStrings(sourceValue.serviceFixingRate),
@@ -463,6 +465,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
     serviceType,
     installCrewSize: dispatchValue.match(/(\d+)\s+installer/i)?.[1] ?? "1",
     installMinutes: minutesFrom(dispatchValue),
+    installLabourBasis: "line_total",
     quantity: input.quantity || "1",
     unitPriceOverridden: false,
     manualUnitPrice: input.unitPrice || "0",
