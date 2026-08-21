@@ -63,6 +63,7 @@ export type QuickQuoteSnapshot = {
   surveyNeedsConfiguration?: boolean;
   surveyContext?: Record<string, unknown>;
   linkedDispatchLineId?: string | null;
+  linkedAccessEquipmentLineId?: string | null;
   parentLineId?: string | null;
   builderMode?: "quick" | "advanced";
   activeStep?: QuickQuoteStep;
@@ -121,6 +122,10 @@ export type QuickQuoteSnapshot = {
   installMinutes?: string;
   installLabourBasis?: QuickQuoteLabourBasis;
   travelCharge?: string;
+  accessEquipmentRequired?: boolean;
+  accessEquipmentType?: string;
+  accessEquipmentDailyCharge?: string;
+  accessEquipmentDays?: string;
   serviceFixings?: string[];
   serviceFixingQty?: Record<string, string>;
   serviceFixingRate?: Record<string, string>;

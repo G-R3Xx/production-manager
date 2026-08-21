@@ -577,19 +577,23 @@ export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]
 
   const ordered: QuoteLineRecord[] = [];
   const added = new Set<string>();
-  for (const line of result.rows) {
-    if (linkedChildIds.has(line.id)) continue;
+  const appendLineAndChildren = (line: QuoteLineRecord) => {
+    if (added.has(line.id)) return;
     ordered.push(line);
     added.add(line.id);
     for (const child of childrenByParent.get(line.id) ?? []) {
-      ordered.push(child);
-      added.add(child.id);
+      appendLineAndChildren(child);
     }
+  };
+
+  for (const line of result.rows) {
+    if (linkedChildIds.has(line.id)) continue;
+    appendLineAndChildren(line);
   }
 
   // Keep malformed/orphaned legacy rows visible rather than dropping them.
   for (const line of result.rows) {
-    if (!added.has(line.id)) ordered.push(line);
+    appendLineAndChildren(line);
   }
   return ordered;
 }

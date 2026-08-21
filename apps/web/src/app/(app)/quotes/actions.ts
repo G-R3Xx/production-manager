@@ -66,6 +66,53 @@ function snapshotText(snapshot: Record<string, unknown>, key: string): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+type LinkedQuoteLineInput = {
+  productName: string;
+  optionSummary: string | null;
+  quantity: string;
+  unitPrice: string;
+  notes: string | null;
+  configurationSnapshot: Record<string, unknown>;
+};
+
+async function upsertLinkedQuoteLine(
+  tenantId: string,
+  quoteId: string,
+  existingLineId: string,
+  parentLineId: string,
+  input: LinkedQuoteLineInput | null
+): Promise<string> {
+  const existingLine = existingLineId
+    ? await getQuoteLineForTenant(tenantId, quoteId, existingLineId)
+    : null;
+
+  if (!input) {
+    if (existingLine) {
+      await deleteQuoteLineForTenant(tenantId, quoteId, existingLine.id);
+    }
+    return "";
+  }
+
+  const nextInput = {
+    ...input,
+    configurationSnapshot: {
+      ...input.configurationSnapshot,
+      parentLineId
+    }
+  };
+
+  if (existingLine) {
+    await updateQuoteLineForTenant(tenantId, quoteId, existingLine.id, nextInput);
+    return existingLine.id;
+  }
+
+  const created = await addQuoteLine(quoteId, {
+    productId: null,
+    ...nextInput
+  });
+  return created.id;
+}
+
 function buildEditableOptionSummary(formData: FormData): string | null {
   const labels = formData.getAll("optionDetailLabel");
   const values = formData.getAll("optionDetailValue");
@@ -426,6 +473,31 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
   const serviceLineUnitPrice = String(formData.get("serviceLineUnitPrice") ?? "").trim();
   const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
   const serviceLineSnapshot = jsonObject(formData.get("serviceLineConfigurationSnapshot"));
+  const serviceLineInput: LinkedQuoteLineInput | null = serviceLineProductName && serviceLineUnitPrice
+    ? {
+        productName: serviceLineProductName,
+        optionSummary: nullable(formData.get("serviceLineOptionSummary")),
+        quantity: serviceLineQuantity,
+        unitPrice: serviceLineUnitPrice,
+        notes: nullable(formData.get("serviceLineNotes")),
+        configurationSnapshot: serviceLineSnapshot
+      }
+    : null;
+
+  const accessEquipmentLineProductName = String(formData.get("accessEquipmentLineProductName") ?? "").trim();
+  const accessEquipmentLineUnitPrice = String(formData.get("accessEquipmentLineUnitPrice") ?? "").trim();
+  const accessEquipmentLineQuantity = String(formData.get("accessEquipmentLineQuantity") ?? "1").trim() || "1";
+  const accessEquipmentLineSnapshot = jsonObject(formData.get("accessEquipmentLineConfigurationSnapshot"));
+  const accessEquipmentLineInput: LinkedQuoteLineInput | null = accessEquipmentLineProductName && accessEquipmentLineUnitPrice
+    ? {
+        productName: accessEquipmentLineProductName,
+        optionSummary: nullable(formData.get("accessEquipmentLineOptionSummary")),
+        quantity: accessEquipmentLineQuantity,
+        unitPrice: accessEquipmentLineUnitPrice,
+        notes: nullable(formData.get("accessEquipmentLineNotes")),
+        configurationSnapshot: accessEquipmentLineSnapshot
+      }
+    : null;
 
   if (editingLineId) {
     const existingLine = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, editingLineId);
@@ -435,53 +507,42 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
 
     const existingSnapshot = existingLine.configurationSnapshot ?? {};
     const existingDispatchLineId = snapshotText(existingSnapshot, "linkedDispatchLineId");
-    let linkedDispatchLineId = existingDispatchLineId;
+    const existingDispatch = existingDispatchLineId
+      ? await getQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId)
+      : null;
+    const existingAccessEquipmentLineId = snapshotText(existingSnapshot, "linkedAccessEquipmentLineId")
+      || snapshotText(existingDispatch?.configurationSnapshot ?? {}, "linkedAccessEquipmentLineId");
 
-    if (serviceLineProductName && serviceLineUnitPrice) {
-      const dispatchSnapshot = { ...serviceLineSnapshot, parentLineId: editingLineId };
-      if (existingDispatchLineId) {
-        const existingDispatch = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId);
-        if (existingDispatch) {
-          await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId, {
-            productName: serviceLineProductName,
-            optionSummary: nullable(formData.get("serviceLineOptionSummary")),
-            quantity: serviceLineQuantity,
-            unitPrice: serviceLineUnitPrice,
-            notes: nullable(formData.get("serviceLineNotes")),
-            configurationSnapshot: dispatchSnapshot
-          });
-        } else {
-          const createdDispatch = await addQuoteLine(quoteId, {
-            productId: null,
-            productName: serviceLineProductName,
-            optionSummary: nullable(formData.get("serviceLineOptionSummary")),
-            quantity: serviceLineQuantity,
-            unitPrice: serviceLineUnitPrice,
-            notes: nullable(formData.get("serviceLineNotes")),
-            configurationSnapshot: dispatchSnapshot
-          });
-          linkedDispatchLineId = createdDispatch.id;
+    const linkedDispatchLineId = await upsertLinkedQuoteLine(
+      activeTenant.tenantId,
+      quoteId,
+      existingDispatchLineId,
+      editingLineId,
+      serviceLineInput
+    );
+    const linkedAccessEquipmentLineId = await upsertLinkedQuoteLine(
+      activeTenant.tenantId,
+      quoteId,
+      existingAccessEquipmentLineId,
+      linkedDispatchLineId || editingLineId,
+      accessEquipmentLineInput
+    );
+
+    if (linkedDispatchLineId && serviceLineInput) {
+      await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, linkedDispatchLineId, {
+        ...serviceLineInput,
+        configurationSnapshot: {
+          ...serviceLineInput.configurationSnapshot,
+          parentLineId: editingLineId,
+          linkedAccessEquipmentLineId: linkedAccessEquipmentLineId || null
         }
-      } else {
-        const createdDispatch = await addQuoteLine(quoteId, {
-          productId: null,
-          productName: serviceLineProductName,
-          optionSummary: nullable(formData.get("serviceLineOptionSummary")),
-          quantity: serviceLineQuantity,
-          unitPrice: serviceLineUnitPrice,
-          notes: nullable(formData.get("serviceLineNotes")),
-          configurationSnapshot: dispatchSnapshot
-        });
-        linkedDispatchLineId = createdDispatch.id;
-      }
-    } else if (existingDispatchLineId) {
-      await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, existingDispatchLineId);
-      linkedDispatchLineId = "";
+      });
     }
 
     const surveyContext = existingSnapshot.surveyContext && typeof existingSnapshot.surveyContext === "object" && !Array.isArray(existingSnapshot.surveyContext)
       ? existingSnapshot.surveyContext
       : undefined;
+    const existingParentLineId = snapshotText(existingSnapshot, "parentLineId");
     await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, editingLineId, {
       productName,
       optionSummary: nullable(formData.get("optionSummary")),
@@ -490,7 +551,9 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
       notes: nullable(formData.get("notes")),
       configurationSnapshot: {
         ...configurationSnapshot,
+        ...(existingParentLineId ? { parentLineId: existingParentLineId } : {}),
         linkedDispatchLineId: linkedDispatchLineId || null,
+        linkedAccessEquipmentLineId: linkedAccessEquipmentLineId || null,
         ...(surveyContext ? { surveyImported: true, surveyNeedsConfiguration: configurationSnapshot.surveyNeedsConfiguration !== false, surveyContext } : {})
       }
     });
@@ -508,28 +571,44 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
     configurationSnapshot
   });
 
-  let linkedDispatchLineId = "";
-  if (serviceLineProductName && serviceLineUnitPrice) {
-    const createdDispatch = await addQuoteLine(quoteId, {
-      productId: null,
-      productName: serviceLineProductName,
-      optionSummary: nullable(formData.get("serviceLineOptionSummary")),
-      quantity: serviceLineQuantity,
-      unitPrice: serviceLineUnitPrice,
-      notes: nullable(formData.get("serviceLineNotes")),
-      configurationSnapshot: { ...serviceLineSnapshot, parentLineId: createdMain.id }
+  const linkedDispatchLineId = await upsertLinkedQuoteLine(
+    activeTenant.tenantId,
+    quoteId,
+    "",
+    createdMain.id,
+    serviceLineInput
+  );
+  const linkedAccessEquipmentLineId = await upsertLinkedQuoteLine(
+    activeTenant.tenantId,
+    quoteId,
+    "",
+    linkedDispatchLineId || createdMain.id,
+    accessEquipmentLineInput
+  );
+
+  if (linkedDispatchLineId && serviceLineInput) {
+    await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, linkedDispatchLineId, {
+      ...serviceLineInput,
+      configurationSnapshot: {
+        ...serviceLineInput.configurationSnapshot,
+        parentLineId: createdMain.id,
+        linkedAccessEquipmentLineId: linkedAccessEquipmentLineId || null
+      }
     });
-    linkedDispatchLineId = createdDispatch.id;
   }
 
-  if (linkedDispatchLineId) {
+  if (linkedDispatchLineId || linkedAccessEquipmentLineId) {
     await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, createdMain.id, {
       productName,
       optionSummary: nullable(formData.get("optionSummary")),
       quantity,
       unitPrice,
       notes: nullable(formData.get("notes")),
-      configurationSnapshot: { ...configurationSnapshot, linkedDispatchLineId }
+      configurationSnapshot: {
+        ...configurationSnapshot,
+        linkedDispatchLineId: linkedDispatchLineId || null,
+        linkedAccessEquipmentLineId: linkedAccessEquipmentLineId || null
+      }
     });
   }
 
@@ -547,8 +626,14 @@ export async function deleteQuoteLineAction(formData: FormData): Promise<void> {
 
   const line = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId);
   const linkedDispatchLineId = snapshotText(line?.configurationSnapshot ?? {}, "linkedDispatchLineId");
-  if (linkedDispatchLineId) {
-    await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, linkedDispatchLineId);
+  const linkedDispatch = linkedDispatchLineId
+    ? await getQuoteLineForTenant(activeTenant.tenantId, quoteId, linkedDispatchLineId)
+    : null;
+  const linkedAccessEquipmentLineId = snapshotText(line?.configurationSnapshot ?? {}, "linkedAccessEquipmentLineId")
+    || snapshotText(linkedDispatch?.configurationSnapshot ?? {}, "linkedAccessEquipmentLineId");
+  const linkedLineIds = new Set([linkedAccessEquipmentLineId, linkedDispatchLineId].filter(Boolean));
+  for (const linkedLineId of linkedLineIds) {
+    await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, linkedLineId);
   }
   await deleteQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId);
 

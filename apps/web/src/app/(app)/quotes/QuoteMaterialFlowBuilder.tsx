@@ -69,7 +69,7 @@ type QuoteMaterialFlowBuilderProps = {
 type FlowType = QuickQuoteFlowType;
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
-type ServiceType = "" | "pickup" | "delivery" | "install";
+type ServiceType = "" | "pickup" | "delivery" | "install" | "access_equipment";
 type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl";
 type InkChoice = "" | "none" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
@@ -189,8 +189,11 @@ const smallFinishingOptions = [
 const serviceTypes: Array<{ key: Exclude<ServiceType, "">; label: string; icon: string; description: string }> = [
   { key: "pickup", label: "Pickup", icon: "↗", description: "Client collects the job. Usually no charge unless you add notes or a manual price." },
   { key: "delivery", label: "Delivery", icon: "▣", description: "Add a delivery charge as its own quote line." },
-  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, minutes and fixing consumables." }
+  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, minutes and fixing consumables." },
+  { key: "access_equipment", label: "Access equipment", icon: "▦", description: "Hire equipment charged by day, with quote pricing applied automatically." }
 ];
+
+const dispatchServiceTypes = serviceTypes.filter((item) => item.key !== "access_equipment");
 
 const fixingOptions = [
   { key: "silicone", label: "Silicone", icon: "◍", unit: "tube", placeholderQty: "eg 1", placeholderRate: "eg 12" },
@@ -1084,6 +1087,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [installMinutes, setInstallMinutes] = useState(snapshotString(initialSnapshot, "installMinutes"));
   const [installLabourBasis, setInstallLabourBasis] = useState<LabourBasis>(labourBasisValue(initialSnapshot?.installLabourBasis, "line_total"));
   const [travelCharge, setTravelCharge] = useState(snapshotString(initialSnapshot, "travelCharge"));
+  const [accessEquipmentRequired, setAccessEquipmentRequired] = useState(Boolean(initialSnapshot?.accessEquipmentRequired));
+  const [accessEquipmentType, setAccessEquipmentType] = useState(snapshotString(initialSnapshot, "accessEquipmentType"));
+  const [accessEquipmentDailyCharge, setAccessEquipmentDailyCharge] = useState(snapshotString(initialSnapshot, "accessEquipmentDailyCharge"));
+  const [accessEquipmentDays, setAccessEquipmentDays] = useState(snapshotString(initialSnapshot, "accessEquipmentDays", "1"));
   const [serviceFixings, setServiceFixings] = useState<string[]>(snapshotStringArray(initialSnapshot, "serviceFixings"));
   const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingQty"));
   const [serviceFixingRate, setServiceFixingRate] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingRate"));
@@ -1239,7 +1246,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     : "";
   const areaSqm = width > 0 && height > 0 ? (width / 1000) * (height / 1000) : 0;
   const sideMultiplier = printed && sides === "double" ? 2 : 1;
-  const quantityNumber = Math.max(1, numberValue(quantity, 1));
+  const effectiveQuantity = flowType === "service" && serviceType === "access_equipment"
+    ? accessEquipmentDays
+    : quantity;
+  const quantityNumber = Math.max(1, numberValue(effectiveQuantity, 1));
   const safeDropOverlapMm = Math.max(0, numberValue(dropOverlapMm, 0));
   const activeRollMaterial = isRollStockBase ? selectedMainMaterial : selectedMedia;
   const activeRollWidthMm = numberValue(activeRollMaterial?.rollWidthMm, 0);
@@ -1612,6 +1622,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable total", amount: qty / Math.max(1, quantityNumber), unit: item.unit, rate, cost: (qty * rate) / Math.max(1, quantityNumber), note: `${usage(qty)} ${item.unit} total for the quote line` });
         }
       }
+
+      if (serviceType === "access_equipment") {
+        const dailyCharge = numberValue(accessEquipmentDailyCharge, 0);
+        if (dailyCharge > 0) {
+          rows.push({
+            label: "Access equipment",
+            detail: accessEquipmentType.trim() || "Equipment hire",
+            amount: 1,
+            unit: "day",
+            rate: dailyCharge,
+            cost: dailyCharge,
+            note: "Daily equipment cost before quote pricing"
+          });
+        }
+      }
     }
 
     if (flowType === "component") {
@@ -1642,7 +1667,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1697,6 +1722,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${minutesLabel(installMinutes)} ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
         : "";
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
+  const accessEquipmentDaysNumber = Math.max(1, numberValue(accessEquipmentDays, 1));
+  const accessEquipmentRawDailyCharge = numberValue(accessEquipmentDailyCharge, 0);
+  const accessEquipmentDailySellPrice = accessEquipmentRawDailyCharge * pricingMultiplier;
+  const accessEquipmentLineTotal = accessEquipmentDailySellPrice * accessEquipmentDaysNumber;
+  const accessEquipmentDetailsComplete = Boolean(
+    accessEquipmentType.trim()
+      && accessEquipmentRawDailyCharge > 0
+      && numberValue(accessEquipmentDays, 0) > 0
+  );
+  const shouldCreateAccessEquipmentLine = serviceType === "install"
+    && accessEquipmentRequired
+    && accessEquipmentDetailsComplete;
+  const accessEquipmentSummary = accessEquipmentDetailsComplete
+    ? `${accessEquipmentType.trim()} · ${usage(accessEquipmentDaysNumber)} day${accessEquipmentDaysNumber === 1 ? "" : "s"}`
+    : "";
   const baseSheetUse = flowType === "signage" ? costs.find((row) => row.label === "Base material" && row.unit === "sheet") : undefined;
   const totalSheetUse = baseSheetUse ? baseSheetUse.amount * quantityNumber : 0;
   const sheetUseLabel = baseSheetUse && totalSheetUse > 0
@@ -1738,7 +1778,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const lineName = flowType === "component"
     ? componentName.trim() || "Custom component"
     : flowType === "service"
-    ? serviceType === "install" ? "Sign Install" : serviceLabel ?? "Service item"
+    ? serviceType === "install"
+      ? "Sign Install"
+      : serviceType === "access_equipment"
+        ? `Access Equipment${accessEquipmentType.trim() ? ` - ${accessEquipmentType.trim()}` : ""}`
+        : serviceLabel ?? "Service item"
     : flowType === "small_format"
       ? selectedSmallType?.label ?? "Small format item"
       : flowType === "plan_printing"
@@ -1759,12 +1803,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ].filter(Boolean).join(" · ")
     : flowType === "service"
     ? [
-      serviceType === "install" ? "Install only — client-supplied signage" : serviceLabel,
+      serviceType === "install" ? "Install only — client-supplied signage" : serviceType === "access_equipment" ? accessEquipmentSummary : serviceLabel,
       serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
       serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null,
       serviceType === "install" && travelCharge ? `Travel / call-out charge ${money(numberValue(travelCharge, 0))} total` : null,
-      serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
+      serviceType === "install" && serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
     ].filter(Boolean).join(" · ")
     : isPrintDepartment
       ? [
@@ -1815,12 +1859,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
     ].filter(Boolean).join(" · ");
 
-  const dispatchComplete = serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0);
+  const accessEquipmentSelectionComplete = !accessEquipmentRequired || accessEquipmentDetailsComplete;
+  const dispatchComplete = serviceType === "pickup"
+    || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0)
+    || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0 && accessEquipmentSelectionComplete);
 
   const canSave = flowType === "component"
     ? Boolean(componentName.trim() && componentHasCost)
     : flowType === "service"
-    ? Boolean(serviceType && (serviceType === "pickup" || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0) || (numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0)))
+    ? Boolean(serviceType && (
+      serviceType === "pickup"
+      || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0)
+      || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0 && accessEquipmentSelectionComplete)
+      || (serviceType === "access_equipment" && accessEquipmentDetailsComplete)
+    ))
     : isPrintDepartment
       ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
       : flowType === "small_format"
@@ -1835,6 +1887,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     surveyNeedsConfiguration: initialSnapshot?.surveyImported ? !canSave : undefined,
     surveyContext: initialSnapshot?.surveyContext,
     linkedDispatchLineId: initialSnapshot?.linkedDispatchLineId ?? null,
+    linkedAccessEquipmentLineId: initialSnapshot?.linkedAccessEquipmentLineId ?? null,
     builderMode: "quick",
     activeStep,
     flowType,
@@ -1892,6 +1945,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     installMinutes,
     installLabourBasis,
     travelCharge,
+    accessEquipmentRequired,
+    accessEquipmentType,
+    accessEquipmentDailyCharge,
+    accessEquipmentDays,
     serviceFixings,
     serviceFixingQty,
     serviceFixingRate,
@@ -1900,7 +1957,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     componentParts,
     componentLabourLabel,
     componentLabourMinutes,
-    quantity,
+    quantity: effectiveQuantity,
     unitPriceOverridden,
     manualUnitPrice: (unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2),
     notes: lineNotes,
@@ -1938,6 +1995,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     version: 1,
     source: "quick_quote_builder",
     parentLineId: editingLine?.id ?? null,
+    linkedAccessEquipmentLineId: initialSnapshot?.linkedAccessEquipmentLineId ?? null,
     builderMode: "quick",
     activeStep: "service_details",
     flowType: "service",
@@ -1947,6 +2005,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     installMinutes,
     installLabourBasis,
     travelCharge,
+    accessEquipmentRequired,
+    accessEquipmentType,
+    accessEquipmentDailyCharge,
+    accessEquipmentDays,
     serviceFixings,
     serviceFixingQty,
     serviceFixingRate,
@@ -1966,6 +2028,45 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       priceLevelFactor,
       manualQuoteDiscountPercent,
       pricingBreakdown: dispatchCosts.map((row) => ({ ...row }))
+    }
+  };
+
+  const accessEquipmentConfigurationSnapshot: QuickQuoteSnapshot = {
+    version: 1,
+    source: "quick_quote_builder",
+    parentLineId: editingLine?.id ?? null,
+    builderMode: "quick",
+    activeStep: "service_details",
+    flowType: "service",
+    serviceType: "access_equipment",
+    accessEquipmentRequired: true,
+    accessEquipmentType,
+    accessEquipmentDailyCharge,
+    accessEquipmentDays,
+    quantity: String(accessEquipmentDaysNumber),
+    unitPriceOverridden: false,
+    manualUnitPrice: accessEquipmentDailySellPrice.toFixed(2),
+    notes: "",
+    materialSnapshots: { componentParts: [] },
+    pricingSnapshot: {
+      markupMultiplier,
+      profitMultiplier,
+      labourRate,
+      rawCost: accessEquipmentRawDailyCharge,
+      autoUnitPrice: accessEquipmentDailySellPrice,
+      priceLevelCode: pricingSettings?.priceLevelCode || "Level A",
+      priceLevelName: pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A",
+      priceLevelFactor,
+      manualQuoteDiscountPercent,
+      pricingBreakdown: [{
+        label: "Access equipment",
+        detail: accessEquipmentType.trim(),
+        amount: 1,
+        unit: "day",
+        rate: accessEquipmentRawDailyCharge,
+        cost: accessEquipmentRawDailyCharge,
+        note: "Daily equipment cost before quote pricing"
+      }]
     }
   };
 
@@ -2086,7 +2187,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "small_quantity" || compactStep === "review") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => { setQuantity(event.target.value); changed(); }} type="number" min="1" step="any" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Internal line notes</b><textarea value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} style={textareaStyle} /></label></div></div>;
+      return <div style={compactPanel}><div style={compactGrid}>{serviceType !== "access_equipment" ? <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => { setQuantity(event.target.value); changed(); }} type="number" min="1" step="any" style={inputStyle} /></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Internal line notes</b><textarea value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} style={textareaStyle} /></label></div></div>;
     }
 
     if (compactStep === "service_type") {
@@ -2094,7 +2195,90 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "service_details" || compactStep === "dispatch") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Pickup / delivery / install</b><select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}><option value="">Choose</option>{serviceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label>{serviceType === "delivery" ? <label style={{ display: "grid", gap: 6 }}><b>Delivery charge ($)</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} /></label> : null}{serviceType === "install" ? <><label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Travel / call-out charge ($)</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); changed(); }} placeholder="Dollar amount, not minutes" type="number" min="0" step="0.01" style={inputStyle} /><small style={{ color: "#64748b" }}>Enter the total dollar charge once for this quote line.</small></label></> : null}</div>{serviceType === "install" ? <InstallLabourField value={installMinutes} basis={installLabourBasis} crewSize={installCrewSize} quantity={quantityNumber} labourRate={labourRate} onChange={(value) => { setInstallMinutes(value); changed(); }} onBasisChange={(basis) => { setInstallLabourBasis(basis); changed(); }} /> : null}</div>;
+      const availableServiceTypes = flowType === "service" ? serviceTypes : dispatchServiceTypes;
+      return (
+        <div style={compactPanel}>
+          <div style={compactGrid}>
+            <label style={{ display: "grid", gap: 6 }}>
+              <b>Pickup / delivery / install</b>
+              <select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}>
+                <option value="">Choose</option>
+                {availableServiceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+              </select>
+            </label>
+            {serviceType === "delivery" ? (
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Delivery charge ($)</b>
+                <input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} />
+              </label>
+            ) : null}
+            {serviceType === "install" ? (
+              <>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <b>Installers</b>
+                  <input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} />
+                </label>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <b>Travel / call-out charge ($)</b>
+                  <input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); changed(); }} placeholder="Dollar amount, not minutes" type="number" min="0" step="0.01" style={inputStyle} />
+                  <small style={{ color: "#64748b" }}>Enter the total dollar charge once for this quote line.</small>
+                </label>
+              </>
+            ) : null}
+          </div>
+
+          {serviceType === "install" ? (
+            <>
+              <InstallLabourField value={installMinutes} basis={installLabourBasis} crewSize={installCrewSize} quantity={quantityNumber} labourRate={labourRate} onChange={(value) => { setInstallMinutes(value); changed(); }} onBasisChange={(basis) => { setInstallLabourBasis(basis); changed(); }} />
+              <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", padding: 12, display: "grid", gap: 10 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 900 }}>
+                  <input
+                    type="checkbox"
+                    checked={accessEquipmentRequired}
+                    onChange={(event) => { setAccessEquipmentRequired(event.target.checked); changed(); }}
+                  />
+                  Is access equipment required?
+                </label>
+                {accessEquipmentRequired ? (
+                  <div style={compactGrid}>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Type of equipment</b>
+                      <input value={accessEquipmentType} onChange={(event) => { setAccessEquipmentType(event.target.value); changed(); }} placeholder="eg Scissor lift" style={inputStyle} />
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Daily charge ($)</b>
+                      <input value={accessEquipmentDailyCharge} onChange={(event) => { setAccessEquipmentDailyCharge(event.target.value); changed(); }} placeholder="Equipment cost per day" type="number" min="0" step="0.01" style={inputStyle} />
+                      <small style={{ color: "#64748b" }}>Markup, profit and the client price level are applied automatically.</small>
+                    </label>
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Number of days</b>
+                      <input value={accessEquipmentDays} onChange={(event) => { setAccessEquipmentDays(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} />
+                    </label>
+                  </div>
+                ) : null}
+              </div>
+            </>
+          ) : null}
+
+          {serviceType === "access_equipment" ? (
+            <div style={compactGrid}>
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Type of equipment</b>
+                <input value={accessEquipmentType} onChange={(event) => { setAccessEquipmentType(event.target.value); changed(); }} placeholder="eg Scissor lift" style={inputStyle} />
+              </label>
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Daily charge ($)</b>
+                <input value={accessEquipmentDailyCharge} onChange={(event) => { setAccessEquipmentDailyCharge(event.target.value); changed(); }} placeholder="Equipment cost per day" type="number" min="0" step="0.01" style={inputStyle} />
+                <small style={{ color: "#64748b" }}>Markup, profit and the client price level are applied automatically.</small>
+              </label>
+              <label style={{ display: "grid", gap: 6 }}>
+                <b>Number of days</b>
+                <input value={accessEquipmentDays} onChange={(event) => { setAccessEquipmentDays(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} />
+              </label>
+            </div>
+          ) : null}
+        </div>
+      );
     }
 
     if (compactStep === "service_fixings") {
@@ -2133,7 +2317,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   };
 
   const allSignageSteps: QuickQuoteStep[] = flowType === "service"
-      ? ["flow", "service_type", "service_details", "service_fixings", "review"]
+      ? ["flow", "service_type", "service_details", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "review"]
       : flowType === "component"
         ? ["flow", "component_details", "component_parts", "component_labour", "review"]
         : flowType === "small_format"
@@ -2192,7 +2376,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         <input type="hidden" name="productName" value={editingLine?.productName || lineName} />
         <input type="hidden" name="optionSummary" value={optionSummary} />
         <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
-        <input type="hidden" name="quantity" value={quantity} />
+        <input type="hidden" name="quantity" value={effectiveQuantity} />
         <input type="hidden" name="notes" value={lineNotes} />
         {shouldCreateDispatchLine ? (
           <>
@@ -2201,6 +2385,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
             <input type="hidden" name="serviceLineQuantity" value={String(dispatchLineQuantity)} />
             <input type="hidden" name="serviceLineConfigurationSnapshot" value={JSON.stringify(dispatchConfigurationSnapshot)} />
+          </>
+        ) : null}
+        {shouldCreateAccessEquipmentLine ? (
+          <>
+            <input type="hidden" name="accessEquipmentLineProductName" value={`Access Equipment - ${accessEquipmentType.trim()}`} />
+            <input type="hidden" name="accessEquipmentLineOptionSummary" value={accessEquipmentSummary} />
+            <input type="hidden" name="accessEquipmentLineUnitPrice" value={accessEquipmentDailySellPrice.toFixed(2)} />
+            <input type="hidden" name="accessEquipmentLineQuantity" value={String(accessEquipmentDaysNumber)} />
+            <input type="hidden" name="accessEquipmentLineConfigurationSnapshot" value={JSON.stringify(accessEquipmentConfigurationSnapshot)} />
           </>
         ) : null}
 
@@ -2222,6 +2415,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
             <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>
             {shouldCreateDispatchLine ? <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>Plus {serviceType === "install" ? "Sign Install" : "Delivery"}: qty {usage(dispatchLineQuantity)} × {money(dispatchUnitPrice)} = {money(dispatchLineTotal)}</span> : null}
+            {shouldCreateAccessEquipmentLine ? <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 850 }}>Plus Access Equipment - {accessEquipmentType.trim()}: {usage(accessEquipmentDaysNumber)} day{accessEquipmentDaysNumber === 1 ? "" : "s"} × {money(accessEquipmentDailySellPrice)} = {money(accessEquipmentLineTotal)}</span> : null}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 40, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save Quote Line" : "Complete required fields"}</button>
