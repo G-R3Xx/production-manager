@@ -199,7 +199,7 @@ const fixingOptions = [
   { key: "silicone", label: "Silicone", icon: "◍", unit: "tube", placeholderQty: "eg 1", placeholderRate: "eg 12" },
   { key: "tape", label: "VHB / double-sided tape", icon: "═", unit: "lm", placeholderQty: "eg 3", placeholderRate: "eg 2.5" },
   { key: "screws", label: "Screws / anchors", icon: "•", unit: "each", placeholderQty: "eg 12", placeholderRate: "eg 0.25" },
-  { key: "screws_custom", label: "Screms / special fixings", icon: "✦", unit: "each", placeholderQty: "eg 4", placeholderRate: "eg 1" },
+  { key: "screws_custom", label: "Screws / special fixings", icon: "✦", unit: "each", placeholderQty: "eg 4", placeholderRate: "eg 1" },
   { key: "other", label: "Other consumables", icon: "+", unit: "allowance", placeholderQty: "eg 1", placeholderRate: "eg 15" }
 ];
 
@@ -1714,12 +1714,25 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
   const dispatchUnitPrice = dispatchRawCost * pricingMultiplier;
   const dispatchLineTotal = dispatchUnitPrice * dispatchLineQuantity;
+  const fixingAllowanceSummary = serviceFixings.map((key) => {
+    const item = fixingOptions.find((option) => option.key === key);
+    if (!item) return "";
+    const qty = numberValue(serviceFixingQty[key], 0);
+    if (qty <= 0) return item.label;
+    const pluralUnit = item.unit === "tube" && Math.abs(qty - 1) > 0.0001
+      ? "tubes"
+      : item.unit === "allowance" && Math.abs(qty - 1) > 0.0001
+        ? "allowances"
+        : item.unit;
+    const unitText = pluralUnit === "lm" ? `${usage(qty)}lm` : `${usage(qty)} ${pluralUnit}`;
+    return `${item.label} — ${unitText}`;
+  }).filter(Boolean).join(", ");
   const dispatchSummary = serviceType === "pickup"
     ? "Pickup"
     : serviceType === "delivery"
       ? `Delivery${deliveryCharge ? ` · allowance ${money(numberValue(deliveryCharge, 0))}` : ""}`
       : serviceType === "install"
-        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${minutesLabel(installMinutes)} ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null].filter(Boolean).join(" · ")
+        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${minutesLabel(installMinutes)} ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, fixingAllowanceSummary ? `Fixings allowance: ${fixingAllowanceSummary}` : null].filter(Boolean).join(" · ")
         : "";
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
   const accessEquipmentDaysNumber = Math.max(1, numberValue(accessEquipmentDays, 1));
@@ -1740,21 +1753,31 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const baseSheetUse = flowType === "signage" ? costs.find((row) => row.label === "Base material" && row.unit === "sheet") : undefined;
   const totalSheetUse = baseSheetUse ? baseSheetUse.amount * quantityNumber : 0;
   const sheetUseLabel = baseSheetUse && totalSheetUse > 0
-    ? `${usage(totalSheetUse)} billable sheet${Math.abs(totalSheetUse - 1) < 0.0001 ? "" : "s"}${baseSheetUse.note ? ` · ${baseSheetUse.note}` : ""}`
+    ? `Stock: ${baseSheetUse.detail} — ${usage(totalSheetUse)} sheet${Math.abs(totalSheetUse - 1) < 0.0001 ? "" : "s"} calculated`
     : "";
   const rollUseRow = flowType === "signage"
     ? costs.find((row) => row.unit === "lm" && ["Roll print media", "Cut vinyl", "Base material"].includes(row.label))
     : undefined;
   const totalRollUse = rollUseRow ? rollUseRow.amount * quantityNumber : 0;
   const rollUseLabel = rollUseRow && totalRollUse > 0
-    ? `${usage(totalRollUse)}lm total${rollUseRow.note ? ` · ${rollUseRow.note}` : ""}`
+    ? `${rollUseRow.label === "Base material" ? "Stock" : rollUseRow.label === "Cut vinyl" ? "Cut vinyl" : "Print media"}: ${rollUseRow.detail} — ${usage(totalRollUse)}lm calculated`
     : "";
   const inkUseRow = flowType === "signage"
     ? costs.find((row) => row.unit === "sqm" && (row.label === "CMYK ink" || row.label === "White ink"))
     : undefined;
   const totalInkUse = inkUseRow ? inkUseRow.amount * quantityNumber : 0;
   const inkUseLabel = inkUseRow && totalInkUse > 0
-    ? `${usage(totalInkUse)}sqm billable${inkUseRow.note ? ` · ${inkUseRow.note}` : ""}`
+    ? `Ink: ${ink === "both" ? "CMYK + White" : inkUseRow.label.replace(/ ink$/i, "")} — ${usage(totalInkUse)}sqm calculated${ink === "both" ? " each" : ""}`
+    : "";
+  const backingUseRow = flowType === "signage" ? costs.find((row) => row.label === "Backing film" && row.unit === "lm") : undefined;
+  const totalBackingUse = backingUseRow ? backingUseRow.amount * quantityNumber : 0;
+  const backingUseLabel = backingUseRow && totalBackingUse > 0
+    ? `Backing: ${backingUseRow.detail} — ${usage(totalBackingUse)}lm calculated`
+    : "";
+  const laminateUseRow = flowType === "signage" ? costs.find((row) => row.label === "Laminate" && row.unit === "lm") : undefined;
+  const totalLaminateUse = laminateUseRow ? laminateUseRow.amount * quantityNumber : 0;
+  const laminateUseLabel = laminateUseRow && totalLaminateUse > 0
+    ? `Laminate: ${laminateUseRow.detail} — ${usage(totalLaminateUse)}lm calculated`
     : "";
 
   const finishingSummary = finishings.map((key) => {
@@ -1808,7 +1831,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
       serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null,
       serviceType === "install" && travelCharge ? `Travel / call-out charge ${money(numberValue(travelCharge, 0))} total` : null,
-      serviceType === "install" && serviceFixings.length ? `Fixings: ${selectedKeys(fixingOptions, serviceFixings)}` : null
+      serviceType === "install" && fixingAllowanceSummary ? `Fixings allowance: ${fixingAllowanceSummary}` : null
     ].filter(Boolean).join(" · ")
     : isPrintDepartment
       ? [
@@ -1820,7 +1843,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
       smallFinishingSummary ? `Finishing: ${smallFinishingSummary}` : null,
-      dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
+      serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
     : flowType === "small_format"
@@ -1838,25 +1861,25 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
       smallFinishingSummary ? `Finishing: ${smallFinishingSummary}` : null,
-      dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
+      serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
     : [
       selectedBase?.label,
-      customerMaterialName(selectedMainMaterial) ? `Substrate: ${customerMaterialName(selectedMainMaterial)}` : null,
       finishedSizeLabel ? `Finished size: ${finishedSizeLabel}` : null,
       artworkChoice === "required" ? numberValue(artworkMinutes, 0) > 0 ? `Artwork ${minutesLabel(artworkMinutes)}` : "Artwork required" : artworkChoice === "client_supplied" ? "Artwork supplied" : null,
       isRollStockBase ? null : printMethods.find((item) => item.key === resolvedPrintMethod)?.label,
       printed && numberValue(printSetupMinutes, 0) > 0 ? `Print setup ${minutesLabel(printSetupMinutes)}` : null,
-      selectedMediaName || null,
+      sheetUseLabel || null,
+      rollUseLabel || null,
       activeRollMaterial && dropLayoutSummary ? `Drop layout: ${dropLayoutSummary}` : null,
-      inkChoices.find((item) => item.key === ink)?.label,
+      inkUseLabel || (inkChoices.find((item) => item.key === ink)?.label ?? null),
       sides ? `${sides === "double" ? "Double" : "Single"} sided` : null,
       printDirection ? `${printDirection === "reverse" ? "Reverse" : (selectedReversePrintableRoll && !isClearAcrylic ? "Standard" : "Positive")} print` : null,
-      backingApplicable && selectedBackingName ? `Backing: ${selectedBackingName}` : null,
-      selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null,
+      backingUseLabel || (backingApplicable && selectedBackingName ? `Backing: ${selectedBackingName}` : null),
+      laminateUseLabel || (selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null),
       finishingSummary ? `Finishing: ${finishingSummary}` : null,
-      dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
+      serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
     ].filter(Boolean).join(" · ");
 
   const accessEquipmentSelectionComplete = !accessEquipmentRequired || accessEquipmentDetailsComplete;

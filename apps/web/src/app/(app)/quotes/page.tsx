@@ -157,6 +157,144 @@ function displayedLineSummary(value: string | null, isSurveyLine: boolean): stri
   return cleaned || null;
 }
 
+type StaffPricingBreakdownRow = {
+  label: string;
+  detail: string;
+  amount: number;
+  unit: string;
+};
+
+function recordValue(value: unknown): UnknownRecord | null {
+  return isRecord(value) ? value : null;
+}
+
+function numberFromUnknown(value: unknown): number {
+  const parsed = typeof value === "number" ? value : Number(String(value ?? "").trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function staffUsage(value: number): string {
+  if (!Number.isFinite(value)) return "0";
+  return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+function staffPricingBreakdown(configurationSnapshot: unknown): StaffPricingBreakdownRow[] {
+  const snapshot = recordValue(configurationSnapshot);
+  const pricing = recordValue(snapshot?.pricingSnapshot);
+  const rows = Array.isArray(pricing?.pricingBreakdown) ? pricing.pricingBreakdown : [];
+  return rows.flatMap((raw): StaffPricingBreakdownRow[] => {
+    const row = recordValue(raw);
+    if (!row) return [];
+    return [{
+      label: textValue(row.label),
+      detail: textValue(row.detail),
+      amount: numberFromUnknown(row.amount),
+      unit: textValue(row.unit),
+    }];
+  });
+}
+
+function staffFixingAllowance(configurationSnapshot: unknown): string {
+  const snapshot = recordValue(configurationSnapshot);
+  if (!snapshot) return "";
+  const selected = Array.isArray(snapshot.serviceFixings)
+    ? snapshot.serviceFixings.filter((value): value is string => typeof value === "string")
+    : [];
+  const qtyMap = recordValue(snapshot.serviceFixingQty) ?? {};
+  const meta: Record<string, { label: string; unit: string }> = {
+    silicone: { label: "Silicone", unit: "tube" },
+    tape: { label: "VHB / double-sided tape", unit: "lm" },
+    screws: { label: "Screws / anchors", unit: "each" },
+    screws_custom: { label: "Screws / special fixings", unit: "each" },
+    other: { label: "Other consumables", unit: "allowance" },
+  };
+  return selected.map((key) => {
+    const item = meta[key];
+    if (!item) return "";
+    const qty = numberFromUnknown(qtyMap[key]);
+    if (qty <= 0) return item.label;
+    const pluralUnit = item.unit === "tube" && Math.abs(qty - 1) > 0.0001
+      ? "tubes"
+      : item.unit === "allowance" && Math.abs(qty - 1) > 0.0001
+        ? "allowances"
+        : item.unit;
+    const amount = pluralUnit === "lm" ? `${staffUsage(qty)}lm` : `${staffUsage(qty)} ${pluralUnit}`;
+    return `${item.label} — ${amount}`;
+  }).filter(Boolean).join(", ");
+}
+
+function staffLineSummary(optionSummary: string | null, configurationSnapshot: unknown, quantity: string): string | null {
+  const snapshot = recordValue(configurationSnapshot);
+  const flowType = textValue(snapshot?.flowType);
+  const serviceType = textValue(snapshot?.serviceType);
+  let parts = String(optionSummary ?? "").split(" · ").map((part) => part.trim()).filter(Boolean);
+
+  // Install detail belongs on the dedicated install line, never on the substrate/product line.
+  parts = parts.filter((part) => !(part.toLowerCase().startsWith("dispatch:") && part.toLowerCase().includes("install")));
+
+  if (flowType === "service" && serviceType === "install") {
+    parts = parts.filter((part) => !part.toLowerCase().startsWith("fixings:") && !part.toLowerCase().startsWith("fixings allowance:"));
+    const allowance = staffFixingAllowance(configurationSnapshot);
+    if (allowance) parts.push(`Fixings allowance: ${allowance}`);
+    return parts.join(" · ") || null;
+  }
+
+  if (flowType !== "signage") return parts.join(" · ") || null;
+
+  // New lines already save the calculated production usage in their summary. Keep those as-is.
+  if (parts.some((part) => /^(stock|print media|cut vinyl|ink|backing|laminate):.+—.+calculated/i.test(part))) {
+    return parts.join(" · ") || null;
+  }
+
+  const rows = staffPricingBreakdown(configurationSnapshot);
+  if (!rows.length) return parts.join(" · ") || null;
+  const qty = Math.max(0, numberFromUnknown(quantity));
+  const totalFor = (row: StaffPricingBreakdownRow) => row.amount * qty;
+  const usageParts: string[] = [];
+  const replacedDetails = new Set<string>();
+
+  const base = rows.find((row) => row.label === "Base material" && (row.unit === "sheet" || row.unit === "lm"));
+  if (base && totalFor(base) > 0) {
+    replacedDetails.add(base.detail.toLowerCase());
+    const total = totalFor(base);
+    usageParts.push(base.unit === "sheet"
+      ? `Stock: ${base.detail} — ${staffUsage(total)} sheet${Math.abs(total - 1) < 0.0001 ? "" : "s"} calculated`
+      : `Stock: ${base.detail} — ${staffUsage(total)}lm calculated`);
+  }
+
+  const media = rows.find((row) => (row.label === "Roll print media" || row.label === "Cut vinyl") && row.unit === "lm");
+  if (media && totalFor(media) > 0) {
+    replacedDetails.add(media.detail.toLowerCase());
+    usageParts.push(`${media.label === "Cut vinyl" ? "Cut vinyl" : "Print media"}: ${media.detail} — ${staffUsage(totalFor(media))}lm calculated`);
+  }
+
+  rows.filter((row) => (row.label === "CMYK ink" || row.label === "White ink") && row.unit === "sqm" && totalFor(row) > 0).forEach((row) => {
+    usageParts.push(`Ink: ${row.label.replace(/ ink$/i, "")} — ${staffUsage(totalFor(row))}sqm calculated`);
+  });
+
+  const backing = rows.find((row) => row.label === "Backing film" && row.unit === "lm");
+  if (backing && totalFor(backing) > 0) {
+    replacedDetails.add(backing.detail.toLowerCase());
+    usageParts.push(`Backing: ${backing.detail} — ${staffUsage(totalFor(backing))}lm calculated`);
+  }
+
+  const laminate = rows.find((row) => row.label === "Laminate" && row.unit === "lm");
+  if (laminate && totalFor(laminate) > 0) {
+    replacedDetails.add(laminate.detail.toLowerCase());
+    usageParts.push(`Laminate: ${laminate.detail} — ${staffUsage(totalFor(laminate))}lm calculated`);
+  }
+
+  parts = parts.filter((part) => {
+    const lower = part.toLowerCase();
+    if (lower.startsWith("substrate:") || lower.startsWith("backing:") || lower.startsWith("laminate:")) return false;
+    if (["cmyk", "white ink", "cmyk + white", "cmyk white"].includes(lower)) return false;
+    if (replacedDetails.has(lower)) return false;
+    return true;
+  });
+
+  return [...parts, ...usageParts].join(" · ") || null;
+}
+
 function surveyStatusLabel(status: string | null | undefined, syncStatus: string | null | undefined): string {
   if (syncStatus === "completed" || status === "completed") return "Survey completed · ready to quote";
   if (syncStatus === "created") return "Sent to Install Scheduler · awaiting completion";
@@ -805,7 +943,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 </span>
                               ) : null}
                             </div>
-                            <div style={{ color: "#667085", fontSize: 13 }}>{[displayedLineSummary(line.optionSummary, Boolean(surveyReference)), `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
+                            <div style={{ color: "#667085", fontSize: 13 }}>{[staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity), `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
                             {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
                           <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
