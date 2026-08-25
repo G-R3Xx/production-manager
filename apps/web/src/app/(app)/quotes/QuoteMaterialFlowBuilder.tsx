@@ -2305,7 +2305,37 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "service_fixings") {
-      return <div style={compactPanel}>{fixingOptions.map((item) => <div key={item.key} style={{ display: "grid", gridTemplateColumns: "minmax(180px,1fr) 120px 140px", gap: 8, alignItems: "center" }}><label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={serviceFixings.includes(item.key)} onChange={() => { toggleServiceFixing(item.key); changed(); }} />{item.label}</label>{serviceFixings.includes(item.key) ? <><input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); changed(); }} placeholder={`Qty (${item.unit})`} type="number" min="0" step="0.01" style={inputStyle} /><input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); changed(); }} placeholder="Cost each" type="number" min="0" step="0.01" style={inputStyle} /></> : <span />}</div>)}</div>;
+      return (
+        <div style={{ ...compactPanel, gap: 10 }}>
+          <div style={{ color: "#475467", fontSize: 12 }}>Select the fixings/consumables allowed for this installation. Quantities are totals for the complete install line and their costs are included before markup, profit and client price level.</div>
+          {fixingOptions.map((item) => {
+            const selected = serviceFixings.includes(item.key);
+            const qty = numberValue(serviceFixingQty[item.key], 0);
+            const rate = numberValue(serviceFixingRate[item.key], 0);
+            return (
+              <div key={item.key} style={{ border: "1px solid #dbeafe", borderRadius: 12, padding: 10, display: "grid", gap: 8 }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}>
+                  <input type="checkbox" checked={selected} onChange={() => { toggleServiceFixing(item.key); changed(); }} />
+                  {item.label}
+                </label>
+                {selected ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                    <label style={{ display: "grid", gap: 5 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Allowed qty ({item.unit})</span>
+                      <input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); changed(); }} placeholder={item.placeholderQty} type="number" min="0" step="0.01" style={inputStyle} />
+                    </label>
+                    <label style={{ display: "grid", gap: 5 }}>
+                      <span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Cost / {item.unit} ($)</span>
+                      <input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); changed(); }} placeholder={item.placeholderRate} type="number" min="0" step="0.01" style={inputStyle} />
+                    </label>
+                    <div style={{ display: "grid", alignContent: "end", minHeight: 42, fontSize: 12, color: "#475467", fontWeight: 800 }}>Allowance cost: {money(qty * rate)}</div>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      );
     }
 
     if (compactStep === "component_details") {
@@ -2344,9 +2374,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       : flowType === "component"
         ? ["flow", "component_details", "component_parts", "component_labour", "review"]
         : flowType === "small_format"
-          ? ["flow", "small_type", ...(isDuplicateBook ? ["ncr_details" as QuickQuoteStep] : []), "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", "small_quantity"]
+          ? ["flow", "small_type", ...(isDuplicateBook ? ["ncr_details" as QuickQuoteStep] : []), "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
           : isPrintDepartment
-            ? ["flow", "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", "small_quantity"]
+            ? ["flow", "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
             : [
               "flow",
               "base",
@@ -2359,6 +2389,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
               ...(printed ? ["sides" as QuickQuoteStep, "laminate" as QuickQuoteStep] : []),
               "finishing",
               "dispatch",
+              ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []),
               "review",
             ];
     const allStepLabels: Partial<Record<QuickQuoteStep, string>> = {
