@@ -51,6 +51,7 @@ export type CompanySettingsRecord = {
   companyLogoStoragePath: string | null;
   defaultCurrency: string;
   globalMarkupMultiplier: string;
+  accessEquipmentMarkupMultiplier: string;
   globalProfitMultiplier: string;
   quoteLabourRate: string;
   quoteInkRatePerSqm: string;
@@ -102,6 +103,7 @@ async function ensurePricingSettingsColumns(): Promise<void> {
   await pool.query(`
     ALTER TABLE app.tenant_settings
       ADD COLUMN IF NOT EXISTS global_markup_multiplier numeric(8,4) NOT NULL DEFAULT 1.5,
+      ADD COLUMN IF NOT EXISTS access_equipment_markup_multiplier numeric(8,4),
       ADD COLUMN IF NOT EXISTS global_profit_multiplier numeric(8,4) NOT NULL DEFAULT 1.2,
       ADD COLUMN IF NOT EXISTS quote_labour_rate numeric(10,2) NOT NULL DEFAULT 66,
       ADD COLUMN IF NOT EXISTS quote_ink_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 10,
@@ -138,6 +140,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
         ts.company_logo_storage_path AS "companyLogoStoragePath",
         COALESCE(ts.default_currency, 'AUD') AS "defaultCurrency",
         COALESCE(ts.global_markup_multiplier, 1.5)::text AS "globalMarkupMultiplier",
+        COALESCE(ts.access_equipment_markup_multiplier, ts.global_markup_multiplier, 1.5)::text AS "accessEquipmentMarkupMultiplier",
         COALESCE(ts.global_profit_multiplier, 1.2)::text AS "globalProfitMultiplier",
         COALESCE(ts.quote_labour_rate, 66)::text AS "quoteLabourRate",
         COALESCE(ts.quote_ink_rate_per_sqm, 10)::text AS "quoteInkRatePerSqm",
@@ -192,6 +195,7 @@ export async function updateCompanySettingsByTenantId(
         company_logo_storage_path,
         default_currency,
         global_markup_multiplier,
+        access_equipment_markup_multiplier,
         global_profit_multiplier,
         quote_labour_rate,
         quote_ink_rate_per_sqm,
@@ -204,7 +208,7 @@ export async function updateCompanySettingsByTenantId(
         proof_terms,
         job_terms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,$17::jsonb,$18::jsonb,$19::jsonb,$20,$21,$22)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$18::jsonb,$19::jsonb,$20::jsonb,$21,$22,$23)
       ON CONFLICT (tenant_id)
       DO UPDATE SET
         company_legal_name = EXCLUDED.company_legal_name,
@@ -217,6 +221,7 @@ export async function updateCompanySettingsByTenantId(
         company_logo_storage_path = EXCLUDED.company_logo_storage_path,
         default_currency = EXCLUDED.default_currency,
         global_markup_multiplier = EXCLUDED.global_markup_multiplier,
+        access_equipment_markup_multiplier = EXCLUDED.access_equipment_markup_multiplier,
         global_profit_multiplier = EXCLUDED.global_profit_multiplier,
         quote_labour_rate = EXCLUDED.quote_labour_rate,
         quote_ink_rate_per_sqm = EXCLUDED.quote_ink_rate_per_sqm,
@@ -242,6 +247,7 @@ export async function updateCompanySettingsByTenantId(
       input.companyLogoStoragePath,
       input.defaultCurrency,
       input.globalMarkupMultiplier || "1.5",
+      input.accessEquipmentMarkupMultiplier || input.globalMarkupMultiplier || "1.5",
       input.globalProfitMultiplier || "1.2",
       input.quoteLabourRate || "66",
       input.quoteInkRatePerSqm || "10",

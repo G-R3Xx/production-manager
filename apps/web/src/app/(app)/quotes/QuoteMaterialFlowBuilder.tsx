@@ -35,6 +35,7 @@ type QuoteSizePreset = {
 
 export type PricingSettings = {
   markupMultiplier?: string | number | null;
+  accessEquipmentMarkupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
   labourRate?: string | number | null;
   inkRatePerSqm?: string | number | null;
@@ -1107,6 +1108,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [lineNotes, setLineNotes] = useState(editingLine?.notes ?? snapshotString(initialSnapshot, "notes"));
 
   const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
+  const accessEquipmentMarkupMultiplier = multiplierValue(pricingSettings?.accessEquipmentMarkupMultiplier, markupMultiplier);
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
   const sellMultiplier = markupMultiplier * profitMultiplier;
   const labourRate = numberValue(pricingSettings?.labourRate, defaultLabourRate);
@@ -1675,7 +1677,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const manualQuoteDiscountPercent = discountPercentValue(pricingSettings?.manualQuoteDiscountPercent);
   const manualQuoteDiscountMultiplier = Math.max(0, 1 - manualQuoteDiscountPercent / 100);
   const pricingMultiplier = sellMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
-  const autoUnitPrice = rawCost * pricingMultiplier;
+  const accessEquipmentPricingMultiplier = accessEquipmentMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
+  const effectivePricingMultiplier = flowType === "service" && serviceType === "access_equipment" ? accessEquipmentPricingMultiplier : pricingMultiplier;
+  const autoUnitPrice = rawCost * effectivePricingMultiplier;
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
   const selectedMediaName = isRollStockBase ? "" : customerMaterialName(selectedMedia);
@@ -1737,7 +1741,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
   const accessEquipmentDaysNumber = Math.max(1, numberValue(accessEquipmentDays, 1));
   const accessEquipmentRawDailyCharge = numberValue(accessEquipmentDailyCharge, 0);
-  const accessEquipmentDailySellPrice = accessEquipmentRawDailyCharge * pricingMultiplier;
+  const accessEquipmentDailySellPrice = accessEquipmentRawDailyCharge * accessEquipmentPricingMultiplier;
   const accessEquipmentLineTotal = accessEquipmentDailySellPrice * accessEquipmentDaysNumber;
   const accessEquipmentDetailsComplete = Boolean(
     accessEquipmentType.trim()
@@ -1998,7 +2002,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         .map((material) => [material.id, snapshotMaterialForSave(material) as SnapshotMaterial])).values())
     },
     pricingSnapshot: {
-      markupMultiplier,
+      markupMultiplier: flowType === "service" && serviceType === "access_equipment" ? accessEquipmentMarkupMultiplier : markupMultiplier,
       profitMultiplier,
       labourRate,
       inkRatePerSqm,
@@ -2072,7 +2076,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     notes: "",
     materialSnapshots: { componentParts: [] },
     pricingSnapshot: {
-      markupMultiplier,
+      markupMultiplier: accessEquipmentMarkupMultiplier,
       profitMultiplier,
       labourRate,
       rawCost: accessEquipmentRawDailyCharge,

@@ -97,6 +97,7 @@ export const tenantSettings = appSchema.table("tenant_settings", {
   companyLogoStoragePath: text("company_logo_storage_path"),
   defaultCurrency: varchar("default_currency", { length: 3 }).notNull().default("AUD"),
   globalMarkupMultiplier: numeric("global_markup_multiplier", { precision: 8, scale: 4 }).notNull().default("1.5"),
+  accessEquipmentMarkupMultiplier: numeric("access_equipment_markup_multiplier", { precision: 8, scale: 4 }),
   globalProfitMultiplier: numeric("global_profit_multiplier", { precision: 8, scale: 4 }).notNull().default("1.2"),
   quoteInkBillingIncrementSqm: numeric("quote_ink_billing_increment_sqm", { precision: 6, scale: 4 }).notNull().default("0.5"),
   myobPriceLevelFactorsJson: jsonb("myob_price_level_factors_json").notNull().default({ "Level A": "1", "Level B": "1", "Level C": "1", "Level D": "1", "Level E": "1", "Level F": "1" }),

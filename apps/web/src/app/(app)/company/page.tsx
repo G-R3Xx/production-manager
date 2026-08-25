@@ -194,17 +194,23 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
             </p>
           </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
             <label style={{ display: "grid", gap: 8 }}>
               <span style={{ fontWeight: 600 }}>Global markup multiplier</span>
               <input name="globalMarkupMultiplier" defaultValue={settings?.globalMarkupMultiplier ?? "1.5"} placeholder="eg 1.5" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
-              <small style={{ color: "#475467" }}>Example: x1.5 adds your standard overhead/markup to all quote items.</small>
+              <small style={{ color: "#475467" }}>Example: x1.5 adds your standard overhead/markup to normal quote items.</small>
+            </label>
+
+            <label style={{ display: "grid", gap: 8 }}>
+              <span style={{ fontWeight: 600 }}>Access equipment markup multiplier</span>
+              <input name="accessEquipmentMarkupMultiplier" defaultValue={settings?.accessEquipmentMarkupMultiplier ?? settings?.globalMarkupMultiplier ?? "1.5"} placeholder="eg 1.15" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
+              <small style={{ color: "#475467" }}>Used instead of the global markup for scissor lifts, boom lifts and other access-equipment hire. Profit and client price level still apply.</small>
             </label>
 
             <label style={{ display: "grid", gap: 8 }}>
               <span style={{ fontWeight: 600 }}>Global profit multiplier</span>
               <input name="globalProfitMultiplier" defaultValue={settings?.globalProfitMultiplier ?? "1.2"} placeholder="eg 1.2" inputMode="decimal" style={{ minHeight: 46, borderRadius: 12, border: "1px solid #93c5fd", padding: "0 14px", fontSize: 16 }} />
-              <small style={{ color: "#475467" }}>Example: x1.2 adds your profit after markup. x1.5 × x1.2 = x1.8 total.</small>
+              <small style={{ color: "#475467" }}>Example: x1.2 adds your profit after the applicable markup multiplier.</small>
             </label>
           </div>
 
