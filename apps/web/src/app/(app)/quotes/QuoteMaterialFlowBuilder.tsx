@@ -468,23 +468,50 @@ function sheetAreaSqm(material: QuoteMaterial): number {
   return (dimensions.width / 1000) * (dimensions.length / 1000);
 }
 
-function panelizedSheets(parentWidth: number, parentHeight: number, pieceWidth: number, pieceHeight: number): { sheets: number; across: number; rows: number; rotated: boolean } | null {
+function panelizedSheets(
+  parentWidth: number,
+  parentHeight: number,
+  pieceWidth: number,
+  pieceHeight: number
+): { sheets: number; across: number; rows: number; rotated: boolean; panels: number; panelsPerSheet: number; panelWidth: number; panelHeight: number } | null {
   if (parentWidth <= 0 || parentHeight <= 0 || pieceWidth <= 0 || pieceHeight <= 0) return null;
 
-  const normal = {
-    sheets: Math.ceil(pieceWidth / parentWidth) * Math.ceil(pieceHeight / parentHeight),
-    across: Math.ceil(pieceWidth / parentWidth),
-    rows: Math.ceil(pieceHeight / parentHeight),
-    rotated: false
-  };
-  const rotated = {
-    sheets: Math.ceil(pieceWidth / parentHeight) * Math.ceil(pieceHeight / parentWidth),
-    across: Math.ceil(pieceWidth / parentHeight),
-    rows: Math.ceil(pieceHeight / parentWidth),
-    rotated: true
-  };
+  // Oversize signs are commonly made as multiple panels. The old calculation treated
+  // every panel as if it needed its own parent sheet. That overstates stock when the
+  // resulting panels can be nested together on one sheet (for example 4000 x 500mm ACM
+  // becomes two 2000 x 500mm panels, both of which fit on one 2440 x 1220mm sheet).
+  //
+  // Keep the split conservative: only create the minimum equal panel grid needed to fit
+  // the finished item within a parent-sheet orientation. We do not add extra seams just
+  // to improve yield.
+  const candidates = [
+    { sheetWidth: parentWidth, sheetHeight: parentHeight, rotated: false },
+    { sheetWidth: parentHeight, sheetHeight: parentWidth, rotated: true }
+  ].map((orientation) => {
+    const across = Math.max(1, Math.ceil((pieceWidth - 0.0000001) / orientation.sheetWidth));
+    const rows = Math.max(1, Math.ceil((pieceHeight - 0.0000001) / orientation.sheetHeight));
+    const panelWidth = pieceWidth / across;
+    const panelHeight = pieceHeight / rows;
+    const panels = across * rows;
+    const panelsPerSheet = piecesPerSheet(parentWidth, parentHeight, panelWidth, panelHeight);
+    if (panelsPerSheet <= 0) return null;
+    return {
+      sheets: panels / panelsPerSheet,
+      across,
+      rows,
+      rotated: orientation.rotated,
+      panels,
+      panelsPerSheet,
+      panelWidth,
+      panelHeight
+    };
+  }).filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate));
 
-  return [normal, rotated].sort((a, b) => a.sheets - b.sheets)[0] ?? null;
+  return candidates.sort((a, b) =>
+    a.panels - b.panels ||
+    a.sheets - b.sheets ||
+    Number(a.rotated) - Number(b.rotated)
+  )[0] ?? null;
 }
 
 type SheetBillingRule = { increment: number; label: string; source: "configured" | "recommended" | "exact" };
@@ -556,17 +583,21 @@ function sheetUsageForQuoteLine(
 
   const panelized = panelizedSheets(dimensions.width, dimensions.length, pieceWidthMm, pieceHeightMm);
   if (panelized && panelized.sheets > 0) {
-    const calculatedTotal = panelized.sheets * safeQuantity;
+    const totalPanels = panelized.panels * safeQuantity;
+    const calculatedTotal = totalPanels / panelized.panelsPerSheet;
     const billableTotal = roundSheetUsage(calculatedTotal, billing.increment);
-    const physicalSheets = Math.ceil(calculatedTotal - 0.0000001);
+    const physicalSheets = Math.max(1, Math.ceil(calculatedTotal - 0.0000001));
     return {
       amount: billableTotal / safeQuantity,
       calculatedTotal,
       billableTotal,
       physicalSheets,
       note: [
-        `${physicalSheets} physical parent sheet${physicalSheets === 1 ? "" : "s"} required`,
         `panelled ${panelized.across} across × ${panelized.rows} high`,
+        `${usage(panelized.panelWidth)} × ${usage(panelized.panelHeight)}mm nominal panels`,
+        `${panelized.panelsPerSheet} panel${panelized.panelsPerSheet === 1 ? "" : "s"} up per parent sheet`,
+        `calculated ${usage(calculatedTotal)} sheet${Math.abs(calculatedTotal - 1) < 0.0001 ? "" : "s"}`,
+        `${physicalSheets} physical parent sheet${physicalSheets === 1 ? "" : "s"} opened`,
         panelized.rotated ? "rotated sheet orientation" : null,
         billing.label,
         `${usage(parentArea)}sqm parent sheet`
