@@ -232,8 +232,37 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
       ) : null}
 
       {isImageAttachment(item) ? (
-        <a href={item.fileUrl} target="_blank" rel="noreferrer" style={{ display: "block", border: "1px solid #e5e7eb", borderRadius: 12, overflow: "hidden", background: "#fff" }}>
-          <img src={item.fileUrl} alt={item.fileName} style={{ display: "block", width: "100%", maxHeight: 260, objectFit: "contain", background: "#fff" }} />
+        <a
+          href={item.fileUrl}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            width: "100%",
+            maxWidth: "100%",
+            minWidth: 0,
+            border: "1px solid #e5e7eb",
+            borderRadius: 12,
+            overflow: "hidden",
+            background: "#f8fafc",
+            boxSizing: "border-box"
+          }}
+        >
+          <img
+            src={item.fileUrl}
+            alt={item.fileName}
+            style={{
+              display: "block",
+              width: "auto",
+              height: "auto",
+              maxWidth: "100%",
+              maxHeight: 360,
+              objectFit: "contain",
+              objectPosition: "center center"
+            }}
+          />
         </a>
       ) : null}
 
