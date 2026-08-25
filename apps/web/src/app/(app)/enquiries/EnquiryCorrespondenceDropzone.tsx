@@ -95,7 +95,7 @@ async function uploadCorrespondenceFileDirectly(form: HTMLFormElement, file: Fil
 export function EnquiryCorrespondenceDropzone({ inputName = "correspondenceFile" }: EnquiryCorrespondenceDropzoneProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
-  const [status, setStatus] = useState("Drag an email, .eml/.msg file, PDF or screenshot here, or choose a file.");
+  const [status, setStatus] = useState("Drag an Outlook .msg or .eml email, PDF or screenshot here, or choose a file. .msg and .eml emails show inline.");
 
   async function handleFile(file: File | null, form: HTMLFormElement | null) {
     if (!file || !form) return;
@@ -169,7 +169,7 @@ export function EnquiryCorrespondenceDropzone({ inputName = "correspondenceFile"
         ref={inputRef}
         name={inputName}
         type="file"
-        accept=".eml,.msg,.pdf,.txt,.doc,.docx,.png,.jpg,.jpeg,.webp,message/rfc822,application/pdf,image/*"
+        accept=".eml,.msg,.pdf,.txt,.doc,.docx,.png,.jpg,.jpeg,.webp,message/rfc822,application/vnd.ms-outlook,application/pdf,image/*"
         style={inputStyle}
         onChange={async (event) => {
           const input = event.currentTarget;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { looksLikeEmailAttachment, looksLikeTextAttachment, parseEmailPreview, type CorrespondencePreviewFields } from "./emailPreview";
+import { looksLikeEmailAttachment, looksLikeOutlookMsgAttachment, looksLikeTextAttachment, parseEmailPreview, parseOutlookMsgPreview, type CorrespondencePreviewFields } from "./emailPreview";
 
 type EnquiryCorrespondencePreviewItem = {
   id: string;
@@ -98,8 +98,21 @@ async function fetchInlinePreview(item: EnquiryCorrespondencePreviewItem): Promi
 
   const response = await fetch(item.fileUrl);
   if (!response.ok) return null;
-  const text = await response.text();
 
+  if (looksLikeOutlookMsgAttachment(item.fileName, item.mimeType)) {
+    const parsed = parseOutlookMsgPreview(await response.arrayBuffer());
+    if (!parsed) return null;
+    return {
+      previewKind: "email",
+      emailSubject: parsed.subject,
+      emailFrom: parsed.from,
+      emailTo: parsed.to,
+      emailDate: parsed.date,
+      bodyPreview: parsed.bodyPreview
+    };
+  }
+
+  const text = await response.text();
   if (looksLikeEmailAttachment(item.fileName, item.mimeType)) {
     const parsed = parseEmailPreview(text);
     if (!parsed) return null;
@@ -128,7 +141,8 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
   const [loadedPreview, setLoadedPreview] = useState<CorrespondencePreviewFields | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const preview = hasUsefulPreview(savedPreview) ? savedPreview : loadedPreview;
-  const isEmail = preview?.previewKind === "email" || Boolean(preview?.emailSubject || preview?.emailFrom || preview?.emailTo);
+  const isRecognisedEmail = looksLikeEmailAttachment(item.fileName, item.mimeType);
+  const isEmail = isRecognisedEmail || preview?.previewKind === "email" || Boolean(preview?.emailSubject || preview?.emailFrom || preview?.emailTo);
   const isText = preview?.previewKind === "text";
 
   useEffect(() => {
@@ -173,6 +187,11 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
       </div>
 
       {loadingPreview ? <div style={{ color: "#667085", fontSize: 12 }}>Loading email preview…</div> : null}
+      {isRecognisedEmail && !loadingPreview && !preview ? (
+        <div style={{ border: "1px solid #f2d39a", borderRadius: 12, background: "#fffbeb", padding: 10, color: "#7a4e00", fontSize: 12 }}>
+          This email is attached, but its inline preview could not be read. Use Open original to view it.
+        </div>
+      ) : null}
 
       {isEmail && preview ? (
         <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 12, display: "grid", gap: 8 }}>

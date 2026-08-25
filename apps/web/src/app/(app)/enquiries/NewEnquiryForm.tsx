@@ -124,7 +124,7 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
   const [uploadStatus, setUploadStatus] = useState(
     isTablet
       ? "Take a photo of the supplied signage, site, sketch or reference material."
-      : "Drag an email, .eml/.msg file, PDF or screenshot here before creating the enquiry."
+      : "Drag an Outlook .msg or .eml email, PDF or screenshot here before creating the enquiry. .msg and .eml emails show inline."
   );
   const [pendingUploads, setPendingUploads] = useState<PendingCorrespondenceUpload[]>([]);
   const fieldStyle = isTablet
@@ -387,7 +387,7 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
         <input
           ref={inputRef}
           type="file"
-          accept=".eml,.msg,.pdf,.txt,.doc,.docx,.png,.jpg,.jpeg,.webp,message/rfc822,application/pdf,image/*"
+          accept=".eml,.msg,.pdf,.txt,.doc,.docx,.png,.jpg,.jpeg,.webp,message/rfc822,application/vnd.ms-outlook,application/pdf,image/*"
           style={{ minHeight: 38, borderRadius: 12, border: "1px solid #d0d5dd", padding: "7px 10px", background: "#fff", width: "100%", boxSizing: "border-box", fontSize: 12 }}
           onChange={async (event) => {
             const file = event.currentTarget.files ? firstUsefulFile(event.currentTarget.files) : null;

@@ -27,6 +27,7 @@ function safeFileName(value: unknown): string {
 
 function extensionFromContentType(contentType: string): string {
   if (contentType.includes("rfc822")) return ".eml";
+  if (contentType.includes("vnd.ms-outlook") || contentType.includes("x-msg")) return ".msg";
   if (contentType.includes("pdf")) return ".pdf";
   if (contentType.includes("jpeg") || contentType.includes("jpg")) return ".jpg";
   if (contentType.includes("png")) return ".png";
