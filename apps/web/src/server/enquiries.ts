@@ -344,6 +344,41 @@ export async function listRecentEnquiryCorrespondenceForTenant(tenantId: string,
   }));
 }
 
+export async function listEnquiryCorrespondenceForEnquiry(tenantId: string, enquiryId: string, limit = 12): Promise<EnquiryCorrespondenceRecord[]> {
+  await ensureEnquiryCorrespondenceTable();
+  const result = await pool.query<EnquiryCorrespondenceRecord & { sizeBytes: string | number | null; totalCount: string | number }>(`
+    SELECT
+      id,
+      tenant_id as "tenantId",
+      enquiry_id as "enquiryId",
+      file_name as "fileName",
+      file_url as "fileUrl",
+      storage_path as "storagePath",
+      mime_type as "mimeType",
+      CASE WHEN size_bytes IS NULL THEN NULL ELSE size_bytes::bigint END as "sizeBytes",
+      uploaded_by as "uploadedBy",
+      preview_kind as "previewKind",
+      email_subject as "emailSubject",
+      email_from as "emailFrom",
+      email_to as "emailTo",
+      email_date as "emailDate",
+      body_preview as "bodyPreview",
+      count(*) OVER () as "totalCount",
+      created_at as "createdAt"
+    FROM app.enquiry_correspondence
+    WHERE tenant_id = $1::uuid
+      AND enquiry_id = $2::uuid
+    ORDER BY created_at DESC
+    LIMIT $3::integer
+  `, [tenantId, enquiryId, Math.max(1, Math.min(50, limit))]);
+
+  return result.rows.map((row) => ({
+    ...row,
+    sizeBytes: row.sizeBytes == null ? null : Number(row.sizeBytes),
+    totalCount: Number(row.totalCount) || 0
+  }));
+}
+
 export async function createEnquiryCorrespondenceForTenant(tenantId: string, input: {
   enquiryId: string;
   fileName: string;

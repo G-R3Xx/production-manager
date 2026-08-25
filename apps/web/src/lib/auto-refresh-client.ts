@@ -6,8 +6,10 @@ let lastClaimedRefreshAt = 0;
 
 function formCanContainUnsavedWork(form: HTMLFormElement | null): boolean {
   if (!form) return false;
-  if (form.dataset.autoRefreshSafe === "true") return false;
-  return form.method.toLowerCase() !== "get";
+  // Treat every form as potentially editable unless it is explicitly marked safe.
+  // Server Action forms can present as GET/default forms in the browser during hydration,
+  // so relying on form.method allowed quote edits to slip past the refresh guard.
+  return form.dataset.autoRefreshSafe !== "true";
 }
 
 function formFromTarget(target: EventTarget | null): HTMLFormElement | null {
@@ -57,6 +59,11 @@ export function installAutoRefreshFormTracking(): () => void {
 export function pageHasUnsavedEdits(): boolean {
   const active = document.activeElement;
   if (active instanceof HTMLElement && active.isContentEditable) return true;
+
+  // Some editors (especially the quote line builder) use React-controlled buttons and
+  // hidden inputs. While one of those editors is open, do not refresh the page at all.
+  // This protects the selections even before the first native input/change event fires.
+  if (document.querySelector('details[data-production-manager-auto-refresh-protected="true"][open]')) return true;
 
   return Boolean(document.querySelector(`form[${DIRTY_FORM_ATTRIBUTE}="true"]`));
 }

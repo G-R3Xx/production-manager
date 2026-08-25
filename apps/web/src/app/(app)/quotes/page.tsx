@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
+import { getEnquiryById, listEnquiriesForTenant, listEnquiryCorrespondenceForEnquiry } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
@@ -19,6 +19,7 @@ import { QuoteStatusAutoRefresh } from "./QuoteStatusAutoRefresh";
 import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
 import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
 import { getProductionJobForQuote } from "@/server/production";
+import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondencePreview";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -468,7 +469,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
   const surveySourceEnquiry = survey?.enquiryId ? enquiryById.get(survey.enquiryId) ?? null : null;
   const selectedQuoteSourceEnquiry = selectedQuote?.enquiryId ? enquiryById.get(selectedQuote.enquiryId) ?? null : null;
-  const sourceEnquiry = enquiry ?? surveySourceEnquiry;
+  const sourceEnquiry = enquiry ?? surveySourceEnquiry ?? selectedQuoteSourceEnquiry;
   const sourceClientName = survey?.clientName ?? sourceEnquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? sourceEnquiry?.contactName ?? "";
   const sourcePhone = survey?.phone ?? sourceEnquiry?.phone ?? "";
@@ -480,6 +481,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null),
     selectedQuote ? getProductionJobForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
   ]);
+  const selectedQuoteEnquiryCorrespondence = selectedQuoteSourceEnquiry
+    ? await listEnquiryCorrespondenceForEnquiry(activeTenant.tenantId, selectedQuoteSourceEnquiry.id, 12)
+    : [];
   const selectedQuoteFingerprint = selectedQuote ? quoteActivityFingerprint(selectedQuote, quoteLines) : "";
   const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
   const importedMyobCustomers = clients.filter((client) => client.isActive && Boolean(client.myobUid) && !client.myobUid.startsWith("manual-"));
@@ -717,6 +721,54 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
                   </form>
                   <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
+                  {selectedQuoteSourceEnquiry ? (
+                    <details
+                      open={quoteLines.length === 0}
+                      style={{ border: "1px solid #bfdbfe", borderRadius: 16, background: "#f8fbff", overflow: "hidden" }}
+                    >
+                      <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                          <strong style={{ color: "#1d4ed8" }}>Enquiry details & correspondence</strong>
+                          <span style={{ color: "#475467", fontSize: 12, overflowWrap: "anywhere" }}>{selectedQuoteSourceEnquiry.requestSummary}</span>
+                        </div>
+                        <span style={{ border: "1px solid #bfdbfe", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", padding: "5px 9px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
+                          {selectedQuoteEnquiryCorrespondence[0]?.totalCount ?? selectedQuoteEnquiryCorrespondence.length} attachment{(selectedQuoteEnquiryCorrespondence[0]?.totalCount ?? selectedQuoteEnquiryCorrespondence.length) === 1 ? "" : "s"}
+                        </span>
+                      </summary>
+                      <div style={{ borderTop: "1px solid #dbeafe", padding: 14, display: "grid", gap: 12 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
+                          <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
+                            <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Client / contact</span>
+                            <strong>{selectedQuoteSourceEnquiry.clientName}</strong>
+                            <span style={{ color: "#475467", fontSize: 12 }}>{[selectedQuoteSourceEnquiry.contactName, selectedQuoteSourceEnquiry.phone, selectedQuoteSourceEnquiry.email].filter(Boolean).join(" · ") || "No contact details recorded"}</span>
+                          </div>
+                          <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
+                            <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Site / reference</span>
+                            <strong>{selectedQuoteSourceEnquiry.siteAddress || "No site address recorded"}</strong>
+                            <span style={{ color: "#475467", fontSize: 12 }}>{[selectedQuoteSourceEnquiry.clientPurchaseOrderNumber ? `PO ${selectedQuoteSourceEnquiry.clientPurchaseOrderNumber}` : null, selectedQuoteSourceEnquiry.urgency ? `${selectedQuoteSourceEnquiry.urgency} priority` : null, selectedQuoteSourceEnquiry.source].filter(Boolean).join(" · ")}</span>
+                          </div>
+                        </div>
+                        <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
+                          <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Original enquiry request</span>
+                          <div style={{ color: "#101828", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{selectedQuoteSourceEnquiry.requestSummary}</div>
+                          {selectedQuoteSourceEnquiry.notes ? <div style={{ color: "#475467", fontSize: 12, whiteSpace: "pre-wrap" }}><strong>Internal notes:</strong> {selectedQuoteSourceEnquiry.notes}</div> : null}
+                        </div>
+                        <section style={{ display: "grid", gap: 8 }}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                            <strong style={{ fontSize: 13 }}>Photos, emails & attachments</strong>
+                            <a href={`/enquiries${selectedQuoteSourceEnquiry.status === "converted" ? "?filter=completed&" : selectedQuoteSourceEnquiry.status === "deleted" ? "?filter=deleted&" : "?"}selectedEnquiry=${selectedQuoteSourceEnquiry.id}#enquiry-${selectedQuoteSourceEnquiry.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 800, textDecoration: "none" }}>Open Enquiries page ↗</a>
+                          </div>
+                          {selectedQuoteEnquiryCorrespondence.length ? (
+                            <div style={{ display: "grid", gap: 8 }}>
+                              {selectedQuoteEnquiryCorrespondence.map((item) => <EnquiryCorrespondencePreview key={item.id} item={item} />)}
+                            </div>
+                          ) : (
+                            <span style={{ color: "#98a2b3", fontSize: 12 }}>No enquiry correspondence or photos attached.</span>
+                          )}
+                        </section>
+                      </div>
+                    </details>
+                  ) : null}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}><strong>{quoteLines.length}</strong> line item{quoteLines.length === 1 ? "" : "s"}</span>
@@ -870,7 +922,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
               {selectedQuote.status !== "deleted" ? (
                 <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 2 }}>
-                  <details style={{ border: "1px solid #b9cdfc", borderRadius: 18, background: "#fff", overflow: "hidden" }}>
+                  <details data-production-manager-auto-refresh-protected="true" style={{ border: "1px solid #b9cdfc", borderRadius: 18, background: "#fff", overflow: "hidden" }}>
                     <summary style={{ listStyle: "none", cursor: "pointer", padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#f8fbff)", color: "#155eef", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}><span>＋ Add quote line</span><span style={{ fontSize: 12, color: "#475467" }}>Open line editor</span></summary>
                     <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
                       {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
@@ -913,6 +965,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <details
                       key={line.id}
                       id={`quote-line-${line.id}`}
+                      data-production-manager-auto-refresh-protected="true"
                       open={focusLine === line.id ? true : undefined}
                       style={{
                         border: focusLine === line.id ? "2px solid #fb923c" : "1px solid #dfe7f2",

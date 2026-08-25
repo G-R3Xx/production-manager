@@ -1,5 +1,5 @@
-# Production Manager V26.08.25.04
+# Production Manager V26.08.25.05
 
 Current full-project source build.
 
-See `README-V26.08.25.04.md` for the latest changes.
+See `README-V26.08.25.05.md` for the latest changes.

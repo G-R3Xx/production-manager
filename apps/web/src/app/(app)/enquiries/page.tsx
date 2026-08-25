@@ -43,6 +43,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const message = readParam(params, "message");
   const error = readParam(params, "error");
   const filter = readParam(params, "filter");
+  const selectedEnquiry = readParam(params, "selectedEnquiry");
   await reconcileEnquiryWorkflowStatusesForTenant(activeTenant.tenantId);
   const [allEnquiries, clients, correspondence] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
@@ -124,7 +125,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
               const purchaseOrderLine = enquiry.clientPurchaseOrderNumber ? `PO: ${enquiry.clientPurchaseOrderNumber}` : "";
 
               return (
-                <details key={enquiry.id} className="enquiry-preview-card" style={{ border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", overflow: "hidden" }}>
+                <details id={`enquiry-${enquiry.id}`} key={enquiry.id} open={selectedEnquiry === enquiry.id} className="enquiry-preview-card" style={{ border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", overflow: "hidden", scrollMarginTop: 88 }}>
                   <summary className="enquiry-preview-summary" style={{ cursor: "pointer", listStyle: "none", padding: 12, display: "grid", gap: 8 }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
                       <div style={{ display: "flex", gap: 12, alignItems: "start", minWidth: 0 }}>

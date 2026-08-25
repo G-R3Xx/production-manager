@@ -2392,7 +2392,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       review: "Quantity and internal notes",
     };
     return (
-      <form action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
+      <form data-production-manager-auto-refresh-protected="true" action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
         <input type="hidden" name="quoteId" value={quoteId} />
         {editingLine ? <input type="hidden" name="editingLineId" value={editingLine.id} /> : null}
         <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
@@ -2423,7 +2423,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ borderRadius: 14, background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 14px" }}>
             <strong style={{ color: "#1d4ed8" }}>Configure the complete quote line</strong>
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line.</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line. Live auto-refresh is paused while this editor is open so your unsaved selections are protected.</div>
           </div>
           {allSignageSteps.map((step, index) => (
             <section key={step} style={{ display: "grid", gap: 7 }}>
