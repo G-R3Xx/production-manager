@@ -29,7 +29,12 @@ const cardStyle: CSSProperties = {
   borderRadius: 14,
   padding: 12,
   display: "grid",
-  gap: 8
+  gap: 8,
+  width: "100%",
+  maxWidth: "100%",
+  minWidth: 0,
+  boxSizing: "border-box",
+  overflow: "hidden"
 };
 
 const labelStyle: CSSProperties = {
@@ -43,7 +48,10 @@ const labelStyle: CSSProperties = {
 const valueStyle: CSSProperties = {
   color: "#101828",
   fontSize: 13,
-  overflowWrap: "anywhere"
+  minWidth: 0,
+  maxWidth: "100%",
+  overflowWrap: "anywhere",
+  wordBreak: "break-word"
 };
 
 function formatFileSize(sizeBytes: number | null | undefined): string {
@@ -169,7 +177,7 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
 
   return (
     <article style={cardStyle}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start", flexWrap: "wrap", minWidth: 0, maxWidth: "100%" }}>
         <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={{ borderRadius: 999, background: isEmail ? "#eef4ff" : "#f2f4f7", color: isEmail ? "#155eef" : "#344054", padding: "3px 8px", fontSize: 11, fontWeight: 900 }}>
@@ -181,7 +189,7 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
             {[formatFileSize(item.sizeBytes), item.uploadedBy ? `uploaded by ${item.uploadedBy}` : "", formatDateTime(item.createdAt)].filter(Boolean).join(" · ")}
           </div>
         </div>
-        <a href={item.fileUrl} target="_blank" rel="noreferrer" style={{ flex: "0 0 auto", border: "1px solid #d0d5dd", background: "#fff", color: "#111827", textDecoration: "none", borderRadius: 999, padding: "6px 9px", fontSize: 12, fontWeight: 900 }}>
+        <a href={item.fileUrl} target="_blank" rel="noreferrer" style={{ flex: "0 0 auto", maxWidth: "100%", border: "1px solid #d0d5dd", background: "#fff", color: "#111827", textDecoration: "none", borderRadius: 999, padding: "6px 9px", fontSize: 12, fontWeight: 900, boxSizing: "border-box" }}>
           Open original
         </a>
       </div>
@@ -194,12 +202,12 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
       ) : null}
 
       {isEmail && preview ? (
-        <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 12, display: "grid", gap: 8 }}>
+        <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 12, display: "grid", gap: 8, minWidth: 0, maxWidth: "100%", boxSizing: "border-box", overflow: "hidden" }}>
           <div>
             <div style={labelStyle}>Subject</div>
             <div style={{ ...valueStyle, fontWeight: 900 }}>{preview.emailSubject || item.fileName}</div>
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(180px, 100%), 1fr))", gap: 10, minWidth: 0 }}>
             <div>
               <div style={labelStyle}>From</div>
               <div style={valueStyle}>{preview.emailFrom || "Not captured"}</div>
@@ -216,7 +224,7 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
           {preview.bodyPreview ? (
             <div style={{ borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
               <div style={labelStyle}>Email body preview</div>
-              <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", color: "#344054", fontSize: 13, lineHeight: 1.5 }}>{preview.bodyPreview}</pre>
+              <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", color: "#344054", fontSize: 13, lineHeight: 1.5, maxWidth: "100%", overflowWrap: "anywhere", wordBreak: "break-word" }}>{preview.bodyPreview}</pre>
             </div>
           ) : (
             <div style={{ color: "#98a2b3", fontSize: 12 }}>No readable email body was captured. The original file is still attached.</div>
@@ -227,7 +235,7 @@ export function EnquiryCorrespondencePreview({ item }: EnquiryCorrespondencePrev
       {isText && preview?.bodyPreview ? (
         <section style={{ border: "1px solid #e5e7eb", borderRadius: 12, background: "#fff", padding: 12 }}>
           <div style={labelStyle}>Text preview</div>
-          <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", color: "#344054", fontSize: 13, lineHeight: 1.5 }}>{preview.bodyPreview}</pre>
+          <pre style={{ margin: "6px 0 0", whiteSpace: "pre-wrap", fontFamily: "inherit", color: "#344054", fontSize: 13, lineHeight: 1.5, maxWidth: "100%", overflowWrap: "anywhere", wordBreak: "break-word" }}>{preview.bodyPreview}</pre>
         </section>
       ) : null}
 

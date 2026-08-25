@@ -722,52 +722,61 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   </form>
                   <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
                   {selectedQuoteSourceEnquiry ? (
-                    <details
-                      open={quoteLines.length === 0}
-                      style={{ border: "1px solid #bfdbfe", borderRadius: 16, background: "#f8fbff", overflow: "hidden" }}
+                    <section
+                      style={{ border: "1px solid #bfdbfe", borderRadius: 16, background: "#f8fbff", overflow: "hidden", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}
                     >
-                      <summary style={{ cursor: "pointer", listStyle: "none", padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-                        <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
+                      <div style={{ padding: "12px 14px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", minWidth: 0 }}>
+                        <div style={{ display: "grid", gap: 3, minWidth: 0, flex: "1 1 420px" }}>
                           <strong style={{ color: "#1d4ed8" }}>Enquiry details & correspondence</strong>
                           <span style={{ color: "#475467", fontSize: 12, overflowWrap: "anywhere" }}>{selectedQuoteSourceEnquiry.requestSummary}</span>
                         </div>
                         <span style={{ border: "1px solid #bfdbfe", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", padding: "5px 9px", fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>
                           {selectedQuoteEnquiryCorrespondence[0]?.totalCount ?? selectedQuoteEnquiryCorrespondence.length} attachment{(selectedQuoteEnquiryCorrespondence[0]?.totalCount ?? selectedQuoteEnquiryCorrespondence.length) === 1 ? "" : "s"}
                         </span>
-                      </summary>
-                      <div style={{ borderTop: "1px solid #dbeafe", padding: 14, display: "grid", gap: 12 }}>
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 8 }}>
-                          <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
-                            <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Client / contact</span>
-                            <strong>{selectedQuoteSourceEnquiry.clientName}</strong>
-                            <span style={{ color: "#475467", fontSize: 12 }}>{[selectedQuoteSourceEnquiry.contactName, selectedQuoteSourceEnquiry.phone, selectedQuoteSourceEnquiry.email].filter(Boolean).join(" · ") || "No contact details recorded"}</span>
-                          </div>
-                          <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
-                            <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Site / reference</span>
-                            <strong>{selectedQuoteSourceEnquiry.siteAddress || "No site address recorded"}</strong>
-                            <span style={{ color: "#475467", fontSize: 12 }}>{[selectedQuoteSourceEnquiry.clientPurchaseOrderNumber ? `PO ${selectedQuoteSourceEnquiry.clientPurchaseOrderNumber}` : null, selectedQuoteSourceEnquiry.urgency ? `${selectedQuoteSourceEnquiry.urgency} priority` : null, selectedQuoteSourceEnquiry.source].filter(Boolean).join(" · ")}</span>
-                          </div>
-                        </div>
-                        <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4 }}>
-                          <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Original enquiry request</span>
-                          <div style={{ color: "#101828", whiteSpace: "pre-wrap", lineHeight: 1.45 }}>{selectedQuoteSourceEnquiry.requestSummary}</div>
-                          {selectedQuoteSourceEnquiry.notes ? <div style={{ color: "#475467", fontSize: 12, whiteSpace: "pre-wrap" }}><strong>Internal notes:</strong> {selectedQuoteSourceEnquiry.notes}</div> : null}
-                        </div>
-                        <section style={{ display: "grid", gap: 8 }}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                            <strong style={{ fontSize: 13 }}>Photos, emails & attachments</strong>
-                            <a href={`/enquiries${selectedQuoteSourceEnquiry.status === "converted" ? "?filter=completed&" : selectedQuoteSourceEnquiry.status === "deleted" ? "?filter=deleted&" : "?"}selectedEnquiry=${selectedQuoteSourceEnquiry.id}#enquiry-${selectedQuoteSourceEnquiry.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 800, textDecoration: "none" }}>Open Enquiries page ↗</a>
-                          </div>
-                          {selectedQuoteEnquiryCorrespondence.length ? (
-                            <div style={{ display: "grid", gap: 8 }}>
-                              {selectedQuoteEnquiryCorrespondence.map((item) => <EnquiryCorrespondencePreview key={item.id} item={item} />)}
-                            </div>
-                          ) : (
-                            <span style={{ color: "#98a2b3", fontSize: 12 }}>No enquiry correspondence or photos attached.</span>
-                          )}
-                        </section>
                       </div>
-                    </details>
+                      <div style={{ borderTop: "1px solid #dbeafe", padding: 14, display: "grid", gap: 12, minWidth: 0 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(220px,100%),1fr))", gap: 8, minWidth: 0 }}>
+                          <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4, minWidth: 0 }}>
+                            <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Client / contact</span>
+                            <strong style={{ overflowWrap: "anywhere" }}>{selectedQuoteSourceEnquiry.clientName}</strong>
+                            <span style={{ color: "#475467", fontSize: 12, overflowWrap: "anywhere" }}>{[selectedQuoteSourceEnquiry.contactName, selectedQuoteSourceEnquiry.phone, selectedQuoteSourceEnquiry.email].filter(Boolean).join(" · ") || "No contact details recorded"}</span>
+                          </div>
+                          <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4, minWidth: 0 }}>
+                            <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Site / reference</span>
+                            <strong style={{ overflowWrap: "anywhere" }}>{selectedQuoteSourceEnquiry.siteAddress || "No site address recorded"}</strong>
+                            <span style={{ color: "#475467", fontSize: 12, overflowWrap: "anywhere" }}>{[selectedQuoteSourceEnquiry.clientPurchaseOrderNumber ? `PO ${selectedQuoteSourceEnquiry.clientPurchaseOrderNumber}` : null, selectedQuoteSourceEnquiry.urgency ? `${selectedQuoteSourceEnquiry.urgency} priority` : null, selectedQuoteSourceEnquiry.source].filter(Boolean).join(" · ")}</span>
+                          </div>
+                        </div>
+                        <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, background: "#fff", padding: 10, display: "grid", gap: 4, minWidth: 0 }}>
+                          <span style={{ color: "#667085", fontSize: 10, fontWeight: 900, textTransform: "uppercase", letterSpacing: "0.06em" }}>Original enquiry request</span>
+                          <div style={{ color: "#101828", whiteSpace: "pre-wrap", lineHeight: 1.45, overflowWrap: "anywhere" }}>{selectedQuoteSourceEnquiry.requestSummary}</div>
+                          {selectedQuoteSourceEnquiry.notes ? <div style={{ color: "#475467", fontSize: 12, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong>Internal notes:</strong> {selectedQuoteSourceEnquiry.notes}</div> : null}
+                        </div>
+                        <details style={{ border: "1px solid #dbeafe", borderRadius: 12, background: "#fff", overflow: "hidden", minWidth: 0, maxWidth: "100%" }}>
+                          <summary style={{ cursor: "pointer", listStyle: "none", padding: "10px 12px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap", minWidth: 0 }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+                              <strong style={{ fontSize: 13 }}>Photos, emails & attachments</strong>
+                              <span style={{ border: "1px solid #dbeafe", borderRadius: 999, background: "#eff6ff", color: "#1d4ed8", padding: "3px 7px", fontSize: 10, fontWeight: 900, whiteSpace: "nowrap" }}>
+                                {selectedQuoteEnquiryCorrespondence[0]?.totalCount ?? selectedQuoteEnquiryCorrespondence.length}
+                              </span>
+                            </div>
+                            <span style={{ color: "#155eef", fontSize: 12, fontWeight: 800, whiteSpace: "nowrap" }}>View attachments ▾</span>
+                          </summary>
+                          <div style={{ borderTop: "1px solid #dbeafe", padding: 10, display: "grid", gap: 8, minWidth: 0, maxWidth: "100%", overflow: "hidden" }}>
+                            <div style={{ display: "flex", justifyContent: "flex-end", minWidth: 0 }}>
+                              <a href={`/enquiries${selectedQuoteSourceEnquiry.status === "converted" ? "?filter=completed&" : selectedQuoteSourceEnquiry.status === "deleted" ? "?filter=deleted&" : "?"}selectedEnquiry=${selectedQuoteSourceEnquiry.id}#enquiry-${selectedQuoteSourceEnquiry.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 800, textDecoration: "none", overflowWrap: "anywhere" }}>Open Enquiries page ↗</a>
+                            </div>
+                            {selectedQuoteEnquiryCorrespondence.length ? (
+                              <div style={{ display: "grid", gap: 8, minWidth: 0, maxWidth: "100%" }}>
+                                {selectedQuoteEnquiryCorrespondence.map((item) => <EnquiryCorrespondencePreview key={item.id} item={item} />)}
+                              </div>
+                            ) : (
+                              <span style={{ color: "#98a2b3", fontSize: 12 }}>No enquiry correspondence or photos attached.</span>
+                            )}
+                          </div>
+                        </details>
+                      </div>
+                    </section>
                   ) : null}
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
