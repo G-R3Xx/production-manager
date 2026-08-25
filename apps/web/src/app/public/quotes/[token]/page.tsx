@@ -147,10 +147,15 @@ function clientMaterialTitle(value: string | null | undefined): string {
   const source = compactText(value);
   if (!source) return "";
 
-  // Keep the exact purchased substrate name in the quote data, but avoid repeating a
-  // parent-sheet dimension in the headline when the finished size is shown separately.
-  const withoutTrailingParentSize = source.replace(/\s+\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?(?:\s*mm)?\s*$/i, "").trim();
-  return withoutTrailingParentSize || source;
+  // Client quotes only need the substrate/product name. Stock-sheet dimensions,
+  // calculated sheet usage and other production-consumption wording are internal.
+  const withoutCalculatedUsage = source
+    .replace(/\s*[—-]\s*\d+(?:\.\d+)?\s*(?:sheets?|sheet(?:s)?\s+used|lm|linear\s*m(?:etre)?s?|m²|sqm)\s*(?:calculated|used)?\s*$/i, "")
+    .trim();
+  const withoutParentSize = withoutCalculatedUsage
+    .replace(/\s*[-–—]?\s*\d+(?:\.\d+)?\s*[×x]\s*\d+(?:\.\d+)?(?:\s*mm)?\s*$/i, "")
+    .trim();
+  return withoutParentSize || withoutCalculatedUsage || source;
 }
 
 function friendlyLaminate(raw: string | null | undefined): string | null {
@@ -170,57 +175,6 @@ function friendlyLaminate(raw: string | null | undefined): string | null {
   return /laminate/i.test(cleaned) ? titleCaseLabel(cleaned) : `${titleCaseLabel(cleaned)} Laminate`;
 }
 
-function friendlyPrintMethod(value: string | null | undefined): string | null {
-  const lower = compactText(value).toLowerCase();
-  if (!lower || lower === "no print") return null;
-  if (lower === "direct print") return "Direct Print";
-  if (lower === "roll stock") return "Roll Stock";
-  if (lower === "cut vinyl") return "Cut Vinyl";
-  return titleCaseLabel(value);
-}
-
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
-}
-
-function customerFacingRollMediaName(line: Pick<QuoteLineRecord, "optionSummary" | "configurationSnapshot">): string {
-  const snapshot = recordValue(line.configurationSnapshot);
-  const materialSnapshots = recordValue(snapshot?.materialSnapshots);
-  const media = recordValue(materialSnapshots?.media);
-  const main = recordValue(materialSnapshots?.main);
-  const printMethod = compactText(snapshot?.printMethod as string | null | undefined).toLowerCase();
-  const mainLooksLikeRoll = Boolean(
-    main && (
-      Number(main.rollWidthMm ?? 0) > 0 ||
-      /^(?:lm|linear\s*m(?:etre)?s?)$/i.test(compactText(main.stockUom as string | null | undefined)) ||
-      /\b(roll|vinyl|banner|sav|media)\b/i.test(compactText(main.materialType as string | null | undefined))
-    )
-  );
-  const selected = media ?? (printMethod === "roll_stock" && mainLooksLikeRoll ? main : null);
-  const customerName = compactText(selected?.customerFacingName as string | null | undefined);
-  if (customerName) return customerName;
-
-  // Materials deliberately fall back to their stock name when Customer-facing name is blank.
-  // That is the same rule used by the quote builder itself.
-  const stockName = compactText(selected?.name as string | null | undefined);
-  if (stockName && !/^roll stock$/i.test(stockName)) return stockName;
-
-  // Older quick-quote snapshots may not contain materialSnapshots. The builder stores the
-  // selected media immediately after the Roll stock choice in optionSummary, so recover it
-  // there without exposing pricing/setup/internal workflow labels.
-  const parts = summaryParts(line);
-  const rollIndex = parts.findIndex((part) => /^roll stock$/i.test(part));
-  if (rollIndex >= 0) {
-    for (const candidate of parts.slice(rollIndex + 1)) {
-      if (/^(?:no print|direct print|roll stock|cut vinyl|cmyk|mono|white|white ink|cmyk \+ white|cmyk \+ special)$/i.test(candidate)) continue;
-      if (/\bsided\b/i.test(candidate) || /^(?:reverse|standard|positive) print$/i.test(candidate)) continue;
-      if (/^(?:substrate|stock|material|finished size|size|artwork|print setup|backing|laminate|finishing|dispatch|qty)\s*:/i.test(candidate)) continue;
-      return candidate;
-    }
-  }
-  return "";
-}
-
 function friendlySide(value: string | null | undefined): string | null {
   const lower = compactText(value).toLowerCase();
   if (lower.includes("double")) return "Double sided";
@@ -235,47 +189,25 @@ function isInstallLine(line: Pick<QuoteLineRecord, "productName" | "optionSummar
   return /^(sign install|installation|install)$/i.test(productName) || /\b(sign install|installation service)\b/i.test(productName);
 }
 
-function installLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
-  const parts = summaryParts(line);
-  const fixings = parts.find((part) => /^fixings:/i.test(part));
+function installLineForClient(_line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
   return {
     title: "Sign Install",
-    detail: fixings ? fixings.replace(/^fixings:\s*/i, "Fixings: ") : null
+    detail: null
   };
 }
 
-function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "configurationSnapshot">): ClientQuoteLine {
+function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
   const parts = summaryParts(line);
   const combined = [line.productName, line.optionSummary].filter(Boolean).join(" · ");
   const base = cleanBaseMaterialName(line.productName);
   const selectedMaterial = cleanSelectedMaterialName(line);
   const materialTitle = clientMaterialTitle(selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
-  const rawPrintMethod = parts.find((part) => /^(no print|direct print|roll stock|cut vinyl)$/i.test(part));
-  const printMethod = friendlyPrintMethod(rawPrintMethod);
-  const rollMediaName = /^roll stock$/i.test(compactText(rawPrintMethod)) ? customerFacingRollMediaName(line) : "";
-  const ink = parts.find((part) => /^(cmyk|mono|white|white ink|cmyk \+ white|cmyk \+ special)$/i.test(part));
-  const side = friendlySide(parts.find((part) => /\bsided\b/i.test(part)));
-  const printDirection = parts.find((part) => /^(reverse|standard|positive) print$/i.test(part));
-  const backingPart = parts.find((part) => /^backing:/i.test(part));
-  const backingName = compactText(backingPart?.replace(/^backing:\s*/i, ""));
-  const backing = backingName && !/^none$/i.test(backingName) ? `Backed in ${titleCaseLabel(backingName)}` : null;
   const laminate = friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
-  const title = [materialTitle, dimension, laminate].filter(Boolean).join(" ") || line.productName;
-  const detailParts = [
-    selectedMaterial && selectedMaterial !== materialTitle ? `Substrate: ${selectedMaterial}` : null,
-    rollMediaName || printMethod,
-    ink ? ink.toUpperCase().replace("CMYK + WHITE", "CMYK + White").replace(/^WHITE$/, "White") : null,
-    printDirection ? titleCaseLabel(printDirection) : null,
-    backing,
-    laminate,
-    side
-  ].filter(Boolean);
+  const title = [materialTitle, dimension, laminate].filter(Boolean).join(" · ") || line.productName;
 
-  return {
-    title,
-    detail: detailParts.length ? detailParts.join(", ").replace(/, (Single sided|Double sided)$/i, " $1") : null
-  };
+  // Everything else on a signage quote line is production/setup data and stays internal.
+  return { title, detail: null };
 }
 
 function smallFormatLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
