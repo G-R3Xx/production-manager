@@ -97,6 +97,8 @@ export type QuickQuoteSnapshot = {
   finishingLabourBasis?: Record<string, QuickQuoteLabourBasis>;
   eyeletPresetLabel?: string;
   customEyeletQty?: string;
+  standoffMaterialId?: string;
+  standoffQtyPerItem?: string;
   smallType?: string;
   smallStockId?: string;
   customSmallStockEnabled?: boolean;
@@ -146,6 +148,7 @@ export type QuickQuoteSnapshot = {
     smallStock?: SnapshotMaterial | null;
     smallCoating?: SnapshotMaterial | null;
     eyelet?: SnapshotMaterial | null;
+    standoff?: SnapshotMaterial | null;
     componentParts?: SnapshotMaterial[];
   };
   pricingSnapshot?: {
@@ -292,6 +295,7 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
       smallStock: snapshotMaterial(materialData.smallStock),
       smallCoating: snapshotMaterial(materialData.smallCoating),
       eyelet: snapshotMaterial(materialData.eyelet),
+      standoff: snapshotMaterial(materialData.standoff),
       componentParts: componentMaterials
     }
   };
@@ -307,6 +311,7 @@ export function materialsFromSnapshot(snapshot: QuickQuoteSnapshot | null | unde
     snapshot.materialSnapshots.smallStock,
     snapshot.materialSnapshots.smallCoating,
     snapshot.materialSnapshots.eyelet,
+    snapshot.materialSnapshots.standoff,
     ...(snapshot.materialSnapshots.componentParts ?? [])
   ].filter((item): item is SnapshotMaterial => Boolean(item?.id && item?.name));
   const seen = new Set<string>();

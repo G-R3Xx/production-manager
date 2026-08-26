@@ -386,6 +386,11 @@ function isLaminateMaterial(material: QuoteMaterial): boolean {
   return type.includes("laminate") || type.includes("cello") || text.includes("laminate") || text.includes("anti graffiti") || text.includes("anti-graffiti") || text.includes("cello");
 }
 
+function isStandoffMaterial(material: QuoteMaterial): boolean {
+  const text = materialText(material);
+  return /\b(standoffs?|stand[- ]?offs?|sign mounts?|mounting spacers?)\b/.test(text);
+}
+
 function isPrintRollMaterial(material: QuoteMaterial): boolean {
   return isRollMaterial(material) && !isLaminateMaterial(material);
 }
@@ -1086,6 +1091,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [finishingLabourBasis, setFinishingLabourBasis] = useState<Record<string, LabourBasis>>(labourBasisRecord(snapshotStringRecord(initialSnapshot, "finishingLabourBasis"), "line_total"));
   const [eyeletPresetLabel, setEyeletPresetLabel] = useState(snapshotString(initialSnapshot, "eyeletPresetLabel", eyeletPresets[0]?.label ?? ""));
   const [customEyeletQty, setCustomEyeletQty] = useState(snapshotString(initialSnapshot, "customEyeletQty"));
+  const [standoffMaterialId, setStandoffMaterialId] = useState(snapshotString(initialSnapshot, "standoffMaterialId"));
+  const [standoffQtyPerItem, setStandoffQtyPerItem] = useState(snapshotString(initialSnapshot, "standoffQtyPerItem", "4"));
 
   const [smallType, setSmallType] = useState<SmallFormatType | "">(snapshotString(initialSnapshot, "smallType") as SmallFormatType | "");
   const [smallStockId, setSmallStockId] = useState(snapshotString(initialSnapshot, "smallStockId"));
@@ -1238,10 +1245,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const selectedLaminate = laminateMaterials.find((material) => material.id === laminateId);
   const selectedSmallStock = customSmallStockEnabled ? customSmallStock : departmentStocks.find((material) => material.id === smallStockId);
   const selectedSmallCoating = laminateMaterials.find((material) => material.id === smallCoatingId);
-  const eyeletMaterial = materialPool.find((material) => materialText(material).includes("eyelet")) ?? materialPool.find((material) => String(material.materialType ?? "").toLowerCase().includes("fix"));
+  const eyeletMaterial = materialPool.find((material) => materialText(material).includes("eyelet"));
+  const standoffMaterials = useMemo(() => materialPool.filter(isStandoffMaterial), [materialPool]);
+  const selectedStandoffMaterial = standoffMaterials.find((material) => material.id === standoffMaterialId);
 
   const selectedBase = baseTypes.find((item) => item.key === baseType);
   const selectedSmallType = smallFormatTypes.find((item) => item.key === smallType);
+  const panelStandoffsApplicable = flowType === "signage" && Boolean(selectedMainMaterial) && !isRollMaterial(selectedMainMaterial as QuoteMaterial);
   const isDuplicateBook = smallType === "duplicate_books";
   const ncrCopiesCount = ncrCopyCount(ncrCopies);
   const ncrDetailsComplete = !isDuplicateBook || Boolean(ncrCopiesCount > 0 && numberValue(ncrSetsPerBook, 0) > 0 && ncrCoverColour && ncrTapeColour);
@@ -1499,6 +1509,26 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
         }
       }
+
+      if (panelStandoffsApplicable && selectedStandoffMaterial) {
+        const qtyPerItem = Math.max(0, numberValue(standoffQtyPerItem, 0));
+        if (qtyPerItem > 0) {
+          const rate = eachRate(selectedStandoffMaterial);
+          rows.push({
+            label: "Standoffs",
+            detail: selectedStandoffMaterial.name,
+            amount: qtyPerItem,
+            unit: "each",
+            rate: rate.rate,
+            cost: qtyPerItem * rate.rate,
+            note: [
+              `${usage(qtyPerItem)} per finished item`,
+              quantityNumber > 1 ? `${usage(qtyPerItem * quantityNumber)} total for quote qty ${usage(quantityNumber)}` : null,
+              rate.note
+            ].filter(Boolean).join(" · ") || undefined
+          });
+        }
+      }
     }
 
     if (isPrintDepartment) {
@@ -1700,7 +1730,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -1815,6 +1845,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     ? `Laminate: ${laminateUseRow.detail} — ${usage(totalLaminateUse)}lm calculated`
     : "";
 
+  const standoffQtyPerItemNumber = Math.max(0, numberValue(standoffQtyPerItem, 0));
+  const standoffSummary = panelStandoffsApplicable && selectedStandoffMaterial && standoffQtyPerItemNumber > 0
+    ? `Standoffs: ${customerMaterialName(selectedStandoffMaterial)} × ${usage(standoffQtyPerItemNumber)}`
+    : "";
+
   const finishingSummary = finishings.map((key) => {
     if (key === "eyelets") {
       const preset = eyeletPresets.find((option) => option.label === eyeletPresetLabel);
@@ -1913,6 +1948,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       printDirection ? `${printDirection === "reverse" ? "Reverse" : (selectedReversePrintableRoll && !isClearAcrylic ? "Standard" : "Positive")} print` : null,
       backingUseLabel || (backingApplicable && selectedBackingName ? `Backing: ${selectedBackingName}` : null),
       laminateUseLabel || (selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null),
+      standoffSummary || null,
       finishingSummary ? `Finishing: ${finishingSummary}` : null,
       serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
     ].filter(Boolean).join(" · ");
@@ -1978,6 +2014,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     finishingLabourBasis,
     eyeletPresetLabel,
     customEyeletQty,
+    standoffMaterialId: panelStandoffsApplicable ? standoffMaterialId : "",
+    standoffQtyPerItem: panelStandoffsApplicable ? standoffQtyPerItem : "",
     smallType,
     smallStockId,
     customSmallStockEnabled,
@@ -2027,6 +2065,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       smallStock: snapshotMaterialForSave(selectedSmallStock),
       smallCoating: snapshotMaterialForSave(selectedSmallCoating),
       eyelet: snapshotMaterialForSave(eyeletMaterial),
+      standoff: snapshotMaterialForSave(panelStandoffsApplicable ? selectedStandoffMaterial : undefined),
       componentParts: Array.from(new Map(componentParts
         .map((part) => materialPool.find((material) => material.id === part.materialId))
         .filter((material): material is QuoteMaterial => Boolean(material))
@@ -2217,7 +2256,41 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "finishing") {
-      return <div style={compactPanel}><div style={checkGrid}>{finishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={finishings.includes(item.key)} onChange={() => { toggleFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setFinishingLabourBasis(value); changed(); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} quantity={quantityNumber} />{finishings.includes("eyelets") ? <div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Eyelet preset</b><select value={eyeletPresetLabel} onChange={(event) => { setEyeletPresetLabel(event.target.value); changed(); }} style={inputStyle}>{eyeletPresets.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => { setCustomEyeletQty(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label></div> : null}</div>;
+      return (
+        <div style={compactPanel}>
+          <div style={checkGrid}>{finishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={finishings.includes(item.key)} onChange={() => { toggleFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div>
+          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setFinishingLabourBasis(value); changed(); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} quantity={quantityNumber} />
+          {finishings.includes("eyelets") ? <div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Eyelet preset</b><select value={eyeletPresetLabel} onChange={(event) => { setEyeletPresetLabel(event.target.value); changed(); }} style={inputStyle}>{eyeletPresets.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => { setCustomEyeletQty(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label></div> : null}
+          {panelStandoffsApplicable ? (
+            <div style={{ marginTop: 12, border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", padding: 12, display: "grid", gap: 10 }}>
+              <div>
+                <b>Panel mounting add-on — standoffs</b>
+                <div style={{ color: "#475467", fontSize: 12, marginTop: 3 }}>Uses the per-each cost from your Materials library. The quantity below is per finished item and is multiplied by the quote quantity automatically.</div>
+              </div>
+              {standoffMaterials.length ? (
+                <div style={compactGrid}>
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <b>Standoffs</b>
+                    <select value={standoffMaterialId} onChange={(event) => { setStandoffMaterialId(event.target.value); changed(); }} style={inputStyle}>
+                      <option value="">No standoffs</option>
+                      {standoffMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}
+                    </select>
+                  </label>
+                  {standoffMaterialId ? (
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <b>Qty per finished item</b>
+                      <input value={standoffQtyPerItem} onChange={(event) => { setStandoffQtyPerItem(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} />
+                      <small style={{ color: "#64748b" }}>{usage(standoffQtyPerItemNumber)} each × quote qty {usage(quantityNumber)} = {usage(standoffQtyPerItemNumber * quantityNumber)} standoff{Math.abs(standoffQtyPerItemNumber * quantityNumber - 1) < 0.0001 ? "" : "s"} total.</small>
+                    </label>
+                  ) : null}
+                </div>
+              ) : (
+                <div style={{ padding: 10, borderRadius: 10, background: "#fff7ed", color: "#9a3412", fontSize: 12 }}>Add standoff items under <b>Materials</b> (for example Silver Standoff / Black Standoff) as individual <b>each</b> items and they will appear here automatically.</div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      );
     }
 
     if (compactStep === "small_type") {

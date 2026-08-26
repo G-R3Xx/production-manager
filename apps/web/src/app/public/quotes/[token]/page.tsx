@@ -182,6 +182,16 @@ function friendlySide(value: string | null | undefined): string | null {
   return value ? titleCaseLabel(value) : null;
 }
 
+function friendlyStandoffs(raw: string | null | undefined): string | null {
+  const value = compactText(raw).replace(/^standoffs:\s*/i, "");
+  if (!value) return null;
+  const match = value.match(/^(.*?)\s*[×x]\s*(\d+(?:\.\d+)?)$/i);
+  if (!match) return value;
+  const material = compactText(match[1]);
+  const qty = compactText(match[2]);
+  return `${material} × ${qty}`;
+}
+
 function isInstallLine(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): boolean {
   const productName = compactText(line.productName).toLowerCase();
   // Dispatch notes on signage lines can legitimately contain "Install". Only treat a
@@ -204,7 +214,8 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   const materialTitle = clientMaterialTitle(selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
   const laminate = friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
-  const title = [materialTitle, dimension, laminate].filter(Boolean).join(" · ") || line.productName;
+  const standoffs = friendlyStandoffs(parts.find((part) => /^standoffs:/i.test(part)));
+  const title = [materialTitle, dimension, laminate, standoffs].filter(Boolean).join(" · ") || line.productName;
 
   // Everything else on a signage quote line is production/setup data and stays internal.
   return { title, detail: null };
