@@ -5,6 +5,7 @@ import { after } from "next/server";
 import { pool } from "@production-manager/db";
 import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
+import { buildArtworkSpecificationSnapshot, type ArtworkSpecificationSnapshot } from "@/lib/artworkSpecification";
 
 export type QuoteDraftRecord = {
   id: string;
@@ -112,6 +113,7 @@ export type ArtworkApprovalPageRecord = {
   substrateSummary: string | null;
   installSummary: string | null;
   smallFormatSummary: string | null;
+  payloadJson: Record<string, unknown>;
   sortOrder: number;
   sourceQuoteLineId: string | null;
   proofRevision: string | null;
@@ -209,6 +211,7 @@ export type ArtworkApprovalPageInput = {
   installSummary?: string | null;
   smallFormatSummary?: string | null;
   sourceQuoteLineId?: string | null;
+  specificationSnapshot?: ArtworkSpecificationSnapshot | null;
 };
 
 function makePublicToken(): string {
@@ -1463,7 +1466,8 @@ function buildArtworkPageFromQuoteLine(line: QuoteLineRecord, index: number, kin
     substrateSummary: fallbackSubstrate || null,
     installSummary: kind === "signage" && finishingParts.length ? finishingParts.join("\n") : null,
     smallFormatSummary: kind !== "signage" ? parts.join("\n") : null,
-    sourceQuoteLineId: line.id
+    sourceQuoteLineId: line.id,
+    specificationSnapshot: buildArtworkSpecificationSnapshot(line)
   };
 }
 
@@ -1529,6 +1533,16 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
           install_summary = $15::text,
           small_format_summary = $16::text,
           proof_revision = CASE WHEN $7::boolean THEN aa.revision ELSE p.proof_revision END,
+          payload_json = CASE
+            WHEN $17::jsonb IS NULL THEN p.payload_json
+            WHEN COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) ? COALESCE(NULLIF(aa.revision, ''), 'A') THEN p.payload_json
+            ELSE jsonb_set(
+              jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{specification}', $17::jsonb, true),
+              '{specificationByRevision}',
+              COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) || jsonb_build_object(COALESCE(NULLIF(aa.revision, ''), 'A'), $17::jsonb),
+              true
+            )
+          END,
           updated_at = now()
       FROM sales.artwork_approvals aa
       WHERE p.approval_id = aa.id
@@ -1551,7 +1565,8 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
       nullableText(pageInput.sizeSummary),
       nullableText(pageInput.substrateSummary),
       nullableText(pageInput.installSummary),
-      nullableText(pageInput.smallFormatSummary)
+      nullableText(pageInput.smallFormatSummary),
+      pageInput.specificationSnapshot ? JSON.stringify(pageInput.specificationSnapshot) : null
     ]);
     updated += 1;
   }
@@ -1673,6 +1688,7 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
       substrate_summary as "substrateSummary",
       install_summary as "installSummary",
       small_format_summary as "smallFormatSummary",
+      payload_json as "payloadJson",
       sort_order as "sortOrder",
       source_quote_line_id as "sourceQuoteLineId",
       proof_revision as "proofRevision",
@@ -1686,6 +1702,37 @@ export async function listArtworkApprovalPages(approvalId: string): Promise<Artw
     ORDER BY sort_order ASC, created_at ASC
   `, [approvalId]);
   return result.rows;
+}
+
+async function captureArtworkSpecificationSnapshotsForRevision(tenantId: string, approvalId: string, quoteId: string, revision: string | null | undefined): Promise<void> {
+  const [pages, lines] = await Promise.all([listArtworkApprovalPages(approvalId), listQuoteLines(quoteId)]);
+  const lineById = new Map(lines.map((line) => [line.id, line]));
+  const revisionKey = String(revision || "A").trim() || "A";
+
+  for (const page of pages) {
+    if (!page.sourceQuoteLineId) continue;
+    const line = lineById.get(page.sourceQuoteLineId);
+    if (!line) continue;
+    const specification = buildArtworkSpecificationSnapshot(line);
+    await pool.query(`
+      UPDATE sales.artwork_approval_pages p
+      SET payload_json = CASE
+        WHEN COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) ? $4::text THEN p.payload_json
+        ELSE jsonb_set(
+          jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{specification}', $5::jsonb, true),
+          '{specificationByRevision}',
+          COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) || jsonb_build_object($4::text, $5::jsonb),
+          true
+        )
+      END,
+      updated_at = now()
+      FROM sales.artwork_approvals aa
+      WHERE p.approval_id = aa.id
+        AND aa.tenant_id = $1::uuid
+        AND p.approval_id = $2::uuid
+        AND p.id = $3::uuid
+    `, [tenantId, approvalId, page.id, revisionKey, JSON.stringify(specification)]);
+  }
 }
 
 export async function updateArtworkApprovalDetailsForTenant(tenantId: string, approvalId: string, input: ArtworkApprovalDetailsInput): Promise<void> {
@@ -1746,6 +1793,7 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
       small_format_summary,
       source_quote_line_id,
       proof_revision,
+      payload_json,
       sort_order,
       created_at,
       updated_at
@@ -1767,6 +1815,13 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
            $16,
            NULLIF($17::text, '')::uuid,
            aa.revision,
+           CASE
+             WHEN $18::jsonb IS NULL THEN '{}'::jsonb
+             ELSE jsonb_build_object(
+               'specification', $18::jsonb,
+               'specificationByRevision', jsonb_build_object(COALESCE(NULLIF(aa.revision, ''), 'A'), $18::jsonb)
+             )
+           END,
            COALESCE((SELECT max(sort_order) + 1 FROM sales.artwork_approval_pages WHERE approval_id = aa.id), 1),
            now(),
            now()
@@ -1789,7 +1844,8 @@ export async function addArtworkApprovalPageForTenant(tenantId: string, approval
     nullableText(input.substrateSummary),
     nullableText(input.installSummary),
     nullableText(input.smallFormatSummary),
-    input.sourceQuoteLineId ?? null
+    input.sourceQuoteLineId ?? null,
+    input.specificationSnapshot ? JSON.stringify(input.specificationSnapshot) : null
   ]);
   await pool.query(`
     UPDATE sales.artwork_approvals
@@ -1852,6 +1908,8 @@ export async function replaceArtworkApprovalPageProofForTenant(tenantId: string,
 
 export async function markArtworkApprovalSentForTenant(tenantId: string, approvalId: string): Promise<void> {
   await ensureArtworkApprovalTables();
+  const approval = await getArtworkApprovalById(tenantId, approvalId);
+  if (approval) await captureArtworkSpecificationSnapshotsForRevision(tenantId, approvalId, approval.quoteId, approval.revision);
   await pool.query(`
     UPDATE sales.artwork_approvals
     SET status = 'sent',
@@ -2049,6 +2107,7 @@ export async function startArtworkApprovalRevisionForTenant(tenantId: string, ap
         updated_at = now()
     WHERE approval_id = $1::uuid
   `, [approvalId, revision]);
+  await captureArtworkSpecificationSnapshotsForRevision(tenantId, approvalId, current.quoteId, revision);
   return revision;
 }
 

@@ -10,6 +10,8 @@ import { ArtworkResponsePanel } from "./ArtworkResponsePanel";
 import { ArtworkProofPreview } from "./ArtworkProofPreview";
 import { ArtworkPageResponseControls } from "./ArtworkPageResponseControls";
 import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
+import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
+import { buildArtworkSpecificationSnapshot, specificationForRevision } from "@/lib/artworkSpecification";
 
 type PageProps = { params: Promise<{ token: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
@@ -128,6 +130,11 @@ function structuredDetails(page: ArtworkApprovalPageRecord, line: QuoteLineRecor
   });
 }
 
+function artworkSpecification(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined, approvalRevision: string | null | undefined) {
+  return specificationForRevision(page.payloadJson, page.proofRevision || approvalRevision)
+    ?? (line ? buildArtworkSpecificationSnapshot(line) : null);
+}
+
 function proofDescription(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined): string | null {
   // Quote-backed proof pages already have the production specification broken into dedicated
   // fields. Do not repeat the entire option/process summary as a giant description.
@@ -209,7 +216,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
       <div style={{ maxWidth: 1320, margin: "0 auto", display: "grid", gap: 14 }}>
         <style>{`
           .public-artwork-head{display:grid;grid-template-columns:190px minmax(0,1fr) auto;gap:18px;align-items:center}
-          .public-artwork-proof{display:grid;grid-template-columns:minmax(0,1fr) 300px;min-height:520px}
+          .public-artwork-proof{display:grid;grid-template-columns:minmax(0,1fr) 360px;min-height:520px}
           @media(max-width:760px){.public-artwork-head{grid-template-columns:1fr}.public-artwork-head>div:last-child{justify-items:start!important}.public-artwork-proof{grid-template-columns:1fr;min-height:0}.public-artwork-proof>aside{border-left:0!important;border-top:1px solid #e4e7ec}.public-artwork-message{grid-template-columns:1fr!important}.public-artwork-message>a{width:fit-content}}
         `}</style>
         {message ? <div style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 13, padding: "11px 14px", fontWeight: 850 }}>{message}</div> : null}
@@ -230,7 +237,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             </div>
           </div>
           <div className="public-artwork-message" style={{ borderTop: "1px solid #e4e7ec", padding: "12px 18px", display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 14, alignItems: "center", background: "#fbfcfe" }}>
-            <p style={{ margin: 0, color: "#475467", lineHeight: 1.5, fontSize: 13 }}>{approval.clientMessage || "Please review every proof page below. Check spelling, layout, size, material and finishing details before approving."}</p>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.5, fontSize: 13 }}>{approval.clientMessage || "Please review every proof page below. Check spelling, layout, size, materials, laminate/finish and mounting details before approving."}</p>
             {isOpenForResponse ? <a href="#respond" style={{ minHeight: 38, borderRadius: 11, padding: "0 14px", background: "#111827", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", fontWeight: 900, whiteSpace: "nowrap" }}>Go to decision</a> : null}
           </div>
         </section>
@@ -259,8 +266,14 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
               <div className="public-artwork-proof">
                 <div style={{ padding: 18, display: "grid", placeItems: "center", background: "#eef2f6", overflow: "hidden" }}><ArtworkProofPreview url={page.imageUrl} title={page.title} isPdf={isPdfArtwork(page.imageUrl, page.fileName)} watermarkText={proofWatermarkText} /></div>
                 <aside style={{ borderLeft: "1px solid #e4e7ec", background: "#f8fafc", padding: 16, display: "grid", alignContent: "start", gap: 11 }}>
+                  {(() => {
+                    const sourceLine = page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null;
+                    const specification = artworkSpecification(page, sourceLine, approval.revision);
+                    return specification?.items.length
+                      ? <ArtworkSpecificationPanel items={specification.items} />
+                      : <>{structuredDetails(page, sourceLine).map((row) => <div key={row.label} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><p style={{ margin: "4px 0 0", color: "#1d2939", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{row.value}</p></div>)}</>;
+                  })()}
                   {proofDescription(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null) ? <div><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>Description</span><p style={{ margin: "4px 0 0", color: "#344054", fontSize: 12, lineHeight: 1.45 }}>{proofDescription(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null)}</p></div> : null}
-                  {structuredDetails(page, page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null).map((row) => <div key={row.label} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><p style={{ margin: "4px 0 0", color: "#1d2939", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{row.value}</p></div>)}
                   {page.notes && !/auto-created from quote line/i.test(page.notes) ? <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>Notes</span><p style={{ margin: "4px 0 0", color: "#344054", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{page.notes}</p></div> : null}
                   <ArtworkPageResponseControls token={token} pageId={page.id} status={page.clientResponseStatus} notes={page.clientResponseNotes} isOpen={isOpenForResponse} />
                 </aside>

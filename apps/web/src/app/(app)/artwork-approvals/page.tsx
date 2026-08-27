@@ -20,6 +20,8 @@ import {
 import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
+import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
+import { buildArtworkSpecificationSnapshot, specificationForRevision } from "@/lib/artworkSpecification";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import { ArtworkEmailSendButton } from "./ArtworkEmailSendButton";
 import { ArtworkStatusAutoRefresh } from "./ArtworkStatusAutoRefresh";
@@ -253,6 +255,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const pendingLineCount = quoteLines.filter((line) => lineStatus(line) === "pending").length;
   const inScopeLines = quoteLines.filter((line) => lineIsInArtworkScope(line, selectedQuote?.status, usesLineResponses));
   const inScopeLineIds = new Set(inScopeLines.map((line) => line.id));
+  const sourceLineById = new Map(quoteLines.map((line) => [line.id, line]));
   const linkedPages = new Map(proofPages.filter((page) => page.sourceQuoteLineId).map((page) => [page.sourceQuoteLineId as string, page]));
   const activeProofPages = proofPages.filter((page) => !page.sourceQuoteLineId || inScopeLineIds.has(page.sourceQuoteLineId));
   const outOfScopePages = proofPages.filter((page) => page.sourceQuoteLineId && !inScopeLineIds.has(page.sourceQuoteLineId));
@@ -434,6 +437,9 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                         const currentProof = isProofReadyForRevision(page, currentRevision);
                         const needsRevision = !placeholder && !currentProof;
                         const decisionTone = pageDecisionTone(page.clientResponseStatus);
+                        const sourceLine = page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null;
+                        const specification = specificationForRevision(page.payloadJson, page.proofRevision || currentRevision)
+                          ?? (sourceLine ? buildArtworkSpecificationSnapshot(sourceLine) : null);
                         return (
                           <article key={page.id} className="artwork-proof-row" style={{ border: currentProof ? "1px solid #d0d5dd" : "1px solid #fdb022", borderRadius: 17, background: "#fff" }}>
                             <div className="proof-preview" style={{ background: "#f8fafc", borderRight: "1px solid #e4e7ec", padding: 10, display: "grid", placeItems: "center", minHeight: 188 }}>{proofArtworkPreview(page, 190)}</div>
@@ -445,9 +451,11 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                               </div>
                               <h3 style={{ margin: "7px 0 4px", fontSize: 18 }}>{page.title}</h3>
                               {page.description ? <p style={{ margin: "0 0 9px", color: "#667085", fontSize: 12, lineHeight: 1.4 }}>{page.description}</p> : null}
-                              <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "7px 12px" }}>
-                                {detailsList(page).map((row) => <div key={row.label}><span style={{ display: "block", color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><span style={{ display: "block", color: "#344054", fontSize: 11, whiteSpace: "pre-wrap", marginTop: 2 }}>{row.value}</span></div>)}
-                              </div>
+                              {specification?.items.length ? <ArtworkSpecificationPanel items={specification.items} compact style={{ marginTop: 10 }} /> : (
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: "7px 12px" }}>
+                                  {detailsList(page).map((row) => <div key={row.label}><span style={{ display: "block", color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><span style={{ display: "block", color: "#344054", fontSize: 11, whiteSpace: "pre-wrap", marginTop: 2 }}>{row.value}</span></div>)}
+                                </div>
+                              )}
                             </div>
                             <div className="proof-actions" style={{ borderLeft: "1px solid #e4e7ec", background: "#fcfcfd", padding: 11, display: "grid", alignContent: "center", gap: 8 }}>
                               <strong style={{ fontSize: 12 }}>{placeholder ? "Upload finished proof" : needsRevision ? `Upload revision ${currentRevision || ""}` : "Replace proof"}</strong>
