@@ -20,7 +20,8 @@
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zod": "^3.24.4",
-    "drizzle-orm": "^0.43.1"
+    "drizzle-orm": "^0.43.1",
+    "pantoner": "1.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.15.3",

@@ -50,6 +50,9 @@ importers:
       next:
         specifier: ^16.0.0
         version: 16.2.3(react-dom@19.2.5(react@19.2.5))(react@19.2.5)
+      pantoner:
+        specifier: 1.1.2
+        version: 1.1.2
       react:
         specifier: ^19.2.0
         version: 19.2.5
@@ -1383,6 +1386,9 @@ packages:
   pgpass@1.0.5:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
+  pantoner@1.1.2:
+    resolution: {tarball: https://registry.npmjs.org/pantoner/-/pantoner-1.1.2.tgz}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -2496,6 +2502,8 @@ snapshots:
   pgpass@1.0.5:
     dependencies:
       split2: 4.2.0
+
+  pantoner@1.1.2: {}
 
   picocolors@1.1.1: {}
 
