@@ -9,6 +9,7 @@ import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { ArtworkResponsePanel } from "./ArtworkResponsePanel";
 import { ArtworkProofPreview } from "./ArtworkProofPreview";
 import { ArtworkPageResponseControls } from "./ArtworkPageResponseControls";
+import { ArtworkDecisionNavLink, ArtworkDecisionProgressBanner, ArtworkDecisionProvider, ArtworkDecisionStatusPill } from "./ArtworkDecisionContext";
 import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
 import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
 import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision } from "@/lib/artworkSpecification";
@@ -160,11 +161,6 @@ function statusTone(status: string) {
   return { bg: "#f8fafc", fg: "#475467", border: "#d0d5dd", label: "Awaiting review" };
 }
 
-function pageStatusTone(status: ArtworkApprovalPageRecord["clientResponseStatus"]) {
-  if (status === "approved") return { bg: "#ecfdf3", fg: "#067647", border: "#abefc6", label: "✓ Page approved" };
-  if (status === "changes_requested") return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa", label: "Changes requested" };
-  return { bg: "#f8fafc", fg: "#475467", border: "#d0d5dd", label: "Awaiting decision" };
-}
 
 function watermarkText(companyName: string, quoteNumber: string | null | undefined): string {
   const brand = String(companyName || "Tender Edge").trim().toUpperCase();
@@ -205,13 +201,9 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
   const proofWatermarkText = watermarkText(companySettings?.tenantName || companySettings?.tradingName || companyName, sourceQuote?.quoteNumber || approval.drawingNumber);
   const companyLogoUrl = companySettings?.companyLogoUrl || "/brand/production-manager-logo.svg";
   const isApproved = approval.status === "approved";
-  const hasChanges = approval.status === "changes_requested";
   const isOpenForResponse = approval.status === "sent" || approval.status === "viewed" || approval.status === "changes_requested";
   const showProofs = approval.status !== "draft" || previewMode;
   const tone = statusTone(approval.status);
-  const approvedPageCount = pages.filter((page) => page.clientResponseStatus === "approved").length;
-  const changesPageCount = pages.filter((page) => page.clientResponseStatus === "changes_requested").length;
-  const allPagesApproved = pages.length > 0 && approvedPageCount === pages.length;
   const statusFingerprint = artworkApprovalStatusFingerprint(approval, allPages);
 
   return (
@@ -246,26 +238,22 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
           </div>
         </section>
 
-        {isOpenForResponse && allPagesApproved && !hasChanges ? (
-          <section style={{ border: "2px solid #12b76a", borderRadius: 18, background: "#ecfdf3", padding: 16, display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap", boxShadow: "0 10px 26px rgba(6,118,71,0.12)" }}>
-            <div style={{ display: "grid", gap: 4 }}>
-              <strong style={{ color: "#067647", fontSize: 18 }}>✓ All proof pages approved</strong>
-              <span style={{ color: "#344054", fontSize: 13 }}>One final production sign-off is required before the artwork is released.</span>
-            </div>
-            <a href="#respond" style={{ minHeight: 44, borderRadius: 12, padding: "0 16px", background: "#067647", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", fontWeight: 950, whiteSpace: "nowrap" }}>Complete final approval →</a>
-          </section>
-        ) : null}
+        <ArtworkDecisionProvider
+          token={token}
+          revision={approval.revision || "A"}
+          initialDecisions={pages.map((page) => ({ pageId: page.id, status: page.clientResponseStatus, notes: page.clientResponseNotes }))}
+        >
+          {isOpenForResponse ? <ArtworkDecisionProgressBanner /> : null}
 
-        {showProofs && pages.length > 1 ? <nav style={{ border: "1px solid #d0d5dd", borderRadius: 16, background: "#fff", padding: 10, display: "flex", gap: 7, overflowX: "auto" }}>{pages.map((page, index) => { const pageTone = pageStatusTone(page.clientResponseStatus); return <a key={page.id} href={`#proof-${index + 1}`} style={{ border: `1px solid ${pageTone.border}`, borderRadius: 10, padding: "8px 10px", textDecoration: "none", color: pageTone.fg, background: pageTone.bg, fontSize: 11, fontWeight: 900, whiteSpace: "nowrap" }}>{page.clientResponseStatus === "approved" ? "✓ " : page.clientResponseStatus === "changes_requested" ? "! " : ""}{page.signCode || `S${index + 1}`} · {page.title}</a>; })}</nav> : null}
+        {showProofs && pages.length > 1 ? <nav style={{ border: "1px solid #d0d5dd", borderRadius: 16, background: "#fff", padding: 10, display: "flex", gap: 7, overflowX: "auto" }}>{pages.map((page, index) => <ArtworkDecisionNavLink key={page.id} pageId={page.id} href={`#proof-${index + 1}`} label={`${page.signCode || `S${index + 1}`} · ${page.title}`} />)}</nav> : null}
 
         {showProofs ? <section style={{ display: "grid", gap: 14 }}>
           {pages.map((page, index) => {
-            const pageTone = pageStatusTone(page.clientResponseStatus);
             return (
             <article id={`proof-${index + 1}`} key={page.id} style={{ border: "1px solid #d0d5dd", borderRadius: 22, background: "#fff", boxShadow: "0 14px 40px rgba(15,23,42,0.06)", overflow: "hidden", scrollMarginTop: 18 }}>
               <header style={{ padding: "13px 16px", borderBottom: "1px solid #e4e7ec", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", background: "#fbfcfe" }}>
                 <div style={{ minWidth: 0 }}><p style={{ margin: 0, color: "#667085", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.08em" }}>{page.signCode || `S${index + 1}`} · Proof {index + 1} of {pages.length}</p><h2 style={{ margin: "3px 0 0", fontSize: 20 }}>{page.title}</h2></div>
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}><span style={{ borderRadius: 999, border: `1px solid ${pageTone.border}`, background: pageTone.bg, color: pageTone.fg, padding: "5px 8px", fontSize: 10, fontWeight: 950 }}>{pageTone.label}</span><span style={{ color: "#667085", fontWeight: 900, fontSize: 12, whiteSpace: "nowrap" }}>Watermarked proof preview</span></div>
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}><ArtworkDecisionStatusPill pageId={page.id} /><span style={{ color: "#667085", fontWeight: 900, fontSize: 12, whiteSpace: "nowrap" }}>Watermarked proof preview</span></div>
               </header>
               <div className="public-artwork-proof">
                 <div style={{ padding: 18, display: "grid", placeItems: "center", background: "#eef2f6", overflow: "hidden" }}><ArtworkProofPreview url={page.imageUrl} title={page.title} isPdf={isPdfArtwork(page.imageUrl, page.fileName)} watermarkText={proofWatermarkText} /></div>
@@ -293,13 +281,6 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
           </section>
         )}
 
-        {hasChanges ? (
-          <section style={{ border: "1px solid #fed7aa", borderRadius: 22, background: "#fff7ed", padding: 18, display: "grid", gap: 8 }}>
-            <h2 style={{ margin: 0, color: "#c2410c" }}>Changes requested on {changesPageCount} proof page{changesPageCount === 1 ? "" : "s"}</h2>
-            <p style={{ margin: 0, color: "#7c2d12" }}>Each request is shown beside the affected proof. You can continue deciding the remaining pages while our artwork team reviews those notes.</p>
-          </section>
-        ) : null}
-
         {isApproved ? (
           <section style={{ border: "1px solid #abefc6", borderRadius: 22, background: "#ecfdf3", padding: 18, display: "grid", gap: 8 }}>
             <h2 style={{ margin: 0, color: "#067647" }}>Artwork approved for production</h2>
@@ -307,12 +288,13 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             {approval.clientResponseNotes ? <p style={{ margin: 0, color: "#475467", whiteSpace: "pre-wrap" }}>{approval.clientResponseNotes}</p> : null}
             {approval.clientSignatureDataUrl ? <img src={approval.clientSignatureDataUrl} alt="Signature" style={{ width: 250, maxWidth: "100%", border: "1px solid #abefc6", borderRadius: 12, background: "#fff" }} /> : null}
           </section>
-        ) : isOpenForResponse ? <ArtworkResponsePanel token={token} pageCount={pages.length} approvedPageCount={approvedPageCount} /> : (
+        ) : isOpenForResponse ? <ArtworkResponsePanel token={token} /> : (
           <section style={{ border: "1px solid #d0d5dd", borderRadius: 22, background: "#fff", padding: 18, color: "#475467" }}>
             <strong>Preview only</strong>
             <p style={{ margin: "5px 0 0", lineHeight: 1.5 }}>This revision has not been issued for approval yet. You can review the proof, but approval controls will appear once the artwork team sends the revision.</p>
           </section>
         )}
+        </ArtworkDecisionProvider>
       </div>
     </main>
   );
