@@ -21,7 +21,7 @@ import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
-import { buildArtworkSpecificationSnapshot, specificationForRevision } from "@/lib/artworkSpecification";
+import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision } from "@/lib/artworkSpecification";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import { ArtworkEmailSendButton } from "./ArtworkEmailSendButton";
 import { ArtworkStatusAutoRefresh } from "./ArtworkStatusAutoRefresh";
@@ -38,6 +38,7 @@ import {
   restoreArtworkApprovalAction,
   reopenArtworkApprovalPageAction,
   saveArtworkApprovalDetailsAction,
+  saveArtworkApprovalPmsColoursAction,
   sendArtworkApprovalFromPageAction,
   startArtworkApprovalRevisionAction
 } from "./actions";
@@ -438,8 +439,13 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                         const needsRevision = !placeholder && !currentProof;
                         const decisionTone = pageDecisionTone(page.clientResponseStatus);
                         const sourceLine = page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null;
-                        const specification = specificationForRevision(page.payloadJson, page.proofRevision || currentRevision)
-                          ?? (sourceLine ? buildArtworkSpecificationSnapshot(sourceLine) : null);
+                        const specificationRevision = page.proofRevision || currentRevision;
+                        const savedSpecification = specificationForRevision(page.payloadJson, specificationRevision);
+                        const baseSpecification = sourceLine && selectedApproval.status === "draft"
+                          ? buildArtworkSpecificationSnapshot(sourceLine)
+                          : savedSpecification ?? (sourceLine ? buildArtworkSpecificationSnapshot(sourceLine) : null);
+                        const pmsColours = pmsColoursForRevision(page.payloadJson, specificationRevision, selectedApproval.status === "draft");
+                        const specification = applyPmsColoursToArtworkSpecification(baseSpecification, pmsColours);
                         return (
                           <article key={page.id} className="artwork-proof-row" style={{ border: currentProof ? "1px solid #d0d5dd" : "1px solid #fdb022", borderRadius: 17, background: "#fff" }}>
                             <div className="proof-preview" style={{ background: "#f8fafc", borderRight: "1px solid #e4e7ec", padding: 10, display: "grid", placeItems: "center", minHeight: 188 }}>{proofArtworkPreview(page, 190)}</div>
@@ -456,6 +462,19 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                                   {detailsList(page).map((row) => <div key={row.label}><span style={{ display: "block", color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><span style={{ display: "block", color: "#344054", fontSize: 11, whiteSpace: "pre-wrap", marginTop: 2 }}>{row.value}</span></div>)}
                                 </div>
                               )}
+                              <form action={saveArtworkApprovalPmsColoursAction} style={{ marginTop: 10, border: "1px solid #dbe4f0", borderRadius: 12, background: "#f8fafc", padding: 9, display: "grid", gap: 7 }}>
+                                <input type="hidden" name="approvalId" value={selectedApproval.id} />
+                                <input type="hidden" name="pageId" value={page.id} />
+                                <input type="hidden" name="pageLabel" value={page.signCode || page.title} />
+                                <label style={{ display: "grid", gap: 5, color: "#344054", fontSize: 10, fontWeight: 950 }}>
+                                  Required PMS colours
+                                  <input name="pmsColours" defaultValue={pmsColours} placeholder="e.g. PMS 186 C, PMS 3005 C" style={{ ...input, minHeight: 36, fontSize: 11 }} />
+                                </label>
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                                  <span style={{ color: "#667085", fontSize: 9.5, lineHeight: 1.3 }}>Staff-entered only. These colours are shown to the client as part of the approval specification.</span>
+                                  <button type="submit" style={{ ...secondaryButton, minHeight: 32, padding: "0 10px", fontSize: 10 }}>Save PMS colours</button>
+                                </div>
+                              </form>
                             </div>
                             <div className="proof-actions" style={{ borderLeft: "1px solid #e4e7ec", background: "#fcfcfd", padding: 11, display: "grid", alignContent: "center", gap: 8 }}>
                               <strong style={{ fontSize: 12 }}>{placeholder ? "Upload finished proof" : needsRevision ? `Upload revision ${currentRevision || ""}` : "Replace proof"}</strong>

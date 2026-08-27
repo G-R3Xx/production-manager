@@ -5,7 +5,7 @@ import { after } from "next/server";
 import { pool } from "@production-manager/db";
 import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
-import { buildArtworkSpecificationSnapshot, type ArtworkSpecificationSnapshot } from "@/lib/artworkSpecification";
+import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, type ArtworkSpecificationSnapshot } from "@/lib/artworkSpecification";
 
 export type QuoteDraftRecord = {
   id: string;
@@ -1488,6 +1488,7 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
   ]);
   const existingByLineId = new Map(existingPages.filter((page) => page.sourceQuoteLineId).map((page) => [page.sourceQuoteLineId as string, page]));
   const usesLineResponses = quoteUsesLineResponses(lines);
+  const refreshCurrentDraftSpecification = approval.status === "draft" && !approval.sentAt;
   const activeLineIds = new Set<string>();
   let created = 0;
   let updated = 0;
@@ -1535,6 +1536,12 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
           proof_revision = CASE WHEN $7::boolean THEN aa.revision ELSE p.proof_revision END,
           payload_json = CASE
             WHEN $17::jsonb IS NULL THEN p.payload_json
+            WHEN $18::boolean THEN jsonb_set(
+              jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{specification}', $17::jsonb, true),
+              '{specificationByRevision}',
+              COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) || jsonb_build_object(COALESCE(NULLIF(aa.revision, ''), 'A'), $17::jsonb),
+              true
+            )
             WHEN COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) ? COALESCE(NULLIF(aa.revision, ''), 'A') THEN p.payload_json
             ELSE jsonb_set(
               jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{specification}', $17::jsonb, true),
@@ -1566,7 +1573,8 @@ export async function prefillArtworkApprovalPagesFromQuoteLines(tenantId: string
       nullableText(pageInput.substrateSummary),
       nullableText(pageInput.installSummary),
       nullableText(pageInput.smallFormatSummary),
-      pageInput.specificationSnapshot ? JSON.stringify(pageInput.specificationSnapshot) : null
+      pageInput.specificationSnapshot ? JSON.stringify(pageInput.specificationSnapshot) : null,
+      refreshCurrentDraftSpecification
     ]);
     updated += 1;
   }
@@ -1713,18 +1721,17 @@ async function captureArtworkSpecificationSnapshotsForRevision(tenantId: string,
     if (!page.sourceQuoteLineId) continue;
     const line = lineById.get(page.sourceQuoteLineId);
     if (!line) continue;
-    const specification = buildArtworkSpecificationSnapshot(line);
+    const baseSpecification = buildArtworkSpecificationSnapshot(line);
+    const pmsColours = pmsColoursForRevision(page.payloadJson, revisionKey, true);
+    const specification = applyPmsColoursToArtworkSpecification(baseSpecification, pmsColours) ?? baseSpecification;
     await pool.query(`
       UPDATE sales.artwork_approval_pages p
-      SET payload_json = CASE
-        WHEN COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) ? $4::text THEN p.payload_json
-        ELSE jsonb_set(
-          jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{specification}', $5::jsonb, true),
-          '{specificationByRevision}',
-          COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) || jsonb_build_object($4::text, $5::jsonb),
-          true
-        )
-      END,
+      SET payload_json = jsonb_set(
+        jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{specification}', $5::jsonb, true),
+        '{specificationByRevision}',
+        COALESCE(p.payload_json->'specificationByRevision', '{}'::jsonb) || jsonb_build_object($4::text, $5::jsonb),
+        true
+      ),
       updated_at = now()
       FROM sales.artwork_approvals aa
       WHERE p.approval_id = aa.id
@@ -1733,6 +1740,59 @@ async function captureArtworkSpecificationSnapshotsForRevision(tenantId: string,
         AND p.id = $3::uuid
     `, [tenantId, approvalId, page.id, revisionKey, JSON.stringify(specification)]);
   }
+}
+
+export async function updateArtworkApprovalPagePmsColoursForTenant(
+  tenantId: string,
+  approvalId: string,
+  pageId: string,
+  pmsColours: string | null,
+): Promise<{ revision: string; revisionStarted: boolean }> {
+  await ensureArtworkApprovalTables();
+  const current = await getArtworkApprovalById(tenantId, approvalId);
+  if (!current) throw new Error("Artwork approval not found.");
+  if (current.status === "deleted") throw new Error("Restore the artwork approval before changing PMS colours.");
+
+  let revision = current.revision || "A";
+  let revisionStarted = false;
+  if (current.status === "approved") {
+    const reopened = await reopenArtworkApprovalForTenant(tenantId, approvalId, "Required PMS colour matching was changed.");
+    revision = reopened.revision;
+    revisionStarted = reopened.reopened;
+  } else if (["sent", "viewed", "changes_requested"].includes(current.status)) {
+    revision = await startArtworkApprovalRevisionForTenant(tenantId, approvalId);
+    revisionStarted = true;
+  }
+
+  const cleaned = String(pmsColours ?? "").trim();
+  const result = await pool.query(`
+    UPDATE sales.artwork_approval_pages p
+    SET payload_json = jsonb_set(
+          jsonb_set(COALESCE(p.payload_json, '{}'::jsonb), '{pmsColours}', to_jsonb($4::text), true),
+          '{pmsColoursByRevision}',
+          COALESCE(p.payload_json->'pmsColoursByRevision', '{}'::jsonb) || jsonb_build_object($5::text, $4::text),
+          true
+        ),
+        proof_revision = $5::varchar,
+        client_response_status = 'pending',
+        client_response_notes = NULL,
+        client_responded_at = NULL,
+        updated_at = now()
+    FROM sales.artwork_approvals aa
+    WHERE p.approval_id = aa.id
+      AND aa.tenant_id = $1::uuid
+      AND p.approval_id = $2::uuid
+      AND p.id = $3::uuid
+  `, [tenantId, approvalId, pageId, cleaned, revision]);
+  if (!result.rowCount) throw new Error("Artwork proof page not found.");
+
+  await pool.query(`
+    UPDATE sales.artwork_approvals
+    SET updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [tenantId, approvalId]);
+
+  return { revision, revisionStarted };
 }
 
 export async function updateArtworkApprovalDetailsForTenant(tenantId: string, approvalId: string, input: ArtworkApprovalDetailsInput): Promise<void> {
@@ -1909,7 +1969,7 @@ export async function replaceArtworkApprovalPageProofForTenant(tenantId: string,
 export async function markArtworkApprovalSentForTenant(tenantId: string, approvalId: string): Promise<void> {
   await ensureArtworkApprovalTables();
   const approval = await getArtworkApprovalById(tenantId, approvalId);
-  if (approval) await captureArtworkSpecificationSnapshotsForRevision(tenantId, approvalId, approval.quoteId, approval.revision);
+  if (approval?.status === "draft") await captureArtworkSpecificationSnapshotsForRevision(tenantId, approvalId, approval.quoteId, approval.revision);
   await pool.query(`
     UPDATE sales.artwork_approvals
     SET status = 'sent',

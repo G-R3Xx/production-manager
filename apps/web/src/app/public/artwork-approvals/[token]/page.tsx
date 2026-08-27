@@ -11,7 +11,7 @@ import { ArtworkProofPreview } from "./ArtworkProofPreview";
 import { ArtworkPageResponseControls } from "./ArtworkPageResponseControls";
 import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
 import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
-import { buildArtworkSpecificationSnapshot, specificationForRevision } from "@/lib/artworkSpecification";
+import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision } from "@/lib/artworkSpecification";
 
 type PageProps = { params: Promise<{ token: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
@@ -130,9 +130,13 @@ function structuredDetails(page: ArtworkApprovalPageRecord, line: QuoteLineRecor
   });
 }
 
-function artworkSpecification(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined, approvalRevision: string | null | undefined) {
-  return specificationForRevision(page.payloadJson, page.proofRevision || approvalRevision)
-    ?? (line ? buildArtworkSpecificationSnapshot(line) : null);
+function artworkSpecification(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined, approvalRevision: string | null | undefined, refreshFromSource = false) {
+  const revision = page.proofRevision || approvalRevision;
+  const base = line && refreshFromSource
+    ? buildArtworkSpecificationSnapshot(line)
+    : specificationForRevision(page.payloadJson, revision) ?? (line ? buildArtworkSpecificationSnapshot(line) : null);
+  const pmsColours = pmsColoursForRevision(page.payloadJson, revision, refreshFromSource);
+  return applyPmsColoursToArtworkSpecification(base, pmsColours);
 }
 
 function proofDescription(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined): string | null {
@@ -237,7 +241,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             </div>
           </div>
           <div className="public-artwork-message" style={{ borderTop: "1px solid #e4e7ec", padding: "12px 18px", display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 14, alignItems: "center", background: "#fbfcfe" }}>
-            <p style={{ margin: 0, color: "#475467", lineHeight: 1.5, fontSize: 13 }}>{approval.clientMessage || "Please review every proof page below. Check spelling, layout, size, materials, laminate/finish and mounting details before approving."}</p>
+            <p style={{ margin: 0, color: "#475467", lineHeight: 1.5, fontSize: 13 }}>{approval.clientMessage || "Please review every proof page below. Check spelling, layout, required PMS colour matching, size, materials, laminate/finish, mounting and pickup / delivery / install details before approving."}</p>
             {isOpenForResponse ? <a href="#respond" style={{ minHeight: 38, borderRadius: 11, padding: "0 14px", background: "#111827", color: "#fff", textDecoration: "none", display: "inline-flex", alignItems: "center", fontWeight: 900, whiteSpace: "nowrap" }}>Go to decision</a> : null}
           </div>
         </section>
@@ -268,7 +272,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
                 <aside style={{ borderLeft: "1px solid #e4e7ec", background: "#f8fafc", padding: 16, display: "grid", alignContent: "start", gap: 11 }}>
                   {(() => {
                     const sourceLine = page.sourceQuoteLineId ? sourceLineById.get(page.sourceQuoteLineId) : null;
-                    const specification = artworkSpecification(page, sourceLine, approval.revision);
+                    const specification = artworkSpecification(page, sourceLine, approval.revision, approval.status === "draft");
                     return specification?.items.length
                       ? <ArtworkSpecificationPanel items={specification.items} />
                       : <>{structuredDetails(page, sourceLine).map((row) => <div key={row.label} style={{ borderTop: "1px solid #e4e7ec", paddingTop: 9 }}><span style={{ color: "#98a2b3", fontSize: 9, fontWeight: 950, textTransform: "uppercase" }}>{row.label}</span><p style={{ margin: "4px 0 0", color: "#1d2939", fontSize: 12, lineHeight: 1.45, whiteSpace: "pre-wrap" }}>{row.value}</p></div>)}</>;

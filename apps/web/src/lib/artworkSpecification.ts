@@ -71,6 +71,14 @@ function sidesLabel(value: unknown): string {
   return key ? titleCase(key) : "";
 }
 
+function dispatchLabel(value: unknown): { value: string; icon: ArtworkSpecificationItem["icon"] } | null {
+  const key = lower(value);
+  if (key === "pickup") return { value: "Pickup", icon: "pickup" };
+  if (key === "delivery") return { value: "Delivery", icon: "delivery" };
+  if (key === "install") return { value: "Install", icon: "install" };
+  return null;
+}
+
 const finishingLabels: Record<string, string> = {
   jingwei: "Jingwei cutting",
   eyelets: "Eyelets",
@@ -171,6 +179,9 @@ export function buildArtworkSpecificationSnapshot(line: QuoteLineLike, capturedA
   mountingParts.push(...mountingFromSummary);
   if (mountingParts.length) add(items, { key: "mounting", label: "Mounting", value: unique(mountingParts).join(" · "), icon: "mounting" });
 
+  const dispatch = dispatchLabel(snapshot.serviceType);
+  if (dispatch) add(items, { key: "dispatch", label: "Pickup / delivery / install", value: dispatch.value, icon: dispatch.icon });
+
   const width = numberText(snapshot.widthMm);
   const height = numberText(snapshot.heightMm);
   const sizeFromSnapshot = Number(width) > 0 && Number(height) > 0 ? `${width} × ${height}mm` : "";
@@ -190,6 +201,47 @@ export function buildArtworkSpecificationSnapshot(line: QuoteLineLike, capturedA
   };
 }
 
+
+export function normalisePmsColours(value: unknown): string {
+  const parts = String(value ?? "")
+    .split(/[\n,;]+/g)
+    .map((part) => part.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+  return unique(parts).join(" · ");
+}
+
+export function pmsColoursForRevision(payload: unknown, revision: string | null | undefined, preferCurrent = false): string {
+  const record = recordValue(payload);
+  if (!record) return "";
+  const revisionKey = text(revision) || "A";
+  const byRevision = recordValue(record.pmsColoursByRevision);
+  const revisionValue = normalisePmsColours(byRevision?.[revisionKey]);
+  if (revisionValue) return revisionValue;
+  return preferCurrent ? normalisePmsColours(record.pmsColours) : "";
+}
+
+export function applyPmsColoursToArtworkSpecification(
+  snapshot: ArtworkSpecificationSnapshot | null | undefined,
+  value: unknown,
+): ArtworkSpecificationSnapshot | null {
+  if (!snapshot) return null;
+  const pmsColours = normalisePmsColours(value);
+  const items = snapshot.items.filter((item) => item.key !== "colour");
+  if (pmsColours) {
+    const item: ArtworkSpecificationItem = {
+      key: "colour",
+      label: "PMS colour matching",
+      value: pmsColours,
+      detail: "Screen swatches are RGB guides only. The PMS code is the approved colour reference.",
+      icon: "colour",
+    };
+    const printIndex = items.findIndex((existing) => existing.key === "print");
+    const insertAt = printIndex >= 0 ? printIndex + 1 : Math.min(1, items.length);
+    items.splice(insertAt, 0, item);
+  }
+  return { ...snapshot, items };
+}
+
 export function readArtworkSpecificationSnapshot(value: unknown): ArtworkSpecificationSnapshot | null {
   const record = recordValue(value);
   if (!record || Number(record.version) !== 1 || !Array.isArray(record.items)) return null;
@@ -200,7 +252,7 @@ export function readArtworkSpecificationSnapshot(value: unknown): ArtworkSpecifi
     const label = text(item.label);
     const valueText = text(item.value);
     const icon = text(item.icon) as ArtworkSpecificationItem["icon"];
-    if (!key || !label || !valueText || !["substrate", "print", "laminate", "backing", "cut", "mounting", "size", "quantity", "finish"].includes(icon)) return [];
+    if (!key || !label || !valueText || !["substrate", "colour", "print", "laminate", "backing", "cut", "mounting", "pickup", "delivery", "install", "size", "quantity", "finish"].includes(icon)) return [];
     return [{ key, label, value: valueText, detail: text(item.detail) || null, icon } satisfies ArtworkSpecificationItem];
   });
   if (!items.length) return null;

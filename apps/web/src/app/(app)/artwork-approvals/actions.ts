@@ -25,7 +25,8 @@ import {
   replaceArtworkApprovalPageProofForTenant,
   setArtworkApprovalStatusForTenant,
   startArtworkApprovalRevisionForTenant,
-  updateArtworkApprovalDetailsForTenant
+  updateArtworkApprovalDetailsForTenant,
+  updateArtworkApprovalPagePmsColoursForTenant
 } from "@/server/quotes";
 
 async function requireTenant() {
@@ -171,6 +172,27 @@ export async function replaceArtworkApprovalPageProofAction(formData: FormData):
     ? `Proof updated. Approval reopened as Revision ${after.revision || "A"}; this page returned to pending and other page approvals were retained.`
     : "Proof updated. This page returned to pending approval.";
   revalidatePath("/artwork-approvals");
+  redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
+}
+
+export async function saveArtworkApprovalPmsColoursAction(formData: FormData): Promise<void> {
+  const { activeTenant } = await requireTenant();
+  const approvalId = oneLine(formData.get("approvalId"));
+  const pageId = oneLine(formData.get("pageId"));
+  const pageLabel = oneLine(formData.get("pageLabel"), "Proof page");
+  if (!approvalId || !pageId) redirect("/artwork-approvals?error=Select%20an%20artwork%20proof%20page%20first");
+
+  const result = await updateArtworkApprovalPagePmsColoursForTenant(
+    activeTenant.tenantId,
+    approvalId,
+    pageId,
+    nullable(formData.get("pmsColours")),
+  );
+
+  revalidatePath("/artwork-approvals");
+  const message = result.revisionStarted
+    ? `${pageLabel} PMS colours saved. Approval moved to Revision ${result.revision} for client re-approval.`
+    : `${pageLabel} PMS colours saved for client approval.`;
   redirect(`/artwork-approvals?selected=${approvalId}&message=${encodeURIComponent(message)}`);
 }
 

@@ -26,7 +26,7 @@ export function ArtworkResponsePanel({ token, pageCount, approvedPageCount }: { 
           </div>
           <label style={{ display: "flex", gap: 10, alignItems: "flex-start", border: "1px solid #abefc6", background: "#ecfdf3", borderRadius: 12, padding: 12, color: "#344054", fontWeight: 800, lineHeight: 1.45 }}>
             <input name="confirmed" type="checkbox" style={{ width: 18, height: 18, marginTop: 2, flex: "0 0 auto" }} />
-            <span>I have checked all proof pages, spelling, layout, colours, sizes, quantities, materials, laminate/finish and mounting details and approve this artwork for production.</span>
+            <span>I have checked all proof pages, spelling, layout, required PMS colour matching, sizes, quantities, materials, laminate/finish, mounting and pickup / delivery / install details and approve this artwork for production.</span>
           </label>
           <div style={{ display: "grid", gap: 7 }}><strong style={{ fontSize: 12 }}>Signature</strong><SignaturePad /></div>
           <button type="submit" style={{ minHeight: 48, borderRadius: 13, border: "none", background: "#067647", color: "#fff", fontWeight: 950, cursor: "pointer", fontSize: 15 }}>Approve artwork for production</button>
