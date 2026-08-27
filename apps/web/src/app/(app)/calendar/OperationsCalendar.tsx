@@ -277,6 +277,12 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
     }
   }
 
+  function sameStaffIds(left: string[], right: string[]) {
+    if (left.length !== right.length) return false;
+    const rightSet = new Set(right);
+    return left.every((id) => rightSet.has(id));
+  }
+
   function dropOnDate(date: string) {
     const event = events.find((item) => item.id === draggingId);
     if (!event || completed(event)) return;
@@ -285,7 +291,23 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
       setDropTarget(null);
       return;
     }
+    // Month view has no staff rows, so changing the date preserves the existing team.
     void saveSchedule(event, date, effectiveStaffIds(event));
+  }
+
+  function dropOnStaffDate(date: string, staffId: string) {
+    const event = events.find((item) => item.id === draggingId);
+    if (!event || completed(event)) return;
+    // A week-view cell represents both a date and an owner. Dropping onto a
+    // named staff row therefore schedules AND assigns in one action. Dropping
+    // onto the Unassigned row deliberately clears the team.
+    const nextStaff = staffId === "unassigned" ? [] : [staffId];
+    if (event.dueDate === date && sameStaffIds(effectiveStaffIds(event), nextStaff)) {
+      setDraggingId(null);
+      setDropTarget(null);
+      return;
+    }
+    void saveSchedule(event, date, nextStaff);
   }
 
   function beginDrag(event: CalendarEvent, dragEvent: React.DragEvent) {
@@ -370,7 +392,7 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
       <section style={{ background: "#fff", border: "1px solid #dfe7f2", borderRadius: 20, padding: 14, boxShadow: "0 10px 28px rgba(15,23,42,.04)", display: "grid", gap: 10 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 7 }}><button type="button" onClick={() => navigate(-1)} style={navStyle}>←</button><button type="button" onClick={() => setFocusDate(todayKey)} style={navStyle}>Today</button><button type="button" onClick={() => navigate(1)} style={navStyle}>→</button></div>
-          <span style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>Drag any open item onto another date to reschedule it.</span>
+          <span style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>Week view: drop onto a staff/date cell to schedule and assign. Month view changes the date only.</span>
         </div>
 
         {view === "week" ? (
@@ -386,7 +408,7 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
                   {weekDays.map((day) => {
                     const cellEvents = eventsOn(day).filter((event) => person.id === "unassigned" ? effectiveStaffIds(event).length === 0 : effectiveStaffIds(event).includes(person.id));
                     const targetKey = `${person.id}:${day}`;
-                    return <div key={day} onDragOver={(event) => { event.preventDefault(); setDropTarget(targetKey); }} onDragLeave={() => setDropTarget((current) => current === targetKey ? null : current)} onDrop={(event) => { event.preventDefault(); dropOnDate(day); }} style={{ padding: 7, borderLeft: "1px solid #eef2f6", background: dropTarget === targetKey ? "#dbeafe" : day === todayKey ? "#f8fbff" : "#fff", display: "grid", alignContent: "start", gap: 5, transition: "background .12s" }}>
+                    return <div key={day} onDragOver={(event) => { event.preventDefault(); setDropTarget(targetKey); }} onDragLeave={() => setDropTarget((current) => current === targetKey ? null : current)} onDrop={(event) => { event.preventDefault(); dropOnStaffDate(day, person.id); }} style={{ padding: 7, borderLeft: "1px solid #eef2f6", background: dropTarget === targetKey ? "#dbeafe" : day === todayKey ? "#f8fbff" : "#fff", display: "grid", alignContent: "start", gap: 5, transition: "background .12s" }}>
                       {cellEvents.map((item) => <EventCard key={item.id} event={item} onSelect={() => setSelectedId(item.id)} onDragStart={(event) => beginDrag(item, event)} onDragEnd={() => { setDraggingId(null); setDropTarget(null); }} />)}
                     </div>;
                   })}
