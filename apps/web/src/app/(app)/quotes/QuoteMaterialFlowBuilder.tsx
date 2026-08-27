@@ -255,7 +255,7 @@ const textareaStyle = { minHeight: 92, borderRadius: 16, border: "1px solid #cfd
 const primaryButton = { minHeight: 46, borderRadius: 16, border: "none", background: "#155eef", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 18px" };
 const ghostButton = { minHeight: 42, borderRadius: 14, border: "1px solid #d0d7e2", background: "#fff", color: "#1e293b", fontWeight: 900, cursor: "pointer", padding: "0 14px" };
 
-function numberValue(value: string | number | null | undefined, fallback = 0): number {
+function numberValue(value: unknown, fallback = 0): number {
   const text = String(value ?? "").replace(/,/g, "").replace(/\$/g, "").replace(/mm/gi, "").replace(/lm/gi, "").replace(/sqm/gi, "").trim();
   if (!text) return fallback;
   const amount = Number(text);
