@@ -10,7 +10,7 @@ import {
   type QuoteQuestion
 } from "./QuoteLineBuilder";
 import { inferLegacyQuickQuoteSnapshot, readQuickQuoteSnapshot, stepForQuoteSummaryRow } from "./quoteLineSnapshot";
-import { QuoteMaterialFlowBuilder, type PricingSettings as FlowPricingSettings, type QuoteMaterial as FlowQuoteMaterial } from "./QuoteMaterialFlowBuilder";
+import { QuoteMaterialFlowBuilder, type MyobMatrixItem, type PricingSettings as FlowPricingSettings, type QuoteMaterial as FlowQuoteMaterial } from "./QuoteMaterialFlowBuilder";
 
 type QuoteLineEditorChoice = QuoteChoice;
 type QuoteLineEditorField = QuoteQuestion;
@@ -30,6 +30,7 @@ type QuoteLineEditorProps = {
   };
   product?: QuoteLineEditorProduct | null;
   materials: FlowQuoteMaterial[];
+  myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: FlowPricingSettings;
 };
 
@@ -386,7 +387,7 @@ function productFamilyForDepartment(department: string): string {
   }
 }
 
-export function QuoteLineEditor({ quoteId, line, product, materials, pricingSettings }: QuoteLineEditorProps) {
+export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixItems = [], pricingSettings }: QuoteLineEditorProps) {
   const quickSnapshot = useMemo(() => {
     if (product) return null;
     return readQuickQuoteSnapshot(line.configurationSnapshot) ?? inferLegacyQuickQuoteSnapshot({
@@ -483,6 +484,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, pricingSett
         <QuoteMaterialFlowBuilder
           quoteId={quoteId}
           materials={materials}
+          myobMatrixItems={myobMatrixItems}
           pricingSettings={pricingSettings}
           editingLine={{
             id: line.id,

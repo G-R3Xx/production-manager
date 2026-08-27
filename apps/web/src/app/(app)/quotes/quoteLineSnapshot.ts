@@ -118,6 +118,13 @@ export type QuickQuoteSnapshot = {
   smallFinishings?: string[];
   smallFinishingMinutes?: Record<string, string>;
   smallFinishingLabourBasis?: Record<string, QuickQuoteLabourBasis>;
+  planPricingMode?: "myob_matrix" | "pm_calculated";
+  myobMatrixItemId?: string;
+  myobMatrixItemUid?: string;
+  myobMatrixItemName?: string;
+  myobMatrixItemSku?: string;
+  myobPriceMatrixSnapshot?: Record<string, unknown>;
+  myobPriceMatrixSyncedAt?: string;
   serviceType?: string;
   deliveryCharge?: string;
   installCrewSize?: string;
@@ -164,6 +171,13 @@ export type QuickQuoteSnapshot = {
     priceLevelName?: string;
     priceLevelFactor?: number;
     manualQuoteDiscountPercent?: number;
+    pricingSource?: "myob_item_matrix" | "pm_calculated";
+    myobMatrixItemUid?: string;
+    myobMatrixItemName?: string;
+    myobMatrixItemSku?: string;
+    myobMatrixUnitPrice?: number;
+    myobMatrixQuantityOver?: number;
+    myobMatrixLevelKey?: string;
     pricingBreakdown?: Array<Record<string, unknown>>;
   };
 };

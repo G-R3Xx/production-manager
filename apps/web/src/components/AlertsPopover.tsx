@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { markAllNotificationsReadAction } from "@/app/(app)/actions";
 
 type AlertItem = {
@@ -33,10 +33,41 @@ export function AlertsPopover({ initialNotifications, initialUnreadCount }: { in
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Initial values are only a hydration fallback. Alerts refresh independently
+  // after mount, so a router refresh must not blank an already-loaded popover.
   useEffect(() => {
+    if (!initialNotifications.length && !initialUnreadCount) return;
     setNotifications(initialNotifications);
     setUnreadCount(initialUnreadCount);
   }, [initialNotifications, initialUnreadCount]);
+
+  const refreshAlerts = useCallback(async () => {
+    try {
+      const response = await fetch("/api/notifications", {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      if (!response.ok) return;
+      const payload = await response.json() as { notifications?: AlertItem[]; unreadCount?: number };
+      setNotifications(Array.isArray(payload.notifications) ? payload.notifications : []);
+      setUnreadCount(Number(payload.unreadCount ?? 0));
+    } catch {
+      // Alerts are non-critical UI. A failed background refresh must never hold up navigation.
+    }
+  }, []);
+
+  useEffect(() => {
+    const initialTimer = window.setTimeout(() => void refreshAlerts(), 500);
+    const timer = window.setInterval(() => void refreshAlerts(), 30_000);
+    const onFocus = () => void refreshAlerts();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [refreshAlerts]);
 
   const markAllRead = async () => {
     if (!unreadCount || saving) return;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   APP_ACTIVITY_CHECK_EVENT,
   claimAppRefresh,
@@ -10,20 +10,31 @@ import {
   pageHasUnsavedEdits,
 } from "@/lib/auto-refresh-client";
 
-const PULSE_INTERVAL_MS = 5_000;
-const FALLBACK_REFRESH_MS = 60_000;
+// The global pulse is only a safety net for cross-user/background changes.
+// Page-specific status watchers can poll faster without making every screen
+// scan the whole workflow database several times per second.
+const PULSE_INTERVAL_MS = 15_000;
+const MIN_PULSE_CHECK_GAP_MS = 8_000;
+const FALLBACK_REFRESH_MS = 90_000;
 
 export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
   const router = useRouter();
+  const pathname = usePathname();
+  const isProductionBoard = pathname?.startsWith("/production/board") ?? false;
   const refreshingRef = useRef(false);
   const checkingRef = useRef(false);
   const pulseRef = useRef<string>(initialPulse);
+  const hasBaselineRef = useRef(Boolean(initialPulse));
   const pendingRefreshRef = useRef(false);
   const lastRefreshAtRef = useRef(Date.now());
+  const lastCheckAtRef = useRef(0);
 
   useEffect(() => {
-    pulseRef.current = initialPulse;
-    pendingRefreshRef.current = false;
+    if (initialPulse) {
+      pulseRef.current = initialPulse;
+      hasBaselineRef.current = true;
+      pendingRefreshRef.current = false;
+    }
     clearAllAutoRefreshFormDirty();
   }, [initialPulse]);
 
@@ -31,7 +42,10 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
     const removeFormTracking = installAutoRefreshFormTracking();
 
     async function checkPulse() {
+      const now = Date.now();
       if (document.visibilityState !== "visible" || refreshingRef.current || checkingRef.current) return;
+      if (now - lastCheckAtRef.current < MIN_PULSE_CHECK_GAP_MS) return;
+      lastCheckAtRef.current = now;
       checkingRef.current = true;
 
       try {
@@ -43,6 +57,16 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
         if (!response.ok) throw new Error(`Pulse request failed (${response.status})`);
         const payload = await response.json() as { pulse?: string };
         const nextPulse = String(payload.pulse ?? "");
+
+        // The app layout deliberately does not block navigation waiting for a
+        // global pulse anymore. The first background check establishes the
+        // baseline and must never cause an immediate second page load.
+        if (!hasBaselineRef.current) {
+          pulseRef.current = nextPulse;
+          hasBaselineRef.current = true;
+          pendingRefreshRef.current = false;
+          return;
+        }
 
         if (nextPulse !== pulseRef.current) {
           pulseRef.current = nextPulse;
@@ -70,23 +94,27 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
     const checkWhenVisible = () => {
       if (document.visibilityState === "visible") void checkPulse();
     };
+    const checkFromActivityEvent = () => void checkPulse();
 
-    void checkPulse();
-    const timer = window.setInterval(() => void checkPulse(), PULSE_INTERVAL_MS);
+    // Let the requested page paint first; the global change detector is not
+    // part of the critical navigation path.
+    const initialTimer = window.setTimeout(() => void checkPulse(), 750);
+    const timer = isProductionBoard ? null : window.setInterval(() => void checkPulse(), PULSE_INTERVAL_MS);
     window.addEventListener("focus", checkWhenVisible);
     window.addEventListener("pageshow", checkWhenVisible);
-    window.addEventListener(APP_ACTIVITY_CHECK_EVENT, checkWhenVisible);
+    window.addEventListener(APP_ACTIVITY_CHECK_EVENT, checkFromActivityEvent);
     document.addEventListener("visibilitychange", checkWhenVisible);
 
     return () => {
-      window.clearInterval(timer);
+      window.clearTimeout(initialTimer);
+      if (timer !== null) window.clearInterval(timer);
       window.removeEventListener("focus", checkWhenVisible);
       window.removeEventListener("pageshow", checkWhenVisible);
-      window.removeEventListener(APP_ACTIVITY_CHECK_EVENT, checkWhenVisible);
+      window.removeEventListener(APP_ACTIVITY_CHECK_EVENT, checkFromActivityEvent);
       document.removeEventListener("visibilitychange", checkWhenVisible);
       removeFormTracking();
     };
-  }, [router]);
+  }, [isProductionBoard, router]);
 
   return null;
 }

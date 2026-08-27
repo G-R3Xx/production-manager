@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
 
@@ -60,9 +60,19 @@ type EditableQuoteLine = {
   reconstructed?: boolean;
 };
 
+export type MyobMatrixItem = {
+  id: string;
+  name: string;
+  sku?: string | null;
+  myobUid: string;
+  myobPriceMatrix: Record<string, unknown>;
+  myobPriceMatrixSyncedAt?: string | null;
+};
+
 type QuoteMaterialFlowBuilderProps = {
   quoteId: string;
   materials: QuoteMaterial[];
+  myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: PricingSettings;
   editingLine?: EditableQuoteLine | null;
 };
@@ -79,6 +89,7 @@ type DropDirection = "auto" | "vertical" | "horizontal";
 type ArtworkChoice = "" | "required" | "client_supplied";
 type LabourBasis = "per_item" | "line_total";
 type SmallPrintColour = "" | "mono" | "cmyk" | "special";
+type PlanPricingMode = "myob_matrix" | "pm_calculated";
 
 type CostRow = {
   label: string;
@@ -971,6 +982,67 @@ function isPrintDepartmentFlow(value: FlowType): boolean {
   return value === "plan_printing" || value === "poster_printing";
 }
 
+type MyobMatrixPrice = { unitPrice: number; quantityOver: number; levelKey: string };
+
+function myobMatrixPrice(matrix: Record<string, unknown> | null | undefined, priceLevelCode: string | null | undefined, quantity: number): MyobMatrixPrice | null {
+  if (!matrix) return null;
+  const levelMatch = String(priceLevelCode ?? "Level A").match(/^Level\s+([A-F])$/i);
+  const levelKey = `Level${(levelMatch?.[1] ?? "A").toUpperCase()}`;
+  const sellingPrices = Array.isArray(matrix.SellingPrices) ? matrix.SellingPrices : [];
+  const eligible = sellingPrices
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    .map((row) => ({ row, quantityOver: Math.max(0, numberValue(row.QuantityOver, 0)) }))
+    .filter(({ quantityOver }) => quantityOver === 0 || Math.max(0, quantity) > quantityOver)
+    .sort((a, b) => b.quantityOver - a.quantityOver);
+
+  for (const candidate of eligible) {
+    const levels = candidate.row.Levels;
+    if (!levels || typeof levels !== "object" || Array.isArray(levels)) continue;
+    const parsed = Number((levels as Record<string, unknown>)[levelKey]);
+    if (Number.isFinite(parsed) && parsed >= 0) return { unitPrice: parsed, quantityOver: candidate.quantityOver, levelKey };
+  }
+  return null;
+}
+
+function myobMatrixTierLabel(matrix: Record<string, unknown> | null | undefined, quantityOver: number): string {
+  if (!matrix) return quantityOver > 0 ? `Qty ${quantityOver + 1}+` : "Base quantity tier";
+  const thresholds = (Array.isArray(matrix.SellingPrices) ? matrix.SellingPrices : [])
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    .map((row) => Math.max(0, numberValue(row.QuantityOver, 0)))
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .sort((a, b) => a - b);
+  const next = thresholds.find((value) => value > quantityOver);
+  const start = quantityOver + 1;
+  return next == null ? `Qty ${start}+` : `Qty ${start}–${next}`;
+}
+
+function planSizeCode(widthMm: number, heightMm: number): string {
+  const w = Math.round(Math.min(widthMm, heightMm));
+  const h = Math.round(Math.max(widthMm, heightMm));
+  const sizes: Array<[string, number, number]> = [
+    ["A4", 210, 297],
+    ["A3", 297, 420],
+    ["A2", 420, 594],
+    ["A1", 594, 841],
+    ["A0", 841, 1189]
+  ];
+  return sizes.find(([, sw, sh]) => Math.abs(w - sw) <= 3 && Math.abs(h - sh) <= 3)?.[0] ?? "";
+}
+
+function planMatrixItemScore(item: MyobMatrixItem, sizeCode: string, printColour: SmallPrintColour): number {
+  const text = `${item.sku ?? ""} ${item.name}`.toLowerCase();
+  let score = /\b(plan|plans|plot|plotting|drawing|drawings|cad|blueprint)\b/.test(text) ? 2 : 0;
+  if (sizeCode && new RegExp(`\\b${sizeCode.toLowerCase()}\\b`, "i").test(text)) score += 6;
+  if (printColour === "mono" && /\b(mono|monochrome|b\s*&?\s*w|black\s*(?:&|and)?\s*white|greyscale|grayscale)\b/.test(text)) score += 5;
+  if ((printColour === "cmyk" || printColour === "special") && /\b(colou?r|cmyk|full\s*colou?r)\b/.test(text)) score += 5;
+  return score;
+}
+
+function matrixItemLabel(item: MyobMatrixItem): string {
+  const sku = String(item.sku ?? "").trim();
+  return sku ? `${sku} · ${item.name}` : item.name;
+}
+
 function flowTypeLabel(value: FlowType): string {
   if (value === "signage") return "Large format / signage";
   if (value === "plan_printing") return "Plan printing";
@@ -1036,7 +1108,7 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, editingLine = null }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const materialPool = useMemo(() => {
     const restoredMaterials = materialsFromSnapshot(initialSnapshot);
@@ -1113,6 +1185,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const [smallFinishings, setSmallFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "smallFinishings"));
   const [smallFinishingMinutes, setSmallFinishingMinutes] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "smallFinishingMinutes"));
   const [smallFinishingLabourBasis, setSmallFinishingLabourBasis] = useState<Record<string, LabourBasis>>(labourBasisRecord(snapshotStringRecord(initialSnapshot, "smallFinishingLabourBasis"), "line_total"));
+  const [planPricingMode, setPlanPricingMode] = useState<PlanPricingMode>(() => {
+    const saved = snapshotString(initialSnapshot, "planPricingMode") as PlanPricingMode;
+    if (saved === "myob_matrix" || saved === "pm_calculated") return saved;
+    if (editingLine) return "pm_calculated";
+    return myobMatrixItems.length ? "myob_matrix" : "pm_calculated";
+  });
+  const [planMyobItemId, setPlanMyobItemId] = useState(snapshotString(initialSnapshot, "myobMatrixItemId"));
+  const [planMatrixSelectionTouched, setPlanMatrixSelectionTouched] = useState(false);
   const legacySmallFinishingPerItem = Boolean(
     initialSnapshot?.flowType === "small_format"
       && Object.keys(initialSnapshot.smallFinishingMinutes ?? {}).length > 0
@@ -1167,6 +1247,44 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const activeSizePresetValue = activeSizePresets.some((preset) => preset.width === widthMm && preset.height === heightMm)
     ? `${widthMm}x${heightMm}`
     : "";
+  const savedMyobPriceMatrix = initialSnapshot?.myobPriceMatrixSnapshot && typeof initialSnapshot.myobPriceMatrixSnapshot === "object" && !Array.isArray(initialSnapshot.myobPriceMatrixSnapshot)
+    ? initialSnapshot.myobPriceMatrixSnapshot
+    : null;
+  const savedMyobMatrixItem = savedMyobPriceMatrix && initialSnapshot?.myobMatrixItemUid
+    ? {
+        id: initialSnapshot.myobMatrixItemId || `saved-${initialSnapshot.myobMatrixItemUid}`,
+        name: initialSnapshot.myobMatrixItemName || "Saved MYOB price item",
+        sku: initialSnapshot.myobMatrixItemSku || null,
+        myobUid: initialSnapshot.myobMatrixItemUid,
+        myobPriceMatrix: savedMyobPriceMatrix,
+        myobPriceMatrixSyncedAt: initialSnapshot.myobPriceMatrixSyncedAt || null
+      } satisfies MyobMatrixItem
+    : null;
+  const planMatrixItemPool = useMemo(() => {
+    const combined = savedMyobMatrixItem ? [...myobMatrixItems, savedMyobMatrixItem] : [...myobMatrixItems];
+    const seen = new Set<string>();
+    return combined.filter((item) => {
+      const key = item.id || item.myobUid;
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [myobMatrixItems, savedMyobMatrixItem]);
+  const currentPlanSizeCode = planSizeCode(numberValue(widthMm, 0), numberValue(heightMm, 0));
+  const sortedPlanMatrixItems = useMemo(() => [...planMatrixItemPool].sort((a, b) => {
+    const scoreDiff = planMatrixItemScore(b, currentPlanSizeCode, smallPrintColour) - planMatrixItemScore(a, currentPlanSizeCode, smallPrintColour);
+    if (scoreDiff !== 0) return scoreDiff;
+    return matrixItemLabel(a).localeCompare(matrixItemLabel(b));
+  }), [planMatrixItemPool, currentPlanSizeCode, smallPrintColour]);
+
+  useEffect(() => {
+    if (editingLine || flowType !== "plan_printing" || planPricingMode !== "myob_matrix" || planMatrixSelectionTouched || !sortedPlanMatrixItems.length) return;
+    const first = sortedPlanMatrixItems[0];
+    const firstScore = first ? planMatrixItemScore(first, currentPlanSizeCode, smallPrintColour) : 0;
+    const secondScore = sortedPlanMatrixItems[1] ? planMatrixItemScore(sortedPlanMatrixItems[1], currentPlanSizeCode, smallPrintColour) : -1;
+    const automaticItemId = first && firstScore >= 7 && firstScore > secondScore ? first.id : "";
+    if (automaticItemId !== planMyobItemId) setPlanMyobItemId(automaticItemId);
+  }, [editingLine, flowType, planPricingMode, planMatrixSelectionTouched, planMyobItemId, sortedPlanMatrixItems, currentPlanSizeCode, smallPrintColour]);
   const inkChoices = useMemo<Array<{ key: Exclude<InkChoice, "">; label: string; icon: string; description: string }>>(() => [
     { key: "none", label: "No print", icon: "—", description: "Use the selected stock without printing or ink charges." },
     { key: "cmyk", label: "CMYK", icon: "●", description: `${money(inkRatePerSqm)}/m² colour ink charge.` },
@@ -1740,7 +1858,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
   const pricingMultiplier = sellMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
   const accessEquipmentPricingMultiplier = accessEquipmentMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
   const effectivePricingMultiplier = flowType === "service" && serviceType === "access_equipment" ? accessEquipmentPricingMultiplier : pricingMultiplier;
-  const autoUnitPrice = rawCost * effectivePricingMultiplier;
+  const selectedPlanMatrixItem = planMatrixItemPool.find((item) => item.id === planMyobItemId) ?? null;
+  const preserveSavedPlanMatrix = Boolean(
+    !planMatrixSelectionTouched
+    && savedMyobPriceMatrix
+    && initialSnapshot?.myobMatrixItemId
+    && initialSnapshot.myobMatrixItemId === planMyobItemId
+  );
+  const activePlanPriceMatrix = preserveSavedPlanMatrix ? savedMyobPriceMatrix : selectedPlanMatrixItem?.myobPriceMatrix ?? null;
+  const useMyobPlanPricing = flowType === "plan_printing" && planPricingMode === "myob_matrix";
+  const selectedPlanMatrixPrice = useMyobPlanPricing
+    ? myobMatrixPrice(activePlanPriceMatrix, pricingSettings?.priceLevelCode, quantityNumber)
+    : null;
+  const myobPlanUnitPrice = selectedPlanMatrixPrice ? selectedPlanMatrixPrice.unitPrice * manualQuoteDiscountMultiplier : null;
+  const autoUnitPrice = useMyobPlanPricing ? (myobPlanUnitPrice ?? 0) : (rawCost * effectivePricingMultiplier);
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
   const selectedMediaName = isRollStockBase ? "" : customerMaterialName(selectedMedia);
@@ -1958,6 +2089,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0)
     || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0 && accessEquipmentSelectionComplete);
 
+  const planMatrixPricingReady = flowType !== "plan_printing" || planPricingMode === "pm_calculated" || Boolean(selectedPlanMatrixItem && selectedPlanMatrixPrice);
+
   const canSave = flowType === "component"
     ? Boolean(componentName.trim() && componentHasCost)
     : flowType === "service"
@@ -1968,7 +2101,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       || (serviceType === "access_equipment" && accessEquipmentDetailsComplete)
     ))
     : isPrintDepartment
-      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete)
+      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete && planMatrixPricingReady)
       : flowType === "small_format"
         ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
         : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!canChooseReversePrint || !printed || printDirection) && (!backingApplicable || Boolean(backingId)) && (!printed || Boolean(laminateId)) && dispatchComplete);
@@ -2035,6 +2168,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     smallFinishings,
     smallFinishingMinutes,
     smallFinishingLabourBasis,
+    planPricingMode: flowType === "plan_printing" ? planPricingMode : undefined,
+    myobMatrixItemId: flowType === "plan_printing" && planPricingMode === "myob_matrix" ? selectedPlanMatrixItem?.id ?? planMyobItemId : undefined,
+    myobMatrixItemUid: flowType === "plan_printing" && planPricingMode === "myob_matrix" ? selectedPlanMatrixItem?.myobUid ?? initialSnapshot?.myobMatrixItemUid : undefined,
+    myobMatrixItemName: flowType === "plan_printing" && planPricingMode === "myob_matrix" ? selectedPlanMatrixItem?.name ?? initialSnapshot?.myobMatrixItemName : undefined,
+    myobMatrixItemSku: flowType === "plan_printing" && planPricingMode === "myob_matrix" ? String(selectedPlanMatrixItem?.sku ?? initialSnapshot?.myobMatrixItemSku ?? "") : undefined,
+    myobPriceMatrixSnapshot: flowType === "plan_printing" && planPricingMode === "myob_matrix" && activePlanPriceMatrix ? activePlanPriceMatrix : undefined,
+    myobPriceMatrixSyncedAt: flowType === "plan_printing" && planPricingMode === "myob_matrix" ? selectedPlanMatrixItem?.myobPriceMatrixSyncedAt ?? initialSnapshot?.myobPriceMatrixSyncedAt : undefined,
     serviceType,
     deliveryCharge,
     installCrewSize,
@@ -2084,6 +2224,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
       priceLevelName: pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A",
       priceLevelFactor,
       manualQuoteDiscountPercent,
+      pricingSource: flowType === "plan_printing" && planPricingMode === "myob_matrix" && selectedPlanMatrixPrice ? "myob_item_matrix" : "pm_calculated",
+      myobMatrixItemUid: selectedPlanMatrixPrice ? selectedPlanMatrixItem?.myobUid ?? initialSnapshot?.myobMatrixItemUid : undefined,
+      myobMatrixItemName: selectedPlanMatrixPrice ? selectedPlanMatrixItem?.name ?? initialSnapshot?.myobMatrixItemName : undefined,
+      myobMatrixItemSku: selectedPlanMatrixPrice ? String(selectedPlanMatrixItem?.sku ?? initialSnapshot?.myobMatrixItemSku ?? "") : undefined,
+      myobMatrixUnitPrice: selectedPlanMatrixPrice?.unitPrice,
+      myobMatrixQuantityOver: selectedPlanMatrixPrice?.quantityOver,
+      myobMatrixLevelKey: selectedPlanMatrixPrice?.levelKey,
       pricingBreakdown: costs.map((row) => ({ ...row }))
     }
   };
@@ -2302,7 +2449,60 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
     }
 
     if (compactStep === "small_stock") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label>{customSmallStockEnabled ? <small style={{ color: "#b54708" }}>This line currently uses a custom stock. Choosing a library material will replace it.</small> : null}</div>;
+      return (
+        <div style={compactPanel}>
+          {flowType === "plan_printing" ? (
+            <div style={{ border: "1px solid #bfdbfe", borderRadius: 12, background: "#eff6ff", padding: 11, display: "grid", gap: 9 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start", flexWrap: "wrap" }}>
+                <div>
+                  <strong style={{ color: "#1d4ed8" }}>Plan Printing pricing</strong>
+                  <div style={{ marginTop: 3, color: "#475467", fontSize: 12 }}>Use the customer&apos;s MYOB A–F item price matrix as the finished sell price. PM material/ink costing remains available internally for production reference.</div>
+                </div>
+                <span style={{ borderRadius: 999, background: planPricingMode === "myob_matrix" ? "#dcfae6" : "#f2f4f7", color: planPricingMode === "myob_matrix" ? "#067647" : "#475467", padding: "5px 9px", fontSize: 11, fontWeight: 900 }}>
+                  {planPricingMode === "myob_matrix" ? "MYOB matrix" : "PM calculated"}
+                </span>
+              </div>
+              <div style={compactGrid}>
+                <label style={{ display: "grid", gap: 6 }}>
+                  <b>Pricing source</b>
+                  <select value={planPricingMode} onChange={(event) => { const nextMode = event.target.value as PlanPricingMode; setPlanPricingMode(nextMode); if (nextMode === "myob_matrix") setPlanMatrixSelectionTouched(false); changed(); }} style={inputStyle}>
+                    <option value="myob_matrix">MYOB item price matrix</option>
+                    <option value="pm_calculated">Production Manager calculated</option>
+                  </select>
+                </label>
+                {planPricingMode === "myob_matrix" ? (
+                  <label style={{ display: "grid", gap: 6 }}>
+                    <b>MYOB price item</b>
+                    <select value={planMyobItemId} onChange={(event) => { setPlanMyobItemId(event.target.value); setPlanMatrixSelectionTouched(true); changed(); }} style={inputStyle}>
+                      <option value="">Choose MYOB item</option>
+                      {sortedPlanMatrixItems.map((item) => <option key={item.id} value={item.id}>{matrixItemLabel(item)}</option>)}
+                    </select>
+                    {currentPlanSizeCode || smallPrintColour ? <small style={{ color: "#64748b" }}>Best matches are sorted first for {currentPlanSizeCode || "the selected size"}{smallPrintColour ? ` · ${smallPrintColour === "mono" ? "Mono" : "Colour"}` : ""}.</small> : null}
+                  </label>
+                ) : null}
+              </div>
+              {planPricingMode === "myob_matrix" ? (
+                selectedPlanMatrixItem && selectedPlanMatrixPrice ? (
+                  <div style={{ borderRadius: 10, border: "1px solid #86efac", background: "#f0fdf4", color: "#166534", padding: "9px 10px", fontSize: 12, lineHeight: 1.5 }}>
+                    <strong>{pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"}</strong> · {myobMatrixTierLabel(activePlanPriceMatrix, selectedPlanMatrixPrice.quantityOver)} · <strong>{money(selectedPlanMatrixPrice.unitPrice)} ea</strong> × {usage(quantityNumber)} = <strong>{money(selectedPlanMatrixPrice.unitPrice * quantityNumber)}</strong>{manualQuoteDiscountPercent > 0 ? ` before ${manualQuoteDiscountPercent}% quote discount` : ""}.
+                    {preserveSavedPlanMatrix ? <><br />Using the matrix snapshot saved with this quote line. <button type="button" onClick={() => { setPlanMatrixSelectionTouched(true); changed(); }} style={{ border: 0, background: "transparent", color: "#155eef", fontWeight: 900, padding: 0, cursor: "pointer", textDecoration: "underline" }}>Use latest synced MYOB matrix</button></> : selectedPlanMatrixItem.myobPriceMatrixSyncedAt ? <><br />Matrix synced {new Date(selectedPlanMatrixItem.myobPriceMatrixSyncedAt).toLocaleString("en-AU")}.</> : null}
+                  </div>
+                ) : selectedPlanMatrixItem ? (
+                  <div style={{ borderRadius: 10, border: "1px solid #fecaca", background: "#fff5f4", color: "#b42318", padding: "9px 10px", fontSize: 12 }}>This MYOB item has no usable {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"} price for quantity {usage(quantityNumber)}. Check the MYOB Item Price Matrix and sync again, or choose another item.</div>
+                ) : planMatrixItemPool.length ? (
+                  <div style={{ borderRadius: 10, border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", padding: "9px 10px", fontSize: 12 }}>Choose the MYOB item that represents this plan-printing option. The correct A–F price and quantity break will be selected automatically.</div>
+                ) : (
+                  <div style={{ borderRadius: 10, border: "1px solid #fecaca", background: "#fff5f4", color: "#b42318", padding: "9px 10px", fontSize: 12 }}>No MYOB plan-printing price matrices are available. Run the MYOB item import/sync, or temporarily choose <b>Production Manager calculated</b>.</div>
+                )
+              ) : (
+                <div style={{ color: "#64748b", fontSize: 12 }}>Fallback mode uses PM stock + print costing, markup/profit and the PM A–F factor. Use this only when a MYOB matrix item is not available.</div>
+              )}
+            </div>
+          ) : null}
+          <label style={{ display: "grid", gap: 6 }}><b>Material / stock</b><select value={smallStockId} onChange={(event) => { setCustomSmallStockEnabled(false); setSmallStockId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose stock</option>{departmentStocks.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label>
+          {customSmallStockEnabled ? <small style={{ color: "#b54708" }}>This line currently uses a custom stock. Choosing a library material will replace it.</small> : null}
+        </div>
+      );
     }
 
     if (compactStep === "small_print") {
@@ -2483,9 +2683,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
         ? ["flow", "component_details", "component_parts", "component_labour", "review"]
         : flowType === "small_format"
           ? ["flow", "small_type", ...(isDuplicateBook ? ["ncr_details" as QuickQuoteStep] : []), "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
-          : isPrintDepartment
-            ? ["flow", "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
-            : [
+          : flowType === "plan_printing"
+            ? ["flow", "small_size", "small_print", "small_stock", "artwork", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
+            : isPrintDepartment
+              ? ["flow", "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
+              : [
               "flow",
               "base",
               "thickness",
@@ -2576,6 +2778,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, pricingSettings, 
           <div style={{ display: "grid", gap: 2 }}>
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
             <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>
+            {flowType === "plan_printing" && planPricingMode === "myob_matrix" && selectedPlanMatrixPrice ? <span style={{ color: "#067647", fontSize: 12, fontWeight: 850 }}>MYOB {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"} · {myobMatrixTierLabel(activePlanPriceMatrix, selectedPlanMatrixPrice.quantityOver)} · {matrixItemLabel(selectedPlanMatrixItem as MyobMatrixItem)}{manualQuoteDiscountPercent > 0 ? ` · ${manualQuoteDiscountPercent}% quote discount applied` : ""}</span> : null}
             {shouldCreateDispatchLine ? <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>Plus {serviceType === "install" ? "Sign Install" : "Delivery"}: qty {usage(dispatchLineQuantity)} × {money(dispatchUnitPrice)} = {money(dispatchLineTotal)}</span> : null}
             {shouldCreateAccessEquipmentLine ? <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 850 }}>Plus Access Equipment - {accessEquipmentType.trim()}: {usage(accessEquipmentDaysNumber)} day{accessEquipmentDaysNumber === 1 ? "" : "s"} × {money(accessEquipmentDailySellPrice)} = {money(accessEquipmentLineTotal)}</span> : null}
           </div>

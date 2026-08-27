@@ -1563,7 +1563,7 @@ type MyobItemOrderLineReference = {
   number: string | null;
   name: string | null;
   locationUid: string | null;
-  source: "linked_product" | "pm_custom_fallback";
+  source: "linked_product" | "quote_matrix_item" | "pm_custom_fallback";
 };
 
 const PM_CUSTOM_SALES_ITEM_NUMBER = "PM-CUSTOM";
@@ -1708,6 +1708,32 @@ async function resolveMyobItemOrderLineReferences(
                 name: textOrNull(item.Name),
                 locationUid: myobItemLocationUid(item),
                 source: "linked_product"
+              };
+            }
+          }
+        } catch (error) {
+          if (!isMyobNotFoundError(error)) throw error;
+        }
+      }
+    }
+
+    if (!lineItem) {
+      const snapshot = line.configurationSnapshot && typeof line.configurationSnapshot === "object" && !Array.isArray(line.configurationSnapshot)
+        ? line.configurationSnapshot as Record<string, unknown>
+        : {};
+      const matrixItemUid = textOrNull(snapshot.myobMatrixItemUid);
+      if (matrixItemUid && normaliseGuid(matrixItemUid) !== normaliseGuid(companyFileId)) {
+        try {
+          const response = await fetchMyobJson(accessToken, companyFileId, `/Inventory/Item/${matrixItemUid}`, tenantId);
+          if (response.data && typeof response.data === "object" && !Array.isArray(response.data)) {
+            const item = response.data as Record<string, unknown>;
+            if (isUsableMyobSalesItem(item)) {
+              lineItem = {
+                uid: matrixItemUid,
+                number: textOrNull(item.Number),
+                name: textOrNull(item.Name),
+                locationUid: myobItemLocationUid(item),
+                source: "quote_matrix_item"
               };
             }
           }

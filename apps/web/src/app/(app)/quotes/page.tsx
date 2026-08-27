@@ -465,6 +465,27 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       };
     })
     .filter((product) => product.fields.length > 0 || product.components.length > 0);
+  const myobMatrixItems = quoteProducts
+    .map((product) => {
+      const matrix = product.payloadJson?.myobPriceMatrix;
+      const syncedAt = typeof product.payloadJson?.myobPriceMatrixSyncedAt === "string" ? product.payloadJson.myobPriceMatrixSyncedAt : null;
+      return product.myobUid && matrix && typeof matrix === "object" && !Array.isArray(matrix)
+        ? {
+            id: product.id,
+            name: product.name,
+            sku: product.sku,
+            department: product.department,
+            myobUid: product.myobUid,
+            myobPriceMatrix: matrix as Record<string, unknown>,
+            myobPriceMatrixSyncedAt: syncedAt
+          }
+        : null;
+    })
+    .filter((item): item is NonNullable<typeof item> => Boolean(item))
+    .filter((item) => {
+      const text = `${item.sku ?? ""} ${item.name}`.toLowerCase();
+      return item.department === "plan_printing" || /\b(plan|plans|plot|plotting|drawing|drawings|cad|blueprint|a0|a1|a2|a3|a4|mono|monochrome|colour|color|cmyk|b\s*&?\s*w)\b/.test(text);
+    });
   const customerById = new Map(clients.map((client) => [client.id, client]));
   const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
   const surveySourceEnquiry = survey?.enquiryId ? enquiryById.get(survey.enquiryId) ?? null : null;
@@ -939,6 +960,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         key="new-quote-line"
                         quoteId={selectedQuote.id}
                         materials={activeMaterials}
+                        myobMatrixItems={myobMatrixItems}
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",
@@ -1041,6 +1063,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           }}
                           product={editableProduct}
                           materials={activeMaterials}
+                          myobMatrixItems={myobMatrixItems}
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                             accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",

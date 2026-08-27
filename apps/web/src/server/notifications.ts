@@ -125,36 +125,15 @@ function directPulseSource(key: string, relation: string): AppPulseSource {
 }
 
 const APP_PULSE_SOURCES: AppPulseSource[] = [
-  {
-    key: "notifications",
-    relations: ["app.notifications"],
-    sql: `
-      SELECT 'notifications'::text AS activity_key,
-        concat(COALESCE(max(created_at)::text, ''), ':', COALESCE(max(read_at)::text, '')) AS activity_value
-      FROM app.notifications
-      WHERE tenant_id=$1::uuid
-    `,
-  },
+  // Keep the global live-refresh pulse focused on workflow records that can
+  // materially change a staff screen in the background. Master-data and
+  // integration pages refresh as part of their own mutations/navigation and
+  // do not need to be scanned globally every few seconds.
   directPulseSource("enquiries", "app.enquiries"),
   directPulseSource("surveys", "app.survey_requests"),
   directPulseSource("jobs", "app.jobs"),
   directPulseSource("job_process_assignments", "app.job_process_assignments"),
   directPulseSource("job_tasks", "app.job_tasks"),
-  directPulseSource("customers", "app.customers"),
-  directPulseSource("suppliers", "app.suppliers"),
-  directPulseSource("memberships", "app.memberships"),
-  {
-    key: "staff_profiles",
-    relations: ["app.user_profiles", "app.memberships"],
-    sql: `
-      SELECT 'staff_profiles'::text AS activity_key,
-        COALESCE(max(profile.updated_at)::text, '') AS activity_value
-      FROM app.user_profiles profile
-      INNER JOIN app.memberships membership ON membership.user_profile_id=profile.id
-      WHERE membership.tenant_id=$1::uuid
-    `,
-  },
-  directPulseSource("tenant_settings", "app.tenant_settings"),
   directPulseSource("quotes", "sales.quote_drafts"),
   {
     key: "quote_lines",
@@ -202,15 +181,7 @@ const APP_PULSE_SOURCES: AppPulseSource[] = [
       WHERE job.tenant_id=$1::uuid
     `,
   },
-  directPulseSource("materials", "catalog.materials"),
-  directPulseSource("products", "catalog.products"),
-  directPulseSource("myob_connections", "integration.myob_connections"),
-  directPulseSource("external_mappings", "integration.external_mappings"),
-  directPulseSource("sync_runs", "integration.sync_runs"),
-  directPulseSource("wordpress_connections", "integration.wordpress_connections"),
-  directPulseSource("wordpress_orders", "integration.wordpress_orders"),
   directPulseSource("purchase_orders", "purchasing.purchase_orders"),
-  directPulseSource("purchase_order_lines", "purchasing.purchase_order_lines"),
 ];
 
 const APP_PULSE_RELATION_CACHE_MS = 60_000;
@@ -247,7 +218,11 @@ async function resilientPulseFallback(tenantId: string, sources: AppPulseSource[
   return createHash("md5").update(activity).digest("hex");
 }
 
-export async function getAppActivityPulseForTenant(tenantId: string): Promise<string> {
+const APP_PULSE_VALUE_CACHE_MS = 4_000;
+type AppPulseCacheEntry = { value: string; expiresAt: number; pending?: Promise<string> };
+const appPulseValueCache = new Map<string, AppPulseCacheEntry>();
+
+async function computeAppActivityPulseForTenant(tenantId: string): Promise<string> {
   await ensureNotificationSchema();
   let sources: AppPulseSource[];
   try {
@@ -269,6 +244,26 @@ export async function getAppActivityPulseForTenant(tenantId: string): Promise<st
     // disable live updates for every other workflow.
     return resilientPulseFallback(tenantId, sources);
   }
+}
+
+export async function getAppActivityPulseForTenant(tenantId: string): Promise<string> {
+  const now = Date.now();
+  const cached = appPulseValueCache.get(tenantId);
+  if (cached && cached.expiresAt > now && !cached.pending) return cached.value;
+  if (cached?.pending) return cached.pending;
+
+  const pending = computeAppActivityPulseForTenant(tenantId)
+    .then((value) => {
+      appPulseValueCache.set(tenantId, { value, expiresAt: Date.now() + APP_PULSE_VALUE_CACHE_MS });
+      return value;
+    })
+    .catch((error) => {
+      appPulseValueCache.delete(tenantId);
+      throw error;
+    });
+
+  appPulseValueCache.set(tenantId, { value: cached?.value ?? "", expiresAt: 0, pending });
+  return pending;
 }
 
 export async function markAllNotificationsReadForTenant(tenantId: string): Promise<void> {
