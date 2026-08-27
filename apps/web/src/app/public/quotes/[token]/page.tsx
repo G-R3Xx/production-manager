@@ -158,14 +158,29 @@ function clientMaterialTitle(value: string | null | undefined): string {
   return withoutParentSize || withoutCalculatedUsage || source;
 }
 
+function snapshotCustomerMaterialName(snapshot: Record<string, unknown> | null | undefined, key: string): string | null {
+  const materialSnapshots = quoteSnapshotRecord(snapshot?.materialSnapshots);
+  const material = quoteSnapshotRecord(materialSnapshots?.[key]);
+  const customerFacingName = compactText(typeof material?.customerFacingName === "string" ? material.customerFacingName : null);
+  if (customerFacingName) return customerFacingName;
+  const internalName = compactText(typeof material?.name === "string" ? material.name : null);
+  return internalName || null;
+}
+
+function stripClientUsage(value: string): string {
+  return compactText(value)
+    .replace(/\s*[—–-]\s*\d+(?:\.\d+)?\s*(?:lm|linear\s*m(?:etre)?s?|metres?|meters?|m²|sqm|sheets?|sheet(?:s)?\s+used)\s*(?:calculated|used)?\s*$/i, "")
+    .trim();
+}
+
 function friendlyLaminate(raw: string | null | undefined): string | null {
-  const value = compactText(raw).replace(/^laminate:\s*/i, "").replace(/^coating:\s*/i, "");
+  const value = stripClientUsage(compactText(raw).replace(/^laminate:\s*/i, "").replace(/^coating:\s*/i, ""));
   if (!value || /^none$/i.test(value)) return null;
   const lower = value.toLowerCase();
   if (lower.includes("gloss")) return "Gloss Laminate";
   if (lower.includes("matt") || lower.includes("matte")) return "Matt Laminate";
   if (lower.includes("anti graffiti")) return "Anti Graffiti Laminate";
-  if (lower.includes("whiteboard")) return "Whiteboard Laminate";
+  if (lower.includes("whiteboard") || lower.includes("white board")) return "White Board Laminate";
   const cleaned = value
     .replace(/^lam[-_\s]*/i, "")
     .replace(/[-_]+/g, " ")
@@ -206,15 +221,29 @@ function installLineForClient(_line: Pick<QuoteLineRecord, "productName" | "opti
   };
 }
 
-function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary">): ClientQuoteLine {
+function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "configurationSnapshot">): ClientQuoteLine {
   const parts = summaryParts(line);
   const combined = [line.productName, line.optionSummary].filter(Boolean).join(" · ");
   const base = cleanBaseMaterialName(line.productName);
   const selectedMaterial = cleanSelectedMaterialName(line);
   const materialTitle = clientMaterialTitle(selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
-  const laminate = friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
-  const standoffs = friendlyStandoffs(parts.find((part) => /^standoffs:/i.test(part)));
+
+  // Use the explicit customer-facing material name saved with the quote wherever
+  // possible. Internal stock names and calculated consumption stay available to staff
+  // in the saved option/pricing snapshots, but must not leak onto the client quote.
+  const laminateSnapshotName = snapshotCustomerMaterialName(line.configurationSnapshot, "laminate");
+  const laminate = laminateSnapshotName
+    ? stripClientUsage(laminateSnapshotName)
+    : friendlyLaminate(parts.find((part) => /^laminate:/i.test(part)));
+
+  const standoffSnapshotName = snapshotCustomerMaterialName(line.configurationSnapshot, "standoff");
+  const standoffPart = parts.find((part) => /^standoffs:/i.test(part));
+  const standoffQtyMatch = compactText(standoffPart).match(/[×x]\s*(\d+(?:\.\d+)?)\s*$/i);
+  const standoffs = standoffSnapshotName && standoffQtyMatch
+    ? `${standoffSnapshotName} × ${standoffQtyMatch[1]}`
+    : friendlyStandoffs(standoffPart);
+
   const title = [materialTitle, dimension, laminate, standoffs].filter(Boolean).join(" · ") || line.productName;
 
   // Everything else on a signage quote line is production/setup data and stays internal.
