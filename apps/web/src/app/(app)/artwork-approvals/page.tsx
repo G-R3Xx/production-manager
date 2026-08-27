@@ -26,6 +26,7 @@ import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
 import { ArtworkEmailSendButton } from "./ArtworkEmailSendButton";
 import { ArtworkStatusAutoRefresh } from "./ArtworkStatusAutoRefresh";
 import { ReopenArtworkPageButton } from "./ReopenArtworkPageButton";
+import { PmsColourFields } from "./PmsColourFields";
 import {
   addArtworkApprovalPageFromPageAction,
   createArtworkApprovalFromQuoteAction,
@@ -466,10 +467,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                                 <input type="hidden" name="approvalId" value={selectedApproval.id} />
                                 <input type="hidden" name="pageId" value={page.id} />
                                 <input type="hidden" name="pageLabel" value={page.signCode || page.title} />
-                                <label style={{ display: "grid", gap: 5, color: "#344054", fontSize: 10, fontWeight: 950 }}>
-                                  Required PMS colours
-                                  <input name="pmsColours" defaultValue={pmsColours} placeholder="e.g. PMS 186 C, PMS 3005 C" style={{ ...input, minHeight: 36, fontSize: 11 }} />
-                                </label>
+                                <PmsColourFields value={pmsColours} />
                                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                                   <span style={{ color: "#667085", fontSize: 9.5, lineHeight: 1.3 }}>Staff-entered only. These colours are shown to the client as part of the approval specification.</span>
                                   <button type="submit" style={{ ...secondaryButton, minHeight: 32, padding: "0 10px", fontSize: 10 }}>Save PMS colours</button>

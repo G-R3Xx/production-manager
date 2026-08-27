@@ -182,11 +182,17 @@ export async function saveArtworkApprovalPmsColoursAction(formData: FormData): P
   const pageLabel = oneLine(formData.get("pageLabel"), "Proof page");
   if (!approvalId || !pageId) redirect("/artwork-approvals?error=Select%20an%20artwork%20proof%20page%20first");
 
+  const pmsEntries = formData.getAll("pmsColour")
+    .map((value) => oneLine(value))
+    .filter(Boolean);
+  const legacyValue = nullable(formData.get("pmsColours"));
+  const pmsColours = pmsEntries.length ? pmsEntries.join("\n") : legacyValue;
+
   const result = await updateArtworkApprovalPagePmsColoursForTenant(
     activeTenant.tenantId,
     approvalId,
     pageId,
-    nullable(formData.get("pmsColours")),
+    pmsColours,
   );
 
   revalidatePath("/artwork-approvals");

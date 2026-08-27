@@ -17,6 +17,7 @@ const PMS_HEX: Record<string, string> = {
   "reflex-blue": "#001489",
   "process-blue": "#0085CA",
   "green": "#00AB84",
+  "white": "#FFFFFF",
   "black": "#2D2926",
   "black-6": "#101820",
 
@@ -36,7 +37,7 @@ const PMS_HEX: Record<string, string> = {
   "420": "#C7C9C7", "423": "#898D8D", "425": "#545859", "427": "#D0D3D4", "428": "#C1C6C8", "429": "#A2AAAD",
   "430": "#7C878E", "431": "#5B6770", "432": "#333F48", "4505": "#998542", "471": "#B86125", "4715": "#956C58",
   "473": "#F0BF9B", "4755": "#D7C4B7", "485": "#DA291C", "4975": "#3F2021", "5235": "#D0BEC7", "5265": "#403A60",
-  "5275": "#595478", "537": "#BBC7D6", "550": "#8DB9CA", "5615": "#5E7461", "5773": "#899064", "611": "#D7C826",
+  "5275": "#595478", "537": "#BBC7D6", "550": "#8DB9CA", "556": "#6FA287", "557": "#85B09A", "558": "#9ABEAA", "5615": "#5E7461", "5773": "#899064", "611": "#D7C826",
   "631": "#3EB1C8", "634": "#005F83", "644": "#9BB8D3", "667": "#7C6992", "699": "#F4C3CC", "709": "#EF6079",
   "721": "#DDA46F", "732": "#623412", "7402": "#ECD898", "7417": "#E04F39", "7455": "#3A5DAE", "7541": "#D9E1E2",
   "7542": "#A4BCC2", "7543": "#98A4AE", "7589": "#5C4738", "7611": "#DDBCB0", "7633": "#C4A4A7", "7639": "#936D73",
@@ -54,7 +55,13 @@ const PMS_HEX: Record<string, string> = {
 };
 
 function normalisePantoneKey(value: string): string {
-  let key = String(value || "").trim().toLowerCase();
+  const raw = String(value || "").trim().toLowerCase();
+  // Staff often add a friendly description after the PMS reference, e.g.
+  // “PMS 557 C - Sage”. Always prefer the explicit PMS/Pantone code.
+  const explicit = raw.match(/(?:pantone|pms)\s*0*(\d{2,4})\s*(?:solid\s+)?(?:coated|uncoated|[cu])?\b/i);
+  if (explicit?.[1]) return explicit[1];
+
+  let key = raw;
   key = key.replace(/^pantone\s+/i, "").replace(/^pms\s+/i, "");
   key = key.replace(/\s+(?:solid\s+)?(?:coated|uncoated)$/i, "");
   key = key.replace(/\s+[cu]$/i, "");
@@ -77,10 +84,13 @@ export function pmsScreenSwatch(value: string): PmsScreenSwatch {
   return { label, hex: PMS_HEX[lookupKey] ?? null, metallic };
 }
 
-export function pmsScreenSwatches(value: string): PmsScreenSwatch[] {
+export function splitPmsColourEntries(value: string): string[] {
   return String(value || "")
     .split(/\s+[·•]\s+|[,;\n]+/g)
     .map((part) => part.trim())
-    .filter(Boolean)
-    .map(pmsScreenSwatch);
+    .filter(Boolean);
+}
+
+export function pmsScreenSwatches(value: string): PmsScreenSwatch[] {
+  return splitPmsColourEntries(value).map(pmsScreenSwatch);
 }

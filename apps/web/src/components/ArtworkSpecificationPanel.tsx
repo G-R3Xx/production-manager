@@ -43,7 +43,16 @@ function iconStroke(children: ReactNode) {
 function SpecIcon({ icon }: { icon: ArtworkSpecificationIcon }) {
   if (icon === "substrate") return iconStroke(<><path d="M7 18 24 9l17 9-17 9L7 18Z"/><path d="m10 24 14 7 14-7"/><path d="m10 30 14 7 14-7"/></>);
   if (icon === "colour") return iconStroke(<><circle cx="16" cy="17" r="7"/><circle cx="30" cy="17" r="7"/><circle cx="23" cy="30" r="7"/><path d="M10 40h27"/></>);
-  if (icon === "print") return iconStroke(<><path d="M12 10h24v9H12z"/><path d="M8 20h32a3 3 0 0 1 3 3v10H5V23a3 3 0 0 1 3-3Z"/><path d="M12 29h24v9H12z"/><path d="M35 25h2"/></>);
+  if (icon === "print") return iconStroke(<>
+    <path d="M8 15h32l2 5v12H6V20l2-5Z"/>
+    <path d="M13 20h22"/>
+    <path d="M15 24h18"/>
+    <path d="M16 25v13h16V25"/>
+    <path d="M10 32v7M38 32v7"/>
+    <path d="M7 13h9v2H7z"/>
+    <path d="M35 18h4v4h-4z"/>
+    <circle cx="39" cy="26" r="1" fill="currentColor" stroke="none"/>
+  </>);
   if (icon === "laminate") return iconStroke(<><circle cx="13" cy="15" r="6"/><path d="M19 15h17a5 5 0 0 1 5 5v3"/><path d="M8 26h29v12H8z"/><path d="M13 21v5"/></>);
   if (icon === "backing") return iconStroke(<><path d="M8 12h27v20H8z"/><path d="m14 36 26-20"/><path d="M35 12h5v5"/><path d="M8 32v5h5"/></>);
   if (icon === "cut") return iconStroke(<><path d="M8 31c7-10 13-15 21-15 4 0 8 2 11 5" strokeDasharray="4 4"/><path d="M30 10 18 37"/><path d="M25 11h10l-5 8"/></>);
