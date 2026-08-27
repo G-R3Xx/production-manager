@@ -1,4 +1,5 @@
 import type { ArtworkSpecificationItem, ArtworkSpecificationSnapshot } from "@/components/ArtworkSpecificationPanel";
+export type { ArtworkSpecificationItem, ArtworkSpecificationSnapshot } from "@/components/ArtworkSpecificationPanel";
 
 type QuoteLineLike = {
   id?: string | null;
