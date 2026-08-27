@@ -6,6 +6,7 @@ import { pool } from "@production-manager/db";
 import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
 import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, type ArtworkSpecificationSnapshot } from "@/lib/artworkSpecification";
+import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
 
 export type QuoteDraftRecord = {
   id: string;
@@ -236,12 +237,21 @@ let artworkApprovalSchemaReady = false;
 let artworkApprovalSchemaPromise: Promise<void> | null = null;
 let quoteLineClientResponseSchemaReady = false;
 let quoteLineClientResponseSchemaPromise: Promise<void> | null = null;
+let quoteLineConfigurationSchemaReady = false;
+let quoteLineConfigurationSchemaPromise: Promise<void> | null = null;
 
 async function ensureQuoteLifecycleColumns(): Promise<void> {
   if (!process.env.DATABASE_URL || quoteLifecycleSchemaReady) return;
   if (quoteLifecycleSchemaPromise) return quoteLifecycleSchemaPromise;
 
   quoteLifecycleSchemaPromise = (async () => {
+  if (await relationHasColumns("sales.quote_drafts", [
+    "quote_number", "public_token", "job_name", "sent_at", "email_status", "client_purchase_order_number",
+    "myob_order_uid", "myob_order_number", "myob_order_status", "myob_order_payload_json"
+  ])) {
+    quoteLifecycleSchemaReady = true;
+    return;
+  }
   await pool.query(`
     ALTER TABLE sales.quote_drafts
       ADD COLUMN IF NOT EXISTS quote_number varchar(50),
@@ -281,11 +291,23 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
 }
 
 async function ensureQuoteLineConfigurationColumn(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
-  await pool.query(`
-    ALTER TABLE sales.quote_lines
-      ADD COLUMN IF NOT EXISTS configuration_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb
-  `);
+  if (!process.env.DATABASE_URL || quoteLineConfigurationSchemaReady) return;
+  if (quoteLineConfigurationSchemaPromise) return quoteLineConfigurationSchemaPromise;
+  quoteLineConfigurationSchemaPromise = (async () => {
+    if (await relationHasColumns("sales.quote_lines", ["configuration_snapshot"])) {
+      quoteLineConfigurationSchemaReady = true;
+      return;
+    }
+    await pool.query(`
+      ALTER TABLE sales.quote_lines
+        ADD COLUMN IF NOT EXISTS configuration_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb
+    `);
+    quoteLineConfigurationSchemaReady = true;
+  })().catch((error) => {
+    quoteLineConfigurationSchemaPromise = null;
+    throw error;
+  });
+  return quoteLineConfigurationSchemaPromise;
 }
 
 async function ensureQuoteLineClientResponseColumns(): Promise<void> {
@@ -293,6 +315,12 @@ async function ensureQuoteLineClientResponseColumns(): Promise<void> {
   if (quoteLineClientResponseSchemaPromise) return quoteLineClientResponseSchemaPromise;
 
   quoteLineClientResponseSchemaPromise = (async () => {
+  if (await relationHasColumns("sales.quote_lines", [
+    "client_response_status", "client_response_notes", "client_responded_at", "client_revision_excluded"
+  ])) {
+    quoteLineClientResponseSchemaReady = true;
+    return;
+  }
   await pool.query(`
     ALTER TABLE sales.quote_lines
       ADD COLUMN IF NOT EXISTS client_response_status varchar(32) NOT NULL DEFAULT 'pending',
@@ -317,6 +345,15 @@ async function ensureArtworkApprovalTables(): Promise<void> {
   if (artworkApprovalSchemaPromise) return artworkApprovalSchemaPromise;
 
   artworkApprovalSchemaPromise = (async () => {
+  const artworkTablesReady = await relationsExist(["sales.artwork_approvals", "sales.artwork_approval_pages"]);
+  const artworkColumnsReady = artworkTablesReady && await Promise.all([
+    relationHasColumns("sales.artwork_approvals", ["project_name", "revision", "payload_json", "client_signature_data_url"]),
+    relationHasColumns("sales.artwork_approval_pages", ["sign_code", "source_quote_line_id", "proof_revision", "client_response_status", "payload_json"])
+  ]).then((checks) => checks.every(Boolean));
+  if (artworkColumnsReady) {
+    artworkApprovalSchemaReady = true;
+    return;
+  }
   await pool.query(`
     CREATE TABLE IF NOT EXISTS sales.artwork_approvals (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

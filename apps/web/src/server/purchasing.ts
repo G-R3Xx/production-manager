@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
 
 export type PurchaseOrderStatus = "draft" | "ordered" | "received" | "cancelled";
 
@@ -58,8 +59,24 @@ export type PurchasingDefaults = {
 };
 
 let purchasingSchemaReady = false;
+let purchasingSchemaPromise: Promise<void> | null = null;
 export async function ensurePurchasingSchema(): Promise<void> {
   if (purchasingSchemaReady || !process.env.DATABASE_URL) return;
+  if (purchasingSchemaPromise) return purchasingSchemaPromise;
+  purchasingSchemaPromise = (async () => {
+    const tablesReady = await relationsExist([
+      "purchasing.purchase_orders", "purchasing.purchase_order_lines",
+      "purchasing.purchase_order_documents", "purchasing.purchase_order_events"
+    ]);
+    const columnsReady = tablesReady && await Promise.all([
+      relationHasColumns("purchasing.purchase_orders", ["myob_sync_status", "email_status", "sent_at"]),
+      relationHasColumns("catalog.materials", ["myob_uid", "myob_payload_json"]),
+      relationHasColumns("app.tenant_settings", ["myob_purchase_expense_account_uid", "myob_purchase_tax_code_uid"])
+    ]).then((checks) => checks.every(Boolean));
+    if (columnsReady) {
+      purchasingSchemaReady = true;
+      return;
+    }
   await pool.query(`
     ALTER TYPE external_entity_type ADD VALUE IF NOT EXISTS 'material';
     ALTER TYPE external_entity_type ADD VALUE IF NOT EXISTS 'purchase_order';
@@ -167,7 +184,12 @@ export async function ensurePurchasingSchema(): Promise<void> {
     WHERE myob_uid IS NOT NULL
       AND myob_sync_status='not_synced';
   `);
-  purchasingSchemaReady = true;
+    purchasingSchemaReady = true;
+  })().catch((error) => {
+    purchasingSchemaPromise = null;
+    throw error;
+  });
+  return purchasingSchemaPromise;
 }
 
 function asObject(value: unknown): Record<string, unknown> {

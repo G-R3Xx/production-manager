@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { relationHasColumns } from "@/server/schema-readiness";
 
 export type SupplierRecord = {
   id: string;
@@ -19,14 +20,26 @@ export type SupplierRecord = {
 };
 
 let supplierPurchasingSchemaReady = false;
+let supplierPurchasingSchemaPromise: Promise<void> | null = null;
 
 export async function ensureSupplierPurchasingSchema(): Promise<void> {
   if (supplierPurchasingSchemaReady || !process.env.DATABASE_URL) return;
+  if (supplierPurchasingSchemaPromise) return supplierPurchasingSchemaPromise;
+  supplierPurchasingSchemaPromise = (async () => {
+    if (await relationHasColumns("app.suppliers", ["purchase_order_email"])) {
+      supplierPurchasingSchemaReady = true;
+      return;
+    }
   await pool.query(`
     ALTER TABLE app.suppliers
       ADD COLUMN IF NOT EXISTS purchase_order_email varchar(320);
   `);
-  supplierPurchasingSchemaReady = true;
+    supplierPurchasingSchemaReady = true;
+  })().catch((error) => {
+    supplierPurchasingSchemaPromise = null;
+    throw error;
+  });
+  return supplierPurchasingSchemaPromise;
 }
 
 function parseJsonObject(value: unknown): Record<string, unknown> {

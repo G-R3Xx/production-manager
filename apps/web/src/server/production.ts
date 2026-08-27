@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
 
 export type ProductionJobRecord = {
   id: string;
@@ -538,8 +539,26 @@ function buildInstallSchedulerProductionDetails(row: {
   return { itemSummary, description: lines.join("\n"), substrateSummary: substrate, printSummary: print, laminateSummary: laminate, finishingDetails: finishings };
 }
 
+let productionSchemaReady = false;
+let productionSchemaPromise: Promise<void> | null = null;
+
 export async function ensureProductionTables(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL || productionSchemaReady) return;
+  if (productionSchemaPromise) return productionSchemaPromise;
+
+  productionSchemaPromise = (async () => {
+    const tablesReady = await relationsExist([
+      "production.production_jobs", "production.production_items", "production.production_steps"
+    ]);
+    const columnsReady = tablesReady && await Promise.all([
+      relationHasColumns("production.production_jobs", ["dispatch_type", "source_type", "external_order_id", "linked_customer_id", "payload_json"]),
+      relationHasColumns("production.production_items", ["source_quote_line_id", "production_type", "print_ready_url", "payload_json"]),
+      relationHasColumns("production.production_steps", ["assignee_profile_ids", "due_date", "assignment_source", "assignment_process_key"])
+    ]).then((checks) => checks.every(Boolean));
+    if (columnsReady) {
+      productionSchemaReady = true;
+      return;
+    }
 
   await pool.query(`CREATE SCHEMA IF NOT EXISTS production`);
 
@@ -709,6 +728,12 @@ export async function ensureProductionTables(): Promise<void> {
     CREATE INDEX IF NOT EXISTS production_steps_job_sort_idx
       ON production.production_steps (job_id, item_id, sort_order, created_at)
   `);
+    productionSchemaReady = true;
+  })().catch((error) => {
+    productionSchemaPromise = null;
+    throw error;
+  });
+  return productionSchemaPromise;
 }
 
 function productionJobSelectSql(): string {

@@ -58,8 +58,8 @@ export function AlertsPopover({ initialNotifications, initialUnreadCount }: { in
   }, []);
 
   useEffect(() => {
-    const initialTimer = window.setTimeout(() => void refreshAlerts(), 500);
-    const timer = window.setInterval(() => void refreshAlerts(), 30_000);
+    const initialTimer = window.setTimeout(() => void refreshAlerts(), 6_000);
+    const timer = window.setInterval(() => void refreshAlerts(), 60_000);
     const onFocus = () => void refreshAlerts();
     window.addEventListener("focus", onFocus);
     return () => {

@@ -3,6 +3,7 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 import { createNotificationForTenant } from "@/server/notifications";
+import { relationHasColumns } from "@/server/schema-readiness";
 
 
 export type EnquiryCorrespondenceRecord = {
@@ -127,6 +128,21 @@ export async function reconcileEnquiryWorkflowStatusesForTenant(tenantId: string
         END
     WHERE e.tenant_id = $1::uuid
       AND e.status <> 'deleted'
+      AND (
+        (e.status <> 'converted' AND EXISTS (
+          SELECT 1 FROM sales.quote_drafts accepted_q
+          WHERE accepted_q.tenant_id = e.tenant_id
+            AND accepted_q.enquiry_id = e.id
+            AND accepted_q.status = 'accepted'
+        ))
+        OR
+        (e.status IN ('new','survey_requested') AND EXISTS (
+          SELECT 1 FROM sales.quote_drafts active_q
+          WHERE active_q.tenant_id = e.tenant_id
+            AND active_q.enquiry_id = e.id
+            AND active_q.status <> 'deleted'
+        ))
+      )
   `, [tenantId]);
 }
 
@@ -233,7 +249,23 @@ export async function updateEnquiryStatusForTenant(tenantId: string, enquiryId: 
 }
 
 
+let enquiryCorrespondenceSchemaReady = false;
+let enquiryCorrespondenceSchemaPromise: Promise<void> | null = null;
+
 export async function ensureEnquiryCorrespondenceTable(): Promise<void> {
+  if (!process.env.DATABASE_URL || enquiryCorrespondenceSchemaReady) return;
+  if (enquiryCorrespondenceSchemaPromise) return enquiryCorrespondenceSchemaPromise;
+
+  enquiryCorrespondenceSchemaPromise = (async () => {
+    if (await relationHasColumns("app.enquiry_correspondence", [
+      "id", "tenant_id", "enquiry_id", "file_name", "file_url", "storage_path",
+      "mime_type", "size_bytes", "uploaded_by", "preview_kind", "email_subject",
+      "email_from", "email_to", "email_date", "body_preview", "created_at"
+    ])) {
+      enquiryCorrespondenceSchemaReady = true;
+      return;
+    }
+
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app.enquiry_correspondence (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -274,6 +306,12 @@ export async function ensureEnquiryCorrespondenceTable(): Promise<void> {
       ADD COLUMN IF NOT EXISTS email_date text,
       ADD COLUMN IF NOT EXISTS body_preview text
   `);
+    enquiryCorrespondenceSchemaReady = true;
+  })().catch((error) => {
+    enquiryCorrespondenceSchemaPromise = null;
+    throw error;
+  });
+  return enquiryCorrespondenceSchemaPromise;
 }
 
 export async function listEnquiryCorrespondenceForTenant(tenantId: string): Promise<EnquiryCorrespondenceRecord[]> {

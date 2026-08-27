@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { relationHasColumns } from "@/server/schema-readiness";
 
 export type QuoteSizePreset = {
   label: string;
@@ -97,8 +98,22 @@ function normaliseSizePresetArray(value: unknown, fallback: QuoteSizePreset[]): 
   return cleaned.length > 0 ? cleaned : fallback;
 }
 
+let pricingSettingsSchemaReady = false;
+let pricingSettingsSchemaPromise: Promise<void> | null = null;
+
 async function ensurePricingSettingsColumns(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL || pricingSettingsSchemaReady) return;
+  if (pricingSettingsSchemaPromise) return pricingSettingsSchemaPromise;
+  pricingSettingsSchemaPromise = (async () => {
+    if (await relationHasColumns("app.tenant_settings", [
+      "global_markup_multiplier", "access_equipment_markup_multiplier", "global_profit_multiplier",
+      "quote_labour_rate", "quote_ink_rate_per_sqm", "quote_ink_billing_increment_sqm",
+      "quote_mono_rate_per_sqm", "myob_price_level_factors_json", "company_logo_url",
+      "company_logo_storage_path", "quote_signage_size_presets_json", "quote_small_size_presets_json"
+    ])) {
+      pricingSettingsSchemaReady = true;
+      return;
+    }
 
   await pool.query(`
     ALTER TABLE app.tenant_settings
@@ -115,6 +130,12 @@ async function ensurePricingSettingsColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS quote_signage_size_presets_json jsonb NOT NULL DEFAULT '${sizePresetDefaultSql(defaultSignageSizePresets)}'::jsonb,
       ADD COLUMN IF NOT EXISTS quote_small_size_presets_json jsonb NOT NULL DEFAULT '${sizePresetDefaultSql(defaultSmallSizePresets)}'::jsonb
   `);
+    pricingSettingsSchemaReady = true;
+  })().catch((error) => {
+    pricingSettingsSchemaPromise = null;
+    throw error;
+  });
+  return pricingSettingsSchemaPromise;
 }
 
 export async function getCompanySettingsByTenantId(tenantId: string): Promise<CompanySettingsRecord | null> {

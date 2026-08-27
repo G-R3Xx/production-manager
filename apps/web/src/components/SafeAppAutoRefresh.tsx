@@ -13,9 +13,10 @@ import {
 // The global pulse is only a safety net for cross-user/background changes.
 // Page-specific status watchers can poll faster without making every screen
 // scan the whole workflow database several times per second.
-const PULSE_INTERVAL_MS = 15_000;
-const MIN_PULSE_CHECK_GAP_MS = 8_000;
-const FALLBACK_REFRESH_MS = 90_000;
+const PULSE_INTERVAL_MS = 30_000;
+const MIN_PULSE_CHECK_GAP_MS = 15_000;
+const FALLBACK_REFRESH_MS = 180_000;
+const INITIAL_PULSE_DELAY_MS = 8_000;
 
 export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
   const router = useRouter();
@@ -98,7 +99,7 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
 
     // Let the requested page paint first; the global change detector is not
     // part of the critical navigation path.
-    const initialTimer = window.setTimeout(() => void checkPulse(), 750);
+    const initialTimer = window.setTimeout(() => void checkPulse(), INITIAL_PULSE_DELAY_MS);
     const timer = isProductionBoard ? null : window.setInterval(() => void checkPulse(), PULSE_INTERVAL_MS);
     window.addEventListener("focus", checkWhenVisible);
     window.addEventListener("pageshow", checkWhenVisible);

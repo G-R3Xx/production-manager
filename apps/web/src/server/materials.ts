@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { relationHasColumns } from "@/server/schema-readiness";
 
 export type MaterialRecord = {
   id: string;
@@ -69,8 +70,21 @@ export type UpdateMaterialInput = CreateMaterialInput & {
   id: string;
 };
 
+let materialPricingSchemaReady = false;
+let materialPricingSchemaPromise: Promise<void> | null = null;
+
 export async function ensureMaterialPricingColumns(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL || materialPricingSchemaReady) return;
+  if (materialPricingSchemaPromise) return materialPricingSchemaPromise;
+  materialPricingSchemaPromise = (async () => {
+    if (await relationHasColumns("catalog.materials", [
+      "material_group", "minimum_billable_sheet_fraction", "roll_billing_increment_metres",
+      "reverse_printable", "used_for_backing", "customer_facing_name", "myob_uid",
+      "myob_display_id", "myob_sync_state", "myob_payload_json"
+    ])) {
+      materialPricingSchemaReady = true;
+      return;
+    }
 
   await pool.query(`
     ALTER TABLE catalog.materials
@@ -85,6 +99,12 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS myob_sync_state varchar(30),
       ADD COLUMN IF NOT EXISTS myob_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
+    materialPricingSchemaReady = true;
+  })().catch((error) => {
+    materialPricingSchemaPromise = null;
+    throw error;
+  });
+  return materialPricingSchemaPromise;
 }
 
 function normalizeMaterialType(value: string): string {

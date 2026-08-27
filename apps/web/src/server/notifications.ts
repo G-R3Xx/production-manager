@@ -2,6 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { pool } from "@production-manager/db";
+import { relationHasColumns } from "@/server/schema-readiness";
 
 export type AppNotificationRecord = {
   id: string;
@@ -22,6 +23,13 @@ export async function ensureNotificationSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || notificationSchemaReady) return;
   if (notificationSchemaPromise) return notificationSchemaPromise;
   notificationSchemaPromise = (async () => {
+    if (await relationHasColumns("app.notifications", [
+      "id", "tenant_id", "event_type", "title", "message", "href", "is_read",
+      "payload_json", "created_at", "read_at"
+    ])) {
+      notificationSchemaReady = true;
+      return;
+    }
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app.notifications (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -223,7 +231,6 @@ type AppPulseCacheEntry = { value: string; expiresAt: number; pending?: Promise<
 const appPulseValueCache = new Map<string, AppPulseCacheEntry>();
 
 async function computeAppActivityPulseForTenant(tenantId: string): Promise<string> {
-  await ensureNotificationSchema();
   let sources: AppPulseSource[];
   try {
     sources = await availableAppPulseSources();

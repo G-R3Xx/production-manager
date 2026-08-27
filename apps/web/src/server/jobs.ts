@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
 import { after } from "next/server";
 import { listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
 import { listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
@@ -167,6 +168,16 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
   if (schemaPromise) return schemaPromise;
 
   schemaPromise = (async () => {
+    const tablesReady = await relationsExist(["app.jobs", "app.job_process_assignments", "app.job_tasks"]);
+    const columnsReady = tablesReady && await Promise.all([
+      relationHasColumns("app.jobs", ["production_job_id", "current_stage", "dispatch_type", "invoice_status"]),
+      relationHasColumns("app.job_process_assignments", ["assignee_profile_ids", "due_date"]),
+      relationHasColumns("app.job_tasks", ["assignee_profile_ids", "process_key", "system_key"])
+    ]).then((checks) => checks.every(Boolean));
+    if (columnsReady) {
+      schemaReady = true;
+      return;
+    }
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app.jobs (
         id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
