@@ -349,8 +349,23 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
   const cards = await listProductionBoardCardsForTenant(tenantId);
 
   const fullscreenRequested = readParam(params, "display") === "fullscreen";
-  const grouped = new Map<ProductionBoardColumnKey, ProductionBoardCardRecord[]>(columns.map((column) => [column.key, []]));
-  cards.forEach((card) => grouped.get(boardColumnForCard(card))?.push(card));
+  const grouped = new Map<ProductionBoardColumnKey, Array<{ jobId: string; cards: ProductionBoardCardRecord[] }>>(
+    columns.map((column) => [column.key, []])
+  );
+
+  cards.forEach((card) => {
+    const columnKey = boardColumnForCard(card);
+    const columnGroups = grouped.get(columnKey);
+    if (!columnGroups) return;
+    const existing = columnGroups.find((group) => group.jobId === card.jobId);
+    if (existing) {
+      existing.cards.push(card);
+    } else {
+      columnGroups.push({ jobId: card.jobId, cards: [card] });
+    }
+  });
+
+  const activeJobCount = new Set(cards.map((card) => card.jobId)).size;
 
   return (
     <div
@@ -389,7 +404,7 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
           <p style={{ margin: 0, color: "#cbd5e1", lineHeight: 1.45 }}>Live large-screen view · auto-refreshes every 45 seconds</p>
         </div>
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-          <span style={{ borderRadius: 999, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(147,197,253,0.35)", color: "#dbeafe", padding: "9px 13px", fontSize: 12, fontWeight: 950 }}>{cards.length} active card{cards.length === 1 ? "" : "s"}</span>
+          <span style={{ borderRadius: 999, background: "rgba(37,99,235,0.2)", border: "1px solid rgba(147,197,253,0.35)", color: "#dbeafe", padding: "9px 13px", fontSize: 12, fontWeight: 950 }}>{activeJobCount} active job{activeJobCount === 1 ? "" : "s"}</span>
           <span style={{ borderRadius: 999, background: "rgba(255,255,255,0.08)", border: "1px solid rgba(255,255,255,0.16)", color: "#e2e8f0", padding: "9px 13px", fontSize: 12, fontWeight: 900 }}>Updated {new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", hour: "numeric", minute: "2-digit" }).format(new Date())}</span>
           <a href="/production" style={{ borderRadius: 999, background: "#ffffff", color: "#0f172a", padding: "10px 14px", fontSize: 13, fontWeight: 950, textDecoration: "none" }}>Exit board</a>
         </div>
@@ -399,82 +414,121 @@ export default async function ProductionBoardPage({ searchParams }: PageProps) {
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(5, minmax(250px, 1fr))", gap: 14, alignItems: "start", overflowX: "auto", paddingBottom: 8, minHeight: "calc(100vh - 118px)" }}>
         {columns.map((column) => {
-          const columnCards = grouped.get(column.key) ?? [];
+          const jobGroups = grouped.get(column.key) ?? [];
           return (
             <div key={column.key} style={{ minWidth: 230, border: "1px solid rgba(148,163,184,0.24)", borderRadius: 24, background: "linear-gradient(180deg, rgba(15,23,42,0.98) 0%, rgba(15,23,42,0.88) 100%)", padding: 12, display: "grid", gap: 12, boxShadow: "0 18px 48px rgba(15,23,42,0.18)" }}>
               <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: 10, borderBottom: "1px solid rgba(148,163,184,0.18)", paddingBottom: 10 }}>
                 <div style={{ display: "grid", gap: 4 }}>
-                  <h2 style={{ margin: 0, fontSize: 19 }}>{column.title} <span style={{ color: "#94a3b8", fontSize: 13 }}>{columnCards.length}</span></h2>
+                  <h2 style={{ margin: 0, fontSize: 19 }}>{column.title} <span style={{ color: "#94a3b8", fontSize: 13 }}>{jobGroups.length}</span></h2>
                   <p style={{ margin: 0, color: "#94a3b8", fontSize: 12, lineHeight: 1.35 }}>{column.hint}</p>
                 </div>
                 <span style={{ width: 10, height: 10, borderRadius: 999, background: column.accent, boxShadow: `0 0 0 5px ${column.accent}22`, marginTop: 6 }} />
               </div>
 
               <div style={{ display: "grid", gap: 10 }}>
-                {columnCards.map((card) => {
-                  const tone = priorityTone(card.priority);
-                  const logoUrl = card.clientLogoUrl ?? "";
-                  const progress = Number(card.stepsTotal) > 0 ? `${card.stepsDone}/${card.stepsTotal}` : "No steps";
-                  const print = printMethod(card);
-                  const laminate = laminateName(card);
-                  const substrate = substrateDetail(card);
-                  const finishings = finishingDetails(card, laminate);
-                  const nextStep = nextStepSummary(card, laminate);
+                {jobGroups.map((group) => {
+                  const firstCard = group.cards[0];
+                  if (!firstCard) return null;
+                  const tone = priorityTone(firstCard.priority);
+                  const logoUrl = firstCard.clientLogoUrl ?? "";
+                  const totalSteps = group.cards.reduce((sum, card) => sum + (Number(card.stepsTotal) || 0), 0);
+                  const doneSteps = group.cards.reduce((sum, card) => sum + (Number(card.stepsDone) || 0), 0);
+                  const progress = totalSteps > 0 ? `${doneSteps}/${totalSteps}` : "No steps";
+                  const latestUpdated = group.cards
+                    .map((card) => card.updatedAt)
+                    .filter(Boolean)
+                    .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] ?? firstCard.updatedAt;
+                  const itemCountLabel = group.cards.length > 1 ? `${group.cards.length} line items` : "1 line item";
+
                   return (
-                    <article key={card.id} style={boardCardStyle}>
+                    <article key={`${column.key}:${group.jobId}`} style={boardCardStyle}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
                         <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-                          <ClientLogoBadge logoUrl={logoUrl} name={card.clientName} size={42} radius={12} padding={3} />
+                          <ClientLogoBadge logoUrl={logoUrl} name={firstCard.clientName} size={42} radius={12} padding={3} />
                           <div style={{ minWidth: 0, display: "grid", gap: 2 }}>
-                            <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.clientName}</strong>
-                            <span style={{ color: "#cbd5e1", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{card.quoteNumber ?? "Production"}</span>
+                            <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{firstCard.clientName}</strong>
+                            <span style={{ color: "#cbd5e1", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {[firstCard.quoteNumber ?? "Production", firstCard.projectName].filter(Boolean).join(" · ")}
+                            </span>
+                            {group.cards.length > 1 ? <span style={{ color: "#93c5fd", fontSize: 11, fontWeight: 900 }}>{itemCountLabel}</span> : null}
                           </div>
                         </div>
                         {tone ? <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "4px 8px", fontSize: 11, fontWeight: 950 }}>{tone.label}</span> : null}
                       </div>
 
-                      <div style={{ display: "grid", gap: 5, fontSize: 13, lineHeight: 1.45 }}>
-                        <p style={{ margin: 0, color: "#e2e8f0", fontWeight: 950 }}>Signage details:</p>
-                        <p style={{ margin: 0, color: "#f8fafc", fontWeight: 900 }}>{boardItemSummary(card)}</p>
-                        {substrate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Substrate:</strong> {substrate}</p> : null}
-                        {print ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Print:</strong> {print}</p> : null}
-                        {laminate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Laminate:</strong> {laminate}</p> : null}
-                        {finishings.map((detail) => <p key={detail} style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>{/eyelet/i.test(detail) ? "Eyelets:" : "Finishing:"}</strong> {detail.replace(/^Eyelets?:\s*/i, "")}</p>)}
-                        <div
-                          style={{
-                            marginTop: 8,
-                            borderRadius: 14,
-                            padding: "10px 12px",
-                            background: "linear-gradient(135deg, rgba(250,204,21,0.98) 0%, rgba(245,158,11,0.95) 100%)",
-                            color: "#111827",
-                            border: "1px solid rgba(254,240,138,0.85)",
-                            boxShadow: "0 12px 24px rgba(245,158,11,0.22)",
-                            display: "grid",
-                            gap: 2
-                          }}
-                        >
-                          <span style={{ fontSize: 10, fontWeight: 1000, letterSpacing: "0.12em", textTransform: "uppercase", opacity: 0.78 }}>Next step</span>
-                          <strong style={{ fontSize: 15, lineHeight: 1.2 }}>{nextStep}</strong>
-                        </div>
+                      <div style={{ display: "grid", gap: 10 }}>
+                        {group.cards.map((card, index) => {
+                          const lineProgress = Number(card.stepsTotal) > 0 ? `${card.stepsDone}/${card.stepsTotal}` : "No steps";
+                          const print = printMethod(card);
+                          const laminate = laminateName(card);
+                          const substrate = substrateDetail(card);
+                          const finishings = finishingDetails(card, laminate);
+                          const nextStep = nextStepSummary(card, laminate);
+
+                          return (
+                            <section
+                              key={card.id}
+                              style={{
+                                display: "grid",
+                                gap: 7,
+                                paddingTop: index === 0 ? 2 : 11,
+                                borderTop: index === 0 ? "none" : "1px solid rgba(148,163,184,0.20)"
+                              }}
+                            >
+                              <div style={{ display: "grid", gap: 4, fontSize: 13, lineHeight: 1.42 }}>
+                                <p style={{ margin: 0, color: "#f8fafc", fontWeight: 950 }}>{boardItemSummary(card)}</p>
+                                {substrate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Substrate:</strong> {substrate}</p> : null}
+                                {print ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Print:</strong> {print}</p> : null}
+                                {laminate ? <p style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>Laminate:</strong> {laminate}</p> : null}
+                                {finishings.map((detail) => <p key={detail} style={{ margin: 0, color: "#cbd5e1" }}><strong style={{ color: "#f8fafc" }}>{/eyelet/i.test(detail) ? "Eyelets:" : "Finishing:"}</strong> {detail.replace(/^Eyelets?:\s*/i, "")}</p>)}
+                              </div>
+
+                              <div
+                                style={{
+                                  borderRadius: 12,
+                                  padding: "9px 11px",
+                                  background: "linear-gradient(135deg, rgba(250,204,21,0.98) 0%, rgba(245,158,11,0.95) 100%)",
+                                  color: "#111827",
+                                  border: "1px solid rgba(254,240,138,0.85)",
+                                  boxShadow: "0 10px 20px rgba(245,158,11,0.18)",
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  gap: 10,
+                                  alignItems: "center",
+                                  flexWrap: "wrap"
+                                }}
+                              >
+                                <div style={{ display: "grid", gap: 2 }}>
+                                  <span style={{ fontSize: 10, fontWeight: 1000, letterSpacing: "0.12em", textTransform: "uppercase", opacity: 0.78 }}>Next step</span>
+                                  <strong style={{ fontSize: 15, lineHeight: 1.2 }}>{nextStep}</strong>
+                                </div>
+                                {card.nextStepId ? (
+                                  <ProductionStepToggle stepId={card.nextStepId} initialStatus="pending" board />
+                                ) : null}
+                              </div>
+
+                              {group.cards.length > 1 ? (
+                                <div style={{ color: "#64748b", fontSize: 11, textAlign: "right" }}>{lineProgress}</div>
+                              ) : null}
+                            </section>
+                          );
+                        })}
                       </div>
 
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", color: "#94a3b8", fontSize: 12 }}>
-                        <span>Due {formatDate(card.dueDate)}</span>
-                        <span>{card.assignedTo || "Unassigned"}</span>
+                        <span>Due {formatDate(firstCard.dueDate)}</span>
+                        <span>{firstCard.assignedTo || "Unassigned"}</span>
                         <span>{progress}</span>
                       </div>
 
                       <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                        <a href={`/production/${card.jobId}`} style={{ color: "#93c5fd", fontWeight: 950, textDecoration: "none", fontSize: 12 }}>Open job</a>
-                        <span style={{ color: "#64748b", fontSize: 11 }}>Updated {formatUpdated(card.updatedAt)}</span>
-                        {card.nextStepId ? (
-                          <ProductionStepToggle stepId={card.nextStepId} initialStatus="pending" board />
-                        ) : null}
+                        <a href={`/production/${firstCard.jobId}`} style={{ color: "#93c5fd", fontWeight: 950, textDecoration: "none", fontSize: 12 }}>Open job</a>
+                        <span style={{ color: "#64748b", fontSize: 11 }}>Updated {formatUpdated(latestUpdated)}</span>
                       </div>
                     </article>
                   );
                 })}
-                {columnCards.length === 0 ? <div style={{ border: "1px dashed rgba(148,163,184,0.28)", borderRadius: 18, padding: 16, color: "#94a3b8", textAlign: "center", fontSize: 13 }}>{emptyColumnMessage(column.key)}</div> : null}
+                {jobGroups.length === 0 ? <div style={{ border: "1px dashed rgba(148,163,184,0.28)", borderRadius: 18, padding: 16, color: "#94a3b8", textAlign: "center", fontSize: 13 }}>{emptyColumnMessage(column.key)}</div> : null}
               </div>
             </div>
           );
