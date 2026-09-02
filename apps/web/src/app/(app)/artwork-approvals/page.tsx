@@ -23,7 +23,7 @@ import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
 import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision } from "@/lib/artworkSpecification";
 import { AutoSubmitProofInputs } from "./AutoSubmitProofInputs";
-import { ArtworkEmailSendButton } from "./ArtworkEmailSendButton";
+import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 import { ArtworkStatusAutoRefresh } from "./ArtworkStatusAutoRefresh";
 import { ReopenArtworkPageButton } from "./ReopenArtworkPageButton";
 import { PmsColourFields } from "./PmsColourFields";
@@ -520,7 +520,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                     {!readyToSend && selectedApproval.status !== "deleted" ? <div style={{ border: "1px solid #fedf89", background: "#fffaeb", borderRadius: 12, padding: 10, color: "#93370d", fontSize: 11 }}><strong>Not ready to send.</strong> Upload every required proof and sync any missing quote lines first.</div> : null}
                     {selectedApproval.status !== "deleted" ? (
                       <>
-                        {publicUrl && selectedApproval.email ? <form action={emailArtworkApprovalClientAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><ArtworkEmailSendButton disabled={!readyToSend || approved} recipient={selectedApproval.email} alreadySent={sent} /></form> : null}
+                        {publicUrl ? <EmailRecipientModalForm action={emailArtworkApprovalClientAction} hiddenFields={{ approvalId: selectedApproval.id }} defaultEmail={selectedApproval.email} disabled={!readyToSend || approved} variant="artwork" alreadySent={sent} modalTitle={sent ? "Resend artwork approval" : "Email artwork approval"} modalDescription="Confirm or change the email address before Production Manager sends the client link and downloadable artwork proof PDF." submitLabel={sent ? "Resend link + PDF" : "Send link + PDF"} /> : null}
                         <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#98a2b3", fontSize: 9, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}><span style={{ height: 1, background: "#e4e7ec", flex: 1 }} />Other actions<span style={{ height: 1, background: "#e4e7ec", flex: 1 }} /></div>
                         <form action={sendArtworkApprovalFromPageAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", opacity: !readyToSend || approved ? 0.45 : 1 }}>Mark sent without email</button></form>
                         <form action={directApproveArtworkApprovalAction}><input type="hidden" name="approvalId" value={selectedApproval.id} /><button type="submit" disabled={!readyToSend || approved} style={{ ...secondaryButton, width: "100%", color: "#067647", opacity: !readyToSend || approved ? 0.45 : 1 }}>Approve internally</button></form>

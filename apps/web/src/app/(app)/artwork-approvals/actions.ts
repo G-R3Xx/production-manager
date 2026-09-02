@@ -269,9 +269,10 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
   const approval = await getArtworkApprovalById(activeTenant.tenantId, approvalId);
   if (!approval) redirect("/artwork-approvals?error=Artwork%20approval%20not%20found");
 
-  const recipient = String(approval.email ?? "").trim();
+  const requestedRecipient = String(formData.get("recipientEmail") ?? "").trim();
+  const recipient = requestedRecipient || String(approval.email ?? "").trim();
   if (!recipient || !recipient.includes("@")) {
-    redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent("Artwork approval has no valid client email address.")}`);
+    redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent("Enter a valid artwork approval recipient email address.")}`);
   }
 
   const [pages, lines, sourceQuote, company] = await Promise.all([

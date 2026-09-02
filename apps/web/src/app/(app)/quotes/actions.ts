@@ -859,10 +859,11 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
     redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Configure and price every surveyed sign line before emailing the quote.")}`);
   }
 
-  const recipient = String(initialQuote.email ?? "").trim();
+  const requestedRecipient = String(formData.get("recipientEmail") ?? "").trim();
+  const recipient = requestedRecipient || String(initialQuote.email ?? "").trim();
   if (!recipient || !recipient.includes("@")) {
-    await markQuoteEmailFailedForTenant(activeTenant.tenantId, quoteId, { recipient, error: "Quote has no valid client email address." });
-    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Quote has no valid client email address.")}`);
+    await markQuoteEmailFailedForTenant(activeTenant.tenantId, quoteId, { recipient, error: "Enter a valid quote recipient email address." });
+    redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Enter a valid quote recipient email address.")}`);
   }
 
   // Ensure a public identity without changing lifecycle state. The quote only

@@ -20,6 +20,7 @@ import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
 import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
 import { getProductionJobForQuote } from "@/server/production";
 import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondencePreview";
+import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -834,11 +835,17 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         </form>
                       )}
                       {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Open client quote</a> : null}
-                      {selectedQuote.email ? (
-                        <form action={emailQuoteAction}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <button type="submit" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #0f766e", background: "#0f766e", color: "#fff", fontWeight: 950, padding: "0 14px" }}>{selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send client link + PDF"}</button>
-                        </form>
+                      {selectedQuote.status !== "deleted" ? (
+                        <EmailRecipientModalForm
+                          action={emailQuoteAction}
+                          hiddenFields={{ quoteId: selectedQuote.id }}
+                          defaultEmail={selectedQuote.email}
+                          variant="quote"
+                          alreadySent={selectedQuote.emailStatus === "sent"}
+                          modalTitle={selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}
+                          modalDescription="Confirm or change the email address before Production Manager sends the online quote link and downloadable PDF copy."
+                          submitLabel={selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send link + PDF"}
+                        />
                       ) : null}
                       {selectedQuote.status !== "accepted" && selectedQuote.status !== "deleted" ? (
                         <form action={markQuoteAcceptedManuallyAction}>
