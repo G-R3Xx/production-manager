@@ -11,6 +11,7 @@ import { ArtworkProofPreview } from "./ArtworkProofPreview";
 import { ArtworkPageResponseControls } from "./ArtworkPageResponseControls";
 import { ArtworkDecisionNavLink, ArtworkDecisionProgressBanner, ArtworkDecisionProvider, ArtworkDecisionStatusPill } from "./ArtworkDecisionContext";
 import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
+import { PrintArtworkApprovalButton } from "./PrintArtworkApprovalButton";
 import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
 import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision } from "@/lib/artworkSpecification";
 
@@ -220,6 +221,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
             body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
             .public-artwork-proof, .public-artwork-head, article, section, aside, svg, svg *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
             article{break-inside:avoid-page}
+            .artwork-print-hide{display:none!important}
           }
         `}</style>
         {message ? <div style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 13, padding: "11px 14px", fontWeight: 850 }}>{message}</div> : null}
@@ -234,6 +236,7 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
               <div style={{ display: "flex", gap: 9, alignItems: "center", marginTop: 8 }}><ClientLogoBadge logoUrl={clientLogoUrl} name={approval.clientName} size={36} radius={9} padding={3} /><span style={{ color: "#475467", fontSize: 13 }}>{approval.clientName}{approval.contactName ? ` · ${approval.contactName}` : ""}</span></div>
             </div>
             <div style={{ display: "grid", justifyItems: "end", gap: 6 }}>
+              <PrintArtworkApprovalButton />
               <span style={{ borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "6px 10px", fontSize: 11, fontWeight: 950 }}>{tone.label}</span>
               <strong style={{ fontSize: 13 }}>{sourceQuote?.quoteNumber || approval.drawingNumber || "Artwork proof"}</strong>
               <span style={{ color: "#667085", fontSize: 12 }}>Revision {approval.revision || "A"}{approval.sentAt ? ` · sent ${formatDate(approval.sentAt)}` : ""}</span>
