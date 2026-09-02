@@ -1,7 +1,9 @@
 import "server-only";
 
 import { inflateSync, deflateSync } from "node:zlib";
-import type { ArtworkApprovalPageRecord, ArtworkApprovalRecord, QuoteDraftRecord } from "@/server/quotes";
+import type { ArtworkApprovalPageRecord, ArtworkApprovalRecord, QuoteDraftRecord, QuoteLineRecord } from "@/server/quotes";
+import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision, type ArtworkSpecificationItem } from "@/lib/artworkSpecification";
+import { pmsScreenSwatches } from "@/lib/pmsColour";
 
 const A4_PORTRAIT: [number, number] = [595.28, 841.89];
 const A4_LANDSCAPE: [number, number] = [841.89, 595.28];
@@ -324,27 +326,261 @@ async function fetchBinary(url: string): Promise<{ bytes: Uint8Array; contentTyp
   return { bytes: new Uint8Array(arrayBuffer), contentType: response.headers.get("content-type") || "application/octet-stream" };
 }
 
-function drawImagePageContent(image: EmbeddedImage, pageSize: [number, number], title: string, revision: string, proofIndex: number, proofCount: number): string {
-  const [pageW, pageH] = pageSize;
-  const margin = 34;
-  const headerH = 62;
-  const footerH = 32;
-  const availableW = pageW - margin * 2;
-  const availableH = pageH - margin * 2 - headerH - footerH;
-  const scale = Math.min(availableW / image.width, availableH / image.height);
-  const drawW = image.width * scale;
-  const drawH = image.height * scale;
-  const x = (pageW - drawW) / 2;
-  const y = margin + footerH + (availableH - drawH) / 2;
+function rectStrokeOp(x: number, y: number, width: number, height: number, lineWidth = 0.7, grey = 0.82): string {
+  const g = Math.max(0, Math.min(1, grey));
+  return `${g.toFixed(3)} G ${lineWidth} w ${x.toFixed(1)} ${y.toFixed(1)} ${width.toFixed(1)} ${height.toFixed(1)} re S\n`;
+}
+
+function circleStrokeOp(cx: number, cy: number, radius: number, width = 0.8, grey = 0.1): string {
+  const k = radius * 0.5522847498;
+  const g = Math.max(0, Math.min(1, grey));
+  return `${g.toFixed(3)} G ${width} w ${(cx + radius).toFixed(1)} ${cy.toFixed(1)} m ${(cx + radius).toFixed(1)} ${(cy + k).toFixed(1)} ${(cx + k).toFixed(1)} ${(cy + radius).toFixed(1)} ${cx.toFixed(1)} ${(cy + radius).toFixed(1)} c ${(cx - k).toFixed(1)} ${(cy + radius).toFixed(1)} ${(cx - radius).toFixed(1)} ${(cy + k).toFixed(1)} ${(cx - radius).toFixed(1)} ${cy.toFixed(1)} c ${(cx - radius).toFixed(1)} ${(cy - k).toFixed(1)} ${(cx - k).toFixed(1)} ${(cy - radius).toFixed(1)} ${cx.toFixed(1)} ${(cy - radius).toFixed(1)} c ${(cx + k).toFixed(1)} ${(cy - radius).toFixed(1)} ${(cx + radius).toFixed(1)} ${(cy - k).toFixed(1)} ${(cx + radius).toFixed(1)} ${cy.toFixed(1)} c S\n`;
+}
+
+function hexRgb(value: string | null | undefined): [number, number, number] | null {
+  const match = String(value ?? "").trim().match(/^#([0-9a-f]{6})$/i);
+  if (!match) return null;
+  const hex = match[1]!;
+  return [parseInt(hex.slice(0, 2), 16) / 255, parseInt(hex.slice(2, 4), 16) / 255, parseInt(hex.slice(4, 6), 16) / 255];
+}
+
+function wrappedTextOps(value: string, x: number, y: number, maxChars: number, options?: { size?: number; bold?: boolean; grey?: number; leading?: number; maxLines?: number }): { content: string; endY: number; lines: number } {
+  const size = options?.size ?? 8;
+  const bold = options?.bold ?? false;
+  const grey = options?.grey ?? 0.15;
+  const leading = options?.leading ?? size * 1.28;
+  const maxLines = options?.maxLines ?? 6;
+  const lines = wrapText(value, maxChars).slice(0, maxLines);
   let content = "";
-  content += rectFillOp(0, 0, pageW, pageH, 1, 1, 1);
-  content += textOp("ARTWORK PROOF", margin, pageH - 34, 8, true, 0.38);
-  content += textOp(title || `Proof ${proofIndex}`, margin, pageH - 52, 14, true, 0.08);
-  content += textOp(`Revision ${revision}  |  Proof ${proofIndex} of ${proofCount}`, pageW - 180, pageH - 34, 8, true, 0.38);
-  content += lineOp(margin, pageH - headerH, pageW - margin, pageH - headerH, 0.7, 0.86);
-  content += `q ${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${x.toFixed(2)} ${y.toFixed(2)} cm /Im0 Do Q\n`;
-  content += lineOp(margin, margin + footerH - 3, pageW - margin, margin + footerH - 3, 0.5, 0.9);
-  content += textOp("Please check artwork, spelling, colours, dimensions and supplied content carefully before approval.", margin, margin + 9, 7.4, false, 0.42);
+  lines.forEach((line, index) => { content += textOp(line, x, y - index * leading, size, bold, grey); });
+  return { content, endY: y - lines.length * leading, lines: lines.length };
+}
+
+function specificationForPdf(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined, approval: ArtworkApprovalRecord): ArtworkSpecificationItem[] {
+  const revision = page.proofRevision || approval.revision || "A";
+  const refreshFromSource = approval.status === "draft";
+  const base = line && refreshFromSource
+    ? buildArtworkSpecificationSnapshot(line)
+    : specificationForRevision(page.payloadJson, revision) ?? (line ? buildArtworkSpecificationSnapshot(line) : null);
+  const pms = pmsColoursForRevision(page.payloadJson, revision, refreshFromSource);
+  const snapshot = applyPmsColoursToArtworkSpecification(base, pms);
+  if (snapshot?.items.length) return snapshot.items;
+
+  const fallback: ArtworkSpecificationItem[] = [];
+  if (safeText(page.substrateSummary)) fallback.push({ key: "substrate", label: "Substrate", value: safeText(page.substrateSummary), icon: "substrate" });
+  if (safeText(page.colourSummary)) fallback.push({ key: "colour-fallback", label: "Colour / print", value: safeText(page.colourSummary), icon: "colour" });
+  if (safeText(page.installSummary)) fallback.push({ key: "dispatch-fallback", label: "Pickup / delivery / install", value: safeText(page.installSummary), icon: "install" });
+  if (safeText(page.sizeSummary)) fallback.push({ key: "size", label: "Finished size", value: safeText(page.sizeSummary), icon: "size" });
+  fallback.push({ key: "quantity", label: "Quantity", value: safeText(page.quantity || "1") || "1", icon: "quantity" });
+  return fallback;
+}
+
+function specIconOp(icon: ArtworkSpecificationItem["icon"], x: number, y: number): string {
+  const g = "0.120 G 1.0 w ";
+  if (icon === "substrate") return `${g}${x} ${y + 9} m ${x + 10} ${y + 14} l ${x + 20} ${y + 9} l ${x + 10} ${y + 4} l h S\n${g}${x + 2} ${y + 4} m ${x + 10} ${y} l ${x + 18} ${y + 4} l S\n`;
+  if (icon === "colour") return circleStrokeOp(x + 6, y + 10, 5) + circleStrokeOp(x + 15, y + 10, 5) + circleStrokeOp(x + 10.5, y + 3, 5);
+  if (icon === "print") return `${g}${x + 2} ${y + 5} ${18} ${10} re S\n${g}${x + 6} ${y + 12} ${10} ${6} re S\n${g}${x + 6} ${y} ${10} ${7} re S\n`;
+  if (icon === "laminate") return circleStrokeOp(x + 6, y + 13, 5) + `${g}${x + 11} ${y + 13} m ${x + 20} ${y + 13} l ${x + 20} ${y + 3} l ${x + 4} ${y + 3} l S\n`;
+  if (icon === "backing") return `${g}${x + 2} ${y + 2} ${17} ${15} re S\n${g}${x + 3} ${y + 3} m ${x + 18} ${y + 16} l S\n`;
+  if (icon === "cut") return circleStrokeOp(x + 5, y + 5, 2.5) + circleStrokeOp(x + 11, y + 5, 2.5) + `${g}${x + 7} ${y + 7} m ${x + 18} ${y + 18} l ${x + 10} ${y + 7} m ${x + 18} ${y + 2} l S\n`;
+  if (icon === "mounting") return circleStrokeOp(x + 10, y + 9, 5) + `${g}${x} ${y + 9} m ${x + 5} ${y + 9} l ${x + 15} ${y + 9} m ${x + 20} ${y + 9} l ${x + 10} ${y - 1} m ${x + 10} ${y + 4} l ${x + 10} ${y + 14} m ${x + 10} ${y + 19} l S\n`;
+  if (icon === "delivery") return `${g}${x} ${y + 4} ${13} ${10} re S\n${g}${x + 13} ${y + 4} m ${x + 19} ${y + 4} l ${x + 19} ${y + 10} l ${x + 15} ${y + 14} l ${x + 13} ${y + 14} l S\n` + circleStrokeOp(x + 5, y + 2, 2) + circleStrokeOp(x + 16, y + 2, 2);
+  if (icon === "pickup") return `${g}${x + 2} ${y + 7} ${12} ${10} re S\n${g}${x + 18} ${y + 18} m ${x + 18} ${y} l ${x + 14} ${y + 4} m ${x + 18} ${y} l ${x + 22} ${y + 4} l S\n`;
+  if (icon === "install") return `${g}${x + 2} ${y + 2} m ${x + 19} ${y + 19} l ${x + 14} ${y + 19} m ${x + 19} ${y + 14} l ${x + 2} ${y + 18} m ${x + 18} ${y + 2} l S\n`;
+  if (icon === "size") return `${g}${x + 2} ${y + 3} ${17} ${13} re S\n${g}${x + 2} ${y + 19} m ${x + 19} ${y + 19} l ${x + 2} ${y + 17} m ${x + 2} ${y + 21} l ${x + 19} ${y + 17} m ${x + 19} ${y + 21} l S\n`;
+  if (icon === "quantity") return `${g}${x + 1} ${y + 7} ${14} ${11} re S\n${g}${x + 5} ${y + 3} ${14} ${11} re S\n`;
+  return `${g}${x + 2} ${y + 2} ${17} ${16} re S\n`;
+}
+
+function specItemHeight(item: ArtworkSpecificationItem, panelTextChars = 28): number {
+  if (item.key === "colour") {
+    const count = Math.max(1, pmsScreenSwatches(item.value).length);
+    return 31 + Math.ceil(count / 2) * 17 + (item.detail ? 13 : 0);
+  }
+  const valueLines = Math.min(3, Math.max(1, wrapText(item.value, panelTextChars).length));
+  const detailLines = item.detail ? Math.min(2, wrapText(item.detail, panelTextChars + 5).length) : 0;
+  return Math.max(39, 27 + valueLines * 9 + detailLines * 7);
+}
+
+function drawSpecificationPanel(items: ArtworkSpecificationItem[], x: number, y: number, width: number, height: number): string {
+  let content = "";
+  content += rectFillOp(x, y, width, height, 1, 1, 1);
+  content += rectStrokeOp(x, y, width, height, 0.7, 0.78);
+  const headerH = 27;
+  content += textOp("SIGN SPECIFICATION", x + 10, y + height - 18, 7.2, true, 0.08);
+  content += textOp("APPROVAL SPECIFICATION", x + width - 87, y + height - 18, 5.5, true, 0.52);
+  content += lineOp(x, y + height - headerH, x + width, y + height - headerH, 0.6, 0.82);
+
+  const preferred = items.map((item) => specItemHeight(item));
+  const available = height - headerH;
+  const totalPreferred = preferred.reduce((sum, value) => sum + value, 0);
+  const factor = totalPreferred > available ? Math.max(0.72, available / totalPreferred) : 1;
+  let top = y + height - headerH;
+
+  items.forEach((item, index) => {
+    const itemH = Math.max(30, preferred[index]! * factor);
+    const bottom = top - itemH;
+    if (index) content += lineOp(x, top, x + width, top, 0.5, 0.86);
+    const iconW = 31;
+    content += lineOp(x + iconW, bottom, x + iconW, top, 0.45, 0.88);
+    content += specIconOp(item.icon, x + 5.5, bottom + itemH / 2 - 9);
+    content += textOp(item.label.toUpperCase(), x + iconW + 7, top - 11, 5.7, true, 0.42);
+
+    if (item.key === "colour") {
+      const swatches = pmsScreenSwatches(item.value);
+      const colW = (width - iconW - 15) / 2;
+      swatches.slice(0, 8).forEach((swatch, swatchIndex) => {
+        const col = swatchIndex % 2;
+        const row = Math.floor(swatchIndex / 2);
+        const swatchY = top - 28 - row * 17;
+        const swatchX = x + iconW + 7 + col * colW;
+        const rgb = hexRgb(swatch.hex);
+        if (rgb) content += rectFillOp(swatchX, swatchY, 11, 11, rgb[0], rgb[1], rgb[2]);
+        else content += rectFillOp(swatchX, swatchY, 11, 11, 0.92, 0.93, 0.95);
+        content += rectStrokeOp(swatchX, swatchY, 11, 11, 0.5, 0.62);
+        const label = safeText(swatch.label).slice(0, 18);
+        content += textOp(label, swatchX + 15, swatchY + 2.5, 6.2, true, 0.08);
+      });
+      if (item.detail) {
+        const detail = wrapText(item.detail, 50).slice(0, 2);
+        detail.forEach((line, detailIndex) => { content += textOp(line, x + iconW + 7, bottom + 6 + detailIndex * 6.5, 5.1, false, 0.42); });
+      }
+    } else {
+      const value = wrappedTextOps(item.value, x + iconW + 7, top - 23, 28, { size: 6.8, bold: true, grey: 0.07, leading: 8.2, maxLines: 3 });
+      if (item.detail) {
+        const detailY = Math.max(bottom + 5, value.endY - 1);
+        content += wrappedTextOps(item.detail, x + iconW + 7, detailY, 34, { size: 5.4, grey: 0.42, leading: 6.5, maxLines: 2 }).content;
+      }
+    }
+    top = bottom;
+  });
+  return content;
+}
+
+function approvalStatus(page: ArtworkApprovalPageRecord): string {
+  if (page.clientResponseStatus === "approved") return "Approved";
+  if (page.clientResponseStatus === "changes_requested") return "Changes requested";
+  return "Awaiting decision";
+}
+
+function watermarkTextForPdf(companyName: string, quoteNumber: string): string {
+  const company = safeText(companyName || "Tender Edge").toUpperCase();
+  const quote = safeText(quoteNumber);
+  return quote ? `PROOF ONLY - ${company} - ${quote}` : `PROOF ONLY - ${company}`;
+}
+
+function drawWatermarkOps(text: string, x: number, y: number, width: number, height: number): string {
+  const fontSize = Math.min(26, Math.max(17, width / 23));
+  const cx = x + width / 2;
+  const cy = y + height / 2;
+  const label = safeText(text).slice(0, 72);
+  // Light diagonal text. The online client page uses a proof watermark as well.
+  return `q 0.707 0.707 -0.707 0.707 ${cx.toFixed(1)} ${cy.toFixed(1)} cm 0.820 g BT /F2 ${fontSize.toFixed(1)} Tf 1 0 0 1 ${(-width * 0.31).toFixed(1)} 0 Tm (${pdfEscape(label)}) Tj ET Q\n`;
+}
+
+function buildApprovalSheetContent(input: {
+  image: EmbeddedImage | null;
+  isSourcePdf: boolean;
+  sourcePdfFileName: string;
+  specification: ArtworkSpecificationItem[];
+  page: ArtworkApprovalPageRecord;
+  proofIndex: number;
+  proofCount: number;
+  approval: ArtworkApprovalRecord;
+  companyName: string;
+  quoteNumber: string;
+  projectName: string;
+  revision: string;
+  logoImage: EmbeddedImage | null;
+}): string {
+  const [pageW, pageH] = A4_LANDSCAPE;
+  const margin = 24;
+  const headerY = pageH - 80;
+  const headerH = 57;
+  const articleBottom = 46;
+  const articleTop = headerY - 31;
+  const articleH = articleTop - articleBottom;
+  const articleHeaderH = 35;
+  const contentTop = articleTop - articleHeaderH;
+  const contentBottom = articleBottom + 9;
+  const contentH = contentTop - contentBottom;
+  const specW = 196;
+  const gap = 13;
+  const proofX = margin + 10;
+  const proofW = pageW - margin * 2 - specW - gap - 20;
+  const specX = proofX + proofW + gap;
+  const bodyPad = 10;
+  let content = "";
+
+  content += rectFillOp(0, 0, pageW, pageH, 0.975, 0.981, 0.989);
+  // Header card.
+  content += rectFillOp(margin, headerY, pageW - margin * 2, headerH, 1, 1, 1);
+  content += rectStrokeOp(margin, headerY, pageW - margin * 2, headerH, 0.6, 0.82);
+  if (input.logoImage) {
+    const maxW = 107;
+    const maxH = 35;
+    const scale = Math.min(maxW / input.logoImage.width, maxH / input.logoImage.height);
+    const logoW = input.logoImage.width * scale;
+    const logoH = input.logoImage.height * scale;
+    content += `q ${logoW.toFixed(2)} 0 0 ${logoH.toFixed(2)} ${(margin + 13).toFixed(2)} ${(headerY + (headerH - logoH) / 2).toFixed(2)} cm /Logo Do Q\n`;
+  } else content += textOp(input.companyName, margin + 13, headerY + 23, 13, true, 0.08);
+  content += textOp("ARTWORK APPROVAL", margin + 134, headerY + 39, 6.2, true, 0.42);
+  content += textOp(input.projectName, margin + 134, headerY + 20, 14.5, true, 0.06);
+  const clientLine = [input.approval.clientName, input.approval.contactName].filter(Boolean).join(" - ");
+  content += textOp(clientLine, margin + 134, headerY + 7, 7.2, false, 0.34);
+  content += textOp(approvalStatus(input.page), pageW - margin - 94, headerY + 39, 6.4, true, input.page.clientResponseStatus === "approved" ? 0.28 : 0.42);
+  content += textOp(input.quoteNumber || input.approval.drawingNumber || "Artwork proof", pageW - margin - 145, headerY + 21, 8.2, true, 0.08);
+  content += textOp(`Revision ${input.revision}${input.approval.sentAt ? ` - sent ${dateAu(new Date(input.approval.sentAt))}` : ""}`, pageW - margin - 145, headerY + 7, 6.5, false, 0.42);
+
+  // Client message strip.
+  content += rectFillOp(margin, headerY - 24, pageW - margin * 2, 20, 0.985, 0.989, 0.995);
+  content += rectStrokeOp(margin, headerY - 24, pageW - margin * 2, 20, 0.45, 0.88);
+  const message = safeText(input.approval.clientMessage) || "Please review the proof and approval specification carefully. Reply APPROVED by email, or list the changes required.";
+  content += textOp(message.slice(0, 130), margin + 10, headerY - 17, 6.7, false, 0.31);
+
+  // Proof article.
+  content += rectFillOp(margin, articleBottom, pageW - margin * 2, articleH, 1, 1, 1);
+  content += rectStrokeOp(margin, articleBottom, pageW - margin * 2, articleH, 0.65, 0.80);
+  content += rectFillOp(margin, articleTop - articleHeaderH, pageW - margin * 2, articleHeaderH, 0.988, 0.991, 0.996);
+  content += lineOp(margin, articleTop - articleHeaderH, pageW - margin, articleTop - articleHeaderH, 0.55, 0.86);
+  content += textOp(`${safeText(input.page.signCode || `S${input.proofIndex}`)} - PROOF ${input.proofIndex} OF ${input.proofCount}`, margin + 10, articleTop - 13, 6.2, true, 0.40);
+  content += textOp(safeText(input.page.title || `Artwork proof ${input.proofIndex}`), margin + 10, articleTop - 28, 11.5, true, 0.07);
+  content += textOp(approvalStatus(input.page), pageW - margin - 95, articleTop - 21, 6.4, true, 0.36);
+
+  // Proof area.
+  content += rectFillOp(proofX, contentBottom, proofW, contentH, 0.94, 0.953, 0.968);
+  content += rectStrokeOp(proofX, contentBottom, proofW, contentH, 0.45, 0.88);
+  if (input.image) {
+    const maxW = proofW - bodyPad * 2;
+    const maxH = contentH - bodyPad * 2;
+    const scale = Math.min(maxW / input.image.width, maxH / input.image.height);
+    const drawW = input.image.width * scale;
+    const drawH = input.image.height * scale;
+    const drawX = proofX + (proofW - drawW) / 2;
+    const drawY = contentBottom + (contentH - drawH) / 2;
+    content += `q ${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${drawX.toFixed(2)} ${drawY.toFixed(2)} cm /Im0 Do Q\n`;
+    if (input.page.clientResponseStatus !== "approved") content += drawWatermarkOps(watermarkTextForPdf(input.companyName, input.quoteNumber), drawX, drawY, drawW, drawH);
+  } else if (input.isSourcePdf) {
+    content += rectFillOp(proofX + 34, contentBottom + contentH / 2 - 50, proofW - 68, 100, 1, 1, 1);
+    content += rectStrokeOp(proofX + 34, contentBottom + contentH / 2 - 50, proofW - 68, 100, 0.7, 0.78);
+    content += textOp("PDF PROOF", proofX + 52, contentBottom + contentH / 2 + 18, 9, true, 0.10);
+    content += textOp("Original proof attached separately", proofX + 52, contentBottom + contentH / 2 - 2, 13, true, 0.08);
+    content += wrappedTextOps(input.sourcePdfFileName, proofX + 52, contentBottom + contentH / 2 - 22, 64, { size: 7.2, grey: 0.36, maxLines: 2 }).content;
+  }
+
+  // Specification panel mirrors the online artwork approval.
+  content += drawSpecificationPanel(input.specification, specX, contentBottom, specW, contentH);
+
+  // Decision / email approval strip.
+  const decisionText = input.page.clientResponseStatus === "approved"
+    ? "Decision for this page: Approved"
+    : input.page.clientResponseStatus === "changes_requested"
+      ? "Decision for this page: Changes requested"
+      : "Email approval: reply APPROVED or list the changes required.";
+  content += textOp(decisionText, margin + 10, 27, 6.8, true, 0.27);
+  if (safeText(input.page.notes) && !/auto-created from quote line/i.test(safeText(input.page.notes))) {
+    content += textOp(`Notes: ${safeText(input.page.notes).slice(0, 95)}`, pageW / 2, 27, 6.0, false, 0.42);
+  }
   return content;
 }
 
@@ -358,53 +594,40 @@ function buildCoverContent(input: {
   pageLabels: string[];
   logoImage: EmbeddedImage | null;
 }): string {
-  const [pageW, pageH] = A4_PORTRAIT;
+  const [pageW, pageH] = A4_LANDSCAPE;
   let content = "";
   content += rectFillOp(0, 0, pageW, pageH, 1, 1, 1);
-  content += rectFillOp(0, pageH - 12, pageW, 12, 0.08, 0.66, 0.72);
+  // Minimal landscape cover: the company logo is deliberately the hero.
+  content += rectFillOp(0, pageH - 7, pageW, 7, 0.08, 0.66, 0.72);
+  content += textOp("ARTWORK APPROVAL PROOF PACK", 34, pageH - 38, 7.2, true, 0.40);
+  content += textOp(`Revision ${input.revision}`, pageW - 104, pageH - 38, 7.2, true, 0.40);
+
   if (input.logoImage) {
-    const maxW = 205;
-    const maxH = 55;
+    const maxW = 430;
+    const maxH = 145;
     const scale = Math.min(maxW / input.logoImage.width, maxH / input.logoImage.height);
-    const w = input.logoImage.width * scale;
-    const h = input.logoImage.height * scale;
-    content += `q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} 42 ${(pageH - 55 - h / 2).toFixed(2)} cm /Logo Do Q\n`;
+    const logoW = input.logoImage.width * scale;
+    const logoH = input.logoImage.height * scale;
+    content += `q ${logoW.toFixed(2)} 0 0 ${logoH.toFixed(2)} ${((pageW - logoW) / 2).toFixed(2)} ${(pageH - 255 - logoH / 2).toFixed(2)} cm /Logo Do Q\n`;
   } else {
-    content += textOp(input.companyName, 42, pageH - 72, 18, true, 0.08);
-  }
-  content += textOp("ARTWORK PROOFS", 42, pageH - 142, 11, true, 0.38);
-  content += textOp(input.projectName || "Artwork Approval", 42, pageH - 176, 25, true, 0.06);
-  content += textOp(`Revision ${input.revision}`, 42, pageH - 205, 12, true, 0.2);
-  content += lineOp(42, pageH - 228, pageW - 42, pageH - 228, 0.8, 0.84);
-
-  const rows: Array<[string, string]> = [
-    ["CLIENT", input.clientName],
-    ["CONTACT", input.contactName || "-"],
-    ["QUOTE", input.quoteNumber || "-"],
-    ["ISSUED", dateAu()],
-  ];
-  let y = pageH - 268;
-  for (const [label, value] of rows) {
-    content += textOp(label, 42, y, 8, true, 0.45);
-    content += textOp(value, 150, y, 10, true, 0.12);
-    y -= 28;
+    const company = safeText(input.companyName);
+    content += textOp(company, Math.max(34, pageW / 2 - company.length * 7), pageH - 240, 30, true, 0.07);
   }
 
-  y -= 18;
-  content += textOp("PROOFS INCLUDED", 42, y, 9, true, 0.38);
-  y -= 24;
-  input.pageLabels.slice(0, 18).forEach((label, index) => {
-    content += rectFillOp(42, y - 4, 18, 18, 0.93, 0.96, 1);
-    content += textOp(String(index + 1), 48, y + 1, 8, true, 0.12);
-    content += textOp(label, 72, y + 1, 9.5, index < 18, 0.15);
-    y -= 25;
+  const titleLines = wrapText(input.projectName || "Artwork Approval", 46).slice(0, 2);
+  titleLines.forEach((line, index) => {
+    const approxX = Math.max(34, pageW / 2 - line.length * 5.4);
+    content += textOp(line, approxX, 224 - index * 25, 20, true, 0.06);
   });
-  if (input.pageLabels.length > 18) content += textOp(`+ ${input.pageLabels.length - 18} additional proofs`, 72, y, 9, true, 0.35);
+  const meta = [input.clientName, input.contactName, input.quoteNumber].filter(Boolean).join("  |  ");
+  content += textOp(meta, Math.max(34, pageW / 2 - meta.length * 3.2), 172, 9, true, 0.28);
+  content += textOp(`${input.pageLabels.length} proof${input.pageLabels.length === 1 ? "" : "s"} included  |  Issued ${dateAu()}`, pageW / 2 - 86, 151, 7.5, false, 0.42);
 
-  content += rectFillOp(42, 74, pageW - 84, 72, 0.965, 0.977, 0.992);
-  content += textOp("CLIENT REVIEW", 58, 124, 8, true, 0.1);
-  const reviewLines = wrapText("Please review every proof carefully. If your security settings block the online approval page, reply to the artwork email with APPROVED or list the changes required. Tender Edge staff will record your email approval in Production Manager.", 88).slice(0, 4);
-  reviewLines.forEach((line, index) => { content += textOp(line, 58, 106 - index * 12, 8.4, false, 0.3); });
+  content += rectFillOp(34, 42, pageW - 68, 74, 0.965, 0.977, 0.992);
+  content += rectStrokeOp(34, 42, pageW - 68, 74, 0.5, 0.86);
+  content += textOp("CLIENT REVIEW", 50, 93, 7.0, true, 0.10);
+  const review = "Each following page is a PDF version of the Artwork Approval sheet, including the proof, PMS colour references and sign specification. If your organisation blocks the online link, review this PDF and reply to the email with APPROVED or the changes required.";
+  wrapText(review, 118).slice(0, 3).forEach((line, index) => { content += textOp(line, 50, 77 - index * 12, 8.1, false, 0.29); });
   return content;
 }
 
@@ -412,6 +635,7 @@ export async function buildArtworkProofPdf(input: {
   approval: ArtworkApprovalRecord;
   pages: ArtworkApprovalPageRecord[];
   sourceQuote: QuoteDraftRecord | null;
+  sourceLines?: QuoteLineRecord[];
   companyName: string;
   companyLogoUrl?: string | null;
   fallbackLogoUrl?: string | null;
@@ -474,32 +698,51 @@ export async function buildArtworkProofPdf(input: {
     logoImage,
   });
   const coverStream = pdf.stream("", Buffer.from(coverContent, "ascii"));
-  pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4_PORTRAIT[0]} ${A4_PORTRAIT[1]}] /Resources << ${coverResources} >> /Contents ${coverStream} 0 R >>`));
+  pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4_LANDSCAPE[0]} ${A4_LANDSCAPE[1]}] /Resources << ${coverResources} >> /Contents ${coverStream} 0 R >>`));
 
   const extraPdfAttachments: ProofAttachment[] = [];
-  let imageProofIndex = 0;
+  const sourceLineById = new Map((input.sourceLines ?? []).map((line) => [line.id, line]));
   for (const proof of fetchedProofs) {
+    const proofIndex = input.pages.indexOf(proof.page) + 1;
+    const sourceLine = proof.page.sourceQuoteLineId ? sourceLineById.get(proof.page.sourceQuoteLineId) : null;
+    const specification = specificationForPdf(proof.page, sourceLine, input.approval);
+    let image: EmbeddedImage | null = null;
+    let isSourcePdf = false;
     if (proof.kind === "pdf") {
+      isSourcePdf = true;
       const attachmentName = proof.fileName.toLowerCase().endsWith(".pdf") ? proof.fileName : `${safeFilePart(proof.page.signCode || proof.page.title, "Proof")}.pdf`;
       extraPdfAttachments.push({ fileName: attachmentName, content: proof.bytes });
-      continue;
-    }
-    if (proof.kind !== "jpeg" && proof.kind !== "png") {
+    } else if (proof.kind === "jpeg" || proof.kind === "png") {
+      try {
+        image = proof.kind === "jpeg" ? embedJpeg(pdf, proof.bytes) : embedPng(pdf, proof.bytes);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        notes.push(`${proof.page.signCode || proof.page.title}: ${message}`);
+        continue;
+      }
+    } else {
       notes.push(`${proof.page.signCode || proof.page.title}: ${proof.fileName} is not a PNG, JPG or PDF and could not be added to the PDF pack.`);
       continue;
     }
-    try {
-      const image = proof.kind === "jpeg" ? embedJpeg(pdf, proof.bytes) : embedPng(pdf, proof.bytes);
-      imageProofIndex += 1;
-      const pageSize = image.width > image.height * 1.08 ? A4_LANDSCAPE : A4_PORTRAIT;
-      const title = [proof.page.signCode, proof.page.title].filter(Boolean).join(" - ") || `Artwork proof ${imageProofIndex}`;
-      const content = drawImagePageContent(image, pageSize, title, revision, input.pages.indexOf(proof.page) + 1, input.pages.length);
-      const contentStream = pdf.stream("", Buffer.from(content, "ascii"));
-      pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${pageSize[0]} ${pageSize[1]}] /Resources << /Font << /F1 ${fontId} 0 R /F2 ${boldFontId} 0 R >> /XObject << /Im0 ${image.objectId} 0 R >> >> /Contents ${contentStream} 0 R >>`));
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      notes.push(`${proof.page.signCode || proof.page.title}: ${message}`);
-    }
+
+    const content = buildApprovalSheetContent({
+      image,
+      isSourcePdf,
+      sourcePdfFileName: proof.fileName,
+      specification,
+      page: proof.page,
+      proofIndex,
+      proofCount: input.pages.length,
+      approval: input.approval,
+      companyName: input.companyName,
+      quoteNumber,
+      projectName,
+      revision,
+      logoImage,
+    });
+    const contentStream = pdf.stream("", Buffer.from(content, "ascii"));
+    const xObjects = [logoImage ? `/Logo ${logoImage.objectId} 0 R` : "", image ? `/Im0 ${image.objectId} 0 R` : ""].filter(Boolean).join(" ");
+    pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4_LANDSCAPE[0]} ${A4_LANDSCAPE[1]}] /Resources << /Font << /F1 ${fontId} 0 R /F2 ${boldFontId} 0 R >>${xObjects ? ` /XObject << ${xObjects} >>` : ""} >> /Contents ${contentStream} 0 R >>`));
   }
 
   pdf.set(pagesId, `<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map((id) => `${id} 0 R`).join(" ")}] >>`);

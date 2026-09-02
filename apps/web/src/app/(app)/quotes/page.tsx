@@ -8,7 +8,7 @@ import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
 import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
@@ -812,7 +812,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
                     <div style={{ display: "grid", gap: 6 }}>
                       <strong>Client-facing quote link</strong>
-                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Email Quote sends this link directly from Production Manager and marks the quote as sent automatically.</p>
+                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Send client link + PDF emails both the online approval link and a downloadable PDF copy, then marks the quote as sent automatically.</p>
                       <input readOnly value={quotePublicUrl || "Mark quote as sent to generate/confirm the link"} style={{ ...inputStyle, fontSize: 13 }} />
                     </div>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -837,7 +837,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       {selectedQuote.email ? (
                         <form action={emailQuoteAction}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <button type="submit" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #0f766e", background: "#0f766e", color: "#fff", fontWeight: 950, padding: "0 14px" }}>{selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}</button>
+                          <button type="submit" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #0f766e", background: "#0f766e", color: "#fff", fontWeight: 950, padding: "0 14px" }}>{selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send client link + PDF"}</button>
+                        </form>
+                      ) : null}
+                      {selectedQuote.status !== "accepted" && selectedQuote.status !== "deleted" ? (
+                        <form action={markQuoteAcceptedManuallyAction}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <button type="submit" title="Use when the client approved the attached PDF by email or another offline method." style={{ minHeight: 44, borderRadius: 14, border: "1px solid #86efac", background: "#f0fdf4", color: "#067647", fontWeight: 950, padding: "0 14px" }}>Mark accepted (email/manual)</button>
                         </form>
                       ) : null}
                     </div>

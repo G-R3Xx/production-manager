@@ -24,6 +24,7 @@ import {
   removeArtworkApprovalPageForTenant,
   setQuoteDraftStatusForTenant,
   getQuoteDraftById,
+  respondToQuoteByToken,
   updateQuoteMyobOrderSyncForTenant,
   updateQuoteJobNameForTenant,
   updateQuoteLinkedCustomerForTenant
@@ -35,6 +36,7 @@ import { saveMyobSalesDefaults } from "@/server/myob-sales-settings";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { sendOutboundEmail } from "@/server/outbound-email";
+import { buildQuotePdf } from "@/server/quote-pdf";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -831,6 +833,21 @@ function quoteEmailEscape(value: string | null | undefined): string {
     .replace(/'/g, "&#39;");
 }
 
+export async function markQuoteAcceptedManuallyAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  if (!quoteId) redirect("/quotes?error=Select%20a%20quote%20first");
+
+  await ensureQuotePublicIdentityForTenant(activeTenant.tenantId, quoteId);
+  const quote = await getQuoteDraftById(activeTenant.tenantId, quoteId);
+  if (!quote?.publicToken) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Quote public identity could not be generated.")}`);
+  if (quote.status === "accepted") redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent("Quote is already accepted.")}`);
+
+  await respondToQuoteByToken(quote.publicToken, "accepted", "Approved by client via email/offline response and recorded manually by Production Manager staff.");
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent("Quote marked accepted from client email/offline approval.")}`);
+}
+
 export async function emailQuoteAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const quoteId = String(formData.get("quoteId") ?? "").trim();
@@ -873,6 +890,23 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
     const tenderEdgeHorizontalLogoUrl = `${emailOrigin}/brand/tender-edge-horizontal-logo-2025.png`;
     const isTenderEdge = /tender\s*edge/i.test(companyName);
     const quoteEmailLogoUrl = isTenderEdge ? tenderEdgeHorizontalLogoUrl : company?.companyLogoUrl;
+    const quoteLines = await listQuoteLines(quoteId);
+    let quotePdf: Awaited<ReturnType<typeof buildQuotePdf>>;
+    try {
+      quotePdf = await buildQuotePdf({
+        quote,
+        lines: quoteLines,
+        company,
+        companyLogoUrl: quoteEmailLogoUrl || null,
+        fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,
+      });
+      if (quotePdf.bytes.byteLength > 18 * 1024 * 1024) {
+        throw new Error(`Quote PDF is ${(quotePdf.bytes.byteLength / 1024 / 1024).toFixed(1)}MB. Keep the PDF under 18MB so it can be delivered reliably by email.`);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Quote PDF could not be prepared: ${message}`);
+    }
     const companyLogo = quoteEmailLogoUrl
       ? `<img src="${quoteEmailEscape(quoteEmailLogoUrl)}" alt="${quoteEmailEscape(companyName)}" style="display:block;max-width:390px;max-height:58px;width:auto;height:auto;border:0;outline:none;text-decoration:none" />`
       : `<div style="font-size:24px;line-height:1.1;font-weight:800;color:#123a63">${quoteEmailEscape(companyName)}</div>`;
@@ -901,7 +935,8 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
           <tr>
             <td style="padding:12px 32px 30px">
               <p style="margin:0 0 14px">Hi ${quoteEmailEscape(contactName)},</p>
-              <p style="margin:0 0 22px;color:#475569">Your ${quoteEmailEscape(companyName)} quote is ready. You can review each item and approve it, cancel it, or request changes directly from the quote page.</p>
+              <p style="margin:0 0 14px;color:#475569">Your ${quoteEmailEscape(companyName)} quote is ready. A PDF copy of the quote is attached to this email.</p>
+              <p style="margin:0 0 22px;color:#475569">You can review each item and approve it, cancel it, or request changes directly from the quote page. <strong>If your organisation blocks external web links, please review the attached PDF and reply to this email with APPROVED or the changes required.</strong></p>
               <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px">
                 <tr><td style="border-radius:12px;background:#0f766e">
                   <a href="${quoteEmailEscape(publicUrl)}" style="display:inline-block;padding:13px 20px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:800">View and respond to quote</a>
@@ -909,6 +944,9 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
               </table>
               <div style="padding:14px 16px;border:1px solid #dbe4f0;border-radius:12px;background:#f8fbff;color:#64748b;font-size:12px;word-break:break-all">
                 If the button does not open, use this link:<br><a href="${quoteEmailEscape(publicUrl)}" style="color:#0f766e">${quoteEmailEscape(publicUrl)}</a>
+              </div>
+              <div style="margin-top:12px;padding:14px 16px;border:1px solid #bbf7d0;border-radius:12px;background:#f0fdf4;color:#166534;font-size:12px">
+                <strong>PDF quote attached:</strong> ${quoteEmailEscape(quotePdf.fileName)}
               </div>
             </td>
           </tr>
@@ -928,6 +966,7 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
       to: recipient,
       subject,
       html,
+      attachments: [{ fileName: quotePdf.fileName, content: quotePdf.bytes }],
       replyTo: company?.email || undefined,
       idempotencyKey: `quote-${quoteId}-${Date.now()}`,
       tags: [{ name: "Type", value: "Quote" }, { name: "Quote", value: quoteNumber }]

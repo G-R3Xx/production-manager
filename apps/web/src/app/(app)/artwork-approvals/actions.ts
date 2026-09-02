@@ -320,6 +320,7 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
       approval,
       pages: requiredPages,
       sourceQuote,
+      sourceLines: lines,
       companyName,
       companyLogoUrl: logoUrl || null,
       fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,
