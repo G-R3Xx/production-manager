@@ -17,8 +17,8 @@ export function ArtworkEmailSendButton({ disabled, recipient, alreadySent }: Pro
       ? "Resend artwork approval"
       : "Email artwork approval";
   const detail = pending
-    ? "Sending the client link and updating its status"
-    : `Send client link to ${recipient}`;
+    ? "Building the PDF pack and sending the artwork…"
+    : `Send client link + PDF to ${recipient}`;
 
   return (
     <button

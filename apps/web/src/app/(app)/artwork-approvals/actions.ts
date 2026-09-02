@@ -8,6 +8,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { sendOutboundEmail } from "@/server/outbound-email";
+import { buildArtworkProofPdf } from "@/server/artwork-approval-pdf";
 import {
   addArtworkApprovalPageForTenant,
   artworkQuoteLineInScope,
@@ -313,6 +314,27 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
     .map((value) => emailEscape(String(value)))
     .join(" &nbsp;·&nbsp; ");
   const subject = `${title} — Artwork approval${revision ? ` Rev ${revision}` : ""}`;
+  let proofPdf: Awaited<ReturnType<typeof buildArtworkProofPdf>>;
+  try {
+    proofPdf = await buildArtworkProofPdf({
+      approval,
+      pages: requiredPages,
+      sourceQuote,
+      companyName,
+      companyLogoUrl: logoUrl || null,
+      fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,
+    });
+    if (proofPdf.notes.length) {
+      throw new Error(`The PDF attachment could not include every proof: ${proofPdf.notes.join(" ")}`);
+    }
+    const totalAttachmentBytes = proofPdf.bytes.byteLength + proofPdf.extraPdfAttachments.reduce((sum, attachment) => sum + attachment.content.byteLength, 0);
+    if (totalAttachmentBytes > 18 * 1024 * 1024) {
+      throw new Error(`Artwork PDF attachments total ${(totalAttachmentBytes / 1024 / 1024).toFixed(1)}MB. Keep the combined proof files under 18MB so they can be delivered reliably by email.`);
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    redirect(`/artwork-approvals?selected=${approvalId}&error=${encodeURIComponent(`Artwork PDF could not be prepared: ${message}`)}`);
+  }
   const html = `<!doctype html>
 <html>
   <body style="margin:0;padding:0;background:#f2f5f9;font-family:Arial,Helvetica,sans-serif;color:#172033;line-height:1.5">
@@ -327,12 +349,16 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
           </td></tr>
           <tr><td style="padding:12px 32px 30px">
             <p style="margin:0 0 14px">Hi ${emailEscape(contactName)},</p>
-            <p style="margin:0 0 22px;color:#475569">Your artwork proof is ready for review. Please check each proof page and approve the artwork or request changes directly from the approval page.</p>
+            <p style="margin:0 0 14px;color:#475569">Your artwork proof is ready for review. A PDF copy of the artwork proofs is attached to this email.</p>
+            <p style="margin:0 0 22px;color:#475569">You can approve or request changes using the online approval page below. <strong>If your organisation blocks external web links, please review the attached PDF and reply to this email with APPROVED or the changes required.</strong></p>
             <table role="presentation" cellspacing="0" cellpadding="0" border="0" style="margin:0 0 24px"><tr><td style="border-radius:12px;background:#0f766e">
               <a href="${emailEscape(publicUrl)}" style="display:inline-block;padding:13px 20px;color:#ffffff;text-decoration:none;font-size:15px;font-weight:800">Review artwork proof</a>
             </td></tr></table>
             <div style="padding:14px 16px;border:1px solid #dbe4f0;border-radius:12px;background:#f8fbff;color:#64748b;font-size:12px;word-break:break-all">
               If the button does not open, use this link:<br><a href="${emailEscape(publicUrl)}" style="color:#0f766e">${emailEscape(publicUrl)}</a>
+            </div>
+            <div style="margin-top:12px;padding:14px 16px;border:1px solid #bbf7d0;border-radius:12px;background:#f0fdf4;color:#166534;font-size:12px">
+              <strong>PDF copy attached:</strong> ${emailEscape(proofPdf.fileName)}${proofPdf.extraPdfAttachments.length ? `<br>${proofPdf.extraPdfAttachments.length} source PDF proof${proofPdf.extraPdfAttachments.length === 1 ? " is" : "s are"} attached separately where the original proof was already a PDF.` : ""}
             </div>
           </td></tr>
           <tr><td style="padding:18px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;color:#64748b;font-size:12px">
@@ -350,6 +376,10 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
       to: recipient,
       subject,
       html,
+      attachments: [
+        { fileName: proofPdf.fileName, content: proofPdf.bytes },
+        ...proofPdf.extraPdfAttachments,
+      ],
       replyTo: company?.email || undefined,
       idempotencyKey: `artwork-${approvalId}-${Date.now()}`,
       tags: [
