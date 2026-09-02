@@ -214,6 +214,13 @@ export default async function PublicArtworkApprovalPage({ params, searchParams }
           .public-artwork-head{display:grid;grid-template-columns:190px minmax(0,1fr) auto;gap:18px;align-items:center}
           .public-artwork-proof{display:grid;grid-template-columns:minmax(0,1fr) 360px;min-height:520px}
           @media(max-width:760px){.public-artwork-head{grid-template-columns:1fr}.public-artwork-head>div:last-child{justify-items:start!important}.public-artwork-proof{grid-template-columns:1fr;min-height:0}.public-artwork-proof>aside{border-left:0!important;border-top:1px solid #e4e7ec}.public-artwork-message{grid-template-columns:1fr!important}.public-artwork-message>a{width:fit-content}}
+          @media print{
+            @page{margin:10mm}
+            html,body{background:#fff!important}
+            body{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+            .public-artwork-proof, .public-artwork-head, article, section, aside, svg, svg *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}
+            article{break-inside:avoid-page}
+          }
         `}</style>
         {message ? <div style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 13, padding: "11px 14px", fontWeight: 850 }}>{message}</div> : null}
         {error ? <div style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 13, padding: "11px 14px", fontWeight: 850 }}>{error}</div> : null}

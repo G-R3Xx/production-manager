@@ -110,7 +110,7 @@ export default async function TabletEnquiriesPage({ searchParams }: TabletEnquir
         <NewEnquiryForm clients={clients} mode="tablet" returnTo="/enquiries/tablet" />
 
         <p style={{ margin: "0 0 8px", textAlign: "center", color: "#94a3b8", fontSize: 12, fontWeight: 800 }}>
-          V26.08.28.03
+          V26.09.02.01
         </p>
       </div>
     </main>

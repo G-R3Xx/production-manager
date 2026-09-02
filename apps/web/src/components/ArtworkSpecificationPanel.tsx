@@ -94,21 +94,39 @@ export function ArtworkSpecificationPanel({
                 <div style={{ display: "flex", flexWrap: "wrap", gap: compact ? 6 : 8, marginTop: 2 }}>
                   {pmsScreenSwatches(item.value).map((swatch, swatchIndex) => (
                     <span key={`${swatch.label}-${swatchIndex}`} style={{ display: "inline-flex", alignItems: "center", gap: 6, minWidth: 0, fontSize: compact ? 10.5 : 11.5, lineHeight: 1.25, fontWeight: 900, color: "#101828" }}>
-                      <span
+                      <svg
                         aria-hidden="true"
-                        title={swatch.hex ? `${swatch.label} · screen approximation ${swatch.hex}` : `${swatch.label} · PMS code is the approval reference`}
+                        viewBox="0 0 24 24"
+                        width={compact ? 20 : 23}
+                        height={compact ? 20 : 23}
+                        role="img"
                         style={{
-                          width: compact ? 20 : 23,
-                          height: compact ? 20 : 23,
+                          display: "block",
                           flex: "0 0 auto",
                           borderRadius: 5,
-                          border: "1px solid #98a2b3",
-                          boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.55)",
-                          background: swatch.hex
-                            ? swatch.hex
-                            : "repeating-linear-gradient(135deg,#f2f4f7 0,#f2f4f7 5px,#d0d5dd 5px,#d0d5dd 10px)",
+                          printColorAdjust: "exact",
+                          WebkitPrintColorAdjust: "exact",
                         }}
-                      />
+                      >
+                        <title>{swatch.hex ? `${swatch.label} · screen approximation ${swatch.hex}` : `${swatch.label} · PMS code is the approval reference`}</title>
+                        <defs>
+                          <pattern id={`pms-neutral-${index}-${swatchIndex}`} width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                            <rect width="8" height="8" fill="#f2f4f7" />
+                            <rect width="4" height="8" fill="#d0d5dd" />
+                          </pattern>
+                        </defs>
+                        <rect
+                          x="0.75"
+                          y="0.75"
+                          width="22.5"
+                          height="22.5"
+                          rx="4.25"
+                          fill={swatch.hex ? swatch.hex : `url(#pms-neutral-${index}-${swatchIndex})`}
+                          stroke="#98a2b3"
+                          strokeWidth="1.5"
+                        />
+                        <rect x="2" y="2" width="20" height="20" rx="3.2" fill="none" stroke="rgba(255,255,255,0.55)" strokeWidth="1" />
+                      </svg>
                       <span style={{ overflowWrap: "anywhere" }}>{swatch.label}</span>
                     </span>
                   ))}
