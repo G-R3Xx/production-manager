@@ -100,6 +100,20 @@ function textOp(text: string, x: number, y: number, size = 10, bold = false, gre
   return `${g.toFixed(3)} g BT /${bold ? "F2" : "F1"} ${size} Tf 1 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Tm (${pdfEscape(text)}) Tj ET\n`;
 }
 
+function rgbTextOp(text: string, x: number, y: number, size: number, bold: boolean, r: number, g: number, b: number): string {
+  return `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} rg BT /${bold ? "F2" : "F1"} ${size} Tf 1 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Tm (${pdfEscape(text)}) Tj ET\n`;
+}
+
+function rgbLineOp(x1: number, y1: number, x2: number, y2: number, width: number, r: number, g: number, b: number): string {
+  return `${r.toFixed(3)} ${g.toFixed(3)} ${b.toFixed(3)} RG ${width.toFixed(2)} w ${x1.toFixed(1)} ${y1.toFixed(1)} m ${x2.toFixed(1)} ${y2.toFixed(1)} l S\n`;
+}
+
+function centeredTextX(text: string, pageWidth: number, size: number, bold = false): number {
+  // Good visual centring for Helvetica/Helvetica-Bold without bringing a font-metrics dependency into the PDF builder.
+  const averageWidth = size * (bold ? 0.555 : 0.505);
+  return Math.max(24, (pageWidth - safeText(text).length * averageWidth) / 2);
+}
+
 function lineOp(x1: number, y1: number, x2: number, y2: number, width = 0.7, grey = 0.85): string {
   const g = Math.max(0, Math.min(1, grey));
   return `${g.toFixed(3)} G ${width} w ${x1.toFixed(1)} ${y1.toFixed(1)} m ${x2.toFixed(1)} ${y2.toFixed(1)} l S\n`;
@@ -586,6 +600,10 @@ function buildApprovalSheetContent(input: {
 
 function buildCoverContent(input: {
   companyName: string;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  companyEmail?: string | null;
+  companyWebsite?: string | null;
   projectName: string;
   clientName: string;
   contactName: string;
@@ -595,39 +613,87 @@ function buildCoverContent(input: {
   logoImage: EmbeddedImage | null;
 }): string {
   const [pageW, pageH] = A4_LANDSCAPE;
+  const blue: [number, number, number] = [0.075, 0.62, 0.84];
+  const navy: [number, number, number] = [0.055, 0.10, 0.17];
+  const muted: [number, number, number] = [0.34, 0.38, 0.45];
+  const paleBlue: [number, number, number] = [0.955, 0.978, 0.998];
   let content = "";
   content += rectFillOp(0, 0, pageW, pageH, 1, 1, 1);
-  // Minimal landscape cover: the company logo is deliberately the hero.
-  content += rectFillOp(0, pageH - 7, pageW, 7, 0.08, 0.66, 0.72);
-  content += textOp("ARTWORK APPROVAL PROOF PACK", 34, pageH - 38, 7.2, true, 0.40);
-  content += textOp(`Revision ${input.revision}`, pageW - 104, pageH - 38, 7.2, true, 0.40);
 
+  // Large stacked/main company logo: this is intentionally the focal point.
   if (input.logoImage) {
-    const maxW = 430;
-    const maxH = 145;
+    const maxW = 335;
+    const maxH = 135;
     const scale = Math.min(maxW / input.logoImage.width, maxH / input.logoImage.height);
     const logoW = input.logoImage.width * scale;
     const logoH = input.logoImage.height * scale;
-    content += `q ${logoW.toFixed(2)} 0 0 ${logoH.toFixed(2)} ${((pageW - logoW) / 2).toFixed(2)} ${(pageH - 255 - logoH / 2).toFixed(2)} cm /Logo Do Q\n`;
+    content += `q ${logoW.toFixed(2)} 0 0 ${logoH.toFixed(2)} ${((pageW - logoW) / 2).toFixed(2)} ${(pageH - 190).toFixed(2)} cm /Logo Do Q\n`;
   } else {
     const company = safeText(input.companyName);
-    content += textOp(company, Math.max(34, pageW / 2 - company.length * 7), pageH - 240, 30, true, 0.07);
+    content += rgbTextOp(company, centeredTextX(company, pageW, 31, true), pageH - 145, 31, true, ...navy);
   }
 
-  const titleLines = wrapText(input.projectName || "Artwork Approval", 46).slice(0, 2);
-  titleLines.forEach((line, index) => {
-    const approxX = Math.max(34, pageW / 2 - line.length * 5.4);
-    content += textOp(line, approxX, 224 - index * 25, 20, true, 0.06);
-  });
-  const meta = [input.clientName, input.contactName, input.quoteNumber].filter(Boolean).join("  |  ");
-  content += textOp(meta, Math.max(34, pageW / 2 - meta.length * 3.2), 172, 9, true, 0.28);
-  content += textOp(`${input.pageLabels.length} proof${input.pageLabels.length === 1 ? "" : "s"} included  |  Issued ${dateAu()}`, pageW / 2 - 86, 151, 7.5, false, 0.42);
+  // Deliberately centred title treatment from the approved cover concept.
+  content += rgbLineOp(pageW / 2 - 164, 363, pageW / 2 - 124, 363, 1.5, ...blue);
+  content += rgbLineOp(pageW / 2 + 124, 363, pageW / 2 + 164, 363, 1.5, ...blue);
+  const approvalTitle = "ARTWORK APPROVAL";
+  content += textOp(approvalTitle, centeredTextX(approvalTitle, pageW, 12, false), 357, 12, false, 0.28);
+  const packTitle = "PROOF PACK";
+  content += textOp(packTitle, centeredTextX(packTitle, pageW, 31, true), 314, 31, true, 0.10);
+  content += rgbLineOp(pageW / 2 - 34, 294, pageW / 2 + 34, 294, 1.3, ...blue);
 
-  content += rectFillOp(34, 42, pageW - 68, 74, 0.965, 0.977, 0.992);
-  content += rectStrokeOp(34, 42, pageW - 68, 74, 0.5, 0.86);
-  content += textOp("CLIENT REVIEW", 50, 93, 7.0, true, 0.10);
+  const project = safeText(input.projectName || "Artwork Approval");
+  content += rgbTextOp(project, centeredTextX(project, pageW, 18, true), 258, 18, true, ...blue);
+
+  // Three-column metadata row, with the issue date deliberately centred below it.
+  const leftX = 180;
+  const middleX = 405;
+  const rightX = 625;
+  content += rgbTextOp("CLIENT / CONTACT", leftX, 222, 6.8, true, ...blue);
+  const client = safeText(input.clientName || input.companyName);
+  const contact = safeText(input.contactName || "");
+  content += textOp(client, leftX, 204, 8.7, true, 0.13);
+  if (contact) content += textOp(contact, leftX, 189, 8.7, false, 0.13);
+
+  content += rgbLineOp(365, 184, 365, 226, 0.6, 0.86, 0.89, 0.93);
+  content += rgbTextOp("QUOTE NUMBER", middleX, 222, 6.8, true, ...blue);
+  content += textOp(safeText(input.quoteNumber || "-"), middleX, 199, 9.6, true, 0.10);
+
+  content += rgbLineOp(585, 184, 585, 226, 0.6, 0.86, 0.89, 0.93);
+  content += rgbTextOp("REVISION", rightX, 222, 6.8, true, ...blue);
+  content += textOp(`Revision ${safeText(input.revision || "A")}`, rightX, 199, 9.6, true, 0.10);
+
+  const issuedLabel = "ISSUED";
+  const issued = dateAu();
+  content += rgbTextOp(issuedLabel, centeredTextX(issuedLabel, pageW, 6.8, true), 163, 6.8, true, ...blue);
+  content += textOp(issued, centeredTextX(issued, pageW, 9.8, true), 145, 9.8, true, 0.10);
+
+  // Client-review message box: centred and visually anchored, but intentionally light.
+  const reviewX = 144;
+  const reviewY = 59;
+  const reviewW = pageW - reviewX * 2;
+  const reviewH = 66;
+  content += rectFillOp(reviewX, reviewY, reviewW, reviewH, ...paleBlue);
+  content += rectStrokeOp(reviewX, reviewY, reviewW, reviewH, 0.55, 0.86);
+  content += rgbTextOp("CLIENT REVIEW", reviewX + 72, reviewY + 45, 8.4, true, ...blue);
   const review = "Each following page is a PDF version of the Artwork Approval sheet, including the proof, PMS colour references and sign specification. If your organisation blocks the online link, review this PDF and reply to the email with APPROVED or the changes required.";
-  wrapText(review, 118).slice(0, 3).forEach((line, index) => { content += textOp(line, 50, 77 - index * 12, 8.1, false, 0.29); });
+  wrapText(review, 104).slice(0, 3).forEach((line, index) => {
+    content += textOp(line, reviewX + 72, reviewY + 29 - index * 10.5, 7.5, false, 0.27);
+  });
+  // Simple info marker - no bitmap/icon dependency.
+  content += circleStrokeOp(reviewX + 38, reviewY + 33, 18, 1.3, 0.30);
+  content += rgbTextOp("i", reviewX + 36, reviewY + 25, 14, true, ...blue);
+
+  // Contact footer replaces the proof thumbnails from the earlier concept.
+  const footerItems = [input.companyAddress, input.companyPhone, input.companyEmail, input.companyWebsite]
+    .map((value) => safeText(value))
+    .filter(Boolean);
+  if (footerItems.length) {
+    content += lineOp(60, 31, pageW - 60, 31, 0.55, 0.88);
+    const footerText = footerItems.join("   |   ");
+    content += textOp(footerText, centeredTextX(footerText, pageW, 7.2, false), 16, 7.2, false, 0.36);
+  }
+
   return content;
 }
 
@@ -637,6 +703,10 @@ export async function buildArtworkProofPdf(input: {
   sourceQuote: QuoteDraftRecord | null;
   sourceLines?: QuoteLineRecord[];
   companyName: string;
+  companyAddress?: string | null;
+  companyPhone?: string | null;
+  companyEmail?: string | null;
+  companyWebsite?: string | null;
   companyLogoUrl?: string | null;
   fallbackLogoUrl?: string | null;
 }): Promise<ArtworkProofPdfResult> {
@@ -689,6 +759,10 @@ export async function buildArtworkProofPdf(input: {
   const coverResources = `/Font << /F1 ${fontId} 0 R /F2 ${boldFontId} 0 R >>${logoImage ? ` /XObject << /Logo ${logoImage.objectId} 0 R >>` : ""}`;
   const coverContent = buildCoverContent({
     companyName: input.companyName,
+    companyAddress: input.companyAddress,
+    companyPhone: input.companyPhone,
+    companyEmail: input.companyEmail,
+    companyWebsite: input.companyWebsite,
     projectName,
     clientName: input.approval.clientName,
     contactName: input.approval.contactName || "",

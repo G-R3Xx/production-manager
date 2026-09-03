@@ -306,7 +306,10 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
   const emailOrigin = new URL(publicUrl).origin;
   const tenderEdgeHorizontalLogoUrl = `${emailOrigin}/brand/tender-edge-horizontal-logo-2025.png`;
   const isTenderEdge = /tender\s*edge/i.test(companyName);
-  const logoUrl = isTenderEdge ? tenderEdgeHorizontalLogoUrl : company?.companyLogoUrl;
+  // Use the configured/main company logo first. For Tender Edge this is the
+  // stacked logo used by the public quote/artwork pages; the horizontal asset
+  // is retained only as a fallback if the workspace logo is unavailable.
+  const logoUrl = company?.companyLogoUrl || (isTenderEdge ? tenderEdgeHorizontalLogoUrl : null);
   const logo = logoUrl
     ? `<img src="${emailEscape(logoUrl)}" alt="${emailEscape(companyName)}" style="display:block;max-width:390px;max-height:58px;width:auto;height:auto;border:0;outline:none;text-decoration:none" />`
     : `<div style="font-size:24px;line-height:1.1;font-weight:800;color:#123a63">${emailEscape(companyName)}</div>`;
@@ -323,6 +326,10 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
       sourceQuote,
       sourceLines: lines,
       companyName,
+      companyAddress: company?.address || null,
+      companyPhone: company?.phone || null,
+      companyEmail: company?.email || null,
+      companyWebsite: isTenderEdge ? "tenderedge.com.au" : null,
       companyLogoUrl: logoUrl || null,
       fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,
     });
