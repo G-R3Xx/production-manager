@@ -916,7 +916,10 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
         quote,
         lines: quoteLines,
         company,
-        companyLogoUrl: quoteEmailLogoUrl || null,
+        // The public quote uses the configured company logo. Use that same
+        // artwork in the PDF (Tender Edge's configured logo is the stacked
+        // master), while keeping the horizontal logo only as a fallback.
+        companyLogoUrl: company?.companyLogoUrl || quoteEmailLogoUrl || null,
         fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,
         clientLogoUrl: clientLogo,
         clientAddress,

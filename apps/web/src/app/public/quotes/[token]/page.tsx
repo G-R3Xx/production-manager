@@ -167,6 +167,13 @@ function snapshotCustomerMaterialName(snapshot: Record<string, unknown> | null |
   return internalName || null;
 }
 
+function snapshotPrimaryCustomerMaterialName(snapshot: Record<string, unknown> | null | undefined): string | null {
+  return snapshotCustomerMaterialName(snapshot, "media")
+    || snapshotCustomerMaterialName(snapshot, "main")
+    || snapshotCustomerMaterialName(snapshot, "smallStock")
+    || null;
+}
+
 function stripClientUsage(value: string): string {
   return compactText(value)
     .replace(/\s*[—–-]\s*\d+(?:\.\d+)?\s*(?:lm|linear\s*m(?:etre)?s?|metres?|meters?|m²|sqm|sheets?|sheet(?:s)?\s+used)\s*(?:calculated|used)?\s*$/i, "")
@@ -226,7 +233,8 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   const combined = [line.productName, line.optionSummary].filter(Boolean).join(" · ");
   const base = cleanBaseMaterialName(line.productName);
   const selectedMaterial = cleanSelectedMaterialName(line);
-  const materialTitle = clientMaterialTitle(selectedMaterial) || base;
+  const savedMaterialName = snapshotPrimaryCustomerMaterialName(line.configurationSnapshot);
+  const materialTitle = clientMaterialTitle(savedMaterialName || selectedMaterial) || base;
   const dimension = findDimension(parts, combined);
 
   // Use the explicit customer-facing material name saved with the quote wherever

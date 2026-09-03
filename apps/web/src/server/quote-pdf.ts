@@ -132,10 +132,23 @@ function stripClientUsage(v:string):string{return compactText(v).replace(/\s*[�
 function friendlyLaminate(raw:string|null|undefined):string|null{const v=stripClientUsage(compactText(raw).replace(/^laminate:\s*/i,"").replace(/^coating:\s*/i,""));if(!v||/^none$/i.test(v))return null;const l=v.toLowerCase();if(l.includes("whiteboard")||l.includes("white board"))return "White Board Laminate";if(l.includes("anti graffiti"))return "Anti Graffiti Laminate";if(l.includes("gloss"))return "Gloss Laminate";if(l.includes("matt")||l.includes("matte"))return "Matt Laminate";return /laminate/i.test(v)?titleCaseLabel(v):`${titleCaseLabel(v)} Laminate`;}
 function friendlyStandoffs(raw:string|null|undefined):string|null{const v=compactText(raw).replace(/^standoffs:\s*/i,"");if(!v)return null;const m=v.match(/^(.*?)\s*[×x]\s*(\d+(?:\.\d+)?)$/i);return m?`${compactText(m[1])} x ${m[2]}`:v;}
 function isInstallLine(line:Pick<QuoteLineRecord,"productName">):boolean{return /^(sign install|installation|install)$/i.test(compactText(line.productName))||/\b(sign install|installation service)\b/i.test(line.productName);}
+function snapshotPrimaryCustomerMaterialName(snapshot:Record<string,unknown>|null|undefined):string|null{
+  // Roll-print products store the selected print media in `media`, while rigid
+  // panel products store their substrate in `main`. Prefer the saved
+  // customer-facing material name so the emailed PDF matches the public quote
+  // and never leaks supplier/internal stock naming such as Avery/Aslan SKUs.
+  return snapshotCustomerMaterialName(snapshot,"media")
+    || snapshotCustomerMaterialName(snapshot,"main")
+    || snapshotCustomerMaterialName(snapshot,"smallStock")
+    || null;
+}
 function clientLineTitle(line:QuoteLineRecord):string{
   if(isInstallLine(line))return "Sign Install";
   if(/^access equipment\b/i.test(compactText(line.productName))) return line.productName;
-  const parts=summaryParts(line),combined=[line.productName,line.optionSummary].filter(Boolean).join(" · "), base=cleanBaseMaterialName(line.productName),selected=cleanSelectedMaterialName(line),material=clientMaterialTitle(selected)||base,dim=findDimension(parts,combined);
+  const parts=summaryParts(line),combined=[line.productName,line.optionSummary].filter(Boolean).join(" · "), base=cleanBaseMaterialName(line.productName),selected=cleanSelectedMaterialName(line);
+  const savedMaterialName=snapshotPrimaryCustomerMaterialName(line.configurationSnapshot);
+  const material=savedMaterialName?clientMaterialTitle(savedMaterialName):(clientMaterialTitle(selected)||base);
+  const dim=findDimension(parts,combined);
   const lamName=snapshotCustomerMaterialName(line.configurationSnapshot,"laminate"),lam=lamName?stripClientUsage(lamName):friendlyLaminate(parts.find(p=>/^laminate:/i.test(p)));
   const stName=snapshotCustomerMaterialName(line.configurationSnapshot,"standoff"),stPart=parts.find(p=>/^standoffs:/i.test(p)),qm=compactText(stPart).match(/[×x]\s*(\d+(?:\.\d+)?)\s*$/i),st=stName&&qm?`${stName} x ${qm[1]}`:friendlyStandoffs(stPart);
   return [material,dim,lam,st].filter(Boolean).join(" · ")||line.productName;
