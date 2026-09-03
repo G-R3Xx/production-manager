@@ -141,64 +141,273 @@ function clientLineTitle(line:QuoteLineRecord):string{
   return [material,dim,lam,st].filter(Boolean).join(" · ")||line.productName;
 }
 
-function buildPageContent(input:{
-  pageIndex:number; pageCount:number; quote:QuoteDraftRecord; lines:QuoteLineRecord[]; company:CompanySettingsRecord|null; logo:EmbeddedImage|null; lineStart:number; lineEnd:number;
-}):string{
-  const [pageW,pageH]=A4, margin=38, right=pageW-margin; let out="";
-  out+=rectFillOp(0,0,pageW,pageH,1,1,1);
-  out+=rectFillOp(0,pageH-10,pageW,10,0.08,0.66,0.72);
-  if(input.logo){const maxW=160,maxH=50,scale=Math.min(maxW/input.logo.width,maxH/input.logo.height),w=input.logo.width*scale,h=input.logo.height*scale;out+=`q ${w.toFixed(2)} 0 0 ${h.toFixed(2)} ${margin} ${(pageH-43-h/2).toFixed(2)} cm /Logo Do Q\n`;}
-  else out+=textOp(input.company?.tradingName||input.company?.companyLegalName||"Production Manager",margin,pageH-48,15,true,0.08);
-  const companyLine1=[input.company?.companyLegalName,input.company?.abn?`ABN ${input.company.abn}`:null].filter(Boolean).join("  ·  ");
-  const companyLine2=[input.company?.phone,input.company?.email,input.company?.address].filter(Boolean).join("  ·  ");
-  if(companyLine1)out+=textOp(companyLine1,margin,pageH-77,7.2,false,0.38);
-  if(companyLine2)out+=textOp(companyLine2,margin,pageH-89,7.2,false,0.38);
-  out+=textOp("QUOTE",right-58,pageH-42,8,true,0.4);
-  out+=textOp(input.quote.quoteNumber||"DRAFT",right-150,pageH-64,18,true,0.06);
-  out+=textOp(`Issued ${dateAu(input.quote.sentAt||input.quote.createdAt)}`,right-150,pageH-82,8,false,0.42);
-  out+=lineOp(margin,pageH-100,right,pageH-100,0.7,0.86);
-  let y=pageH-128;
-  if(input.pageIndex===0){
-    out+=textOp(input.quote.clientName,margin,y,13,true,0.08); out+=textOp(input.quote.jobName||"Quote",330,y,13,true,0.08); y-=18;
-    if(input.quote.contactName)out+=textOp(`Contact: ${input.quote.contactName}`,margin,y,8.8,false,0.32);
-    out+=textOp(`Reference: ${input.quote.quoteNumber||"-"}`,330,y,8.8,false,0.32); y-=15;
-    if(input.quote.email)out+=textOp(`Email: ${input.quote.email}`,margin,y,8.8,false,0.32); y-=15;
-    if(input.quote.phone)out+=textOp(`Phone: ${input.quote.phone}`,margin,y,8.8,false,0.32); y-=20;
-    out+=lineOp(margin,y,right,y,0.7,0.88); y-=28;
+type Rgb = readonly [number, number, number];
+const PDF_COLOURS = {
+  page: [0.973, 0.982, 0.994] as Rgb,
+  white: [1, 1, 1] as Rgb,
+  ink: [0.063, 0.094, 0.153] as Rgb,
+  body: [0.278, 0.337, 0.404] as Rgb,
+  muted: [0.400, 0.439, 0.522] as Rgb,
+  line: [0.878, 0.906, 0.941] as Rgb,
+  soft: [0.984, 0.992, 1] as Rgb,
+  softBlue: [0.941, 0.965, 1] as Rgb,
+  blue: [0.082, 0.373, 0.937] as Rgb,
+  teal: [0.059, 0.463, 0.431] as Rgb,
+};
+
+function textRgbOp(text: string, x: number, y: number, size = 10, bold = false, color: Rgb = PDF_COLOURS.ink): string {
+  return `${color[0].toFixed(3)} ${color[1].toFixed(3)} ${color[2].toFixed(3)} rg BT /${bold ? "F2" : "F1"} ${size} Tf 1 0 0 1 ${x.toFixed(1)} ${y.toFixed(1)} Tm (${pdfEscape(text)}) Tj ET\n`;
+}
+function lineRgbOp(x1: number, y1: number, x2: number, y2: number, width: number, color: Rgb): string {
+  return `${color[0].toFixed(3)} ${color[1].toFixed(3)} ${color[2].toFixed(3)} RG ${width.toFixed(2)} w ${x1.toFixed(1)} ${y1.toFixed(1)} m ${x2.toFixed(1)} ${y2.toFixed(1)} l S\n`;
+}
+function roundedRectOp(x: number, y: number, width: number, height: number, radius: number, fill: Rgb, stroke: Rgb = PDF_COLOURS.line, strokeWidth = 0.8): string {
+  const r = Math.max(0, Math.min(radius, width / 2, height / 2));
+  const k = 0.5522847498;
+  const c = r * k;
+  const x2 = x + width;
+  const y2 = y + height;
+  const path = [
+    `${(x + r).toFixed(1)} ${y.toFixed(1)} m`,
+    `${(x2 - r).toFixed(1)} ${y.toFixed(1)} l`,
+    `${(x2 - r + c).toFixed(1)} ${y.toFixed(1)} ${x2.toFixed(1)} ${(y + r - c).toFixed(1)} ${x2.toFixed(1)} ${(y + r).toFixed(1)} c`,
+    `${x2.toFixed(1)} ${(y2 - r).toFixed(1)} l`,
+    `${x2.toFixed(1)} ${(y2 - r + c).toFixed(1)} ${(x2 - r + c).toFixed(1)} ${y2.toFixed(1)} ${(x2 - r).toFixed(1)} ${y2.toFixed(1)} c`,
+    `${(x + r).toFixed(1)} ${y2.toFixed(1)} l`,
+    `${(x + r - c).toFixed(1)} ${y2.toFixed(1)} ${x.toFixed(1)} ${(y2 - r + c).toFixed(1)} ${x.toFixed(1)} ${(y2 - r).toFixed(1)} c`,
+    `${x.toFixed(1)} ${(y + r).toFixed(1)} l`,
+    `${x.toFixed(1)} ${(y + r - c).toFixed(1)} ${(x + r - c).toFixed(1)} ${y.toFixed(1)} ${(x + r).toFixed(1)} ${y.toFixed(1)} c`,
+    "h",
+  ].join(" ");
+  return `${fill[0].toFixed(3)} ${fill[1].toFixed(3)} ${fill[2].toFixed(3)} rg ${stroke[0].toFixed(3)} ${stroke[1].toFixed(3)} ${stroke[2].toFixed(3)} RG ${strokeWidth.toFixed(2)} w ${path} B\n`;
+}
+function imageOp(resourceName: string, image: EmbeddedImage, x: number, y: number, maxWidth: number, maxHeight: number): string {
+  const scale = Math.min(maxWidth / image.width, maxHeight / image.height);
+  const width = image.width * scale;
+  const height = image.height * scale;
+  const dx = x + (maxWidth - width) / 2;
+  const dy = y + (maxHeight - height) / 2;
+  return `q ${width.toFixed(2)} 0 0 ${height.toFixed(2)} ${dx.toFixed(2)} ${dy.toFixed(2)} cm /${resourceName} Do Q\n`;
+}
+function addressLines(value: string | null | undefined, maxLines = 3): string[] {
+  return String(value ?? "")
+    .split(/\r?\n/g)
+    .map((part) => safeText(part))
+    .filter(Boolean)
+    .slice(0, maxLines);
+}
+function noteLines(value: string | null | undefined, maxLines = 4): string[] {
+  const raw = String(value ?? "").trim();
+  if (!raw) return [];
+  const lines: string[] = [];
+  for (const paragraph of raw.split(/\r?\n/g).map((part) => safeText(part)).filter(Boolean)) {
+    lines.push(...wrapText(paragraph, 94));
+    if (lines.length >= maxLines) break;
   }
-  out+=textOp("QUOTE DETAILS",margin,y,14,true,0.08); y-=24;
-  const lineH=67;
-  for(let i=input.lineStart;i<input.lineEnd;i+=1){const line=input.lines[i]!; const title=clientLineTitle(line); const qty=numberValue(line.quantity),unit=numberValue(line.unitPrice),total=numberValue(line.lineTotal);
-    out+=rectFillOp(margin,y-lineH+8,right-margin,lineH-2,0.985,0.991,1);
-    const titleLines=wrapText(title,62).slice(0,2); titleLines.forEach((t,idx)=>{out+=textOp(t,margin+12,y-15-idx*13,10.2,idx===0,0.08);});
-    out+=textOp(`Qty ${qty.toFixed(2).replace(/\.00$/,"")} · ${money(unit)} ea`,right-170,y-24,8.2,false,0.38);
-    out+=textOp(money(total),right-76,y-24,11.2,true,0.08);
+  return lines.slice(0, maxLines);
+}
+
+type QuotePdfContext = {
+  clientLogoUrl?: string | null;
+  clientAddress?: string | null;
+  siteAddress?: string | null;
+  clientPurchaseOrderNumber?: string | null;
+};
+
+function buildPageContent(input:{
+  pageIndex:number;
+  pageCount:number;
+  quote:QuoteDraftRecord;
+  lines:QuoteLineRecord[];
+  company:CompanySettingsRecord|null;
+  logo:EmbeddedImage|null;
+  clientLogo:EmbeddedImage|null;
+  lineStart:number;
+  lineEnd:number;
+  context: QuotePdfContext;
+}):string{
+  const [pageW,pageH]=A4;
+  const pageMargin=20;
+  const cardX=24;
+  const cardW=pageW-48;
+  const innerX=40;
+  const innerRight=pageW-40;
+  const innerW=innerRight-innerX;
+  let out="";
+  out+=rectFillOp(0,0,pageW,pageH,...PDF_COLOURS.page);
+
+  const finalPage=input.lineEnd===input.lines.length;
+  const firstPage=input.pageIndex===0;
+  const pageLineCount=input.lineEnd-input.lineStart;
+  const notes=finalPage?noteLines(input.quote.notes,4):[];
+  const notesHeight=notes.length?Math.max(66,34+notes.length*12):0;
+  const reviewHeight=finalPage?66:0;
+  const stackedFooterHeight=finalPage?reviewHeight+(notesHeight?notesHeight+10:0)+20:0;
+  const naturalMainBottom=firstPage?410-pageLineCount*62:520-pageLineCount*62;
+  const mainCardBottom=finalPage?Math.max(pageMargin+stackedFooterHeight,naturalMainBottom):pageMargin+34;
+
+  // Main document card - visually mirrors the online quote container and closes
+  // shortly after the totals instead of leaving a large blank page inside it.
+  out+=roundedRectOp(cardX,mainCardBottom,cardW,pageH-pageMargin-mainCardBottom,16,PDF_COLOURS.white,PDF_COLOURS.line,0.9);
+
+  // Header: large logo, company details and quote metadata.
+  const headerTop=pageH-38;
+  if(input.logo) out+=imageOp("Logo",input.logo,innerX,headerTop-84,155,62);
+  else out+=textRgbOp(input.company?.tradingName||input.company?.companyLegalName||"Production Manager",innerX,headerTop-42,16,true,PDF_COLOURS.blue);
+
+  const companyX=214;
+  const legalName=input.company?.companyLegalName||input.company?.tradingName||"";
+  if(legalName) out+=textRgbOp(legalName,companyX,headerTop-18,10.2,true,PDF_COLOURS.ink);
+  let companyY=headerTop-36;
+  if(input.company?.abn){out+=textRgbOp(`ABN ${input.company.abn}`,companyX,companyY,8.3,false,PDF_COLOURS.body);companyY-=14;}
+  const phoneEmail=[input.company?.phone,input.company?.email].filter(Boolean).join(" · ");
+  if(phoneEmail){out+=textRgbOp(phoneEmail,companyX,companyY,8.3,false,PDF_COLOURS.body);companyY-=14;}
+  for(const line of addressLines(input.company?.address,3)){out+=textRgbOp(line,companyX,companyY,8.3,false,PDF_COLOURS.body);companyY-=13;}
+
+  const metaX=416;
+  out+=lineRgbOp(metaX-12,headerTop-87,metaX-12,headerTop+1,0.7,PDF_COLOURS.line);
+  out+=textRgbOp("QUOTE NUMBER",innerRight-92,headerTop-17,7.4,true,PDF_COLOURS.muted);
+  out+=textRgbOp(input.quote.quoteNumber||"DRAFT",metaX,headerTop-43,16.5,true,PDF_COLOURS.ink);
+  out+=textRgbOp(`Issued ${dateAu(input.quote.sentAt||input.quote.createdAt)}`,metaX,headerTop-63,8,false,PDF_COLOURS.muted);
+  out+=lineRgbOp(innerX,headerTop-98,innerRight,headerTop-98,0.7,PDF_COLOURS.line);
+
+  let y=headerTop-117;
+  if(firstPage){
+    // Client and job information band.
+    const clientLogoBox=input.clientLogo?54:0;
+    if(input.clientLogo){
+      out+=roundedRectOp(innerX,y-58,52,52,8,PDF_COLOURS.white,PDF_COLOURS.line,0.8);
+      out+=imageOp("ClientLogo",input.clientLogo,innerX+4,y-54,44,44);
+    }
+    const clientX=innerX+clientLogoBox+10;
+    out+=textRgbOp(input.quote.clientName,clientX,y-11,10.5,true,PDF_COLOURS.ink);
+    let clientY=y-29;
+    if(input.quote.contactName){out+=textRgbOp(`Contact: ${input.quote.contactName}`,clientX,clientY,8.6,false,PDF_COLOURS.body);clientY-=15;}
+    if(input.quote.email){out+=textRgbOp(`Email: ${input.quote.email}`,clientX,clientY,8.6,false,PDF_COLOURS.body);clientY-=15;}
+    if(input.quote.phone){out+=textRgbOp(`Phone: ${input.quote.phone}`,clientX,clientY,8.6,false,PDF_COLOURS.body);clientY-=15;}
+    const clientAddress=addressLines(input.context.clientAddress,1)[0];
+    if(clientAddress) out+=textRgbOp(`Address: ${clientAddress}`,clientX,clientY,8.2,false,PDF_COLOURS.body);
+
+    const jobX=326;
+    out+=lineRgbOp(jobX-16,y-62,jobX-16,y-5,0.7,PDF_COLOURS.line);
+    out+=textRgbOp(input.quote.jobName||"Quote",jobX,y-11,10.5,true,PDF_COLOURS.ink);
+    out+=textRgbOp(`Reference: ${input.quote.quoteNumber||"-"}`,jobX,y-29,8.6,false,PDF_COLOURS.body);
+    let jobY=y-44;
+    if(input.context.clientPurchaseOrderNumber){out+=textRgbOp(`Client PO: ${input.context.clientPurchaseOrderNumber}`,jobX,jobY,8.6,false,PDF_COLOURS.body);jobY-=15;}
+    const site=addressLines(input.context.siteAddress,2);
+    site.forEach((line,index)=>{out+=textRgbOp(`${index===0?"Site: ":""}${line}`,jobX,jobY-index*13,8.3,false,PDF_COLOURS.body);});
+    y-=78;
+    out+=lineRgbOp(innerX,y,innerRight,y,0.7,PDF_COLOURS.line);
+    y-=30;
+  } else {
+    out+=textRgbOp(input.quote.jobName||input.quote.clientName,innerX,y-4,10.2,true,PDF_COLOURS.ink);
+    out+=textRgbOp(`Continued · ${input.quote.quoteNumber||"Quote"}`,innerRight-132,y-4,8.2,false,PDF_COLOURS.muted);
+    y-=28;
+    out+=lineRgbOp(innerX,y,innerRight,y,0.7,PDF_COLOURS.line);
+    y-=28;
+  }
+
+  out+=textRgbOp("Quote details",innerX,y,15,true,PDF_COLOURS.ink);
+  y-=20;
+
+  const lineH=62;
+  for(let i=input.lineStart;i<input.lineEnd;i+=1){
+    const line=input.lines[i]!;
+    const title=clientLineTitle(line);
+    const qty=numberValue(line.quantity),unit=numberValue(line.unitPrice),total=numberValue(line.lineTotal);
+    const boxY=y-lineH;
+    out+=roundedRectOp(innerX,boxY,innerW,lineH-7,11,PDF_COLOURS.soft,PDF_COLOURS.line,0.75);
+    const titleLines=wrapText(title,58).slice(0,2);
+    titleLines.forEach((part,index)=>{out+=textRgbOp(part,innerX+12,y-20-index*12,9.4,true,PDF_COLOURS.ink);});
+    out+=textRgbOp(money(total),innerRight-146,y-21,10.8,true,PDF_COLOURS.ink);
+    out+=textRgbOp(`Qty ${qty.toFixed(2).replace(/\.00$/,"" )} · ${money(unit)} ea`,innerRight-194,y-39,8,false,PDF_COLOURS.muted);
     y-=lineH;
   }
-  if(input.lineEnd===input.lines.length){
-    const subtotal=input.lines.reduce((s,l)=>s+numberValue(l.lineTotal),0),gst=subtotal*0.1,total=subtotal+gst;
-    y-=8; out+=lineOp(330,y,right,y,0.6,0.86); y-=22;
-    out+=textOp("Subtotal",360,y,9,false,0.22);out+=textOp(money(subtotal),right-78,y,10,true,0.08);y-=20;
-    out+=textOp("GST",360,y,9,false,0.22);out+=textOp(money(gst),right-78,y,10,true,0.08);y-=24;
-    out+=textOp("Total",360,y,13,false,0.08);out+=textOp(money(total),right-90,y,15,true,0.05);y-=34;
-    out+=rectFillOp(margin,54,right-margin,64,0.965,0.977,0.992);
-    out+=textOp("CLIENT REVIEW",margin+14,99,8,true,0.1);
-    wrapText("Please review the quote carefully. If your organisation blocks the online quote page, reply to the quote email with APPROVED or list the changes required. Tender Edge staff can record your email response in Production Manager.",88).slice(0,3).forEach((t,idx)=>{out+=textOp(t,margin+14,83-idx*12,8,false,0.3);});
+
+  if(finalPage){
+    const subtotal=input.lines.reduce((sum,line)=>sum+numberValue(line.lineTotal),0);
+    const gst=subtotal*0.1;
+    const total=subtotal+gst;
+    y-=4;
+    out+=lineRgbOp(354,y,innerRight,y,0.65,PDF_COLOURS.line);
+    y-=20;
+    out+=textRgbOp("Subtotal",376,y,9.1,false,PDF_COLOURS.body); out+=textRgbOp(money(subtotal),innerRight-78,y,10,true,PDF_COLOURS.ink); y-=19;
+    out+=textRgbOp("GST",376,y,9.1,false,PDF_COLOURS.body); out+=textRgbOp(money(gst),innerRight-78,y,10,true,PDF_COLOURS.ink); y-=23;
+    out+=textRgbOp("Total",376,y,13,false,PDF_COLOURS.ink); out+=textRgbOp(money(total),innerRight-88,y,15,true,PDF_COLOURS.ink);
+
+    // Notes and offline approval sit directly beneath the main quote card, like
+    // the separate Notes/response cards on the online quote page.
+    let nextTop=mainCardBottom-10;
+    if(notes.length){
+      const notesY=nextTop-notesHeight;
+      out+=roundedRectOp(cardX,notesY,cardW,notesHeight,14,PDF_COLOURS.white,PDF_COLOURS.line,0.8);
+      out+=textRgbOp("Notes",innerX,notesY+notesHeight-22,13,true,PDF_COLOURS.ink);
+      notes.forEach((part,index)=>{out+=textRgbOp(part,innerX,notesY+notesHeight-41-index*12,8.5,false,PDF_COLOURS.body);});
+      nextTop=notesY-10;
+    }
+    const reviewY=nextTop-reviewHeight;
+    out+=roundedRectOp(cardX,reviewY,cardW,reviewHeight,14,PDF_COLOURS.softBlue,PDF_COLOURS.line,0.8);
+    out+=textRgbOp("OFFLINE APPROVAL",innerX,reviewY+reviewHeight-19,7.5,true,PDF_COLOURS.blue);
+    const review="If your organisation blocks the online quote link, review this PDF and reply to the quote email with APPROVED or list the changes required. Tender Edge staff can record your email response in Production Manager.";
+    wrapText(review,102).slice(0,3).forEach((part,index)=>{out+=textRgbOp(part,innerX,reviewY+reviewHeight-36-index*11,7.9,false,PDF_COLOURS.body);});
   }
-  out+=textOp(`Page ${input.pageIndex+1} of ${input.pageCount}`,right-60,22,7,false,0.5);
+
+  out+=textRgbOp(`Page ${input.pageIndex+1} of ${input.pageCount}`,innerRight-54,12,6.8,false,PDF_COLOURS.muted);
   return out;
 }
 
-export async function buildQuotePdf(input:{quote:QuoteDraftRecord;lines:QuoteLineRecord[];company:CompanySettingsRecord|null;companyLogoUrl?:string|null;fallbackLogoUrl?:string|null;}):Promise<QuotePdfResult>{
-  const lines=input.lines.filter(l=>!l.clientRevisionExcluded&&l.clientResponseStatus!=="cancelled"&&record(l.configurationSnapshot)?.surveyNeedsConfiguration!==true);
+async function maybeEmbedImage(pdf: PdfBuilder, url: string | null | undefined): Promise<EmbeddedImage|null> {
+  const value=String(url??"").trim();
+  if(!value)return null;
+  try{
+    const downloaded=await fetchImage(value);
+    if(downloaded.bytes[0]===0x89)return embedPng(pdf,downloaded.bytes);
+    if(downloaded.bytes[0]===0xff)return embedJpeg(pdf,downloaded.bytes);
+  }catch{
+    return null;
+  }
+  return null;
+}
+
+export async function buildQuotePdf(input:{
+  quote:QuoteDraftRecord;
+  lines:QuoteLineRecord[];
+  company:CompanySettingsRecord|null;
+  companyLogoUrl?:string|null;
+  fallbackLogoUrl?:string|null;
+  clientLogoUrl?:string|null;
+  clientAddress?:string|null;
+  siteAddress?:string|null;
+  clientPurchaseOrderNumber?:string|null;
+}):Promise<QuotePdfResult>{
+  const lines=input.lines.filter(line=>!line.clientRevisionExcluded&&line.clientResponseStatus!=="cancelled"&&record(line.configurationSnapshot)?.surveyNeedsConfiguration!==true);
   if(!lines.length)throw new Error("Quote PDF has no configured client-facing line items.");
   const pdf=new PdfBuilder(),catalogId=pdf.reserve(),pagesId=pdf.reserve(),fontId=pdf.reserve(),boldFontId=pdf.reserve();
-  pdf.set(fontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");pdf.set(boldFontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
-  let logo:EmbeddedImage|null=null;const logoUrl=input.companyLogoUrl||input.fallbackLogoUrl||"";
-  if(logoUrl){try{const downloaded=await fetchImage(logoUrl); if(downloaded.bytes[0]===0x89)logo=embedPng(pdf,downloaded.bytes); else if(downloaded.bytes[0]===0xff)logo=embedJpeg(pdf,downloaded.bytes);}catch{logo=null;}}
-  const firstCapacity=7,nextCapacity=9;const ranges:Array<[number,number]>=[];let start=0;while(start<lines.length){const cap=start===0?firstCapacity:nextCapacity;ranges.push([start,Math.min(lines.length,start+cap)]);start+=cap;}
-  const pageIds:number[]=[];ranges.forEach(([a,b],idx)=>{const resources=`/Font << /F1 ${fontId} 0 R /F2 ${boldFontId} 0 R >>${logo?` /XObject << /Logo ${logo.objectId} 0 R >>`:""}`;const content=buildPageContent({pageIndex:idx,pageCount:ranges.length,quote:input.quote,lines,company:input.company,logo,lineStart:a,lineEnd:b});const stream=pdf.stream("",Buffer.from(content,"ascii"));pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4[0]} ${A4[1]}] /Resources << ${resources} >> /Contents ${stream} 0 R >>`));});
-  pdf.set(pagesId,`<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map(id=>`${id} 0 R`).join(" ")}] >>`);pdf.set(catalogId,`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
+  pdf.set(fontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+  pdf.set(boldFontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
+  const logo=await maybeEmbedImage(pdf,input.companyLogoUrl||input.fallbackLogoUrl||null);
+  const clientLogo=await maybeEmbedImage(pdf,input.clientLogoUrl||null);
+
+  const firstCapacity=4,nextCapacity=4;
+  const ranges:Array<[number,number]>=[];
+  let start=0;
+  while(start<lines.length){const cap=start===0?firstCapacity:nextCapacity;ranges.push([start,Math.min(lines.length,start+cap)]);start+=cap;}
+  const context: QuotePdfContext={
+    clientLogoUrl:input.clientLogoUrl,
+    clientAddress:input.clientAddress,
+    siteAddress:input.siteAddress,
+    clientPurchaseOrderNumber:input.clientPurchaseOrderNumber,
+  };
+  const pageIds:number[]=[];
+  ranges.forEach(([lineStart,lineEnd],pageIndex)=>{
+    const xobjects=[logo?`/Logo ${logo.objectId} 0 R`:null,clientLogo?`/ClientLogo ${clientLogo.objectId} 0 R`:null].filter(Boolean).join(" ");
+    const resources=`/Font << /F1 ${fontId} 0 R /F2 ${boldFontId} 0 R >>${xobjects?` /XObject << ${xobjects} >>`:""}`;
+    const content=buildPageContent({pageIndex,pageCount:ranges.length,quote:input.quote,lines,company:input.company,logo,clientLogo,lineStart,lineEnd,context});
+    const stream=pdf.stream("",Buffer.from(content,"ascii"));
+    pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4[0]} ${A4[1]}] /Resources << ${resources} >> /Contents ${stream} 0 R >>`));
+  });
+  pdf.set(pagesId,`<< /Type /Pages /Count ${pageIds.length} /Kids [${pageIds.map(id=>`${id} 0 R`).join(" ")}] >>`);
+  pdf.set(catalogId,`<< /Type /Catalog /Pages ${pagesId} 0 R >>`);
   const fileName=`${safeFilePart(input.quote.quoteNumber||"Quote","Quote")}-${safeFilePart(input.quote.jobName||input.quote.clientName||"Quote","Quote")}.pdf`;
   return {fileName,bytes:pdf.serialize(catalogId)};
 }

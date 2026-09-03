@@ -33,10 +33,12 @@ import { createProduct, getProductById, updateProduct } from "@/server/products"
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
 import { createMyobCustomerFromLocalClientForTenant, fetchMyobSalesReferenceDataForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 import { saveMyobSalesDefaults } from "@/server/myob-sales-settings";
-import { customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
+import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, customerMyobPriceLevelNames, getCustomerById, updateCustomerPayloadForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { sendOutboundEmail } from "@/server/outbound-email";
 import { buildQuotePdf } from "@/server/quote-pdf";
+import { getEnquiryById } from "@/server/enquiries";
+import { getSurveyRequestById } from "@/server/surveys";
 
 async function requireTenant() {
   const user = await getRequiredSessionUser();
@@ -843,7 +845,11 @@ export async function markQuoteAcceptedManuallyAction(formData: FormData): Promi
   if (!quote?.publicToken) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Quote public identity could not be generated.")}`);
   if (quote.status === "accepted") redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent("Quote is already accepted.")}`);
 
-  await respondToQuoteByToken(quote.publicToken, "accepted", "Approved by client via email/offline response and recorded manually by Production Manager staff.");
+  const manualApprovalNote = String(formData.get("manualApprovalNote") ?? "").trim();
+  const approvalNote = manualApprovalNote
+    ? `Approved by client via email/offline response and recorded manually by Production Manager staff. Staff note: ${manualApprovalNote}`
+    : "Approved by client via email/offline response and recorded manually by Production Manager staff.";
+  await respondToQuoteByToken(quote.publicToken, "accepted", approvalNote);
   revalidatePath("/quotes");
   redirect(`/quotes?selected=${quoteId}&message=${encodeURIComponent("Quote marked accepted from client email/offline approval.")}`);
 }
@@ -880,7 +886,20 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
   let successMessage = "";
   let failureMessage = "";
   try {
-    const company = await getCompanySettingsByTenantId(activeTenant.tenantId);
+    const [company, quoteLines, linkedClient, sourceSurvey] = await Promise.all([
+      getCompanySettingsByTenantId(activeTenant.tenantId),
+      listQuoteLines(quoteId),
+      getCustomerById(activeTenant.tenantId, quote.linkedCustomerId),
+      quote.surveyRequestId ? getSurveyRequestById(activeTenant.tenantId, quote.surveyRequestId) : Promise.resolve(null),
+    ]);
+    const sourceEnquiryId = quote.enquiryId || sourceSurvey?.enquiryId || null;
+    const sourceEnquiry = sourceEnquiryId ? await getEnquiryById(activeTenant.tenantId, sourceEnquiryId) : null;
+    const clientAddressValue = linkedClient?.payloadJson?.billingAddress;
+    const defaultSiteAddressValue = linkedClient?.payloadJson?.defaultSiteAddress;
+    const clientAddress = typeof clientAddressValue === "string" ? clientAddressValue.trim() : null;
+    const siteAddress = sourceSurvey?.siteAddress || sourceEnquiry?.siteAddress || (typeof defaultSiteAddressValue === "string" ? defaultSiteAddressValue.trim() : null);
+    const clientLogo = sourceEnquiry?.clientLogoUrl || customerLogoUrl(linkedClient) || null;
+    const clientPurchaseOrderNumber = sourceEnquiry?.clientPurchaseOrderNumber || quote.clientPurchaseOrderNumber || null;
     const publicUrl = quoteEmailPublicUrl(quote.publicToken);
     const companyName = company?.tradingName || company?.companyLegalName || activeTenant.tenantName || "Tender Edge";
     const contactName = quote.contactName || quote.clientName || "there";
@@ -891,7 +910,6 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
     const tenderEdgeHorizontalLogoUrl = `${emailOrigin}/brand/tender-edge-horizontal-logo-2025.png`;
     const isTenderEdge = /tender\s*edge/i.test(companyName);
     const quoteEmailLogoUrl = isTenderEdge ? tenderEdgeHorizontalLogoUrl : company?.companyLogoUrl;
-    const quoteLines = await listQuoteLines(quoteId);
     let quotePdf: Awaited<ReturnType<typeof buildQuotePdf>>;
     try {
       quotePdf = await buildQuotePdf({
@@ -900,6 +918,10 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
         company,
         companyLogoUrl: quoteEmailLogoUrl || null,
         fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,
+        clientLogoUrl: clientLogo,
+        clientAddress,
+        siteAddress,
+        clientPurchaseOrderNumber,
       });
       if (quotePdf.bytes.byteLength > 18 * 1024 * 1024) {
         throw new Error(`Quote PDF is ${(quotePdf.bytes.byteLength / 1024 / 1024).toFixed(1)}MB. Keep the PDF under 18MB so it can be delivered reliably by email.`);

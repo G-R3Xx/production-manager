@@ -21,6 +21,7 @@ import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
 import { getProductionJobForQuote } from "@/server/production";
 import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondencePreview";
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
+import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalModalForm";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -848,10 +849,11 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         />
                       ) : null}
                       {selectedQuote.status !== "accepted" && selectedQuote.status !== "deleted" ? (
-                        <form action={markQuoteAcceptedManuallyAction}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <button type="submit" title="Use when the client approved the attached PDF by email or another offline method." style={{ minHeight: 44, borderRadius: 14, border: "1px solid #86efac", background: "#f0fdf4", color: "#067647", fontWeight: 950, padding: "0 14px" }}>Mark accepted (email/manual)</button>
-                        </form>
+                        <ManualQuoteApprovalModalForm
+                          action={markQuoteAcceptedManuallyAction}
+                          quoteId={selectedQuote.id}
+                          clientName={selectedQuote.clientName}
+                        />
                       ) : null}
                     </div>
                   </div>
