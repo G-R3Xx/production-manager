@@ -91,6 +91,68 @@ function safeText(value: unknown): string {
     .trim();
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function compactText(value: unknown): string {
+  return String(value ?? "").replace(/\s+/g, " ").trim();
+}
+
+function summaryKey(value: unknown): string {
+  return compactText(value).toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function materialDisplayName(value: unknown): string {
+  const material = recordValue(value);
+  if (!material) return "";
+  return compactText(material.customerFacingName) || compactText(material.name);
+}
+
+function friendlySnapshotValue(value: unknown): string {
+  const raw = compactText(value);
+  if (!raw) return "";
+  const key = raw.toLowerCase();
+  if (key === "direct_print") return "Direct print";
+  if (key === "roll_stock") return "Roll-to-roll print";
+  if (key === "cut_vinyl") return "Cut vinyl";
+  if (key === "no_print") return "No print";
+  if (key === "both") return "CMYK + White";
+  if (key === "cmyk") return "CMYK";
+  if (key === "white") return "White ink";
+  if (key === "mono") return "Mono";
+  if (key === "single") return "Single sided";
+  if (key === "double") return "Double sided";
+  if (key === "pickup") return "Pickup";
+  if (key === "delivery") return "Delivery";
+  if (key === "install") return "Install";
+  return raw.replace(/_/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function optionSummaryValues(line: QuoteLineRecord | null | undefined, labels: RegExp): string[] {
+  return String(line?.optionSummary ?? "")
+    .split(/\s+[·•]\s+/g)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .flatMap((part) => {
+      const colon = part.indexOf(":");
+      if (colon <= 0) return [];
+      const label = part.slice(0, colon).trim();
+      return labels.test(label) ? [part.slice(colon + 1).trim()] : [];
+    })
+    .filter(Boolean);
+}
+
+function uniqueText(values: Array<unknown>): string[] {
+  const seen = new Set<string>();
+  return values.map(compactText).filter(Boolean).filter((value) => {
+    const key = value.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 function pdfEscape(value: unknown): string {
   return safeText(value).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
 }
@@ -372,38 +434,155 @@ function wrappedTextOps(value: string, x: number, y: number, maxChars: number, o
 
 function specificationForPdf(page: ArtworkApprovalPageRecord, line: QuoteLineRecord | null | undefined, approval: ArtworkApprovalRecord): ArtworkSpecificationItem[] {
   const revision = page.proofRevision || approval.revision || "A";
-  const refreshFromSource = approval.status === "draft";
-  const base = line && refreshFromSource
-    ? buildArtworkSpecificationSnapshot(line)
-    : specificationForRevision(page.payloadJson, revision) ?? (line ? buildArtworkSpecificationSnapshot(line) : null);
-  const pms = pmsColoursForRevision(page.payloadJson, revision, refreshFromSource);
-  const snapshot = applyPmsColoursToArtworkSpecification(base, pms);
-  if (snapshot?.items.length) return snapshot.items;
+
+  // The PDF must mirror the online approval panel. Prefer the saved revision snapshot,
+  // then fill any missing fields from the current quote line and the page summaries.
+  // This is intentionally defensive because older approval revisions may pre-date some
+  // of the structured specification fields even though the online page can still resolve
+  // them from the linked quote line.
+  const saved = specificationForRevision(page.payloadJson, revision);
+  const fresh = line ? buildArtworkSpecificationSnapshot(line) : null;
+  const merged = new Map<string, ArtworkSpecificationItem>();
+
+  for (const snapshot of [saved, fresh]) {
+    for (const item of snapshot?.items ?? []) {
+      const value = compactText(item.value);
+      if (!value || merged.has(item.key)) continue;
+      merged.set(item.key, { ...item, value });
+    }
+  }
+
+  const snapshot = recordValue(line?.configurationSnapshot);
+  const materials = recordValue(snapshot?.materialSnapshots);
+  const main = recordValue(materials?.main);
+  const media = recordValue(materials?.media);
+  const laminate = recordValue(materials?.laminate ?? materials?.smallCoating);
+  const backing = recordValue(materials?.backing);
+  const standoff = recordValue(materials?.standoff);
+
+  const addMissing = (item: ArtworkSpecificationItem | null) => {
+    if (!item || merged.has(item.key) || !compactText(item.value)) return;
+    merged.set(item.key, { ...item, value: compactText(item.value) });
+  };
+
+  const printBits = uniqueText([
+    friendlySnapshotValue(snapshot?.printMethod),
+    materialDisplayName(media),
+    friendlySnapshotValue(snapshot?.ink ?? snapshot?.smallPrintColour),
+    friendlySnapshotValue(snapshot?.sides ?? snapshot?.smallSides),
+    compactText(snapshot?.printDirection).toLowerCase() === "reverse" ? "Reverse print" : "",
+    ...optionSummaryValues(line, /^(?:print|print method|print type|ink|colour|color|sides)$/i),
+    page.colourSummary,
+  ]).filter((value) => !/^no print$/i.test(value));
+  addMissing(printBits.length ? { key: "print", label: "Imaging / print", value: printBits.join(" · "), icon: "print" } : null);
+
+  addMissing(materialDisplayName(backing) ? { key: "backing", label: "Backing", value: materialDisplayName(backing), icon: "backing" } : null);
+
+  const laminateValue = materialDisplayName(laminate)
+    || optionSummaryValues(line, /^(?:laminate|lamination|coating)$/i)[0]
+    || String(page.installSummary ?? "").split(/\n+/).map((part) => part.trim()).find((part) => /\b(laminate|lamination|coating)\b/i.test(part))
+    || "";
+  addMissing(laminateValue ? { key: "laminate", label: "Laminate / finish", value: laminateValue, icon: "laminate" } : null);
+
+  const finishingLabels: Record<string, string> = {
+    jingwei: "Jingwei cutting",
+    eyelets: "Eyelets",
+    vinyl_cutting: "Vinyl cutting",
+    print_vinyl_application: "Print / vinyl application",
+    tape_hem_banner: "Tape / hem banner",
+  };
+  const finishings = Array.isArray(snapshot?.finishings) ? snapshot!.finishings as unknown[] : [];
+  const cutBits = uniqueText([
+    ...finishings.map((value) => finishingLabels[compactText(value)] ?? friendlySnapshotValue(value)).filter((value) => value && !/^eyelets$/i.test(value)),
+    ...optionSummaryValues(line, /^(?:finishing|finishings|cut|shape|corners?|corner finish|holes drilled|hole location)$/i),
+    ...String(page.installSummary ?? "").split(/\n+/).filter((part) => part.trim() && !/\b(laminate|lamination|coating)\b/i.test(part)),
+  ]);
+  addMissing(cutBits.length ? { key: "cut", label: "Cut / shape", value: cutBits.join(" · "), icon: "cut" } : null);
+
+  const mountingBits: string[] = [];
+  const standoffName = materialDisplayName(standoff);
+  const standoffQty = compactText(snapshot?.standoffQtyPerItem);
+  if (standoffName && Number(standoffQty) > 0) mountingBits.push(`${standoffName} × ${standoffQty}`);
+  mountingBits.push(...optionSummaryValues(line, /^(?:mounting|standoffs?|fixing method)$/i));
+  if (mountingBits.length) addMissing({ key: "mounting", label: "Mounting", value: uniqueText(mountingBits).join(" · "), icon: "mounting" });
+
+  const service = friendlySnapshotValue(snapshot?.serviceType) || optionSummaryValues(line, /^(?:dispatch|pickup \/ delivery \/ install|service)$/i)[0] || "";
+  if (service) {
+    const serviceKey = service.toLowerCase();
+    const icon: ArtworkSpecificationItem["icon"] = serviceKey.includes("delivery") ? "delivery" : serviceKey.includes("install") ? "install" : "pickup";
+    addMissing({ key: "dispatch", label: "Pickup / delivery / install", value: service, icon });
+  }
+
+  const width = Number(snapshot?.widthMm ?? 0);
+  const height = Number(snapshot?.heightMm ?? 0);
+  const size = compactText(page.sizeSummary) || (width > 0 && height > 0 ? `${width} × ${height}mm` : optionSummaryValues(line, /^(?:finished\s*)?size$/i)[0] || "");
+  addMissing(size ? { key: "size", label: "Finished size", value: size, icon: "size" } : null);
+  addMissing({ key: "quantity", label: "Quantity", value: compactText(page.quantity || line?.quantity || "1") || "1", icon: "quantity" });
+
+  // PMS data is revision-specific when present. Fall back to the current PMS field for
+  // legacy revisions so the email/PDF does not silently lose colour approvals.
+  const pms = pmsColoursForRevision(page.payloadJson, revision, true);
+  const baseSnapshot = {
+    version: 1 as const,
+    capturedAt: new Date().toISOString(),
+    sourceQuoteLineId: line?.id ?? page.sourceQuoteLineId ?? null,
+    sourceLineUpdatedAt: line?.updatedAt ?? null,
+    items: [...merged.values()],
+  };
+  const withPms = applyPmsColoursToArtworkSpecification(baseSnapshot, pms);
+  if (withPms?.items.length) return withPms.items.filter((item) => compactText(item.value));
 
   const fallback: ArtworkSpecificationItem[] = [];
   if (safeText(page.substrateSummary)) fallback.push({ key: "substrate", label: "Substrate", value: safeText(page.substrateSummary), icon: "substrate" });
-  if (safeText(page.colourSummary)) fallback.push({ key: "colour-fallback", label: "Colour / print", value: safeText(page.colourSummary), icon: "colour" });
-  if (safeText(page.installSummary)) fallback.push({ key: "dispatch-fallback", label: "Pickup / delivery / install", value: safeText(page.installSummary), icon: "install" });
+  if (safeText(page.colourSummary)) fallback.push({ key: "print", label: "Imaging / print", value: safeText(page.colourSummary), icon: "print" });
+  if (safeText(page.installSummary)) fallback.push({ key: "cut", label: "Cut / shape", value: safeText(page.installSummary), icon: "cut" });
   if (safeText(page.sizeSummary)) fallback.push({ key: "size", label: "Finished size", value: safeText(page.sizeSummary), icon: "size" });
   fallback.push({ key: "quantity", label: "Quantity", value: safeText(page.quantity || "1") || "1", icon: "quantity" });
   return fallback;
 }
 
 function specIconOp(icon: ArtworkSpecificationItem["icon"], x: number, y: number): string {
-  const g = "0.120 G 1.0 w ";
-  if (icon === "substrate") return `${g}${x} ${y + 9} m ${x + 10} ${y + 14} l ${x + 20} ${y + 9} l ${x + 10} ${y + 4} l h S\n${g}${x + 2} ${y + 4} m ${x + 10} ${y} l ${x + 18} ${y + 4} l S\n`;
-  if (icon === "colour") return circleStrokeOp(x + 6, y + 10, 5) + circleStrokeOp(x + 15, y + 10, 5) + circleStrokeOp(x + 10.5, y + 3, 5);
-  if (icon === "print") return `${g}${x + 2} ${y + 5} ${18} ${10} re S\n${g}${x + 6} ${y + 12} ${10} ${6} re S\n${g}${x + 6} ${y} ${10} ${7} re S\n`;
-  if (icon === "laminate") return circleStrokeOp(x + 6, y + 13, 5) + `${g}${x + 11} ${y + 13} m ${x + 20} ${y + 13} l ${x + 20} ${y + 3} l ${x + 4} ${y + 3} l S\n`;
-  if (icon === "backing") return `${g}${x + 2} ${y + 2} ${17} ${15} re S\n${g}${x + 3} ${y + 3} m ${x + 18} ${y + 16} l S\n`;
-  if (icon === "cut") return circleStrokeOp(x + 5, y + 5, 2.5) + circleStrokeOp(x + 11, y + 5, 2.5) + `${g}${x + 7} ${y + 7} m ${x + 18} ${y + 18} l ${x + 10} ${y + 7} m ${x + 18} ${y + 2} l S\n`;
-  if (icon === "mounting") return circleStrokeOp(x + 10, y + 9, 5) + `${g}${x} ${y + 9} m ${x + 5} ${y + 9} l ${x + 15} ${y + 9} m ${x + 20} ${y + 9} l ${x + 10} ${y - 1} m ${x + 10} ${y + 4} l ${x + 10} ${y + 14} m ${x + 10} ${y + 19} l S\n`;
-  if (icon === "delivery") return `${g}${x} ${y + 4} ${13} ${10} re S\n${g}${x + 13} ${y + 4} m ${x + 19} ${y + 4} l ${x + 19} ${y + 10} l ${x + 15} ${y + 14} l ${x + 13} ${y + 14} l S\n` + circleStrokeOp(x + 5, y + 2, 2) + circleStrokeOp(x + 16, y + 2, 2);
-  if (icon === "pickup") return `${g}${x + 2} ${y + 7} ${12} ${10} re S\n${g}${x + 18} ${y + 18} m ${x + 18} ${y} l ${x + 14} ${y + 4} m ${x + 18} ${y} l ${x + 22} ${y + 4} l S\n`;
-  if (icon === "install") return `${g}${x + 2} ${y + 2} m ${x + 19} ${y + 19} l ${x + 14} ${y + 19} m ${x + 19} ${y + 14} l ${x + 2} ${y + 18} m ${x + 18} ${y + 2} l S\n`;
-  if (icon === "size") return `${g}${x + 2} ${y + 3} ${17} ${13} re S\n${g}${x + 2} ${y + 19} m ${x + 19} ${y + 19} l ${x + 2} ${y + 17} m ${x + 2} ${y + 21} l ${x + 19} ${y + 17} m ${x + 19} ${y + 21} l S\n`;
-  if (icon === "quantity") return `${g}${x + 1} ${y + 7} ${14} ${11} re S\n${g}${x + 5} ${y + 3} ${14} ${11} re S\n`;
-  return `${g}${x + 2} ${y + 2} ${17} ${16} re S\n`;
+  // Match the same icon language used by ArtworkSpecificationPanel.tsx.
+  // Source artwork is a 48x48 SVG; these helpers map that geometry into the PDF panel.
+  const scale = 0.47;
+  const ox = x - 1;
+  const oy = y - 2;
+  const px = (value: number) => ox + value * scale;
+  const py = (value: number) => oy + (48 - value) * scale;
+  const stroke = "0.063 0.094 0.153 RG 1.05 w 1 J 1 j ";
+  const path = (points: Array<[number, number]>, close = false) => {
+    if (!points.length) return "";
+    let op = `${stroke}${px(points[0]![0]).toFixed(2)} ${py(points[0]![1]).toFixed(2)} m `;
+    for (const [xx, yy] of points.slice(1)) op += `${px(xx).toFixed(2)} ${py(yy).toFixed(2)} l `;
+    if (close) op += "h ";
+    return `${op}S\n`;
+  };
+  const line = (x1: number, y1: number, x2: number, y2: number) => path([[x1, y1], [x2, y2]]);
+  const rect = (rx: number, ry: number, rw: number, rh: number) => `${stroke}${px(rx).toFixed(2)} ${py(ry + rh).toFixed(2)} ${(rw * scale).toFixed(2)} ${(rh * scale).toFixed(2)} re S\n`;
+  const circle = (cx: number, cy: number, r: number) => circleStrokeOp(px(cx), py(cy), r * scale, 1.05, 0.09);
+
+  if (icon === "substrate") return path([[7,18],[24,9],[41,18],[24,27]], true) + path([[10,24],[24,31],[38,24]]) + path([[10,30],[24,37],[38,30]]);
+  if (icon === "colour") return circle(16,17,7) + circle(30,17,7) + circle(23,30,7) + line(10,40,37,40);
+  if (icon === "print") return path([[8,15],[40,15],[42,20],[42,32],[6,32],[6,20],[8,15]], true)
+    + line(13,20,35,20) + line(15,24,33,24) + path([[16,25],[16,38],[32,38],[32,25]])
+    + line(10,32,10,39) + line(38,32,38,39) + rect(7,13,9,2) + rect(35,18,4,4) + circle(39,26,1);
+  if (icon === "laminate") return circle(13,15,6) + path([[19,15],[36,15],[41,20],[41,23]]) + rect(8,26,29,12) + line(13,21,13,26);
+  if (icon === "backing") return rect(8,12,27,20) + line(14,36,40,16) + path([[35,12],[40,12],[40,17]]) + path([[8,32],[8,37],[13,37]]);
+  if (icon === "cut") return `${stroke}[2.2 2.2] 0 d ${px(8).toFixed(2)} ${py(31).toFixed(2)} m ${px(16).toFixed(2)} ${py(20).toFixed(2)} ${px(22).toFixed(2)} ${py(16).toFixed(2)} ${px(29).toFixed(2)} ${py(16).toFixed(2)} c ${px(34).toFixed(2)} ${py(16).toFixed(2)} ${px(38).toFixed(2)} ${py(18).toFixed(2)} ${px(40).toFixed(2)} ${py(21).toFixed(2)} c S [] 0 d\n`
+    + line(30,10,18,37) + path([[25,11],[35,11],[30,19]], true);
+  if (icon === "mounting") return line(6,24,18,24) + line(30,24,42,24) + circle(24,24,6)
+    + line(18,20,12,15) + line(18,28,12,33) + line(30,20,36,15) + line(30,28,36,33);
+  if (icon === "pickup") return rect(9,14,21,18) + path([[9,20],[19,26],[30,20]]) + line(35,12,35,35) + path([[30,30],[35,35],[40,30]]);
+  if (icon === "delivery") return rect(5,14,23,19) + path([[28,20],[36,20],[43,27],[43,33],[28,33]])
+    + circle(14,35,4) + circle(36,35,4) + line(31,24,38,24);
+  if (icon === "install") return line(11,37,36,12) + line(30,9,39,18) + line(8,31,17,40)
+    + path([[13,16],[24,16],[24,27]]) + line(9,20,13,20) + line(20,9,20,13);
+  if (icon === "size") return rect(9,13,30,22) + line(9,7,9,11) + line(39,7,39,11) + line(13,8,35,8)
+    + path([[16,5],[13,8],[16,11]]) + path([[32,5],[35,8],[32,11]])
+    + line(43,15,40,15) + line(43,33,40,33) + line(42,18,42,30)
+    + path([[39,21],[42,18],[45,21]]) + path([[39,27],[42,30],[45,27]]);
+  if (icon === "quantity") return rect(10,12,24,18) + rect(15,17,24,18) + rect(20,22,18,14);
+  return rect(9,10,30,28) + line(15,18,33,18) + line(15,24,33,24) + line(15,30,27,30);
 }
 
 function specItemHeight(item: ArtworkSpecificationItem, panelTextChars = 28): number {
@@ -457,10 +636,11 @@ function drawSpecificationPanel(items: ArtworkSpecificationItem[], x: number, y:
       });
       if (item.detail) {
         const detail = wrapText(item.detail, 50).slice(0, 2);
-        detail.forEach((line, detailIndex) => { content += textOp(line, x + iconW + 7, bottom + 6 + detailIndex * 6.5, 5.1, false, 0.42); });
+        detail.forEach((line, detailIndex) => { content += textOp(line, x + iconW + 7, bottom + 6 + (detail.length - 1 - detailIndex) * 6.5, 5.1, false, 0.42); });
       }
     } else {
       const value = wrappedTextOps(item.value, x + iconW + 7, top - 23, 28, { size: 6.8, bold: true, grey: 0.07, leading: 8.2, maxLines: 3 });
+      content += value.content;
       if (item.detail) {
         const detailY = Math.max(bottom + 5, value.endY - 1);
         content += wrappedTextOps(item.detail, x + iconW + 7, detailY, 34, { size: 5.4, grey: 0.42, leading: 6.5, maxLines: 2 }).content;
@@ -477,19 +657,44 @@ function approvalStatus(page: ArtworkApprovalPageRecord): string {
   return "Awaiting decision";
 }
 
-function watermarkTextForPdf(companyName: string, quoteNumber: string): string {
-  const company = safeText(companyName || "Tender Edge").toUpperCase();
-  const quote = safeText(quoteNumber);
-  return quote ? `PROOF ONLY - ${company} - ${quote}` : `PROOF ONLY - ${company}`;
+function watermarkTextForPdf(brandName: string, quoteNumber: string): string[] {
+  const brand = compactText(brandName || "Tender Edge").toUpperCase();
+  const quote = compactText(quoteNumber);
+  return quote ? ["PROOF ONLY", brand, quote] : ["PROOF ONLY", brand];
 }
 
-function drawWatermarkOps(text: string, x: number, y: number, width: number, height: number): string {
-  const fontSize = Math.min(26, Math.max(17, width / 23));
-  const cx = x + width / 2;
-  const cy = y + height / 2;
-  const label = safeText(text).slice(0, 72);
-  // Light diagonal text. The online client page uses a proof watermark as well.
-  return `q 0.707 0.707 -0.707 0.707 ${cx.toFixed(1)} ${cy.toFixed(1)} cm 0.820 g BT /F2 ${fontSize.toFixed(1)} Tf 1 0 0 1 ${(-width * 0.31).toFixed(1)} 0 Tm (${pdfEscape(label)}) Tj ET Q\n`;
+function drawWatermarkPhrase(parts: string[], tx: number, ty: number, angleDegrees: number, fontSize: number, grey = 0.855): string {
+  const radians = angleDegrees * Math.PI / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  let op = `q ${cos.toFixed(4)} ${sin.toFixed(4)} ${(-sin).toFixed(4)} ${cos.toFixed(4)} ${tx.toFixed(1)} ${ty.toFixed(1)} cm\n`;
+  let cursor = 0;
+  const gap = fontSize * 1.55;
+  for (const [index, part] of parts.entries()) {
+    const label = safeText(part).slice(0, 48);
+    op += `${grey.toFixed(3)} g BT /F2 ${fontSize.toFixed(1)} Tf 1 0 0 1 ${cursor.toFixed(1)} 0 Tm (${pdfEscape(label)}) Tj ET\n`;
+    cursor += Math.max(fontSize * 2.2, label.length * fontSize * 0.57);
+    if (index < parts.length - 1) {
+      const dotX = cursor + gap * 0.35;
+      const radius = Math.max(1.3, fontSize * 0.075);
+      const k = radius * 0.5522847498;
+      op += `${grey.toFixed(3)} G ${grey.toFixed(3)} g 0.3 w ${dotX.toFixed(1)} ${(-radius).toFixed(1)} m ${(dotX+k).toFixed(1)} ${(-radius).toFixed(1)} ${(dotX+radius).toFixed(1)} ${(-k).toFixed(1)} ${(dotX+radius).toFixed(1)} 0 c ${(dotX+radius).toFixed(1)} ${k.toFixed(1)} ${(dotX+k).toFixed(1)} ${radius.toFixed(1)} ${dotX.toFixed(1)} ${radius.toFixed(1)} c ${(dotX-k).toFixed(1)} ${radius.toFixed(1)} ${(dotX-radius).toFixed(1)} ${k.toFixed(1)} ${(dotX-radius).toFixed(1)} 0 c ${(dotX-radius).toFixed(1)} ${(-k).toFixed(1)} ${(dotX-k).toFixed(1)} ${(-radius).toFixed(1)} ${dotX.toFixed(1)} ${(-radius).toFixed(1)} c f\n`;
+      cursor += gap;
+    }
+  }
+  return `${op}Q\n`;
+}
+
+function drawWatermarkOps(parts: string[], x: number, y: number, width: number, height: number): string {
+  // Mirror the public approval preview: repeated, light navy watermark at roughly -28deg
+  // in browser coordinates (equivalent to +28deg in PDF coordinates).
+  const fontSize = Math.min(22, Math.max(15, width / 28));
+  const phraseWidth = parts.join("   ").length * fontSize * 0.57;
+  const starts = [
+    [x + width * 0.04, y + height * 0.25],
+    [x + width * 0.10, y + height * 0.67],
+  ] as const;
+  return starts.map(([sx, sy]) => drawWatermarkPhrase(parts, sx - phraseWidth * 0.12, sy, 28, fontSize)).join("");
 }
 
 function buildApprovalSheetContent(input: {
@@ -502,6 +707,7 @@ function buildApprovalSheetContent(input: {
   proofCount: number;
   approval: ArtworkApprovalRecord;
   companyName: string;
+  watermarkBrand: string;
   quoteNumber: string;
   projectName: string;
   revision: string;
@@ -573,7 +779,7 @@ function buildApprovalSheetContent(input: {
     const drawX = proofX + (proofW - drawW) / 2;
     const drawY = contentBottom + (contentH - drawH) / 2;
     content += `q ${drawW.toFixed(2)} 0 0 ${drawH.toFixed(2)} ${drawX.toFixed(2)} ${drawY.toFixed(2)} cm /Im0 Do Q\n`;
-    if (input.page.clientResponseStatus !== "approved") content += drawWatermarkOps(watermarkTextForPdf(input.companyName, input.quoteNumber), drawX, drawY, drawW, drawH);
+    if (input.page.clientResponseStatus !== "approved") content += drawWatermarkOps(watermarkTextForPdf(input.watermarkBrand, input.quoteNumber), drawX, drawY, drawW, drawH);
   } else if (input.isSourcePdf) {
     content += rectFillOp(proofX + 34, contentBottom + contentH / 2 - 50, proofW - 68, 100, 1, 1, 1);
     content += rectStrokeOp(proofX + 34, contentBottom + contentH / 2 - 50, proofW - 68, 100, 0.7, 0.78);
@@ -600,6 +806,7 @@ function buildApprovalSheetContent(input: {
 
 function buildCoverContent(input: {
   companyName: string;
+  watermarkBrand?: string | null;
   companyAddress?: string | null;
   companyPhone?: string | null;
   companyEmail?: string | null;
@@ -703,6 +910,7 @@ export async function buildArtworkProofPdf(input: {
   sourceQuote: QuoteDraftRecord | null;
   sourceLines?: QuoteLineRecord[];
   companyName: string;
+  watermarkBrand?: string | null;
   companyAddress?: string | null;
   companyPhone?: string | null;
   companyEmail?: string | null;
@@ -809,6 +1017,7 @@ export async function buildArtworkProofPdf(input: {
       proofCount: input.pages.length,
       approval: input.approval,
       companyName: input.companyName,
+      watermarkBrand: compactText(input.watermarkBrand) || input.companyName,
       quoteNumber,
       projectName,
       revision,
