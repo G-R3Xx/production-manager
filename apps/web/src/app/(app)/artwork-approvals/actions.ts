@@ -326,7 +326,6 @@ export async function emailArtworkApprovalClientAction(formData: FormData): Prom
       sourceQuote,
       sourceLines: lines,
       companyName,
-      watermarkBrand: activeTenant.tenantName || company?.tradingName || companyName,
       companyAddress: company?.address || null,
       companyPhone: company?.phone || null,
       companyEmail: company?.email || null,

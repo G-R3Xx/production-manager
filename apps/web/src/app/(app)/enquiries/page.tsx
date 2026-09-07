@@ -145,27 +145,31 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                   </summary>
 
                   <div style={{ display: "grid", gap: 10, borderTop: "1px solid #eef2f7", padding: "10px 12px 12px" }}>
-                    <section style={{ display: "grid", gap: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-                        <strong style={{ fontSize: 13 }}>Correspondence</strong>
-                        <span style={{ fontSize: 12, color: "#667085" }}>{correspondenceCount} attached</span>
-                      </div>
-                      {enquiryCorrespondence.length > 0 ? (
-                        <div style={{ display: "grid", gap: 8 }}>
-                          {enquiryCorrespondence.slice(0, 5).map((item) => (
-                            <EnquiryCorrespondencePreview key={item.id} item={item} />
-                          ))}
-                        </div>
-                      ) : (
-                        <span style={{ color: "#98a2b3", fontSize: 12 }}>No email correspondence attached yet.</span>
-                      )}
-                      {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
-                        <form action={attachEnquiryCorrespondenceAction} style={{ margin: 0 }}>
-                          <input type="hidden" name="enquiryId" value={enquiry.id} />
-                          <EnquiryCorrespondenceDropzone />
-                        </form>
-                      ) : null}
-                    </section>
+                    <details style={{ border: "1px solid #e6edf7", borderRadius: 14, background: "#fbfdff", overflow: "hidden" }}>
+                      <summary style={{ cursor: "pointer", padding: "10px 12px", color: "#2463eb" }}>
+                        <span style={{ display: "inline-flex", width: "calc(100% - 20px)", justifyContent: "space-between", gap: 10, alignItems: "center", verticalAlign: "middle" }}>
+                          <strong style={{ fontSize: 13, color: "#111827" }}>Correspondence</strong>
+                          <span style={{ fontSize: 12, color: "#667085", whiteSpace: "nowrap" }}>{correspondenceCount} attached</span>
+                        </span>
+                      </summary>
+                      <section style={{ display: "grid", gap: 8, borderTop: "1px solid #e6edf7", padding: "10px 12px 12px" }}>
+                        {enquiryCorrespondence.length > 0 ? (
+                          <div style={{ display: "grid", gap: 8 }}>
+                            {enquiryCorrespondence.slice(0, 5).map((item) => (
+                              <EnquiryCorrespondencePreview key={item.id} item={item} />
+                            ))}
+                          </div>
+                        ) : (
+                          <span style={{ color: "#98a2b3", fontSize: 12 }}>No email correspondence attached yet.</span>
+                        )}
+                        {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
+                          <form action={attachEnquiryCorrespondenceAction} style={{ margin: 0 }}>
+                            <input type="hidden" name="enquiryId" value={enquiry.id} />
+                            <EnquiryCorrespondenceDropzone />
+                          </form>
+                        ) : null}
+                      </section>
+                    </details>
 
                     <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                       {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
