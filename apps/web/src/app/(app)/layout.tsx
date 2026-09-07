@@ -5,13 +5,14 @@ import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
 import { AppNavLink } from "@/components/AppNavLink";
 import { SafeAppAutoRefresh } from "@/components/SafeAppAutoRefresh";
 import { AlertsPopover } from "@/components/AlertsPopover";
+import { OperationsAttentionBar } from "@/components/OperationsAttentionBar";
 import { signOutAction, switchTenantAction } from "./actions";
 
 type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.09.07.01";
+const APP_VERSION = "V26.09.07.02";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -191,7 +192,8 @@ export default async function AppLayout({ children }: AppLayoutProps) {
       </aside>
 
       <main style={{ padding: "24px 28px 36px", minWidth: 0 }}>
-        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12, position: "relative", zIndex: 20 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "stretch", flexWrap: "wrap", marginBottom: 12, position: "relative", zIndex: 20 }}>
+          <OperationsAttentionBar />
           <AlertsPopover initialNotifications={[]} initialUnreadCount={0} />
         </div>
         <SafeAppAutoRefresh initialPulse="" />
