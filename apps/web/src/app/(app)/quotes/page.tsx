@@ -1063,10 +1063,37 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 </span>
                               ) : null}
                             </div>
-                            <div style={{ color: "#667085", fontSize: 13 }}>{[staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity), `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
+                            <div style={{ color: "#667085", fontSize: 13 }}>{staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity)}</div>
                             {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            <div
+                              aria-label={`Quantity ${line.quantity}, price per unit $${cleanQuoteLineAmount(line.unitPrice)}, line total $${cleanQuoteLineAmount(line.lineTotal)}`}
+                              style={{
+                                display: "flex",
+                                alignItems: "stretch",
+                                border: "1px solid #d6e0ee",
+                                borderRadius: 11,
+                                background: "#ffffff",
+                                overflow: "hidden",
+                                boxShadow: "0 1px 2px rgba(16,24,40,0.04)"
+                              }}
+                            >
+                              <div style={{ display: "grid", gap: 1, alignContent: "center", minHeight: 44, padding: "5px 10px" }}>
+                                <span style={{ color: "#667085", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.04em" }}>Qty</span>
+                                <strong style={{ color: "#101828", fontSize: 15, lineHeight: 1.1 }}>{line.quantity}</strong>
+                              </div>
+                              <div style={{ width: 1, background: "#e5edf7" }} />
+                              <div style={{ display: "grid", gap: 1, alignContent: "center", minHeight: 44, padding: "5px 10px" }}>
+                                <span style={{ color: "#667085", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.04em" }}>Price P/U</span>
+                                <strong style={{ color: "#101828", fontSize: 15, lineHeight: 1.1 }}>${cleanQuoteLineAmount(line.unitPrice)}</strong>
+                              </div>
+                              <div style={{ width: 1, background: "#e5edf7" }} />
+                              <div style={{ display: "grid", gap: 1, alignContent: "center", minHeight: 44, padding: "5px 11px", background: "#f8fafc" }}>
+                                <span style={{ color: "#475467", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.04em" }}>Line total</span>
+                                <strong style={{ color: "#101828", fontSize: 17, lineHeight: 1.05 }}>${cleanQuoteLineAmount(line.lineTotal)}</strong>
+                              </div>
+                            </div>
                             {canOverrideQuoteMarkup ? (
                               <QuoteLineMarkupEditor
                                 quoteId={selectedQuote.id}
