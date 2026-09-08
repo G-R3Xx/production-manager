@@ -902,21 +902,24 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     const needsPmClientLink = !linkedClient;
                     const needsMyobLink = Boolean(linkedClient && !linkedMyobCustomer);
                     const needsAnyClientLink = needsPmClientLink || needsMyobLink;
+                    const needsMyobAttention = needsAnyClientLink || selectedQuote.myobOrderStatus === "error";
+                    const orderLabel = selectedQuote.myobOrderNumber
+                      ? `Order ${selectedQuote.myobOrderNumber}`
+                      : selectedQuote.status === "accepted"
+                        ? "Order pending"
+                        : "Creates automatically when accepted";
                     return (
-                      <section style={{ border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, borderRadius: 18, background: needsAnyClientLink ? "#fff7ed" : myobTone.bg, color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: 14, display: "grid", gap: 12 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                          <div style={{ display: "grid", gap: 4 }}>
-                            <strong>MYOB open job / order</strong>
-                            <span style={{ fontSize: 13 }}>Accepted quotes automatically become open MYOB Item Orders. Production Manager will use the linked MYOB customer, or safely match/create the client in MYOB when required. Drafts, enquiries and surveys stay in Production Manager only.</span>
-                            {linkedClient ? <span style={{ fontSize: 13 }}>Client: <strong>{linkedClient.displayName}</strong> · MYOB: <strong>{linkedMyobCustomer ? linkedMyobCustomer.displayName : "Not linked"}</strong>{customerMyobPriceLevel(linkedClient) ? <> · Price level: <strong>{customerMyobPriceLevelName(linkedClient)} ({customerMyobPriceLevel(linkedClient)})</strong></> : null}</span> : null}
-                            {selectedQuote.myobOrderNumber ? <span style={{ fontSize: 13 }}>Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · synced ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</span> : null}
-                            {selectedQuote.myobOrderStatus === "synced" && JSON.stringify(selectedQuote.myobOrderPayloadJson ?? {}).includes("/Sale/Order/Service") ? (
-                              <span style={{ fontSize: 12, color: "#9a3412", fontWeight: 800 }}>This order was created by an older Production Manager build using MYOB Service layout. New accepted quotes are sent using MYOB Item layout.</span>
-                            ) : null}
-                            {selectedQuote.myobOrderSyncError && !needsAnyClientLink ? <span style={{ fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</span> : null}
+                      <section style={{ display: "grid", gap: needsMyobAttention ? 10 : 0 }}>
+                        <div style={{ border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, borderRadius: 14, background: needsAnyClientLink ? "#fff7ed" : myobTone.bg, color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: "9px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+                            <span style={{ fontSize: 10, fontWeight: 950, letterSpacing: "0.06em", textTransform: "uppercase" }}>MYOB order</span>
+                            <strong style={{ color: "#101828" }}>{orderLabel}</strong>
+                            {selectedQuote.myobOrderSyncedAt ? <span style={{ fontSize: 12, color: "#667085" }}>· synced {formatDateTime(selectedQuote.myobOrderSyncedAt)}</span> : null}
+                            {selectedQuote.myobOrderStatus === "synced" && JSON.stringify(selectedQuote.myobOrderPayloadJson ?? {}).includes("/Sale/Order/Service") ? <span style={{ fontSize: 11, color: "#9a3412", fontWeight: 800 }}>Older MYOB Service-layout order</span> : null}
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            <span style={{ borderRadius: 999, border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, background: "rgba(255,255,255,0.75)", color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{needsPmClientLink ? "PM client link needed" : needsMyobLink ? "MYOB customer link needed" : myobTone.label}</span>
+                            <span style={{ borderRadius: 999, border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, background: "rgba(255,255,255,0.78)", color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{needsPmClientLink ? "PM client link needed" : needsMyobLink ? "MYOB customer link needed" : myobTone.label}</span>
+                            {selectedProductionJob ? <Link href={`/production/${selectedProductionJob.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Job workspace →</Link> : null}
                             {canPush && !needsAnyClientLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
                                 <input type="hidden" name="quoteId" value={selectedQuote.id} />
@@ -926,11 +929,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           </div>
                         </div>
 
+                        {selectedQuote.myobOrderSyncError && !needsAnyClientLink ? <div style={{ border: "1px solid #fecaca", borderRadius: 12, background: "#fef2f2", color: "#b42318", padding: "9px 11px", fontSize: 12, whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</div> : null}
+
                         {needsPmClientLink ? (
-                          <form action={linkQuoteToProductionManagerClientAction} style={{ borderTop: "1px solid #fed7aa", paddingTop: 12, display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
+                          <form action={linkQuoteToProductionManagerClientAction} style={{ border: "1px solid #fed7aa", borderRadius: 14, background: "#fff7ed", padding: 12, display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
                             <input type="hidden" name="quoteId" value={selectedQuote.id} />
                             <label style={{ display: "grid", gap: 6 }}>
-                              <b style={{ fontSize: 13 }}>1. Link this quote to a Production Manager client</b>
+                              <b style={{ fontSize: 13 }}>Link this quote to a Production Manager client</b>
                               <select name="customerId" defaultValue={suggestedPmClient?.id ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
                                 <option value="">Choose Production Manager client…</option>
                                 {clients.filter((candidate) => candidate.isActive).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.companyName && candidate.companyName !== candidate.displayName ? ` — ${candidate.companyName}` : ""}{candidate.email ? ` · ${candidate.email}` : ""}</option>)}
@@ -941,12 +946,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           </form>
                         ) : null}
 
-                        {selectedQuote.status === "accepted" && salesReferences.accounts.length ? (
-                          <div style={{ borderTop: `1px solid ${needsAnyClientLink ? "#fed7aa" : myobTone.border}`, paddingTop: 12, display: "grid", gap: 8 }}>
+                        {selectedQuote.status === "accepted" && salesReferences.accounts.length && (!salesDefaults.incomeAccountUid || selectedQuote.myobOrderStatus === "error") ? (
+                          <div style={{ border: "1px solid #dfe7f2", borderRadius: 14, background: "#f8fafc", padding: 12, display: "grid", gap: 8 }}>
                             <form action={saveMyobSalesDefaultsAction} style={{ display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
                               <input type="hidden" name="quoteId" value={selectedQuote.id} />
                               <label style={{ display: "grid", gap: 6 }}>
-                                <b style={{ fontSize: 13 }}>Default sales income account</b>
+                                <b style={{ fontSize: 13 }}>MYOB fallback sales income account</b>
                                 <select name="incomeAccountUid" defaultValue={salesDefaults.incomeAccountUid ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
                                   <option value="">Choose MYOB income account…</option>
                                   {salesReferences.accounts.map((account) => (
@@ -956,12 +961,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                               </label>
                               <button type="submit" style={{ ...buttonStyle, background: "#334155" }}>Save sales account</button>
                             </form>
-                            <span style={{ fontSize: 12, color: needsAnyClientLink ? "#9a3412" : myobTone.fg }}>MYOB Item Orders use the linked MYOB sales item on saved products. Custom/quick quote lines use the PM-CUSTOM sales item; this Income account is used when Production Manager creates that fallback item.</span>
+                            <span style={{ fontSize: 12, color: "#667085" }}>Only required when a custom/quick quote line needs Production Manager to create the PM-CUSTOM fallback MYOB sales item.</span>
                           </div>
                         ) : null}
 
                         {needsMyobLink ? (
-                          <div style={{ borderTop: "1px solid #fed7aa", paddingTop: 12, display: "grid", gap: 12 }}>
+                          <div style={{ border: "1px solid #fed7aa", borderRadius: 14, background: "#fff7ed", padding: 12, display: "grid", gap: 12 }}>
                             <form action={linkQuoteClientToMyobAction} style={{ display: "grid", gridTemplateColumns: "minmax(260px,1fr) auto auto", gap: 8, alignItems: "end" }}>
                               <input type="hidden" name="quoteId" value={selectedQuote.id} />
                               <label style={{ display: "grid", gap: 6 }}>
@@ -979,18 +984,18 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 {suggestedMyobCustomer ? <span style={{ fontSize: 12, color: "#9a3412" }}>Suggested match: <strong>{suggestedMyobCustomer.displayName}</strong></span> : null}
                               </label>
                               {importedMyobCustomers.length ? <MyobSubmitButton label="Link customer" pendingLabel="Linking…" background="#475467" /> : <Link href="/integrations" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Import MYOB customers</Link>}
-                              {importedMyobCustomers.length && selectedQuote.status === "accepted" ? <MyobSubmitButton label="Link & send to MYOB" pendingLabel="Linking & sending…" background="#0f766e" name="sendNow" value="1" /> : null}
+                              {importedMyobCustomers.length && selectedQuote.status === "accepted" ? <MyobSubmitButton label="Link & create order" pendingLabel="Linking & creating…" background="#0f766e" name="sendNow" value="1" /> : null}
                             </form>
 
-                            <form action={createQuoteClientInMyobAction} style={{ border: "1px solid #fed7aa", borderRadius: 14, background: "rgba(255,255,255,0.72)", padding: 12, display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
+                            <form action={createQuoteClientInMyobAction} style={{ borderTop: "1px solid #fed7aa", paddingTop: 10, display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
                               <input type="hidden" name="quoteId" value={selectedQuote.id} />
                               <div style={{ display: "grid", gap: 3, minWidth: 240, flex: "1 1 360px" }}>
                                 <b style={{ fontSize: 13 }}>Client is not in MYOB?</b>
-                                <span style={{ fontSize: 12, color: "#9a3412" }}>Production Manager checks MYOB for an exact company/email match first. If one exists it links it; otherwise it creates a new MYOB customer and stores the MYOB link permanently.</span>
+                                <span style={{ fontSize: 12, color: "#9a3412" }}>PM checks for an exact company/email match first. If none exists it creates the MYOB customer and stores the link permanently.</span>
                               </div>
                               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                                 <MyobSubmitButton label="Create in MYOB" pendingLabel="Checking MYOB…" background="#7c3aed" />
-                                {selectedQuote.status === "accepted" ? <MyobSubmitButton label="Create & send to MYOB" pendingLabel="Creating & sending…" background="#0f766e" name="sendNow" value="1" /> : null}
+                                {selectedQuote.status === "accepted" ? <MyobSubmitButton label="Create client & order" pendingLabel="Creating…" background="#0f766e" name="sendNow" value="1" /> : null}
                               </div>
                             </form>
                           </div>
@@ -1066,7 +1071,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       }}
                     >
                       <summary style={{ listStyle: "none", cursor: "pointer", padding: 14 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
+                        <div style={{ display: "grid", gap: 10 }}>
                           <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
                               <strong style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}>{line.productName}</strong>
@@ -1087,7 +1092,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             <div style={{ color: "#667085", fontSize: 13 }}>{staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity)}</div>
                             {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-start" }}>
                             <div
                               aria-label={`Quantity ${line.quantity}, price per unit $${cleanQuoteLineAmount(line.unitPrice)}, line total $${cleanQuoteLineAmount(line.lineTotal)}`}
                               style={{
