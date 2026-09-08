@@ -74,7 +74,7 @@ export async function createAndPushInvoiceAction(formData: FormData): Promise<vo
     });
     invoiceId = invoice.id;
     const result = await pushPmInvoiceToMyobForTenant(tenant.tenantId, invoice.id);
-    successMessage = result.myobInvoiceNumber ? `MYOB invoice ${result.myobInvoiceNumber} created.` : "MYOB invoice created.";
+    successMessage = result.message || (result.myobInvoiceNumber ? `MYOB invoice ${result.myobInvoiceNumber} created.` : "MYOB invoice created.");
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     revalidatePath(`/jobs/${jobId}/invoice`);
@@ -97,7 +97,7 @@ export async function retryInvoiceAction(formData: FormData): Promise<void> {
   let successMessage = "MYOB invoice created.";
   try {
     const result = await pushPmInvoiceToMyobForTenant(tenant.tenantId, invoiceId);
-    successMessage = result.myobInvoiceNumber ? `MYOB invoice ${result.myobInvoiceNumber} created.` : "MYOB invoice created.";
+    successMessage = result.message || (result.myobInvoiceNumber ? `MYOB invoice ${result.myobInvoiceNumber} created.` : "MYOB invoice created.");
   } catch (error) {
     redirectWith(jobId, "error", error instanceof Error ? error.message : String(error));
   }

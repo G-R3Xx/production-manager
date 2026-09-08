@@ -2718,6 +2718,44 @@ function safeInvoiceOrderLine(line: Record<string, unknown>): Record<string, unk
   };
 }
 
+function sameMyobUid(left: unknown, right: unknown): boolean {
+  const a = textOrNull(left)?.toLowerCase();
+  const b = textOrNull(right)?.toLowerCase();
+  return Boolean(a && b && a === b);
+}
+
+async function findMyobItemInvoiceConvertedFromOrder(
+  tenantId: string,
+  accessToken: string,
+  companyFileId: string,
+  orderUid: string
+): Promise<Record<string, unknown> | null> {
+  // Converted Item invoices retain the source Order reference. Query that link first so
+  // retry/recovery never creates a duplicate invoice when MYOB already converted it.
+  const filter = encodeURIComponent(`Order/UID eq guid'${orderUid}'`);
+  try {
+    const filtered = await fetchMyobJson(
+      accessToken,
+      companyFileId,
+      `/Sale/Invoice/Item?$filter=${filter}&$top=${MYOB_COLLECTION_PAGE_SIZE}`,
+      tenantId
+    );
+    const match = myobCollectionRecords(filtered.data).find((row) => sameMyobUid(objectChild(row, "Order").UID, orderUid));
+    if (match) return match;
+  } catch {
+    // Some AccountRight company-file versions are inconsistent with nested OData
+    // filters. Fall through to the paginated collection scan below.
+  }
+
+  const collection = await fetchAllMyobCollectionRecords(
+    accessToken,
+    companyFileId,
+    `/Sale/Invoice/Item?$top=${MYOB_COLLECTION_PAGE_SIZE}&$orderby=Date desc`,
+    tenantId
+  );
+  return collection.records.find((row) => sameMyobUid(objectChild(row, "Order").UID, orderUid)) ?? null;
+}
+
 function buildInvoicePayloadFromMyobItemOrder(order: Record<string, unknown>, orderUid: string): Record<string, unknown> {
   const customer = objectChild(order, "Customer");
   const freightTaxCode = objectChild(order, "FreightTaxCode");
@@ -2810,7 +2848,7 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
       }
       const order = orderResponse.data as Record<string, unknown>;
       const orderCustomerUid = textOrNull(objectChild(order, "Customer").UID);
-      if (!orderCustomerUid || orderCustomerUid !== customer.uid) {
+      if (!orderCustomerUid || !sameMyobUid(orderCustomerUid, customer.uid)) {
         throw new Error("The linked MYOB Order customer does not match the client linked to this PM job. Reconcile the customer/order before invoicing.");
       }
       const orderSubtotal = Number(order.Subtotal ?? NaN);
@@ -2818,6 +2856,78 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
       if (Number.isFinite(orderSubtotal) && Math.abs(orderSubtotal - expectedSubtotal) > 0.02) {
         throw new Error(`The MYOB Order has changed since the accepted quote. MYOB Order subtotal is $${orderSubtotal.toFixed(2)} but PM expects $${expectedSubtotal.toFixed(2)}. Reconcile the order before invoicing.`);
       }
+
+      const orderStatus = (textOrNull(order.Status) ?? "").toLowerCase();
+      if (orderStatus === "convertedtoinvoice") {
+        const existingInvoice = await findMyobItemInvoiceConvertedFromOrder(
+          tenantId,
+          accessToken,
+          connection.companyFileId,
+          invoice.sourceOrderUid
+        );
+        if (!existingInvoice) {
+          throw new Error(`MYOB Order ${invoice.sourceOrderNumber ?? invoice.sourceOrderUid} is already marked ConvertedToInvoice, but Production Manager could not locate the MYOB invoice created from it. Refresh MYOB and confirm the invoice in MYOB before retrying.`);
+        }
+
+        const existingUid = readMyobUid(existingInvoice);
+        const existingCustomerUid = textOrNull(objectChild(existingInvoice, "Customer").UID);
+        const existingSubtotal = Number(existingInvoice.Subtotal ?? NaN);
+        if (!existingUid) throw new Error("MYOB returned the converted invoice but did not provide its UID.");
+        if (!existingCustomerUid || !sameMyobUid(existingCustomerUid, customer.uid)) {
+          throw new Error("The MYOB invoice already created from this Order belongs to a different customer. Reconcile the MYOB transaction before linking it to this PM job.");
+        }
+        if (Number.isFinite(existingSubtotal) && Math.abs(existingSubtotal - expectedSubtotal) > 0.02) {
+          throw new Error(`The MYOB invoice already created from this Order is $${existingSubtotal.toFixed(2)} ex GST, but PM expects $${expectedSubtotal.toFixed(2)}. Reconcile the MYOB transaction before linking it.`);
+        }
+
+        const existingNumber = readMyobNumber(existingInvoice);
+        const existingStatus = myobInvoiceLocalStatus(existingInvoice);
+        const existingBalance = Number(existingInvoice.BalanceDueAmount ?? NaN);
+        const existingTotal = Number(existingInvoice.TotalAmount ?? NaN);
+        await markInvoiceSynced(tenantId, invoiceId, {
+          myobUid: existingUid,
+          myobNumber: existingNumber,
+          myobStatus: textOrNull(existingInvoice.Status),
+          balanceDue: Number.isFinite(existingBalance) ? existingBalance : null,
+          totalAmount: Number.isFinite(existingTotal) ? existingTotal : Number(invoice.grandTotal),
+          status: existingStatus,
+          payload: {
+            recoveredAt: new Date().toISOString(),
+            recovery: "linked_existing_invoice_from_converted_order",
+            sourceOrderUid: invoice.sourceOrderUid,
+            response: existingInvoice,
+          }
+        });
+        await upsertExternalMappingByTenantId(tenantId, {
+          entityType: "invoice",
+          localId: invoiceId,
+          externalId: existingUid,
+          syncState: "synced",
+          lastSyncedAt: new Date().toISOString(),
+          payloadJson: { invoiceNumber: existingNumber, quoteNumber: quote.quoteNumber, recoveredFromOrderUid: invoice.sourceOrderUid }
+        });
+        await createSyncRunForTenant(tenantId, "push_invoices", "success", {
+          source: "pushPmInvoiceToMyobForTenant",
+          invoiceId,
+          myobInvoiceUid: existingUid,
+          myobInvoiceNumber: existingNumber,
+          recoveredExistingInvoice: true,
+          sourceOrderUid: invoice.sourceOrderUid
+        }, null);
+        await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+        return {
+          ok: true,
+          invoiceId,
+          myobInvoiceUid: existingUid,
+          myobInvoiceNumber: existingNumber,
+          endpoint,
+          message: `MYOB Order ${invoice.sourceOrderNumber ?? ""} was already converted. Production Manager linked the existing MYOB invoice ${existingNumber ?? existingUid} instead of creating a duplicate.`.replace(/\s+/g, " ").trim()
+        };
+      }
+      if (orderStatus && orderStatus !== "open") {
+        throw new Error(`MYOB Order ${invoice.sourceOrderNumber ?? invoice.sourceOrderUid} has status ${textOrNull(order.Status)}. It must be Open before it can be converted to an invoice.`);
+      }
+
       payload = buildInvoicePayloadFromMyobItemOrder(order, invoice.sourceOrderUid);
     } else {
       const quoteLines = await listQuoteLines(invoice.quoteId);
@@ -2910,6 +3020,72 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
     return { ok: true, invoiceId, myobInvoiceUid: uid, myobInvoiceNumber: number, endpoint: result.url, message: `MYOB invoice ${number ?? "created"} created.` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
+
+    // The order may have been converted in MYOB between our status check and POST, or
+    // it may already have been converted before this PM draft was created. Error 37001
+    // is therefore a recovery signal, not permission to create a second invoice.
+    if (invoice.sourceOrderUid && /OrderConvertedToInvoice|37001|open status to convert/i.test(message)) {
+      try {
+        const existingInvoice = await findMyobItemInvoiceConvertedFromOrder(
+          tenantId,
+          accessToken,
+          connection.companyFileId,
+          invoice.sourceOrderUid
+        );
+        if (existingInvoice) {
+          const existingUid = readMyobUid(existingInvoice);
+          const existingCustomerUid = textOrNull(objectChild(existingInvoice, "Customer").UID);
+          const existingSubtotal = Number(existingInvoice.Subtotal ?? NaN);
+          const expectedSubtotal = Number(invoice.subtotal);
+          if (existingUid
+            && existingCustomerUid
+            && sameMyobUid(existingCustomerUid, customer.uid)
+            && (!Number.isFinite(existingSubtotal) || Math.abs(existingSubtotal - expectedSubtotal) <= 0.02)) {
+            const existingNumber = readMyobNumber(existingInvoice);
+            const existingBalance = Number(existingInvoice.BalanceDueAmount ?? NaN);
+            const existingTotal = Number(existingInvoice.TotalAmount ?? NaN);
+            await markInvoiceSynced(tenantId, invoiceId, {
+              myobUid: existingUid,
+              myobNumber: existingNumber,
+              myobStatus: textOrNull(existingInvoice.Status),
+              balanceDue: Number.isFinite(existingBalance) ? existingBalance : null,
+              totalAmount: Number.isFinite(existingTotal) ? existingTotal : Number(invoice.grandTotal),
+              status: myobInvoiceLocalStatus(existingInvoice),
+              payload: {
+                recoveredAt: new Date().toISOString(),
+                recovery: "linked_existing_invoice_after_37001",
+                originalConversionError: message,
+                sourceOrderUid: invoice.sourceOrderUid,
+                response: existingInvoice,
+              }
+            });
+            await upsertExternalMappingByTenantId(tenantId, {
+              entityType: "invoice",
+              localId: invoiceId,
+              externalId: existingUid,
+              syncState: "synced",
+              lastSyncedAt: new Date().toISOString(),
+              payloadJson: { invoiceNumber: existingNumber, quoteNumber: quote.quoteNumber, recoveredFromOrderUid: invoice.sourceOrderUid }
+            });
+            await createSyncRunForTenant(tenantId, "push_invoices", "success", {
+              source: "pushPmInvoiceToMyobForTenant", invoiceId, myobInvoiceUid: existingUid,
+              myobInvoiceNumber: existingNumber, recoveredExistingInvoiceAfter37001: true
+            }, null);
+            await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+            return {
+              ok: true, invoiceId, myobInvoiceUid: existingUid, myobInvoiceNumber: existingNumber, endpoint,
+              message: `MYOB had already converted Order ${invoice.sourceOrderNumber ?? ""}. Production Manager recovered and linked invoice ${existingNumber ?? existingUid}; no duplicate invoice was created.`.replace(/\s+/g, " ").trim()
+            };
+          }
+        }
+      } catch (recoveryError) {
+        const recoveryMessage = recoveryError instanceof Error ? recoveryError.message : String(recoveryError);
+        await markInvoiceSyncError(tenantId, invoiceId, `${message} Recovery check also failed: ${recoveryMessage}`, { failedAt: new Date().toISOString(), endpoint, request: payload });
+        await createSyncRunForTenant(tenantId, "push_invoices", "error", { source: "pushPmInvoiceToMyobForTenant", invoiceId, endpoint, recoveryAttempted: true }, `${message} Recovery check also failed: ${recoveryMessage}`);
+        throw new Error(`MYOB invoice sync failed: ${message} Recovery check also failed: ${recoveryMessage}`);
+      }
+    }
+
     await markInvoiceSyncError(tenantId, invoiceId, message, { failedAt: new Date().toISOString(), endpoint, request: payload });
     await createSyncRunForTenant(tenantId, "push_invoices", "error", { source: "pushPmInvoiceToMyobForTenant", invoiceId, endpoint }, message);
     throw new Error(`MYOB invoice sync failed: ${message}`);
