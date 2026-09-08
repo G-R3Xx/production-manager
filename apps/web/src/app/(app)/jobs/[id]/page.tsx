@@ -113,7 +113,9 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
           </div>
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {job.currentStage.includes("quote") ? (
+          {job.currentStage === "invoice_required" && canInvoice && quoteCanInvoice ? (
+            <Link href={`/jobs/${job.id}/invoice`} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>Create invoice →</Link>
+          ) : job.currentStage.includes("quote") ? (
             quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</Link> :
             <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}>
               <input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />

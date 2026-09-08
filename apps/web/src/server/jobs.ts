@@ -369,7 +369,7 @@ export function jobStageMeta(stage: JobStage): { label: string; nextAction: stri
     ready_for_pickup: { label: "Ready for pickup", nextAction: "Complete pickup", tone: "green" },
     ready_for_delivery: { label: "Ready for delivery", nextAction: "Complete delivery", tone: "green" },
     ready_for_install: { label: "Ready for install", nextAction: "Complete installation", tone: "green" },
-    invoice_required: { label: "Invoice required", nextAction: "Create MYOB invoice", tone: "red" },
+    invoice_required: { label: "Invoice required", nextAction: "Create invoice", tone: "red" },
     invoiced: { label: "Invoiced", nextAction: "Close job", tone: "green" },
     closed: { label: "Closed", nextAction: "No action required", tone: "slate" },
   };
@@ -1153,7 +1153,7 @@ export async function updateJobMetaForTenant(tenantId: string, input: {
         WHEN $7 = 'sent' THEN 'Await payment'
         WHEN $7 = 'invoiced' THEN 'Send invoice to client'
         WHEN $7 = 'partially_invoiced' THEN 'Invoice remaining balance'
-        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','sent','paid') THEN 'Create MYOB invoice'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','sent','paid') THEN 'Create invoice'
         ELSE next_action
       END,
       current_href = CASE WHEN $7 IN ('partially_invoiced','invoiced','sent','paid') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,

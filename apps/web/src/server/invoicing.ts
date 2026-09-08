@@ -651,7 +651,7 @@ export async function syncJobInvoiceStatusForTenant(tenantId: string, jobId: str
         WHEN $3::varchar='sent' AND current_stage IN ('invoice_required','invoiced') THEN 'Await payment'
         WHEN $3::varchar='invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Send invoice to client'
         WHEN $3::varchar='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoice remaining balance'
-        WHEN $3::varchar NOT IN ('invoiced','sent','paid') AND current_stage='invoiced' THEN 'Create MYOB invoice'
+        WHEN $3::varchar NOT IN ('invoiced','sent','paid') AND current_stage='invoiced' THEN 'Create invoice'
         ELSE next_action
       END,
       current_href=CASE WHEN current_stage IN ('invoice_required','invoiced') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,
