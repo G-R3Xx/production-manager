@@ -3,9 +3,11 @@ import { notFound, redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getJobById } from "@/server/jobs";
-import { getJobInvoiceSummary, listInvoiceLines } from "@/server/invoicing";
+import { getJobInvoiceSummary, invoiceEmailState, listInvoiceLines } from "@/server/invoicing";
 import { InvoiceBuilder } from "./InvoiceBuilder";
-import { refreshInvoiceAction, retryInvoiceAction } from "./actions";
+import { emailInvoiceAction, refreshInvoiceAction, retryInvoiceAction } from "./actions";
+import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
+import { outboundEmailConfigured } from "@/server/outbound-email";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const INVOICE_ROLES = new Set(["owner", "manager", "accounts"]);
@@ -36,6 +38,12 @@ function statusTone(status: string) {
   if (status === "void") return { bg: "#f2f4f7", fg: "#475467", border: "#d0d5dd" };
   return { bg: "#fff1f2", fg: "#b42318", border: "#fecdd3" };
 }
+function emailTone(status: string) {
+  if (status === "sent") return { bg: "#ecfdf3", fg: "#067647", border: "#abefc6", label: "Sent to client" };
+  if (status === "pending") return { bg: "#eff6ff", fg: "#1d4ed8", border: "#bfdbfe", label: "Sending" };
+  if (status === "error") return { bg: "#fff1f2", fg: "#b42318", border: "#fecdd3", label: "Email error" };
+  return { bg: "#f8fafc", fg: "#667085", border: "#dbe4f0", label: "Not sent" };
+}
 
 export default async function JobInvoicePage({ params, searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
@@ -55,6 +63,7 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
   const summary = await getJobInvoiceSummary(tenant.tenantId, job.id, quoteId);
   const unresolvedDraft = summary.invoices.find((invoice) => invoice.status === "draft" && !invoice.myobUid && ["syncing", "error"].includes(invoice.myobSyncStatus));
   const invoiceLinePairs = await Promise.all(summary.invoices.map(async (invoice) => ({ invoice, lines: await listInvoiceLines(tenant.tenantId, invoice.id) })));
+  const emailConfigured = outboundEmailConfigured();
 
   return <div style={{ maxWidth: 1500, margin: "0 auto", display: "grid", gap: 16 }}>
     {message ? <div style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 14, padding: 12, fontWeight: 800 }}>{message}</div> : null}
@@ -103,6 +112,8 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
       <div style={{ display: "grid", gap: 10 }}>
         {invoiceLinePairs.map(({ invoice, lines }) => {
           const tone = statusTone(invoice.status);
+          const clientEmail = invoiceEmailState(invoice);
+          const deliveryTone = emailTone(clientEmail.status);
           return <details key={invoice.id} style={{ border: "1px solid #e4e7ec", borderRadius: 14, padding: 13, background: "#fff" }}>
             <summary style={{ cursor: "pointer", listStyle: "none", display: "grid", gridTemplateColumns: "1.2fr .8fr .8fr .8fr auto", gap: 12, alignItems: "center" }}>
               <span><strong style={{ fontSize: 15 }}>{invoice.myobNumber || invoice.invoiceNumber}</strong><small style={{ display: "block", color: "#667085", marginTop: 3 }}>{invoiceKindLabel(invoice.invoiceKind)} · {dateTime(invoice.issueDate || invoice.createdAt)}</small></span>
@@ -114,11 +125,19 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
             <div style={{ borderTop: "1px solid #eef2f6", marginTop: 12, paddingTop: 12, display: "grid", gap: 10 }}>
               {lines.map((line) => <div key={line.id} style={{ display: "grid", gridTemplateColumns: "1fr 90px 120px 120px", gap: 10, fontSize: 13 }}><span><strong>{line.displayTitle}</strong>{line.displaySubtitle ? <small style={{ display: "block", color: "#667085", marginTop: 2 }}>{line.displaySubtitle}</small> : null}</span><span>Qty {Number(line.qty).toLocaleString("en-AU")}</span><span>{money(Number(line.unitPrice))} P/U</span><strong>{money(Number(line.lineTotal))}</strong></div>)}
               {invoice.myobSyncError ? <div style={{ color: "#b42318", background: "#fff5f4", border: "1px solid #fda29b", borderRadius: 10, padding: 10 }}>{invoice.myobSyncError}</div> : null}
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {invoice.myobUid ? <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #eef2f6", paddingTop: 10 }}>
+                <span style={{ borderRadius: 999, padding: "6px 9px", background: deliveryTone.bg, color: deliveryTone.fg, border: `1px solid ${deliveryTone.border}`, fontSize: 11, fontWeight: 950, textTransform: "uppercase" }}>{deliveryTone.label}</span>
+                {clientEmail.status === "sent" ? <span style={{ color: "#667085", fontSize: 12 }}>{clientEmail.to ? `Sent to ${clientEmail.to}` : "Sent"}{clientEmail.sentAt ? ` · ${dateTime(clientEmail.sentAt)}` : ""}</span> : null}
+                {clientEmail.status === "error" && clientEmail.lastError ? <span style={{ color: "#b42318", fontSize: 12 }}>{clientEmail.lastError}{clientEmail.sentAt ? ` · Last successful send ${dateTime(clientEmail.sentAt)}` : ""}</span> : null}
+              </div> : null}
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {invoice.myobSyncStatus === "error" && !invoice.myobUid ? <form action={retryInvoiceAction}><input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="invoiceId" value={invoice.id} /><button type="submit" style={{ minHeight: 38, border: 0, borderRadius: 10, padding: "0 12px", background: "#b42318", color: "#fff", fontWeight: 900 }}>Recover / retry MYOB</button></form> : null}
-                {invoice.myobUid ? <form action={refreshInvoiceAction}><input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="invoiceId" value={invoice.id} /><button type="submit" style={{ minHeight: 38, border: "1px solid #d0d5dd", borderRadius: 10, padding: "0 12px", background: "#fff", color: "#344054", fontWeight: 900 }}>Refresh MYOB status</button></form> : null}
+                {invoice.myobUid ? <Link href={`/jobs/${job.id}/invoice/${invoice.id}/pdf`} target="_blank" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", border: "1px solid #2563eb", borderRadius: 10, padding: "0 12px", background: "#eff6ff", color: "#1d4ed8", fontWeight: 900, textDecoration: "none" }}>View invoice PDF</Link> : null}
+                {invoice.myobUid ? <EmailRecipientModalForm action={emailInvoiceAction} hiddenFields={{ jobId: job.id, invoiceId: invoice.id }} defaultEmail={clientEmail.to || summary.quote.emailTo || summary.quote.email} disabled={!emailConfigured} variant="invoice" alreadySent={clientEmail.status === "sent"} modalTitle={clientEmail.status === "sent" ? `Resend invoice ${invoice.myobNumber || invoice.invoiceNumber}` : `Send invoice ${invoice.myobNumber || invoice.invoiceNumber}`} modalDescription="Confirm or change the email address before Production Manager sends the branded invoice PDF to the client." submitLabel={clientEmail.status === "sent" ? "Resend invoice PDF" : "Send invoice PDF"} /> : null}
+                {invoice.myobUid ? <form action={refreshInvoiceAction}><input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="invoiceId" value={invoice.id} /><button type="submit" style={{ minHeight: 40, border: "1px solid #d0d5dd", borderRadius: 10, padding: "0 12px", background: "#fff", color: "#344054", fontWeight: 900 }}>Refresh MYOB status</button></form> : null}
                 {invoice.myobStatus ? <span style={{ alignSelf: "center", color: "#667085", fontSize: 12 }}>MYOB status: <strong>{invoice.myobStatus}</strong>{invoice.myobSyncedAt ? ` · synced ${dateTime(invoice.myobSyncedAt)}` : ""}</span> : null}
               </div>
+              {invoice.myobUid && !emailConfigured ? <div style={{ color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 10, padding: 10, fontSize: 12 }}>Invoice email is disabled because outbound Gmail is not configured for this deployment.</div> : null}
             </div>
           </details>;
         })}

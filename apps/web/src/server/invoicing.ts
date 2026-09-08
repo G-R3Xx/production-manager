@@ -73,6 +73,31 @@ export type InvoiceableQuoteLine = {
   configurationSnapshot: Record<string, unknown>;
 };
 
+export type InvoiceEmailState = {
+  status: "not_sent" | "pending" | "sent" | "error";
+  to: string | null;
+  sentAt: string | null;
+  messageId: string | null;
+  lastError: string | null;
+};
+
+export function invoiceEmailState(invoice: Pick<InvoiceRecord, "payloadJson">): InvoiceEmailState {
+  const payload = invoice.payloadJson && typeof invoice.payloadJson === "object" && !Array.isArray(invoice.payloadJson) ? invoice.payloadJson : {};
+  const raw = payload.clientEmail && typeof payload.clientEmail === "object" && !Array.isArray(payload.clientEmail)
+    ? payload.clientEmail as Record<string, unknown>
+    : {};
+  const statusValue = String(raw.status ?? "not_sent");
+  const status: InvoiceEmailState["status"] = ["pending", "sent", "error"].includes(statusValue) ? statusValue as InvoiceEmailState["status"] : "not_sent";
+  const clean = (value: unknown): string | null => { const text = String(value ?? "").trim(); return text || null; };
+  return {
+    status,
+    to: clean(raw.to),
+    sentAt: clean(raw.sentAt),
+    messageId: clean(raw.messageId),
+    lastError: clean(raw.lastError),
+  };
+}
+
 export type JobInvoiceSummary = {
   quote: QuoteDraftRecord;
   lines: InvoiceableQuoteLine[];
@@ -562,33 +587,71 @@ export async function updateInvoiceFromMyob(tenantId: string, invoiceId: string,
     input.balanceDue ?? null, input.totalAmount ?? null, JSON.stringify(input.payload ?? {})]);
 }
 
+export async function markInvoiceEmailPending(tenantId: string, invoiceId: string, recipient: string): Promise<void> {
+  await ensureInvoiceWorkflowSchema();
+  const current = await getInvoiceById(tenantId, invoiceId);
+  const previous = current ? invoiceEmailState(current) : null;
+  await pool.query(`
+    UPDATE app.invoices SET payload_json=COALESCE(payload_json,'{}'::jsonb) || $3::jsonb, updated_at=now()
+    WHERE tenant_id=$1::uuid AND id=$2::uuid
+  `, [tenantId, invoiceId, JSON.stringify({ clientEmail: { status: "pending", to: recipient, sentAt: previous?.sentAt ?? null, messageId: previous?.messageId ?? null, lastError: null } })]);
+}
+
+export async function markInvoiceEmailSent(tenantId: string, invoiceId: string, input: { recipient: string; messageId?: string | null }): Promise<void> {
+  await ensureInvoiceWorkflowSchema();
+  await pool.query(`
+    UPDATE app.invoices SET payload_json=COALESCE(payload_json,'{}'::jsonb) || $3::jsonb, updated_at=now()
+    WHERE tenant_id=$1::uuid AND id=$2::uuid
+  `, [tenantId, invoiceId, JSON.stringify({ clientEmail: { status: "sent", to: input.recipient, sentAt: new Date().toISOString(), messageId: input.messageId ?? null, lastError: null } })]);
+}
+
+export async function markInvoiceEmailFailed(tenantId: string, invoiceId: string, input: { recipient?: string | null; error: string }): Promise<void> {
+  await ensureInvoiceWorkflowSchema();
+  const current = await getInvoiceById(tenantId, invoiceId);
+  const previous = current ? invoiceEmailState(current) : null;
+  await pool.query(`
+    UPDATE app.invoices SET payload_json=COALESCE(payload_json,'{}'::jsonb) || $3::jsonb, updated_at=now()
+    WHERE tenant_id=$1::uuid AND id=$2::uuid
+  `, [tenantId, invoiceId, JSON.stringify({ clientEmail: {
+    status: "error",
+    to: input.recipient ?? previous?.to ?? null,
+    sentAt: previous?.sentAt ?? null,
+    messageId: previous?.messageId ?? null,
+    lastError: input.error,
+  } })]);
+}
+
 export async function syncJobInvoiceStatusForTenant(tenantId: string, jobId: string, quoteId: string): Promise<string> {
   const summary = await getJobInvoiceSummary(tenantId, jobId, quoteId);
   const countable = summary.invoices.filter((invoice) => ["issued", "part_paid", "paid"].includes(invoice.status));
+  const allClientSent = countable.length > 0 && countable.every((invoice) => { const state = invoiceEmailState(invoice); return state.status === "sent" || Boolean(state.sentAt); });
   let invoiceStatus = "not_invoiced";
   if (summary.remainingSubtotal <= 0.01 && countable.length) {
-    invoiceStatus = countable.every((invoice) => invoice.status === "paid") ? "paid" : "invoiced";
+    invoiceStatus = countable.every((invoice) => invoice.status === "paid") ? "paid" : allClientSent ? "sent" : "invoiced";
   } else if (countable.length) {
     invoiceStatus = "partially_invoiced";
   }
   await pool.query(`
     UPDATE app.jobs SET invoice_status=$3::varchar,
       current_stage=CASE
-        WHEN $3::varchar IN ('invoiced','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'invoiced'
-        WHEN $3::varchar NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'invoice_required'
+        WHEN $3::varchar IN ('invoiced','sent','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'invoiced'
+        WHEN $3::varchar NOT IN ('invoiced','sent','paid') AND current_stage='invoiced' THEN 'invoice_required'
         ELSE current_stage
       END,
       current_stage_label=CASE
         WHEN $3::varchar='paid' AND current_stage IN ('invoice_required','invoiced') THEN 'Paid'
+        WHEN $3::varchar='sent' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoice sent'
         WHEN $3::varchar='invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoiced'
         WHEN $3::varchar='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Partially invoiced'
-        WHEN $3::varchar NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'Invoice required'
+        WHEN $3::varchar NOT IN ('invoiced','sent','paid') AND current_stage='invoiced' THEN 'Invoice required'
         ELSE current_stage_label
       END,
       next_action=CASE
-        WHEN $3::varchar IN ('invoiced','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'Close job'
+        WHEN $3::varchar='paid' AND current_stage IN ('invoice_required','invoiced') THEN 'Close job'
+        WHEN $3::varchar='sent' AND current_stage IN ('invoice_required','invoiced') THEN 'Await payment'
+        WHEN $3::varchar='invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Send invoice to client'
         WHEN $3::varchar='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoice remaining balance'
-        WHEN $3::varchar NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'Create MYOB invoice'
+        WHEN $3::varchar NOT IN ('invoiced','sent','paid') AND current_stage='invoiced' THEN 'Create MYOB invoice'
         ELSE next_action
       END,
       current_href=CASE WHEN current_stage IN ('invoice_required','invoiced') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,

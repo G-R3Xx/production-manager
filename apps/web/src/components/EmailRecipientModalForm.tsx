@@ -10,7 +10,7 @@ type Props = {
   hiddenFields: Record<string, string>;
   defaultEmail?: string | null;
   disabled?: boolean;
-  variant: "quote" | "artwork";
+  variant: "quote" | "artwork" | "invoice";
   alreadySent?: boolean;
   modalTitle: string;
   modalDescription: string;
@@ -54,9 +54,10 @@ export function EmailRecipientModalForm({
   const [email, setEmail] = useState(defaultEmail ?? "");
 
   const isArtwork = variant === "artwork";
+  const isInvoice = variant === "invoice";
   const triggerTitle = alreadySent
-    ? isArtwork ? "Resend artwork approval" : "Resend link + PDF"
-    : isArtwork ? "Email artwork approval" : "Send client link + PDF";
+    ? isArtwork ? "Resend artwork approval" : isInvoice ? "Resend invoice" : "Resend link + PDF"
+    : isArtwork ? "Email artwork approval" : isInvoice ? "Send invoice" : "Send client link + PDF";
 
   return (
     <>
@@ -129,7 +130,7 @@ export function EmailRecipientModalForm({
           >
             <div style={{ padding: "18px 20px", borderBottom: "1px solid #e4e7ec", display: "flex", justifyContent: "space-between", gap: 16, alignItems: "start" }}>
               <div>
-                <div style={{ color: isArtwork ? "#7c3aed" : "#0f766e", fontSize: 11, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>
+                <div style={{ color: isArtwork ? "#7c3aed" : isInvoice ? "#2563eb" : "#0f766e", fontSize: 11, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 5 }}>
                   Confirm email recipient
                 </div>
                 <h2 id="email-recipient-modal-title" style={{ margin: 0, color: "#101828", fontSize: 21 }}>{modalTitle}</h2>

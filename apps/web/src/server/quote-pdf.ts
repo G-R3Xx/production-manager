@@ -142,7 +142,7 @@ function snapshotPrimaryCustomerMaterialName(snapshot:Record<string,unknown>|nul
     || snapshotCustomerMaterialName(snapshot,"smallStock")
     || null;
 }
-function clientLineTitle(line:QuoteLineRecord):string{
+export function quoteLineClientTitle(line:QuoteLineRecord):string{
   if(isInstallLine(line))return "Sign Install";
   if(/^access equipment\b/i.test(compactText(line.productName))) return line.productName;
   const parts=summaryParts(line),combined=[line.productName,line.optionSummary].filter(Boolean).join(" · "), base=cleanBaseMaterialName(line.productName),selected=cleanSelectedMaterialName(line);
@@ -326,7 +326,7 @@ function buildPageContent(input:{
   const lineH=62;
   for(let i=input.lineStart;i<input.lineEnd;i+=1){
     const line=input.lines[i]!;
-    const title=clientLineTitle(line);
+    const title=quoteLineClientTitle(line);
     const qty=numberValue(line.quantity),unit=numberValue(line.unitPrice),total=numberValue(line.lineTotal);
     const boxY=y-lineH;
     out+=roundedRectOp(innerX,boxY,innerW,lineH-7,11,PDF_COLOURS.soft,PDF_COLOURS.line,0.75);

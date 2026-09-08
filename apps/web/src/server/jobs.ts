@@ -341,7 +341,7 @@ function productionStage(production: ProductionJobRecord | null | undefined, inv
   if (!production) return null;
   const status = normalise(production.status);
   if (status.includes("complete")) {
-    if (invoiceStatus === "invoiced" || invoiceStatus === "paid") return "invoiced";
+    if (["invoiced", "sent", "paid"].includes(invoiceStatus)) return "invoiced";
     return "invoice_required";
   }
   if (status.includes("ready_for_dispatch") || status.includes("ready_for_install") || status.includes("ready_for_delivery") || status.includes("ready_for_pickup")) {
@@ -582,7 +582,11 @@ async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobR
       ? { ...baseMeta, label: "Partially invoiced", nextAction: "Invoice remaining balance" }
       : stage === "invoiced" && invoiceStatus === "paid"
         ? { ...baseMeta, label: "Paid", nextAction: "Close job" }
-        : baseMeta;
+        : stage === "invoiced" && invoiceStatus === "sent"
+          ? { ...baseMeta, label: "Invoice sent", nextAction: "Await payment" }
+          : stage === "invoiced" && invoiceStatus === "invoiced"
+            ? { ...baseMeta, label: "Invoiced", nextAction: "Send invoice to client" }
+            : baseMeta;
     const stepSummary: ProductionJobStepSummary | undefined = draft.production ? stepByJob.get(draft.production.id) : undefined;
     const nextAction = stage === "production" && stepSummary?.currentStep ? stepSummary.currentStep : meta.nextAction;
     const dueDate = draft.production?.dueDate || draft.survey?.dueDate || existingJob?.dueDate || null;
@@ -1132,24 +1136,27 @@ export async function updateJobMetaForTenant(tenantId: string, input: {
       owner_profile_id = NULLIF($6::text,'')::uuid,
       invoice_status = COALESCE(NULLIF($7,''), invoice_status),
       current_stage = CASE
-        WHEN $7 IN ('invoiced','paid') THEN 'invoiced'
-        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','paid') THEN 'invoice_required'
+        WHEN $7 IN ('invoiced','sent','paid') THEN 'invoiced'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','sent','paid') THEN 'invoice_required'
         ELSE current_stage
       END,
       current_stage_label = CASE
         WHEN $7 = 'paid' THEN 'Paid'
+        WHEN $7 = 'sent' THEN 'Invoice sent'
         WHEN $7 = 'invoiced' THEN 'Invoiced'
         WHEN $7 = 'partially_invoiced' THEN 'Partially invoiced'
-        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','paid') THEN 'Invoice required'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','sent','paid') THEN 'Invoice required'
         ELSE current_stage_label
       END,
       next_action = CASE
-        WHEN $7 IN ('invoiced','paid') THEN 'Close job'
+        WHEN $7 = 'paid' THEN 'Close job'
+        WHEN $7 = 'sent' THEN 'Await payment'
+        WHEN $7 = 'invoiced' THEN 'Send invoice to client'
         WHEN $7 = 'partially_invoiced' THEN 'Invoice remaining balance'
-        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','paid') THEN 'Create MYOB invoice'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','sent','paid') THEN 'Create MYOB invoice'
         ELSE next_action
       END,
-      current_href = CASE WHEN $7 IN ('partially_invoiced','invoiced','paid') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,
+      current_href = CASE WHEN $7 IN ('partially_invoiced','invoiced','sent','paid') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,
       updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, input.jobId, input.title ?? null, input.dueDate ?? null, input.priority ?? null, input.ownerProfileId ?? null, invoiceStatus]);
