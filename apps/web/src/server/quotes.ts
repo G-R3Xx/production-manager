@@ -1056,20 +1056,37 @@ async function updateQuoteReadyForMyobByToken(token: string): Promise<void> {
   }
 }
 
+async function autoCreateMyobOrderForAcceptedQuote(tenantId: string, quoteId: string, quoteNumber: string | null): Promise<void> {
+  try {
+    const { pushAcceptedQuoteToMyobOrderForTenant } = await import("@/server/myob-sync");
+    await pushAcceptedQuoteToMyobOrderForTenant(tenantId, quoteId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Quote accepted, but automatic MYOB Item Order creation failed", error);
+    await createNotificationForTenant(tenantId, {
+      eventType: "myob_order_sync_error",
+      title: "Accepted quote needs MYOB attention",
+      message: `${quoteNumber || "Accepted quote"}: ${message}`,
+      href: `/quotes?selected=${quoteId}`,
+      payloadJson: { quoteId, quoteNumber, error: message }
+    }).catch((notificationError) => console.error("MYOB order sync failed and notification could not be saved", notificationError));
+  }
+}
+
 export async function respondToQuoteByToken(token: string, response: "accepted" | "changes_requested" | "declined", notes: string | null): Promise<void> {
   await ensureQuoteLifecycleColumns();
   await ensureQuoteLineClientResponseColumns();
 
   const timestampColumn = response === "accepted" ? "accepted_at" : response === "declined" ? "declined_at" : "changes_requested_at";
 
-  const result = await pool.query<{ id: string }>(`
+  const result = await pool.query<{ id: string; tenantId: string; quoteNumber: string | null }>(`
     UPDATE sales.quote_drafts
     SET status = $2::varchar,
         ${timestampColumn} = now(),
         client_response_notes = $3::text,
         updated_at = now()
     WHERE public_token = $1
-    RETURNING id
+    RETURNING id::text, tenant_id::text as "tenantId", quote_number as "quoteNumber"
   `, [token, response, notes]);
 
   if (!result.rowCount) {
@@ -1100,6 +1117,10 @@ export async function respondToQuoteByToken(token: string, response: "accepted" 
         AND qd.enquiry_id = e.id
         AND e.status <> 'deleted'
     `, [token]);
+    const acceptedQuote = result.rows[0];
+    if (acceptedQuote?.tenantId && acceptedQuote.id) {
+      after(() => autoCreateMyobOrderForAcceptedQuote(acceptedQuote.tenantId, acceptedQuote.id, acceptedQuote.quoteNumber));
+    }
   }
 }
 
@@ -1223,6 +1244,10 @@ export async function respondToQuoteLineByToken(
   }).catch((error) => console.error("Quote line response saved, but notification failed", error));
   if (options?.deferNotification) after(saveNotification);
   else await saveNotification();
+
+  if (overallStatus === "accepted" && tenantId && quoteId) {
+    after(() => autoCreateMyobOrderForAcceptedQuote(tenantId, quoteId, quoteNumber));
+  }
 
   const gst = subtotal * 0.1;
   return { quoteStatus: overallStatus, lineStatus: response, subtotal, gst, total: subtotal + gst };

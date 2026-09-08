@@ -1855,6 +1855,50 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
     throw new Error("Only accepted quotes can be pushed to MYOB as open orders.");
   }
 
+  // Claim this quote before making any external MYOB request. Acceptance can be
+  // followed immediately by a staff page refresh or a manual retry, so without
+  // an atomic claim two requests could otherwise create duplicate MYOB Orders.
+  const claim = await pool.query<{ status: string; uid: string | null; orderNumber: string | null }>(`
+    UPDATE sales.quote_drafts
+    SET myob_order_status = 'syncing',
+        myob_order_sync_error = NULL,
+        updated_at = now()
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+      AND status = 'accepted'
+      AND (
+        COALESCE(myob_order_status, 'not_synced') IN ('not_synced', 'ready_to_sync', 'error')
+        OR (myob_order_status = 'synced' AND myob_order_uid IS NULL)
+        OR (myob_order_status = 'syncing' AND updated_at < now() - interval '10 minutes')
+      )
+    RETURNING myob_order_status as status, myob_order_uid as uid, myob_order_number as "orderNumber"
+  `, [tenantId, quoteId]);
+
+  if (!claim.rowCount) {
+    const latest = await getQuoteDraftById(tenantId, quoteId);
+    if (latest?.myobOrderStatus === "synced" && latest.myobOrderUid) {
+      return {
+        ok: true,
+        quoteId,
+        myobOrderUid: latest.myobOrderUid,
+        myobOrderNumber: latest.myobOrderNumber,
+        endpoint: "/Sale/Order/Item",
+        message: "This accepted quote is already linked to a MYOB Item Order."
+      };
+    }
+    if (latest?.myobOrderStatus === "syncing") {
+      return {
+        ok: true,
+        quoteId,
+        myobOrderUid: latest.myobOrderUid,
+        myobOrderNumber: latest.myobOrderNumber,
+        endpoint: null,
+        message: "MYOB Item Order creation is already in progress for this accepted quote."
+      };
+    }
+    throw new Error("This accepted quote could not be claimed for MYOB Order creation. Refresh the quote and try again.");
+  }
+
   const connection = await getMyobConnectionByTenantId(tenantId);
   if (!connection?.companyFileId || connection.status !== "connected") {
     const message = "MYOB is not connected. Connect MYOB before sending accepted quotes to MYOB Orders.";
@@ -1873,9 +1917,23 @@ export async function pushAcceptedQuoteToMyobOrderForTenant(tenantId: string, qu
     throw new Error(message);
   }
 
-  const customer = await resolveMyobCustomerUid(tenantId, quote);
+  let customer = await resolveMyobCustomerUid(tenantId, quote);
+  if (!customer.uid && quote.linkedCustomerId) {
+    try {
+      const linked = await createMyobCustomerFromLocalClientForTenant(tenantId, quote.linkedCustomerId);
+      customer = {
+        uid: linked.uid,
+        source: linked.created ? "auto-created-myob-customer" : "auto-matched-myob-customer"
+      };
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = `The accepted quote could not create its MYOB Order because the client could not be linked automatically: ${detail}`;
+      await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, { status: "error", error: message, payloadJson: { attemptedAt: new Date().toISOString(), stage: "customer-auto-link", customerSource: customer.source } });
+      throw new Error(message);
+    }
+  }
   if (!customer.uid) {
-    const message = "The linked client is not mapped to a MYOB customer yet. Import/match the client from MYOB or link this client before creating the MYOB Order.";
+    const message = "The accepted quote is not linked to a Production Manager client, so an MYOB customer and Order could not be created automatically.";
     await updateQuoteMyobOrderSyncForTenant(tenantId, quoteId, { status: "error", error: message, payloadJson: { attemptedAt: new Date().toISOString(), stage: "customer", customerSource: customer.source } });
     throw new Error(message);
   }

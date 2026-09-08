@@ -17,7 +17,7 @@ import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
 import { QuoteStatusAutoRefresh } from "./QuoteStatusAutoRefresh";
 import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
-import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
+import { fetchMyobSalesReferenceDataForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 import { getProductionJobForQuote } from "@/server/production";
 import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondencePreview";
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
@@ -440,7 +440,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const filter = readParam(params, "filter");
 
   const builderDataNeeded = Boolean(selected);
-  const [allQuoteDrafts, materials, enquiry, survey, selectedQuote, companySettings, clients, allEnquiries, quoteProducts, salesDefaults] = await Promise.all([
+  const [allQuoteDrafts, materials, enquiry, survey, initialSelectedQuote, companySettings, initialClients, allEnquiries, quoteProducts, salesDefaults] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? listMaterialsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
@@ -452,6 +452,27 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null })
   ]);
+
+  let selectedQuote = initialSelectedQuote;
+  let clients = initialClients;
+  const selectedOrderState = String(selectedQuote?.myobOrderStatus ?? "").trim().toLowerCase();
+  const shouldBackfillAcceptedOrder = Boolean(
+    selectedQuote?.status === "accepted"
+    && !selectedQuote.myobOrderUid
+    && (selectedOrderState === "" || selectedOrderState === "not_synced" || selectedOrderState === "ready_to_sync" || selectedOrderState === "synced")
+  );
+  if (selectedQuote && shouldBackfillAcceptedOrder) {
+    try {
+      await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, selectedQuote.id);
+    } catch (autoSyncError) {
+      console.error("Accepted quote MYOB Order backfill failed", autoSyncError);
+    }
+    [selectedQuote, clients] = await Promise.all([
+      getQuoteDraftById(activeTenant.tenantId, selectedQuote.id),
+      listCustomersForTenant(activeTenant.tenantId)
+    ]);
+  }
+
   const salesReferences = selectedQuote?.status === "accepted"
     ? await fetchMyobSalesReferenceDataForTenant(activeTenant.tenantId).catch(() => ({ accounts: [] }))
     : { accounts: [] };
@@ -877,7 +898,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   {selectedQuote.emailStatus === "failed" && selectedQuote.emailLastError ? <div style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#b42318", borderRadius: 14, padding: "10px 12px", fontSize: 13 }}><strong>Quote email:</strong> {selectedQuote.emailLastError}</div> : null}
                   {(() => {
                     const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
-                    const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
+                    const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus === "error";
                     const needsPmClientLink = !linkedClient;
                     const needsMyobLink = Boolean(linkedClient && !linkedMyobCustomer);
                     const needsAnyClientLink = needsPmClientLink || needsMyobLink;
@@ -886,7 +907,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                           <div style={{ display: "grid", gap: 4 }}>
                             <strong>MYOB open job / order</strong>
-                            <span style={{ fontSize: 13 }}>Accepted quotes become open MYOB Item Orders. Drafts, enquiries and surveys stay in Production Manager only.</span>
+                            <span style={{ fontSize: 13 }}>Accepted quotes automatically become open MYOB Item Orders. Production Manager will use the linked MYOB customer, or safely match/create the client in MYOB when required. Drafts, enquiries and surveys stay in Production Manager only.</span>
                             {linkedClient ? <span style={{ fontSize: 13 }}>Client: <strong>{linkedClient.displayName}</strong> · MYOB: <strong>{linkedMyobCustomer ? linkedMyobCustomer.displayName : "Not linked"}</strong>{customerMyobPriceLevel(linkedClient) ? <> · Price level: <strong>{customerMyobPriceLevelName(linkedClient)} ({customerMyobPriceLevel(linkedClient)})</strong></> : null}</span> : null}
                             {selectedQuote.myobOrderNumber ? <span style={{ fontSize: 13 }}>Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · synced ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</span> : null}
                             {selectedQuote.myobOrderStatus === "synced" && JSON.stringify(selectedQuote.myobOrderPayloadJson ?? {}).includes("/Sale/Order/Service") ? (
@@ -899,7 +920,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {canPush && !needsAnyClientLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
                                 <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                                <MyobSubmitButton label="Send to MYOB Item Order" pendingLabel="Creating MYOB order…" background="#0f766e" />
+                                <MyobSubmitButton label="Retry MYOB Item Order" pendingLabel="Retrying MYOB order…" background="#0f766e" />
                               </form>
                             ) : null}
                           </div>
