@@ -32,6 +32,7 @@ type QuoteLineEditorProps = {
   materials: FlowQuoteMaterial[];
   myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: FlowPricingSettings;
+  canOverrideMarkup?: boolean;
 };
 
 type SummaryRow = { label: string; value: string };
@@ -136,6 +137,13 @@ function normalise(value: string | null | undefined): string {
 
 function recordValue(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function savedLineMarkupMultiplier(configurationSnapshot: unknown, fallback: string | number | null | undefined): string | number {
+  const snapshot = recordValue(configurationSnapshot);
+  const pricing = recordValue(snapshot?.pricingSnapshot);
+  const saved = Number(pricing?.markupMultiplier);
+  return Number.isFinite(saved) && saved > 0 ? saved : String(fallback ?? "1.5");
 }
 
 function humanize(value: string | null | undefined): string {
@@ -387,7 +395,7 @@ function productFamilyForDepartment(department: string): string {
   }
 }
 
-export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixItems = [], pricingSettings }: QuoteLineEditorProps) {
+export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixItems = [], pricingSettings, canOverrideMarkup = false }: QuoteLineEditorProps) {
   const quickSnapshot = useMemo(() => {
     if (product) return null;
     return readQuickQuoteSnapshot(line.configurationSnapshot) ?? inferLegacyQuickQuoteSnapshot({
@@ -441,9 +449,13 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
   const visibleFieldKeys = new Set(visibleFields.map((field) => field.key));
   const quantityNumber = Math.max(0, numberInput(quantity, 0));
+  const linePricingSettings = useMemo<FlowPricingSettings>(() => ({
+    ...pricingSettings,
+    markupMultiplier: savedLineMarkupMultiplier(line.configurationSnapshot, pricingSettings?.markupMultiplier)
+  }), [pricingSettings, line.configurationSnapshot]);
   const automaticPricing = useMemo(
-    () => calculateQuoteProductPricing(product ?? undefined, materials, answers, pricingSettings, {}, {}, Math.max(1, quantityNumber)),
-    [product, materials, answers, pricingSettings, quantityNumber]
+    () => calculateQuoteProductPricing(product ?? undefined, materials, answers, linePricingSettings, {}, {}, Math.max(1, quantityNumber)),
+    [product, materials, answers, linePricingSettings, quantityNumber]
   );
   const productSetupPriceAvailable = Boolean(
     product &&
@@ -486,6 +498,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
           materials={materials}
           myobMatrixItems={myobMatrixItems}
           pricingSettings={pricingSettings}
+          canOverrideMarkup={canOverrideMarkup}
           editingLine={{
             id: line.id,
             productName: line.productName,

@@ -22,6 +22,7 @@ import { getProductionJobForQuote } from "@/server/production";
 import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondencePreview";
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalModalForm";
+import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -174,6 +175,19 @@ function recordValue(value: unknown): UnknownRecord | null {
 function numberFromUnknown(value: unknown): number {
   const parsed = typeof value === "number" ? value : Number(String(value ?? "").trim());
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function quoteLineMarkupInfo(configurationSnapshot: unknown, standardMarkup: number, standardAccessEquipmentMarkup: number): { markup: number; standard: number; pricingSource: string } {
+  const snapshot = recordValue(configurationSnapshot);
+  const pricing = recordValue(snapshot?.pricingSnapshot);
+  const isAccessEquipment = textValue(snapshot?.flowType) === "service" && textValue(snapshot?.serviceType) === "access_equipment";
+  const standard = isAccessEquipment ? standardAccessEquipmentMarkup : standardMarkup;
+  const saved = numberFromUnknown(pricing?.markupMultiplier);
+  return {
+    markup: saved > 0 ? saved : standard,
+    standard,
+    pricingSource: textValue(pricing?.pricingSource)
+  };
 }
 
 function staffUsage(value: number): string {
@@ -414,6 +428,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!activeTenant) redirect("/bootstrap");
+  const canOverrideQuoteMarkup = ["owner", "manager"].includes(String(activeTenant.tenantRole).toLowerCase());
 
   const params = (await searchParams) ?? {};
   const message = readParam(params, "message");
@@ -571,6 +586,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const linkedClientPriceLevel = customerMyobPriceLevel(linkedClient) ?? "Level A";
   const linkedClientPriceLevelName = customerMyobPriceLevelName(linkedClient) || linkedClientPriceLevel;
   const linkedClientPriceFactor = companySettings?.myobPriceLevelFactors?.[linkedClientPriceLevel] ?? "1";
+  const standardQuoteMarkup = Math.max(0.0001, numberFromUnknown(companySettings?.globalMarkupMultiplier) || 1.5);
+  const standardAccessEquipmentQuoteMarkup = Math.max(0.0001, numberFromUnknown(companySettings?.accessEquipmentMarkupMultiplier) || standardQuoteMarkup);
   const surveyPhotos = extractSurveyPhotos(survey?.installSchedulerPayload);
   const defaultQuoteNotes = buildSurveyQuoteNotes({
     enquirySummary: sourceEnquiry?.requestSummary ?? null,
@@ -976,6 +993,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         quoteId={selectedQuote.id}
                         materials={activeMaterials}
                         myobMatrixItems={myobMatrixItems}
+                        canOverrideMarkup={canOverrideQuoteMarkup}
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",
@@ -1002,12 +1020,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 1 }}>
                 <div style={{ display: "grid", gap: 4 }}>
                   <h4 style={{ margin: 0 }}>Current quote lines <span style={{ color: "#667085", fontWeight: 750 }}>({quoteLines.length})</span></h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Lines stay collapsed until you open one. Survey-created and manually added lines use the same one-page field layout.</p>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Lines stay collapsed until you open one. Survey-created and manually added lines use the same one-page field layout.{canOverrideQuoteMarkup ? " Managers and Owners can adjust the markup multiplier beside any PM-calculated line; the standard still comes from Settings." : ""}</p>
                 </div>
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
                   const surveyReference = surveyLineReference(line.configurationSnapshot);
                   const surveyNeedsConfig = surveyLineNeedsConfiguration(line.configurationSnapshot);
+                  const markupInfo = quoteLineMarkupInfo(line.configurationSnapshot, standardQuoteMarkup, standardAccessEquipmentQuoteMarkup);
                   return (
                     <details
                       key={line.id}
@@ -1046,7 +1065,18 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             <div style={{ color: "#667085", fontSize: 13 }}>{[staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity), `Qty ${line.quantity}`, `Unit $${cleanQuoteLineAmount(line.unitPrice)}`, `Total $${cleanQuoteLineAmount(line.lineTotal)}`].filter(Boolean).join(" · ")}</div>
                             {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
-                          <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                            {canOverrideQuoteMarkup ? (
+                              <QuoteLineMarkupEditor
+                                quoteId={selectedQuote.id}
+                                lineId={line.id}
+                                markupMultiplier={markupInfo.markup}
+                                standardMarkupMultiplier={markupInfo.standard}
+                                disabledReason={markupInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null}
+                              />
+                            ) : null}
+                            <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
+                          </div>
                         </div>
                       </summary>
 
@@ -1079,6 +1109,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           product={editableProduct}
                           materials={activeMaterials}
                           myobMatrixItems={myobMatrixItems}
+                          canOverrideMarkup={canOverrideQuoteMarkup}
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                             accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",

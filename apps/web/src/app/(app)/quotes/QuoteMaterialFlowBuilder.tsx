@@ -75,6 +75,7 @@ type QuoteMaterialFlowBuilderProps = {
   myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: PricingSettings;
   editingLine?: EditableQuoteLine | null;
+  canOverrideMarkup?: boolean;
 };
 
 type FlowType = QuickQuoteFlowType;
@@ -1108,8 +1109,14 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
+  const standardMarkupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
+  const standardAccessEquipmentMarkupMultiplier = multiplierValue(pricingSettings?.accessEquipmentMarkupMultiplier, standardMarkupMultiplier);
+  const initialStandardMarkupMultiplier = initialSnapshot?.flowType === "service" && initialSnapshot?.serviceType === "access_equipment"
+    ? standardAccessEquipmentMarkupMultiplier
+    : standardMarkupMultiplier;
+  const initialSavedMarkupMultiplier = multiplierValue(initialSnapshot?.pricingSnapshot?.markupMultiplier, initialStandardMarkupMultiplier);
   const materialPool = useMemo(() => {
     const restoredMaterials = materialsFromSnapshot(initialSnapshot);
     const combined = [...materials, ...restoredMaterials];
@@ -1221,14 +1228,26 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const [componentLabourMinutes, setComponentLabourMinutes] = useState(snapshotString(initialSnapshot, "componentLabourMinutes"));
 
   const [quantity, setQuantity] = useState(editingLine?.quantity ?? snapshotString(initialSnapshot, "quantity", "1"));
+  const [lineMarkupInput, setLineMarkupInput] = useState(() => initialSavedMarkupMultiplier.toFixed(2));
+  const [markupTouched, setMarkupTouched] = useState(Boolean(editingLine && Math.abs(initialSavedMarkupMultiplier - initialStandardMarkupMultiplier) > 0.000001));
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(Boolean(initialSnapshot?.unitPriceOverridden));
   const [manualUnitPrice, setManualUnitPrice] = useState(editingLine?.unitPrice ?? snapshotString(initialSnapshot, "manualUnitPrice", "0.00"));
   const [lineNotes, setLineNotes] = useState(editingLine?.notes ?? snapshotString(initialSnapshot, "notes"));
 
-  const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
-  const accessEquipmentMarkupMultiplier = multiplierValue(pricingSettings?.accessEquipmentMarkupMultiplier, markupMultiplier);
+  const lineStandardMarkupMultiplier = flowType === "service" && serviceType === "access_equipment"
+    ? standardAccessEquipmentMarkupMultiplier
+    : standardMarkupMultiplier;
+  const lineMarkupMultiplier = canOverrideMarkup
+    ? multiplierValue(lineMarkupInput, lineStandardMarkupMultiplier)
+    : initialSnapshot?.pricingSnapshot?.markupMultiplier != null
+      ? multiplierValue(initialSnapshot.pricingSnapshot.markupMultiplier, lineStandardMarkupMultiplier)
+      : lineStandardMarkupMultiplier;
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
-  const sellMultiplier = markupMultiplier * profitMultiplier;
+  const sellMultiplier = lineMarkupMultiplier * profitMultiplier;
+  useEffect(() => {
+    if (!canOverrideMarkup || editingLine || markupTouched) return;
+    setLineMarkupInput(lineStandardMarkupMultiplier.toFixed(2));
+  }, [canOverrideMarkup, editingLine, markupTouched, lineStandardMarkupMultiplier]);
   const labourRate = numberValue(pricingSettings?.labourRate, defaultLabourRate);
   const inkRatePerSqm = numberValue(pricingSettings?.inkRatePerSqm, defaultInkRatePerSqm);
   const inkBillingIncrementSqm = Math.max(0, numberValue(pricingSettings?.inkBillingIncrementSqm, 0.5));
@@ -1856,8 +1875,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const manualQuoteDiscountPercent = discountPercentValue(pricingSettings?.manualQuoteDiscountPercent);
   const manualQuoteDiscountMultiplier = Math.max(0, 1 - manualQuoteDiscountPercent / 100);
   const pricingMultiplier = sellMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
-  const accessEquipmentPricingMultiplier = accessEquipmentMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
-  const effectivePricingMultiplier = flowType === "service" && serviceType === "access_equipment" ? accessEquipmentPricingMultiplier : pricingMultiplier;
+  const standardPricingMultiplier = standardMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
+  const standardAccessEquipmentPricingMultiplier = standardAccessEquipmentMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
+  const effectivePricingMultiplier = pricingMultiplier;
   const selectedPlanMatrixItem = planMatrixItemPool.find((item) => item.id === planMyobItemId) ?? null;
   const preserveSavedPlanMatrix = Boolean(
     !planMatrixSelectionTouched
@@ -1908,7 +1928,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     return rows;
   }, [serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate, dispatchLineQuantity]);
   const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
-  const dispatchUnitPrice = dispatchRawCost * pricingMultiplier;
+  const dispatchUnitPrice = dispatchRawCost * standardPricingMultiplier;
   const dispatchLineTotal = dispatchUnitPrice * dispatchLineQuantity;
   const fixingAllowanceSummary = serviceFixings.map((key) => {
     const item = fixingOptions.find((option) => option.key === key);
@@ -1933,7 +1953,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
   const accessEquipmentDaysNumber = Math.max(1, numberValue(accessEquipmentDays, 1));
   const accessEquipmentRawDailyCharge = numberValue(accessEquipmentDailyCharge, 0);
-  const accessEquipmentDailySellPrice = accessEquipmentRawDailyCharge * accessEquipmentPricingMultiplier;
+  const accessEquipmentDailySellPrice = accessEquipmentRawDailyCharge * standardAccessEquipmentPricingMultiplier;
   const accessEquipmentLineTotal = accessEquipmentDailySellPrice * accessEquipmentDaysNumber;
   const accessEquipmentDetailsComplete = Boolean(
     accessEquipmentType.trim()
@@ -2212,7 +2232,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         .map((material) => [material.id, snapshotMaterialForSave(material) as SnapshotMaterial])).values())
     },
     pricingSnapshot: {
-      markupMultiplier: flowType === "service" && serviceType === "access_equipment" ? accessEquipmentMarkupMultiplier : markupMultiplier,
+      markupMultiplier: lineMarkupMultiplier,
       profitMultiplier,
       labourRate,
       inkRatePerSqm,
@@ -2262,7 +2282,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     notes: "",
     materialSnapshots: { componentParts: [] },
     pricingSnapshot: {
-      markupMultiplier,
+      markupMultiplier: standardMarkupMultiplier,
       profitMultiplier,
       labourRate,
       rawCost: dispatchRawCost,
@@ -2293,7 +2313,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     notes: "",
     materialSnapshots: { componentParts: [] },
     pricingSnapshot: {
-      markupMultiplier: accessEquipmentMarkupMultiplier,
+      markupMultiplier: standardAccessEquipmentMarkupMultiplier,
       profitMultiplier,
       labourRate,
       rawCost: accessEquipmentRawDailyCharge,
@@ -2778,6 +2798,31 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           <div style={{ display: "grid", gap: 2 }}>
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
             <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>
+            {canOverrideMarkup ? (useMyobPlanPricing && selectedPlanMatrixPrice ? (
+              <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>Markup is not applied to this line because MYOB matrix pricing is controlling the sell price.</span>
+            ) : (
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }} onClick={(event) => event.stopPropagation()}>
+                <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, fontWeight: 900, color: "#344054" }}>
+                  Markup ×
+                  <input
+                    value={lineMarkupInput}
+                    onChange={(event) => { setLineMarkupInput(event.target.value); setMarkupTouched(true); setUnitPriceOverridden(false); }}
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    inputMode="decimal"
+                    aria-label="Line markup multiplier"
+                    style={{ width: 76, minHeight: 34, borderRadius: 9, border: "1px solid #b9cdfc", padding: "0 9px", fontWeight: 900, background: "#fff" }}
+                  />
+                </label>
+                <span style={{ color: Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? "#9a3412" : "#667085", fontSize: 11, fontWeight: 850 }}>
+                  {Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? "Manager override" : `Standard ×${lineStandardMarkupMultiplier.toFixed(2)}`}
+                </span>
+                {Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? (
+                  <button type="button" onClick={() => { setLineMarkupInput(lineStandardMarkupMultiplier.toFixed(2)); setMarkupTouched(false); setUnitPriceOverridden(false); }} style={{ border: 0, background: "transparent", color: "#155eef", fontSize: 11, fontWeight: 900, padding: 0, cursor: "pointer", textDecoration: "underline" }}>Use standard</button>
+                ) : null}
+              </div>
+            )) : null}
             {flowType === "plan_printing" && planPricingMode === "myob_matrix" && selectedPlanMatrixPrice ? <span style={{ color: "#067647", fontSize: 12, fontWeight: 850 }}>MYOB {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"} · {myobMatrixTierLabel(activePlanPriceMatrix, selectedPlanMatrixPrice.quantityOver)} · {matrixItemLabel(selectedPlanMatrixItem as MyobMatrixItem)}{manualQuoteDiscountPercent > 0 ? ` · ${manualQuoteDiscountPercent}% quote discount applied` : ""}</span> : null}
             {shouldCreateDispatchLine ? <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>Plus {serviceType === "install" ? "Sign Install" : "Delivery"}: qty {usage(dispatchLineQuantity)} × {money(dispatchUnitPrice)} = {money(dispatchLineTotal)}</span> : null}
             {shouldCreateAccessEquipmentLine ? <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 850 }}>Plus Access Equipment - {accessEquipmentType.trim()}: {usage(accessEquipmentDaysNumber)} day{accessEquipmentDaysNumber === 1 ? "" : "s"} × {money(accessEquipmentDailySellPrice)} = {money(accessEquipmentLineTotal)}</span> : null}
