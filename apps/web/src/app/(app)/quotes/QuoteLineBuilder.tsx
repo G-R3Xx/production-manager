@@ -1296,13 +1296,41 @@ function sanitiseAnswersForAvailableChoices(product: QuoteProduct | undefined, a
   return next;
 }
 
+type SavedProductDepartment = "signage" | "small_format";
+
+function productDepartment(product: QuoteProduct): SavedProductDepartment | null {
+  const department = String(product.department ?? "").trim().toLowerCase();
+  if (department === "signage") return "signage";
+  if (department === "small_format") return "small_format";
+  return null;
+}
+
 export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings }: QuoteLineBuilderProps) {
-  const [selectedProductId, setSelectedProductId] = useState(products[0]?.id ?? "");
-  const selectedProduct = useMemo(
-    () => products.find((product) => product.id === selectedProductId),
-    [products, selectedProductId]
+  const eligibleProducts = useMemo(
+    () => products.filter((product) => productDepartment(product) !== null),
+    [products]
   );
-  const [answers, setAnswers] = useState<Record<string, string>>(() => defaultAnswersFor(products[0]));
+  const signageCount = useMemo(
+    () => eligibleProducts.filter((product) => productDepartment(product) === "signage").length,
+    [eligibleProducts]
+  );
+  const smallFormatCount = useMemo(
+    () => eligibleProducts.filter((product) => productDepartment(product) === "small_format").length,
+    [eligibleProducts]
+  );
+  const initialDepartment: SavedProductDepartment = signageCount > 0 ? "signage" : "small_format";
+  const initialProduct = eligibleProducts.find((product) => productDepartment(product) === initialDepartment) ?? eligibleProducts[0];
+  const [departmentFilter, setDepartmentFilter] = useState<SavedProductDepartment>(initialDepartment);
+  const filteredProducts = useMemo(
+    () => eligibleProducts.filter((product) => productDepartment(product) === departmentFilter),
+    [eligibleProducts, departmentFilter]
+  );
+  const [selectedProductId, setSelectedProductId] = useState(initialProduct?.id ?? "");
+  const selectedProduct = useMemo(
+    () => eligibleProducts.find((product) => product.id === selectedProductId),
+    [eligibleProducts, selectedProductId]
+  );
+  const [answers, setAnswers] = useState<Record<string, string>>(() => defaultAnswersFor(initialProduct));
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, string>>({});
   const [customFollowUpAnswers, setCustomFollowUpAnswers] = useState<Record<string, string>>({});
   const [manualSummary, setManualSummary] = useState("");
@@ -1379,8 +1407,14 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     }
   }, [autoUnitPrice, unitPriceOverridden]);
 
+  function handleDepartmentChange(department: SavedProductDepartment) {
+    setDepartmentFilter(department);
+    const nextProduct = eligibleProducts.find((product) => productDepartment(product) === department);
+    handleProductChange(nextProduct?.id ?? "");
+  }
+
   function handleProductChange(productId: string) {
-    const nextProduct = products.find((product) => product.id === productId);
+    const nextProduct = eligibleProducts.find((product) => product.id === productId);
     setSelectedProductId(productId);
     setAnswers(defaultAnswersFor(nextProduct));
     setFollowUpAnswers({});
@@ -1477,11 +1511,11 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     );
   }
 
-  if (products.length === 0) {
+  if (eligibleProducts.length === 0) {
     return (
       <div style={{ border: "1px solid #fedf89", background: "#fffcf5", borderRadius: 16, padding: 16, display: "grid", gap: 6 }}>
-        <strong>No products available yet.</strong>
-        <p style={mutedStyle}>Create a product first, then add quote questions and material rows on the Products page.</p>
+        <strong>No Signage or Small format saved products available yet.</strong>
+        <p style={mutedStyle}>Create or classify a product under Signage or Small format on the Products page, then it will appear here.</p>
       </div>
     );
   }
@@ -1511,14 +1545,58 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
       })} />
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
 
-      <label style={labelStyle}>
+      <section style={{ display: "grid", gap: 9 }}>
         <span style={labelTextStyle}>1. Pick saved product</span>
-        <select value={selectedProductId} onChange={(event) => handleProductChange(event.target.value)} style={inputStyle}>
-          {products.map((product) => (
-            <option key={product.id} value={product.id}>{product.name}</option>
-          ))}
-        </select>
-      </label>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button
+            type="button"
+            disabled={signageCount === 0}
+            onClick={() => handleDepartmentChange("signage")}
+            style={{
+              border: departmentFilter === "signage" ? "2px solid #2563eb" : "1px solid #cfd9e8",
+              borderRadius: 999,
+              minHeight: 38,
+              padding: "0 13px",
+              background: departmentFilter === "signage" ? "#eff6ff" : "#fff",
+              color: departmentFilter === "signage" ? "#1d4ed8" : "#475467",
+              fontWeight: 900,
+              cursor: signageCount === 0 ? "not-allowed" : "pointer",
+              opacity: signageCount === 0 ? 0.55 : 1
+            }}
+          >
+            Signage · {signageCount}
+          </button>
+          <button
+            type="button"
+            disabled={smallFormatCount === 0}
+            onClick={() => handleDepartmentChange("small_format")}
+            style={{
+              border: departmentFilter === "small_format" ? "2px solid #2563eb" : "1px solid #cfd9e8",
+              borderRadius: 999,
+              minHeight: 38,
+              padding: "0 13px",
+              background: departmentFilter === "small_format" ? "#eff6ff" : "#fff",
+              color: departmentFilter === "small_format" ? "#1d4ed8" : "#475467",
+              fontWeight: 900,
+              cursor: smallFormatCount === 0 ? "not-allowed" : "pointer",
+              opacity: smallFormatCount === 0 ? 0.55 : 1
+            }}
+          >
+            Small format · {smallFormatCount}
+          </button>
+        </div>
+        {filteredProducts.length > 0 ? (
+          <select value={selectedProductId} onChange={(event) => handleProductChange(event.target.value)} style={inputStyle}>
+            {filteredProducts.map((product) => (
+              <option key={product.id} value={product.id}>{product.name}{product.sku ? ` · ${product.sku}` : ""}</option>
+            ))}
+          </select>
+        ) : (
+          <div style={{ border: "1px dashed #cfd9e8", borderRadius: 12, padding: 12, color: "#667085", background: "#f8fafc" }}>
+            No {departmentFilter === "signage" ? "Signage" : "Small format"} saved products have been created yet.
+          </div>
+        )}
+      </section>
 
       <div style={quotePanelStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>

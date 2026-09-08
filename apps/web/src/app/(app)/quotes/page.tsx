@@ -9,7 +9,7 @@ import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
-import { QuoteMaterialFlowBuilder } from "./QuoteMaterialFlowBuilder";
+import { QuoteLineStartBuilder } from "./QuoteLineStartBuilder";
 import { QuoteLineEditor } from "./QuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
@@ -988,9 +988,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <summary style={{ listStyle: "none", cursor: "pointer", padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#f8fbff)", color: "#155eef", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}><span>＋ Add quote line</span><span style={{ fontSize: 12, color: "#475467" }}>Open line editor</span></summary>
                     <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
                       {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
-                      <QuoteMaterialFlowBuilder
+                      <QuoteLineStartBuilder
                         key="new-quote-line"
                         quoteId={selectedQuote.id}
+                        products={savedQuoteProducts}
                         materials={activeMaterials}
                         myobMatrixItems={myobMatrixItems}
                         canOverrideMarkup={canOverrideQuoteMarkup}
