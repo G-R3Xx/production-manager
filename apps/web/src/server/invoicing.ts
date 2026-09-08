@@ -572,23 +572,23 @@ export async function syncJobInvoiceStatusForTenant(tenantId: string, jobId: str
     invoiceStatus = "partially_invoiced";
   }
   await pool.query(`
-    UPDATE app.jobs SET invoice_status=$3,
+    UPDATE app.jobs SET invoice_status=$3::varchar,
       current_stage=CASE
-        WHEN $3 IN ('invoiced','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'invoiced'
-        WHEN $3 NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'invoice_required'
+        WHEN $3::varchar IN ('invoiced','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'invoiced'
+        WHEN $3::varchar NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'invoice_required'
         ELSE current_stage
       END,
       current_stage_label=CASE
-        WHEN $3='paid' AND current_stage IN ('invoice_required','invoiced') THEN 'Paid'
-        WHEN $3='invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoiced'
-        WHEN $3='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Partially invoiced'
-        WHEN $3 NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'Invoice required'
+        WHEN $3::varchar='paid' AND current_stage IN ('invoice_required','invoiced') THEN 'Paid'
+        WHEN $3::varchar='invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoiced'
+        WHEN $3::varchar='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Partially invoiced'
+        WHEN $3::varchar NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'Invoice required'
         ELSE current_stage_label
       END,
       next_action=CASE
-        WHEN $3 IN ('invoiced','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'Close job'
-        WHEN $3='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoice remaining balance'
-        WHEN $3 NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'Create MYOB invoice'
+        WHEN $3::varchar IN ('invoiced','paid') AND current_stage IN ('invoice_required','invoiced') THEN 'Close job'
+        WHEN $3::varchar='partially_invoiced' AND current_stage IN ('invoice_required','invoiced') THEN 'Invoice remaining balance'
+        WHEN $3::varchar NOT IN ('invoiced','paid') AND current_stage='invoiced' THEN 'Create MYOB invoice'
         ELSE next_action
       END,
       current_href=CASE WHEN current_stage IN ('invoice_required','invoiced') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,

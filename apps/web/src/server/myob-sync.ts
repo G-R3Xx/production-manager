@@ -2833,6 +2833,23 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
   const { accessToken } = await getValidAccessToken(tenantId);
   let payload: Record<string, unknown> | null = null;
 
+  // Once MYOB has confirmed/returned an invoice, a secondary dashboard-stage update
+  // must never downgrade that invoice to a sync error. Keep the accounting sync as
+  // the source of truth and treat workflow-stage refresh as a non-fatal follow-up.
+  const syncJobInvoiceStageSafely = async (): Promise<void> => {
+    try {
+      await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+    } catch (stageError) {
+      const stageMessage = stageError instanceof Error ? stageError.message : String(stageError);
+      await createSyncRunForTenant(tenantId, "push_invoices", "error", {
+        source: "syncJobInvoiceStatusForTenant",
+        invoiceId,
+        myobInvoiceUid: invoice.myobUid ?? null,
+        nonFatal: true
+      }, `Invoice is synced in MYOB, but PM job-stage refresh failed: ${stageMessage}`).catch(() => undefined);
+    }
+  };
+
   try {
     const allInvoices = await listInvoicesForJob(tenantId, invoice.jobId);
     const previousIssued = allInvoices.filter((row) => row.id !== invoice.id && ["issued", "part_paid", "paid"].includes(row.status));
@@ -2914,7 +2931,7 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
           recoveredExistingInvoice: true,
           sourceOrderUid: invoice.sourceOrderUid
         }, null);
-        await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+        await syncJobInvoiceStageSafely();
         return {
           ok: true,
           invoiceId,
@@ -3016,7 +3033,7 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
     await createSyncRunForTenant(tenantId, "push_invoices", "success", {
       source: "pushPmInvoiceToMyobForTenant", invoiceId, myobInvoiceUid: uid, myobInvoiceNumber: number, endpoint: result.url
     }, null);
-    await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+    await syncJobInvoiceStageSafely();
     return { ok: true, invoiceId, myobInvoiceUid: uid, myobInvoiceNumber: number, endpoint: result.url, message: `MYOB invoice ${number ?? "created"} created.` };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -3071,7 +3088,7 @@ export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: 
               source: "pushPmInvoiceToMyobForTenant", invoiceId, myobInvoiceUid: existingUid,
               myobInvoiceNumber: existingNumber, recoveredExistingInvoiceAfter37001: true
             }, null);
-            await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+            await syncJobInvoiceStageSafely();
             return {
               ok: true, invoiceId, myobInvoiceUid: existingUid, myobInvoiceNumber: existingNumber, endpoint,
               message: `MYOB had already converted Order ${invoice.sourceOrderNumber ?? ""}. Production Manager recovered and linked invoice ${existingNumber ?? existingUid}; no duplicate invoice was created.`.replace(/\s+/g, " ").trim()
@@ -3112,5 +3129,17 @@ export async function refreshPmInvoiceFromMyobForTenant(tenantId: string, invoic
     totalAmount: Number.isFinite(total) ? total : null,
     payload: { refreshedAt: new Date().toISOString(), response: data }
   });
-  await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+  // The MYOB refresh above is authoritative. A PM workflow-stage problem must not
+  // make a successfully refreshed MYOB invoice look as though the invoice sync failed.
+  try {
+    await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+  } catch (stageError) {
+    const stageMessage = stageError instanceof Error ? stageError.message : String(stageError);
+    await createSyncRunForTenant(tenantId, "push_invoices", "error", {
+      source: "refreshPmInvoiceFromMyobForTenant:syncJobInvoiceStatusForTenant",
+      invoiceId,
+      myobInvoiceUid: invoice.myobUid,
+      nonFatal: true
+    }, `MYOB invoice refresh succeeded, but PM job-stage refresh failed: ${stageMessage}`).catch(() => undefined);
+  }
 }
