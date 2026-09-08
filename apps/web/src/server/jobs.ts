@@ -339,9 +339,11 @@ function artworkStage(artwork: ArtworkApprovalRecord | null | undefined): JobSta
 
 function productionStage(production: ProductionJobRecord | null | undefined, invoiceStatus: string): JobStage | null {
   if (!production) return null;
-  if (invoiceStatus === "invoiced") return "invoiced";
   const status = normalise(production.status);
-  if (status.includes("complete")) return "invoice_required";
+  if (status.includes("complete")) {
+    if (invoiceStatus === "invoiced" || invoiceStatus === "paid") return "invoiced";
+    return "invoice_required";
+  }
   if (status.includes("ready_for_dispatch") || status.includes("ready_for_install") || status.includes("ready_for_delivery") || status.includes("ready_for_pickup")) {
     const dispatch = normalise(production.dispatchType);
     if (dispatch.includes("install")) return "ready_for_install";
@@ -575,14 +577,21 @@ async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobR
     const existingJob = draft.existingId ? existing.find((job) => job.id === draft.existingId) : null;
     const invoiceStatus = existingJob?.invoiceStatus ?? "not_invoiced";
     const stage = deriveStage(draft, invoiceStatus);
-    const meta = jobStageMeta(stage);
+    const baseMeta = jobStageMeta(stage);
+    const meta = stage === "invoice_required" && invoiceStatus === "partially_invoiced"
+      ? { ...baseMeta, label: "Partially invoiced", nextAction: "Invoice remaining balance" }
+      : stage === "invoiced" && invoiceStatus === "paid"
+        ? { ...baseMeta, label: "Paid", nextAction: "Close job" }
+        : baseMeta;
     const stepSummary: ProductionJobStepSummary | undefined = draft.production ? stepByJob.get(draft.production.id) : undefined;
     const nextAction = stage === "production" && stepSummary?.currentStep ? stepSummary.currentStep : meta.nextAction;
     const dueDate = draft.production?.dueDate || draft.survey?.dueDate || existingJob?.dueDate || null;
     const priority = draft.production?.priority || existingJob?.priority || draft.enquiry?.urgency || "normal";
     const updatedAt = maxUpdatedAt(draft);
     const receivedAt = earliestCreatedAt(draft);
-    const href = currentHrefForDraft(draft, stage);
+    const href = (stage === "invoice_required" || stage === "invoiced") && draft.existingId
+      ? `/jobs/${draft.existingId}/invoice`
+      : currentHrefForDraft(draft, stage);
     const linkedCustomerId = draft.quote?.linkedCustomerId || draft.production?.linkedCustomerId || draft.survey?.linkedCustomerId || draft.enquiry?.linkedCustomerId || null;
 
     const result = draft.existingId
@@ -626,6 +635,10 @@ async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobR
 
     const job = result.rows[0];
     if (job) {
+      if ((stage === "invoice_required" || stage === "invoiced") && job.currentHref !== `/jobs/${job.id}/invoice`) {
+        job.currentHref = `/jobs/${job.id}/invoice`;
+        await pool.query(`UPDATE app.jobs SET current_href=$3, updated_at=GREATEST(updated_at, now()) WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, job.id, job.currentHref]);
+      }
       syncedJobs.push(job);
       await upsertSystemStageTask(job, dueDate);
     }
@@ -1110,29 +1123,33 @@ export async function updateJobMetaForTenant(tenantId: string, input: {
   invoiceStatus?: string | null;
 }): Promise<void> {
   await ensureJobWorkspaceSchema();
-  const invoiceStatus = input.invoiceStatus?.trim() || "not_invoiced";
+  const invoiceStatus = input.invoiceStatus?.trim() || null;
   await pool.query(`
     UPDATE app.jobs SET
       title = COALESCE(NULLIF($3,''), title),
       due_date = NULLIF($4::text,'')::date,
       priority = COALESCE(NULLIF($5,''), priority),
       owner_profile_id = NULLIF($6::text,'')::uuid,
-      invoice_status = $7,
+      invoice_status = COALESCE(NULLIF($7,''), invoice_status),
       current_stage = CASE
-        WHEN $7 = 'invoiced' THEN 'invoiced'
-        WHEN current_stage = 'invoiced' AND $7 <> 'invoiced' THEN 'invoice_required'
+        WHEN $7 IN ('invoiced','paid') THEN 'invoiced'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','paid') THEN 'invoice_required'
         ELSE current_stage
       END,
       current_stage_label = CASE
+        WHEN $7 = 'paid' THEN 'Paid'
         WHEN $7 = 'invoiced' THEN 'Invoiced'
-        WHEN current_stage = 'invoiced' AND $7 <> 'invoiced' THEN 'Invoice required'
+        WHEN $7 = 'partially_invoiced' THEN 'Partially invoiced'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','paid') THEN 'Invoice required'
         ELSE current_stage_label
       END,
       next_action = CASE
-        WHEN $7 = 'invoiced' THEN 'Close job'
-        WHEN current_stage = 'invoiced' AND $7 <> 'invoiced' THEN 'Create MYOB invoice'
+        WHEN $7 IN ('invoiced','paid') THEN 'Close job'
+        WHEN $7 = 'partially_invoiced' THEN 'Invoice remaining balance'
+        WHEN $7 IS NOT NULL AND current_stage = 'invoiced' AND $7 NOT IN ('invoiced','paid') THEN 'Create MYOB invoice'
         ELSE next_action
       END,
+      current_href = CASE WHEN $7 IN ('partially_invoiced','invoiced','paid') THEN '/jobs/' || id::text || '/invoice' ELSE current_href END,
       updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, input.jobId, input.title ?? null, input.dueDate ?? null, input.priority ?? null, input.ownerProfileId ?? null, invoiceStatus]);

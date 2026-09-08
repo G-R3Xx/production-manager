@@ -72,7 +72,6 @@ export async function updateJobMetaAction(formData: FormData): Promise<void> {
     dueDate: text(formData.get("dueDate")),
     priority: text(formData.get("priority")),
     ownerProfileId: text(formData.get("ownerProfileId")),
-    invoiceStatus: text(formData.get("invoiceStatus")),
   });
   revalidatePath("/dashboard");
   revalidatePath("/calendar");

@@ -74,6 +74,8 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   ]);
 
   const stageTone = tone(job.currentStage);
+  const canInvoice = ["owner", "manager", "accounts"].includes(activeTenant.tenantRole);
+  const quoteCanInvoice = Boolean(quote && ["accepted", "converted"].includes(String(quote.status).toLowerCase()));
   const activeStaff = staff.filter((row) => row.membershipStatus === "active");
   const manualTasks = tasks.filter((task) => !task.isSystem);
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
@@ -90,6 +92,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
     artwork ? { label: "Artwork", href: `/artwork-approvals?selected=${artwork.id}` } : null,
     production ? { label: "Production", href: `/production?selected=${production.id}` } : null,
     production ? { label: "Job sheet", href: `/job-sheets/${production.id}`, external: true } : null,
+    canInvoice && quoteCanInvoice ? { label: "Invoicing", href: `/jobs/${job.id}/invoice` } : null,
   ].filter(Boolean) as Array<{ label: string; href: string; external?: boolean }>;
 
   return (
@@ -202,7 +205,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
               <label style={label}>Job owner<select name="ownerProfileId" defaultValue={job.ownerProfileId ?? ""} style={input}><option value="">Unassigned</option>{activeStaff.map((person) => <option key={person.userProfileId} value={person.userProfileId}>{person.fullName} ({person.shortName})</option>)}</select></label>
               <label style={label}>Overall due date<input type="date" name="dueDate" defaultValue={job.dueDate ?? ""} style={input} /></label>
               <label style={label}>Priority<select name="priority" defaultValue={job.priority || "normal"} style={input}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
-              <label style={label}>Invoice status<select name="invoiceStatus" defaultValue={job.invoiceStatus || "not_invoiced"} style={input}><option value="not_invoiced">Not invoiced</option><option value="invoiced">Invoiced</option></select></label>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, padding: 11, background: "#f8fafc" }}><span style={{ display: "block", color: "#667085", fontSize: 11, fontWeight: 900, textTransform: "uppercase" }}>Invoice status</span><strong style={{ display: "block", marginTop: 3 }}>{(job.invoiceStatus || "not_invoiced").replaceAll("_", " ")}</strong>{canInvoice && quoteCanInvoice ? <Link href={`/jobs/${job.id}/invoice`} style={{ display: "inline-block", marginTop: 6, color: "#155eef", fontWeight: 900, fontSize: 12, textDecoration: "none" }}>Open invoicing →</Link> : null}</div>
               <button type="submit" style={button}>Save job details</button>
             </form>
           </section>
@@ -217,6 +220,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
                 ["Artwork", artwork?.status, artwork ? `/artwork-approvals?selected=${artwork.id}` : null],
                 ["Production", production?.status, production ? `/production?selected=${production.id}` : null],
                 ["MYOB Order", job.myobOrderNumber ? `Order ${job.myobOrderNumber}` : "Not created", null],
+                ...(canInvoice && quoteCanInvoice ? [["Invoices", (job.invoiceStatus || "not_invoiced").replaceAll("_", " "), `/jobs/${job.id}/invoice`]] : []),
                 ["Install Scheduler", job.installSchedulerJobId ? "Linked" : "Not linked", job.installSchedulerJobUrl],
               ].map(([name, status, href]) => <div key={String(name)} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, padding: "10px 0", borderBottom: "1px solid #f0f2f5" }}><span><strong>{name}</strong><span style={{ display: "block", color: "#667085", fontSize: 12, marginTop: 2 }}>{String(status || "Not required / not started")}</span></span>{href ? <a href={String(href)} target={String(href).startsWith("http") ? "_blank" : undefined} rel={String(href).startsWith("http") ? "noreferrer" : undefined} style={{ color: "#155eef", fontWeight: 900, textDecoration: "none", alignSelf: "center" }}>Open</a> : null}</div>)}
             </div>

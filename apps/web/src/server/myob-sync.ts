@@ -2659,3 +2659,282 @@ export async function pushPurchaseOrderToMyobForTenant(tenantId: string, purchas
   });
   return { uid, number };
 }
+
+// -----------------------------------------------------------------------------
+// Production Manager -> MYOB sales invoicing
+// -----------------------------------------------------------------------------
+
+export type MyobInvoicePushResult = {
+  ok: boolean;
+  invoiceId: string;
+  myobInvoiceUid: string | null;
+  myobInvoiceNumber: string | null;
+  endpoint: string;
+  message: string;
+};
+
+function australiaInvoiceDate(): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit"
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function myobInvoiceLocalStatus(data: Record<string, unknown>): "issued" | "part_paid" | "paid" {
+  const balance = Number(data.BalanceDueAmount ?? NaN);
+  const total = Number(data.TotalAmount ?? data.Subtotal ?? NaN);
+  const status = String(data.Status ?? "").toLowerCase();
+  if (Number.isFinite(balance) && balance <= 0.01) return "paid";
+  if (status.includes("closed")) return "paid";
+  if (Number.isFinite(balance) && Number.isFinite(total) && balance < total - 0.01) return "part_paid";
+  return "issued";
+}
+
+function safeInvoiceOrderLine(line: Record<string, unknown>): Record<string, unknown> | null {
+  const type = String(line.Type ?? "Transaction");
+  if (type !== "Transaction") return null;
+  const item = objectChild(line, "Item");
+  const account = objectChild(line, "Account");
+  const location = objectChild(line, "Location");
+  const taxCode = objectChild(line, "TaxCode");
+  const job = objectChild(line, "Job");
+  const itemUid = textOrNull(item.UID);
+  const accountUid = textOrNull(account.UID);
+  const taxCodeUid = textOrNull(taxCode.UID);
+  if (!taxCodeUid || (!itemUid && !accountUid)) return null;
+  return {
+    Type: "Transaction",
+    Description: textOrNull(line.Description) ?? undefined,
+    ShipQuantity: Number(line.ShipQuantity ?? line.Quantity ?? 0),
+    UnitPrice: Number(line.UnitPrice ?? 0),
+    DiscountPercent: Number(line.DiscountPercent ?? 0),
+    Total: Number(line.Total ?? 0),
+    ...(itemUid ? { Item: { UID: itemUid } } : {}),
+    ...(accountUid ? { Account: { UID: accountUid } } : {}),
+    ...(textOrNull(location.UID) ? { Location: { UID: textOrNull(location.UID) } } : {}),
+    ...(textOrNull(job.UID) ? { Job: { UID: textOrNull(job.UID) } } : { Job: null }),
+    TaxCode: { UID: taxCodeUid, ...(textOrNull(taxCode.Code) ? { Code: textOrNull(taxCode.Code) } : {}) }
+  };
+}
+
+function buildInvoicePayloadFromMyobItemOrder(order: Record<string, unknown>, orderUid: string): Record<string, unknown> {
+  const customer = objectChild(order, "Customer");
+  const freightTaxCode = objectChild(order, "FreightTaxCode");
+  const rawLines = Array.isArray(order.Lines) ? order.Lines : [];
+  const lines = rawLines
+    .filter((row): row is Record<string, unknown> => Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    .map(safeInvoiceOrderLine)
+    .filter((row): row is Record<string, unknown> => Boolean(row));
+  const customerUid = textOrNull(customer.UID);
+  if (!customerUid || !lines.length) throw new Error("The linked MYOB Order is missing the customer or invoiceable Item lines required for conversion.");
+  const freightTaxUid = textOrNull(freightTaxCode.UID);
+  return {
+    Customer: { UID: customerUid },
+    Date: australiaInvoiceDate(),
+    Number: undefined,
+    CustomerPurchaseOrderNumber: textOrNull(order.CustomerPurchaseOrderNumber) ?? undefined,
+    ShipToAddress: textOrNull(order.ShipToAddress) ?? undefined,
+    Lines: lines,
+    Freight: Number(order.Freight ?? 0),
+    ...(freightTaxUid ? { FreightTaxCode: { UID: freightTaxUid, ...(textOrNull(freightTaxCode.Code) ? { Code: textOrNull(freightTaxCode.Code) } : {}) } } : {}),
+    IsTaxInclusive: order.IsTaxInclusive === true,
+    Comment: textOrNull(order.Comment) ?? undefined,
+    JournalMemo: textOrNull(order.JournalMemo) ?? undefined,
+    InvoiceDeliveryStatus: "Nothing",
+    Order: { UID: orderUid }
+  };
+}
+
+export async function pushPmInvoiceToMyobForTenant(tenantId: string, invoiceId: string): Promise<MyobInvoicePushResult> {
+  const {
+    getInvoiceById,
+    listInvoiceLines,
+    listInvoicesForJob,
+    markInvoiceSynced,
+    markInvoiceSyncError,
+    syncJobInvoiceStatusForTenant,
+  } = await import("@/server/invoicing");
+  const { getQuoteDraftById, listQuoteLines } = await import("@/server/quotes");
+
+  const invoice = await getInvoiceById(tenantId, invoiceId);
+  if (!invoice) throw new Error("Invoice not found.");
+  if (invoice.myobUid && invoice.myobSyncStatus === "synced") {
+    return {
+      ok: true,
+      invoiceId,
+      myobInvoiceUid: invoice.myobUid,
+      myobInvoiceNumber: invoice.myobNumber,
+      endpoint: "/Sale/Invoice/Item",
+      message: "This invoice is already linked to MYOB."
+    };
+  }
+
+  const [quote, invoiceLines] = await Promise.all([
+    getQuoteDraftById(tenantId, invoice.quoteId),
+    listInvoiceLines(tenantId, invoiceId),
+  ]);
+  if (!quote) throw new Error("The accepted quote linked to this invoice could not be found.");
+  if (!invoiceLines.length) throw new Error("This invoice has no lines to send to MYOB.");
+
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") {
+    const message = "MYOB is not connected. Connect MYOB before creating the invoice.";
+    await markInvoiceSyncError(tenantId, invoiceId, message);
+    throw new Error(message);
+  }
+
+  const customer = await resolveMyobCustomerUid(tenantId, quote);
+  if (!customer.uid) {
+    const message = "The linked client is not mapped to a MYOB customer. Link or create the MYOB customer before invoicing.";
+    await markInvoiceSyncError(tenantId, invoiceId, message);
+    throw new Error(message);
+  }
+
+  const endpoint = "/Sale/Invoice/Item";
+  const { accessToken } = await getValidAccessToken(tenantId);
+  let payload: Record<string, unknown> | null = null;
+
+  try {
+    const allInvoices = await listInvoicesForJob(tenantId, invoice.jobId);
+    const previousIssued = allInvoices.filter((row) => row.id !== invoice.id && ["issued", "part_paid", "paid"].includes(row.status));
+    const isFirstFullConversion = invoice.invoiceKind === "full_remaining"
+      && previousIssued.length === 0
+      && Boolean(invoice.sourceOrderUid)
+      && invoiceLines.every((line) => line.sourceKind === "quote_line");
+
+    if (isFirstFullConversion && invoice.sourceOrderUid) {
+      const orderResponse = await fetchMyobJson(accessToken, connection.companyFileId, `/Sale/Order/Item/${invoice.sourceOrderUid}`, tenantId);
+      if (!orderResponse.data || typeof orderResponse.data !== "object" || Array.isArray(orderResponse.data)) {
+        throw new Error("MYOB did not return the linked Item Order needed for invoice conversion.");
+      }
+      const order = orderResponse.data as Record<string, unknown>;
+      const orderCustomerUid = textOrNull(objectChild(order, "Customer").UID);
+      if (!orderCustomerUid || orderCustomerUid !== customer.uid) {
+        throw new Error("The linked MYOB Order customer does not match the client linked to this PM job. Reconcile the customer/order before invoicing.");
+      }
+      const orderSubtotal = Number(order.Subtotal ?? NaN);
+      const expectedSubtotal = Number(invoice.subtotal);
+      if (Number.isFinite(orderSubtotal) && Math.abs(orderSubtotal - expectedSubtotal) > 0.02) {
+        throw new Error(`The MYOB Order has changed since the accepted quote. MYOB Order subtotal is $${orderSubtotal.toFixed(2)} but PM expects $${expectedSubtotal.toFixed(2)}. Reconcile the order before invoicing.`);
+      }
+      payload = buildInvoicePayloadFromMyobItemOrder(order, invoice.sourceOrderUid);
+    } else {
+      const quoteLines = await listQuoteLines(invoice.quoteId);
+      const quoteById = new Map(quoteLines.map((line) => [line.id, line]));
+      const sourceQuoteLines = invoiceLines
+        .map((line) => line.quoteLineId ? quoteById.get(line.quoteLineId) ?? null : null)
+        .filter((line): line is import("@/server/quotes").QuoteLineRecord => Boolean(line));
+      const references = await resolveMyobSalesOrderReferences(tenantId, accessToken, connection.companyFileId, customer.uid);
+      const resolvedQuoteItems = await resolveMyobItemOrderLineReferences(tenantId, accessToken, connection.companyFileId, sourceQuoteLines, references);
+      const fallbackItem = invoiceLines.some((line) => !line.quoteLineId)
+        ? await ensureMyobCustomSalesItem(tenantId, accessToken, connection.companyFileId, references)
+        : null;
+      const customerMaterialNames = await customerFacingMaterialNamesForTenant(tenantId).catch(() => new Map<string, string>());
+      const shipToAddress = await myobSalesOrderShipToForQuote(tenantId, quote, quoteLines);
+
+      const lines = invoiceLines.map((line) => {
+        const quoteLine = line.quoteLineId ? quoteById.get(line.quoteLineId) ?? null : null;
+        const item = quoteLine ? resolvedQuoteItems.get(quoteLine.id) : fallbackItem;
+        if (!item) throw new Error(`MYOB item mapping could not be resolved for invoice line ${line.displayTitle}.`);
+        return {
+          Type: "Transaction",
+          Description: quoteLine ? buildOrderLineDescription(quoteLine, customerMaterialNames) : line.displayTitle.slice(0, 1000),
+          ShipQuantity: Number(line.qty),
+          UnitPrice: Number(line.unitPrice),
+          DiscountPercent: 0,
+          Total: Number(line.lineTotal),
+          Item: { UID: item.uid },
+          TaxCode: { UID: references.taxCodeUid, Code: references.taxCode },
+          ...(item.locationUid ? { Location: { UID: item.locationUid } } : {}),
+          Job: null
+        };
+      });
+
+      payload = {
+        Customer: { UID: customer.uid },
+        Date: australiaInvoiceDate(),
+        Number: undefined,
+        CustomerPurchaseOrderNumber: quote.clientPurchaseOrderNumber ?? undefined,
+        JournalMemo: `Production Manager invoice for ${quote.quoteNumber ?? quote.id}`,
+        Comment: quote.notes ?? undefined,
+        ShipToAddress: shipToAddress || undefined,
+        Lines: lines,
+        Freight: 0,
+        FreightTaxCode: { UID: references.freightTaxCodeUid, Code: references.freightTaxCode },
+        IsTaxInclusive: false,
+        InvoiceDeliveryStatus: "Nothing"
+      };
+    }
+
+    const result = await sendMyobJson(accessToken, connection.companyFileId, endpoint, "POST", payload, tenantId);
+    const uid = readMyobUid(result.data) ?? readUidFromLocation(result.location, connection.companyFileId);
+    if (!uid) throw new Error("MYOB accepted the invoice request but Production Manager could not read the new invoice UID.");
+    let invoiceData: Record<string, unknown> = result.data && typeof result.data === "object" && !Array.isArray(result.data)
+      ? result.data as Record<string, unknown>
+      : {};
+    if (!readMyobNumber(invoiceData) || invoiceData.BalanceDueAmount == null) {
+      const fetched = await fetchMyobJson(accessToken, connection.companyFileId, `/Sale/Invoice/Item/${uid}`, tenantId);
+      if (fetched.data && typeof fetched.data === "object" && !Array.isArray(fetched.data)) invoiceData = fetched.data as Record<string, unknown>;
+    }
+    const number = readMyobNumber(invoiceData);
+    const localStatus = myobInvoiceLocalStatus(invoiceData);
+    const balance = Number(invoiceData.BalanceDueAmount ?? NaN);
+    const totalAmount = Number(invoiceData.TotalAmount ?? NaN);
+    await markInvoiceSynced(tenantId, invoiceId, {
+      myobUid: uid,
+      myobNumber: number,
+      myobStatus: textOrNull(invoiceData.Status),
+      balanceDue: Number.isFinite(balance) ? balance : null,
+      totalAmount: Number.isFinite(totalAmount) ? totalAmount : Number(invoice.grandTotal),
+      status: localStatus,
+      payload: {
+        endpoint: result.url,
+        pushedAt: new Date().toISOString(),
+        requestSummary: { invoiceKind: invoice.invoiceKind, lineCount: invoiceLines.length, convertedFromOrder: isFirstFullConversion },
+        response: invoiceData,
+      }
+    });
+    await upsertExternalMappingByTenantId(tenantId, {
+      entityType: "invoice",
+      localId: invoiceId,
+      externalId: uid,
+      syncState: "synced",
+      lastSyncedAt: new Date().toISOString(),
+      payloadJson: { invoiceNumber: number, quoteNumber: quote.quoteNumber, endpoint: result.url }
+    });
+    await createSyncRunForTenant(tenantId, "push_invoices", "success", {
+      source: "pushPmInvoiceToMyobForTenant", invoiceId, myobInvoiceUid: uid, myobInvoiceNumber: number, endpoint: result.url
+    }, null);
+    await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+    return { ok: true, invoiceId, myobInvoiceUid: uid, myobInvoiceNumber: number, endpoint: result.url, message: `MYOB invoice ${number ?? "created"} created.` };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    await markInvoiceSyncError(tenantId, invoiceId, message, { failedAt: new Date().toISOString(), endpoint, request: payload });
+    await createSyncRunForTenant(tenantId, "push_invoices", "error", { source: "pushPmInvoiceToMyobForTenant", invoiceId, endpoint }, message);
+    throw new Error(`MYOB invoice sync failed: ${message}`);
+  }
+}
+
+export async function refreshPmInvoiceFromMyobForTenant(tenantId: string, invoiceId: string): Promise<void> {
+  const { getInvoiceById, updateInvoiceFromMyob, syncJobInvoiceStatusForTenant } = await import("@/server/invoicing");
+  const invoice = await getInvoiceById(tenantId, invoiceId);
+  if (!invoice?.myobUid) return;
+  const connection = await getMyobConnectionByTenantId(tenantId);
+  if (!connection?.companyFileId || connection.status !== "connected") throw new Error("MYOB is not connected.");
+  const { accessToken } = await getValidAccessToken(tenantId);
+  const response = await fetchMyobJson(accessToken, connection.companyFileId, `/Sale/Invoice/Item/${invoice.myobUid}`, tenantId);
+  if (!response.data || typeof response.data !== "object" || Array.isArray(response.data)) throw new Error("MYOB did not return the invoice record.");
+  const data = response.data as Record<string, unknown>;
+  const balance = Number(data.BalanceDueAmount ?? NaN);
+  const total = Number(data.TotalAmount ?? NaN);
+  await updateInvoiceFromMyob(tenantId, invoiceId, {
+    status: myobInvoiceLocalStatus(data),
+    myobNumber: readMyobNumber(data),
+    myobStatus: textOrNull(data.Status),
+    balanceDue: Number.isFinite(balance) ? balance : null,
+    totalAmount: Number.isFinite(total) ? total : null,
+    payload: { refreshedAt: new Date().toISOString(), response: data }
+  });
+  await syncJobInvoiceStatusForTenant(tenantId, invoice.jobId, invoice.quoteId);
+}
