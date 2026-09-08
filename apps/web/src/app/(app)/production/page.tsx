@@ -35,6 +35,7 @@ import { customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/serv
 import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { listUsersForTenant } from "@/server/users";
+import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -722,6 +723,26 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
     }
   }
 
+  // Accepted quotes should always have an MYOB Item Order. The Quote page already
+  // backfills older accepted quotes; do the same from the Job Workspace so staff
+  // never have to visit Quotes just to repair a missing MYOB order.
+  if (selectedJob && selectedQuote) {
+    const orderState = String(selectedQuote.myobOrderStatus ?? "").trim().toLowerCase();
+    const shouldBackfillAcceptedOrder = Boolean(
+      selectedQuote.status === "accepted"
+      && !selectedQuote.myobOrderUid
+      && (orderState === "" || orderState === "not_synced" || orderState === "ready_to_sync" || orderState === "synced")
+    );
+    if (shouldBackfillAcceptedOrder) {
+      try {
+        await pushAcceptedQuoteToMyobOrderForTenant(tenantId, selectedQuote.id);
+      } catch (autoSyncError) {
+        console.error("Production job MYOB Order backfill failed", autoSyncError);
+      }
+      selectedQuote = await getQuoteDraftById(tenantId, selectedQuote.id);
+    }
+  }
+
   const deletedJobCount = allJobs.filter((job) => job.status === "deleted").length;
   const completedJobCount = allJobs.filter((job) => job.status === "completed").length;
   const jobs = filter === "deleted"
@@ -1049,15 +1070,18 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
 
           {selectedQuote ? (() => {
             const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
-            const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus !== "synced";
+            const orderState = String(selectedQuote.myobOrderStatus ?? "").trim().toLowerCase();
+            const quoteAccepted = selectedQuote.status === "accepted";
+            const canPush = quoteAccepted && !["synced", "syncing"].includes(orderState);
             return (
               <section style={{ ...cardStyle, order: 5, borderColor: myobTone.border, background: myobTone.bg, color: myobTone.fg, display: "grid", gap: 10 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
-                  <div style={{ display: "grid", gap: 5 }}>
+                  <div style={{ display: "grid", gap: 5, minWidth: 0 }}>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase" }}>MYOB open job / order</p>
                     <h3 style={{ margin: 0 }}>{myobTone.label}</h3>
-                    <p style={{ margin: 0, fontSize: 13 }}>Production Manager runs the workflow. Accepted quotes are sent to MYOB automatically as open Item Orders; this control remains available as a manual retry if MYOB needs attention.</p>
+                    <p style={{ margin: 0, fontSize: 13 }}>Accepted quotes are created in MYOB automatically as open Item Orders. If the automatic sync did not complete, use the manual button here.</p>
                     {selectedQuote.myobOrderNumber ? <p style={{ margin: 0, fontSize: 13 }}>MYOB Order: <strong>{selectedQuote.myobOrderNumber}</strong>{selectedQuote.myobOrderSyncedAt ? ` · ${formatDateTime(selectedQuote.myobOrderSyncedAt)}` : ""}</p> : null}
+                    {!quoteAccepted && orderState !== "synced" ? <p style={{ margin: 0, fontSize: 13, color: "#9a3412" }}>This quote is currently <strong>{statusLabel(selectedQuote.status)}</strong>. It must be accepted before Production Manager can create the MYOB Order.</p> : null}
                     {selectedQuote.myobOrderSyncError ? <p style={{ margin: 0, fontSize: 13, color: "#b42318", whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</p> : null}
                   </div>
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -1066,8 +1090,10 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                       <form action={pushProductionQuoteToMyobOrderAction}>
                         <input type="hidden" name="jobId" value={selectedJob.id} />
                         <input type="hidden" name="quoteId" value={selectedJob.quoteId} />
-                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>{selectedQuote.myobOrderStatus === "error" ? "Retry MYOB Item Order" : "Send to MYOB Item Order"}</button>
+                        <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>{orderState === "error" ? "Retry MYOB Item Order" : "Create MYOB Item Order"}</button>
                       </form>
+                    ) : !quoteAccepted && orderState !== "synced" ? (
+                      <a href={`/quotes?selected=${encodeURIComponent(selectedQuote.id)}`} style={{ ...secondaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Open quote →</a>
                     ) : null}
                   </div>
                 </div>
