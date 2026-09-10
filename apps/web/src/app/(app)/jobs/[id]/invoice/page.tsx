@@ -114,7 +114,7 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
           const tone = statusTone(invoice.status);
           const clientEmail = invoiceEmailState(invoice);
           const deliveryTone = emailTone(clientEmail.status);
-          return <details key={invoice.id} style={{ border: "1px solid #e4e7ec", borderRadius: 14, padding: 13, background: "#fff" }}>
+          return <details key={invoice.id} open style={{ border: "1px solid #e4e7ec", borderRadius: 14, padding: 13, background: "#fff" }}>
             <summary style={{ cursor: "pointer", listStyle: "none", display: "grid", gridTemplateColumns: "1.2fr .8fr .8fr .8fr auto", gap: 12, alignItems: "center" }}>
               <span><strong style={{ fontSize: 15 }}>{invoice.myobNumber || invoice.invoiceNumber}</strong><small style={{ display: "block", color: "#667085", marginTop: 3 }}>{invoiceKindLabel(invoice.invoiceKind)} · {dateTime(invoice.issueDate || invoice.createdAt)}</small></span>
               <span><small style={{ display: "block", color: "#667085", fontWeight: 900 }}>EX GST</small><strong>{money(Number(invoice.subtotal))}</strong></span>
