@@ -226,8 +226,8 @@ export default async function SurveysPage({ searchParams }: PageProps) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted survey requests" : "Current survey requests"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <a href="/surveys" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</a>
-              <a href="/surveys?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</a>
+              <Link href="/surveys" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</Link>
+              <Link href="/surveys?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
               <span style={{ fontSize: 13, color: "#667085" }}>{surveyRequests.length} shown</span>
             </div>
           </div>
@@ -342,7 +342,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(150px, 1fr))", gap: 10 }}>
                             {surveyPhotos.map((photo, index) => (
                               <a key={`${photo.url}-${index}`} href={photo.url} target="_blank" rel="noreferrer" style={{ display: "grid", gap: 6, textDecoration: "none", color: "#111827" }}>
-                                <img src={photo.url} alt={photo.fileName || "Survey photo"} style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 12, border: "1px solid #fdba74", background: "#fff" }} />
+                                <img src={photo.url} alt={photo.fileName || "Survey photo"} loading="lazy" decoding="async" style={{ width: "100%", height: 110, objectFit: "cover", borderRadius: 12, border: "1px solid #fdba74", background: "#fff" }} />
                                 <span style={{ fontSize: 12, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.signTitle}</span>
                                 <span style={{ fontSize: 12, color: "#9a3412", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{photo.fileName}{photo.annotated ? " · annotated" : ""}</span>
                               </a>

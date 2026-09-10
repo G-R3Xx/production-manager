@@ -16,7 +16,7 @@ type QuoteLineEditorChoice = QuoteChoice;
 type QuoteLineEditorField = QuoteQuestion;
 type QuoteLineEditorProduct = QuoteProduct;
 
-type QuoteLineEditorProps = {
+export type QuoteLineEditorProps = {
   quoteId: string;
   line: {
     id: string;

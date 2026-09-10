@@ -1,5 +1,6 @@
 export const dynamic = "force-dynamic";
 
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
@@ -803,9 +804,9 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
               <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Current step and due date at a glance. Click any row for the complete job.</p>
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <a href="/production" style={{ color: !filter ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Active</a>
-              <a href="/production?filter=completed" style={{ color: filter === "completed" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Completed ({completedJobCount})</a>
-              <a href="/production?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedJobCount})</a>
+              <Link href="/production" style={{ color: !filter ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Active</Link>
+              <Link href="/production?filter=completed" style={{ color: filter === "completed" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Completed ({completedJobCount})</Link>
+              <Link href="/production?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedJobCount})</Link>
               <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
             </div>
           </div>
@@ -819,7 +820,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
               const jobLogoUrl = logoForJob(job);
               const summary = stepSummaryByJobId.get(job.id);
               return (
-                <a key={job.id} href={`/production/${job.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.45fr) minmax(220px, 1fr) 160px 150px 28px", gap: 14, alignItems: "center", border: "1px solid #dbe4f0", borderRadius: 16, padding: "13px 16px", background: "#fff", textDecoration: "none", color: "inherit", boxShadow: "0 6px 18px rgba(15,23,42,0.035)" }}>
+                <Link prefetch={false} key={job.id} href={`/production/${job.id}`} style={{ display: "grid", gridTemplateColumns: "minmax(260px, 1.45fr) minmax(220px, 1fr) 160px 150px 28px", gap: 14, alignItems: "center", border: "1px solid #dbe4f0", borderRadius: 16, padding: "13px 16px", background: "#fff", textDecoration: "none", color: "inherit", boxShadow: "0 6px 18px rgba(15,23,42,0.035)" }}>
                   <span style={{ display: "flex", gap: 11, alignItems: "center", minWidth: 0 }}>
                     <ClientLogoBadge logoUrl={jobLogoUrl} name={job.clientName} size={42} radius={11} padding={4} />
                     <span style={{ display: "grid", gap: 3, minWidth: 0 }}>
@@ -834,7 +835,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                   <span><span style={{ display: "inline-block", borderRadius: 999, background: tone.bg, color: tone.fg, border: `1px solid ${tone.border}`, padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{statusLabel(job.status)}</span></span>
                   <span style={{ color: job.dueDate ? "#344054" : "#98a2b3", fontWeight: job.dueDate ? 850 : 650 }}>{job.dueDate ? formatDate(job.dueDate) : "No due date"}</span>
                   <span style={{ color: "#2563eb", fontSize: 20, fontWeight: 950 }}>›</span>
-                </a>
+                </Link>
               );
             })}
             {jobs.length === 0 ? <div style={{ color: "#667085", padding: 16, border: "1px dashed #cfd9e8", borderRadius: 14 }}>No jobs in this view.</div> : null}
@@ -871,7 +872,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
       {detailOnly && selectedJobMissing ? (
         <section style={{ ...cardStyle, borderColor: "#fed7aa", background: "#fff7ed", color: "#9a3412", display: "grid", gap: 10 }}>
           <strong>That production job could not be found.</strong>
-          <a href="/production" style={{ color: "#9a3412", fontWeight: 950 }}>Return to current jobs</a>
+          <Link href="/production" style={{ color: "#9a3412", fontWeight: 950 }}>Return to current jobs</Link>
         </section>
       ) : null}
 
@@ -879,7 +880,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
         <section style={{ display: "grid", gap: 18 }}>
           {detailOnly ? (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <a href="/production" style={{ color: "#2563eb", fontWeight: 950, textDecoration: "none" }}>← All production jobs</a>
+              <Link href="/production" style={{ color: "#2563eb", fontWeight: 950, textDecoration: "none" }}>← All production jobs</Link>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ borderRadius: 999, background: "#f8fafc", border: "1px solid #dbe4f0", padding: "7px 11px", color: "#344054", fontSize: 12, fontWeight: 900 }}>Current: {stepSummaryByJobId.get(selectedJob.id)?.currentStep ?? "No production steps"}</span>
                 <span style={{ borderRadius: 999, background: selectedJob.dueDate ? "#fff7ed" : "#f8fafc", border: `1px solid ${selectedJob.dueDate ? "#fed7aa" : "#dbe4f0"}`, padding: "7px 11px", color: selectedJob.dueDate ? "#9a3412" : "#667085", fontSize: 12, fontWeight: 900 }}>{selectedJob.dueDate ? `Due ${formatDate(selectedJob.dueDate)}` : "No due date set"}</span>
@@ -1093,7 +1094,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                         <button type="submit" style={{ ...buttonStyle, background: "#0f766e" }}>{orderState === "error" ? "Retry MYOB Item Order" : "Create MYOB Item Order"}</button>
                       </form>
                     ) : !quoteAccepted && orderState !== "synced" ? (
-                      <a href={`/quotes?selected=${encodeURIComponent(selectedQuote.id)}`} style={{ ...secondaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Open quote →</a>
+                      <Link prefetch={false} href={`/quotes?selected=${encodeURIComponent(selectedQuote.id)}`} style={{ ...secondaryButtonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Open quote →</Link>
                     ) : null}
                   </div>
                 </div>

@@ -109,9 +109,9 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : filter === "completed" ? "Completed enquiries" : "Current enquiries"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <a href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</a>
-              <a href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</a>
-              <a href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</a>
+              <Link href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</Link>
+              <Link href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</Link>
+              <Link href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
               <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} shown</span>
             </div>
           </div>

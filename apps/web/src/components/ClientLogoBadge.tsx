@@ -38,6 +38,8 @@ export function ClientLogoBadge({ logoUrl, name, size = 48, radius = 14, padding
       <img
         src={logoUrl}
         alt={`${name || "Client"} logo`}
+        loading="lazy"
+        decoding="async"
         style={{
           ...baseStyle,
           objectFit: "contain",

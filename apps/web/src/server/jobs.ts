@@ -3,15 +3,18 @@ import "server-only";
 import { pool } from "@production-manager/db";
 import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
 import { after } from "next/server";
-import { listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
-import { listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
+import { getEnquiryById, listEnquiriesForTenant, type EnquiryRecord } from "@/server/enquiries";
+import { getSurveyRequestById, listSurveyRequestsForTenant, type SurveyRequestRecord } from "@/server/surveys";
 import {
+  getQuoteDraftById,
+  getArtworkApprovalById,
   listQuoteDraftsForTenant,
   listArtworkApprovalsForTenant,
   type QuoteDraftRecord,
   type ArtworkApprovalRecord,
 } from "@/server/quotes";
 import {
+  getProductionJobById,
   listProductionJobsForTenant,
   listProductionJobStepSummariesForTenant,
   type ProductionJobRecord,
@@ -223,6 +226,8 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_quote_uidx ON app.jobs (tenant_id, quote_id) WHERE quote_id IS NOT NULL`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_artwork_uidx ON app.jobs (tenant_id, artwork_approval_id) WHERE artwork_approval_id IS NOT NULL`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS jobs_tenant_production_uidx ON app.jobs (tenant_id, production_job_id) WHERE production_job_id IS NOT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS jobs_tenant_stage_due_updated_idx ON app.jobs (tenant_id, current_stage, due_date ASC NULLS LAST, updated_at DESC)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS jobs_tenant_updated_idx ON app.jobs (tenant_id, updated_at DESC)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app.job_process_assignments (
@@ -242,6 +247,7 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
     `);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS job_process_assignments_job_process_uidx ON app.job_process_assignments (job_id, process_key)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS job_process_assignments_tenant_due_idx ON app.job_process_assignments (tenant_id, due_date, process_key)`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS job_process_assignments_tenant_job_idx ON app.job_process_assignments (tenant_id, job_id, process_key)`);
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS app.job_tasks (
@@ -284,6 +290,7 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
     await pool.query(`CREATE INDEX IF NOT EXISTS job_tasks_tenant_due_idx ON app.job_tasks (tenant_id, due_date, status)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS job_tasks_job_idx ON app.job_tasks (job_id, status, due_date)`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS job_tasks_system_uidx ON app.job_tasks (job_id, system_key) WHERE system_key IS NOT NULL`);
+    await pool.query(`CREATE INDEX IF NOT EXISTS job_tasks_job_completed_idx ON app.job_tasks (job_id, completed_at DESC) WHERE completed_at IS NOT NULL`);
     schemaReady = true;
   })().catch((error) => {
     schemaPromise = null;
@@ -1173,20 +1180,16 @@ export async function attachQuoteToJobForTenant(tenantId: string, jobId: string,
   `, [tenantId, jobId, quoteId]);
 }
 
-export async function buildJobTimeline(tenantId: string, job: JobRecord): Promise<JobTimelineItem[]> {
-  const [enquiries, surveys, quotes, artwork, production, tasks] = await Promise.all([
-    job.enquiryId ? listEnquiriesForTenant(tenantId) : Promise.resolve([]),
-    job.surveyRequestId ? listSurveyRequestsForTenant(tenantId) : Promise.resolve([]),
-    job.quoteId ? listQuoteDraftsForTenant(tenantId, { includeWebsiteOrders: true }) : Promise.resolve([]),
-    job.artworkApprovalId ? listArtworkApprovalsForTenant(tenantId) : Promise.resolve([]),
-    job.productionJobId ? listProductionJobsForTenant(tenantId) : Promise.resolve([]),
-    listJobTasksForTenant(tenantId, { jobId: job.id }),
-  ]);
-  const enquiry = enquiries.find((row) => row.id === job.enquiryId);
-  const survey = surveys.find((row) => row.id === job.surveyRequestId);
-  const quote = quotes.find((row) => row.id === job.quoteId);
-  const approval = artwork.find((row) => row.id === job.artworkApprovalId);
-  const productionJob = production.find((row) => row.id === job.productionJobId);
+export function buildJobTimelineFromRecords(input: {
+  job: JobRecord;
+  enquiry?: EnquiryRecord | null;
+  survey?: SurveyRequestRecord | null;
+  quote?: QuoteDraftRecord | null;
+  approval?: ArtworkApprovalRecord | null;
+  productionJob?: ProductionJobRecord | null;
+  tasks?: JobTaskRecord[];
+}): JobTimelineItem[] {
+  const { job, enquiry, survey, quote, approval, productionJob, tasks = [] } = input;
   const items: JobTimelineItem[] = [];
   if (enquiry) items.push({ key: `enquiry-${enquiry.id}`, title: "Enquiry created", detail: enquiry.requestSummary, at: enquiry.createdAt, href: `/enquiries?selected=${enquiry.id}`, tone: "blue" });
   if (survey) {
@@ -1203,4 +1206,19 @@ export async function buildJobTimeline(tenantId: string, job: JobRecord): Promis
   if (productionJob) items.push({ key: `production-${productionJob.id}`, title: productionJob.status === "completed" ? "Production completed" : "Released to production", detail: productionJob.projectName || productionJob.clientName, at: productionJob.updatedAt || productionJob.createdAt, href: `/production?selected=${productionJob.id}`, tone: productionJob.status === "completed" ? "green" : "blue" });
   for (const task of tasks.filter((row) => row.completedAt)) items.push({ key: `task-${task.id}`, title: `Task completed: ${task.title}`, detail: task.stage, at: task.completedAt, href: `/jobs/${job.id}`, tone: "slate" });
   return items.sort((a, b) => new Date(b.at || 0).getTime() - new Date(a.at || 0).getTime());
+}
+
+export async function buildJobTimeline(tenantId: string, job: JobRecord): Promise<JobTimelineItem[]> {
+  // Fetch only the records linked to this job. The previous implementation loaded
+  // every enquiry, survey, quote, artwork approval and production job for the
+  // tenant, which became progressively slower as historical data accumulated.
+  const [enquiry, survey, quote, approval, productionJob, tasks] = await Promise.all([
+    job.enquiryId ? getEnquiryById(tenantId, job.enquiryId) : Promise.resolve(null),
+    job.surveyRequestId ? getSurveyRequestById(tenantId, job.surveyRequestId) : Promise.resolve(null),
+    job.quoteId ? getQuoteDraftById(tenantId, job.quoteId) : Promise.resolve(null),
+    job.artworkApprovalId ? getArtworkApprovalById(tenantId, job.artworkApprovalId) : Promise.resolve(null),
+    job.productionJobId ? getProductionJobById(tenantId, job.productionJobId) : Promise.resolve(null),
+    listJobTasksForTenant(tenantId, { jobId: job.id }),
+  ]);
+  return buildJobTimelineFromRecords({ job, enquiry, survey, quote, approval, productionJob, tasks });
 }

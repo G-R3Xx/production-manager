@@ -1,13 +1,11 @@
 "use client";
 
-import { useState } from "react";
-import { QuoteLineBuilder, type QuoteProduct } from "./QuoteLineBuilder";
-import {
-  QuoteMaterialFlowBuilder,
-  type MyobMatrixItem,
-  type PricingSettings,
-  type QuoteMaterial,
-} from "./QuoteMaterialFlowBuilder";
+import { lazy, Suspense, useState } from "react";
+import type { QuoteProduct } from "./QuoteLineBuilder";
+import type { MyobMatrixItem, PricingSettings, QuoteMaterial } from "./QuoteMaterialFlowBuilder";
+
+const QuoteLineBuilder = lazy(() => import("./QuoteLineBuilder").then((module) => ({ default: module.QuoteLineBuilder })));
+const QuoteMaterialFlowBuilder = lazy(() => import("./QuoteMaterialFlowBuilder").then((module) => ({ default: module.QuoteMaterialFlowBuilder })));
 
 type StartMode = "saved" | "quick";
 
@@ -66,22 +64,24 @@ export function QuoteLineStartBuilder({
       </section>
 
       <div style={{ borderTop: "1px solid #e5edf7", paddingTop: 14 }}>
-        {mode === "saved" ? (
-          <QuoteLineBuilder
-            quoteId={quoteId}
-            products={products}
-            materials={materials}
-            pricingSettings={pricingSettings}
-          />
-        ) : (
-          <QuoteMaterialFlowBuilder
-            quoteId={quoteId}
-            materials={materials}
-            myobMatrixItems={myobMatrixItems}
-            canOverrideMarkup={canOverrideMarkup}
-            pricingSettings={pricingSettings}
-          />
-        )}
+        <Suspense fallback={<div style={{ minHeight: 90, display: "grid", placeItems: "center", color: "#64748b", fontSize: 13, fontWeight: 800 }}>Loading selected quote tool…</div>}>
+          {mode === "saved" ? (
+            <QuoteLineBuilder
+              quoteId={quoteId}
+              products={products}
+              materials={materials}
+              pricingSettings={pricingSettings}
+            />
+          ) : (
+            <QuoteMaterialFlowBuilder
+              quoteId={quoteId}
+              materials={materials}
+              myobMatrixItems={myobMatrixItems}
+              canOverrideMarkup={canOverrideMarkup}
+              pricingSettings={pricingSettings}
+            />
+          )}
+        </Suspense>
       </div>
     </div>
   );

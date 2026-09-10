@@ -9,8 +9,8 @@ import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
-import { QuoteLineStartBuilder } from "./QuoteLineStartBuilder";
-import { QuoteLineEditor } from "./QuoteLineEditor";
+import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
+import { DeferredQuoteLineEditor } from "./DeferredQuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
@@ -651,8 +651,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create or switch quotes here; use the quick builder below to add lines fast.</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <a href="/quotes" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</a>
-            <a href="/quotes?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</a>
+            <Link href="/quotes" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</Link>
+            <Link href="/quotes?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</Link>
             <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
           </div>
         </div>
@@ -716,7 +716,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             const quoteSourceEnquiry = quote.enquiryId ? enquiryById.get(quote.enquiryId) : null;
             const quoteLogoUrl = quoteSourceEnquiry?.clientLogoUrl || customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
             return (
-              <a key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ flex: "0 0 300px", width: 300, minWidth: 0, maxWidth: 300, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 8, background: active ? "#eff6ff" : "#fbfdff", overflow: "hidden" }}>
+              <Link prefetch={false} key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ flex: "0 0 300px", width: 300, minWidth: 0, maxWidth: 300, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 8, background: active ? "#eff6ff" : "#fbfdff", overflow: "hidden" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", minWidth: 0 }}>
                   <div style={{ display: "flex", gap: 10, minWidth: 0, flex: "1 1 auto", alignItems: "center", overflow: "hidden" }}>
                     <ClientLogoBadge logoUrl={quoteLogoUrl} name={quote.clientName} size={42} radius={12} padding={4} />
@@ -725,7 +725,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <span style={{ flex: "0 0 auto", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>{quote.status}</span>
                 </div>
                 <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.jobName, quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Manual discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
-              </a>
+              </Link>
             );
           })}
           {quoteDrafts.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No draft quotes yet.</p> : null}
@@ -1022,7 +1022,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <summary style={{ listStyle: "none", cursor: "pointer", padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#f8fbff)", color: "#155eef", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}><span>＋ Add quote line</span><span style={{ fontSize: 12, color: "#475467" }}>Open line editor</span></summary>
                     <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
                       {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
-                      <QuoteLineStartBuilder
+                      <DeferredQuoteLineStartBuilder
                         key="new-quote-line"
                         quoteId={selectedQuote.id}
                         products={savedQuoteProducts}
@@ -1152,11 +1152,11 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))", gap: 8 }}>
                               {[ ["Location", surveyReference.location], ["Survey size", [surveyReference.width, surveyReference.height, surveyReference.depth].filter(Boolean).join(" × ")], ["Survey qty", surveyReference.quantity], ["Required work", surveyReference.requiredWork], ["Fixing / substrate", surveyReference.fixingMethod], ["Access", surveyReference.accessNotes] ].filter((row) => row[1]).map(([label, value]) => <div key={String(label)} style={{ border: "1px solid #fed7aa", borderRadius: 10, background: "#fff", padding: 8 }}><div style={{ fontSize: 9, fontWeight: 950, color: "#9a3412", textTransform: "uppercase" }}>{label}</div><div style={{ marginTop: 3, fontSize: 12, whiteSpace: "pre-wrap" }}>{value}</div></div>)}
                             </div>
-                            {surveyReference.photos.length ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>{surveyReference.photos.map((photo, photoIndex) => <a key={`${photo.url}-${photoIndex}`} href={photo.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", border: "1px solid #fed7aa", borderRadius: 10, overflow: "hidden", background: "#fff" }}><img src={photo.url} alt={photo.fileName} style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} /><div style={{ padding: "6px 8px", fontSize: 10, color: "#7c2d12" }}>{photo.annotated ? "Annotated · " : ""}{photo.fileName}</div></a>)}</div> : null}
+                            {surveyReference.photos.length ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 8 }}>{surveyReference.photos.map((photo, photoIndex) => <a key={`${photo.url}-${photoIndex}`} href={photo.url} target="_blank" rel="noreferrer" style={{ textDecoration: "none", color: "inherit", border: "1px solid #fed7aa", borderRadius: 10, overflow: "hidden", background: "#fff" }}><img src={photo.url} alt={photo.fileName} loading="lazy" decoding="async" style={{ width: "100%", height: 120, objectFit: "cover", display: "block" }} /><div style={{ padding: "6px 8px", fontSize: 10, color: "#7c2d12" }}>{photo.annotated ? "Annotated · " : ""}{photo.fileName}</div></a>)}</div> : null}
                             {[surveyReference.description, surveyReference.condition, surveyReference.powerRequired, surveyReference.notes].filter(Boolean).length ? <div style={{ color: "#475467", fontSize: 12, whiteSpace: "pre-wrap" }}>{[surveyReference.description ? `Description: ${surveyReference.description}` : null, surveyReference.condition ? `Condition: ${surveyReference.condition}` : null, surveyReference.powerRequired ? `Power: ${surveyReference.powerRequired}` : null, surveyReference.notes ? `Notes: ${surveyReference.notes}` : null].filter(Boolean).join("\n")}</div> : null}
                           </section>
                         ) : null}
-                        <QuoteLineEditor
+                        <DeferredQuoteLineEditor
                           quoteId={selectedQuote.id}
                           line={{
                             id: line.id,

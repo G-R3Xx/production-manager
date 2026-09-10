@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
@@ -12,7 +13,7 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.09.08.13";
+const APP_VERSION = "V26.09.10.01";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -73,7 +74,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           <div style={{ fontSize: 11, fontWeight: 900, color: "#64748b", letterSpacing: "0.05em", textTransform: "uppercase", textAlign: "center" }}>
             {APP_VERSION}
           </div>
-          <a href="/dashboard" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
+          <Link href="/dashboard" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
             <img
               src="/brand/production-manager-logo.svg"
               alt="Production Manager"
@@ -86,7 +87,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
                 boxShadow: "0 14px 28px rgba(15,23,42,0.08)"
               }}
             />
-          </a>
+          </Link>
         </div>
 
         <div

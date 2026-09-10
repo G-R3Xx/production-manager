@@ -1,4 +1,5 @@
 import type { CSSProperties } from "react";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
@@ -354,11 +355,11 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             {(["signage", "plan-printing", "poster-printing", "small-format", "shared"] as const).map((group) => (
-              <a key={group} href={groupHref(group)} style={{ ...groupCardStyle, borderColor: selectedGroup === group ? "#2563eb" : "#dbeafe", background: selectedGroup === group ? "#eff6ff" : "#f8fbff" }}>
+              <Link prefetch={false} key={group} href={groupHref(group)} style={{ ...groupCardStyle, borderColor: selectedGroup === group ? "#2563eb" : "#dbeafe", background: selectedGroup === group ? "#eff6ff" : "#f8fbff" }}>
                 <span style={{ fontWeight: 900 }}>{groupLabel(group)}</span>
                 <span style={mutedTextStyle}>{groupDescription(group)}</span>
                 <span style={{ ...pillStyle, width: "fit-content" }}>{groupCounts[group]} materials</span>
-              </a>
+              </Link>
             ))}
           </div>
 
@@ -374,7 +375,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
             <div style={{ display: "grid", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <strong>{filteredMaterials.length} result{filteredMaterials.length === 1 ? "" : "s"}</strong>
-                <a href="/materials" style={{ color: "#2563eb", fontWeight: 800 }}>Clear search</a>
+                <Link href="/materials" style={{ color: "#2563eb", fontWeight: 800 }}>Clear search</Link>
               </div>
               {filteredMaterials.map((material) => (
                 <MaterialCard key={material.id} material={material} suppliers={suppliers} />

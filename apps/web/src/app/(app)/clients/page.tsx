@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AUSTRALIAN_STATES, formatAustralianAbn, structuredAddressFromPayload, type StructuredAddress } from "@/lib/contact-address";
 import { getRequiredSessionUser } from "@/server/auth/session";
@@ -88,7 +89,7 @@ function AddressFields({ title, prefix, address }: { title: string; prefix: "bil
 function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; selectedId: string }) {
   const selected = client.id === selectedId;
   return (
-    <a href={`/clients?selected=${client.id}`} style={{ textDecoration: "none", color: "inherit", border: selected ? "2px solid #2563eb" : "1px solid #e5e7eb", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "auto 1fr", gap: 12, background: selected ? "#eff6ff" : "#fbfdff" }}>
+    <Link prefetch={false} href={`/clients?selected=${client.id}`} style={{ textDecoration: "none", color: "inherit", border: selected ? "2px solid #2563eb" : "1px solid #e5e7eb", borderRadius: 18, padding: 14, display: "grid", gridTemplateColumns: "auto 1fr", gap: 12, background: selected ? "#eff6ff" : "#fbfdff" }}>
       <ClientLogo client={client} />
       <div style={{ minWidth: 0, display: "grid", gap: 5 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "start" }}>
@@ -98,7 +99,7 @@ function ClientSummaryCard({ client, selectedId }: { client: CustomerRecord; sel
         <span style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[client.companyName, client.email, client.phone].filter(Boolean).join(" · ") || "No contact details yet"}</span>
         <span style={{ color: "#475467", fontSize: 12 }}>{customerMyobPriceLevel(client) ? `Price level: ${customerMyobPriceLevelName(client)} (${customerMyobPriceLevel(client)})` : "Price level: Level A"}</span>
       </div>
-    </a>
+    </Link>
   );
 }
 
@@ -281,7 +282,7 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
         <section style={{ ...panelStyle(), display: "grid", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>Find clients</h2>
-            <a href="/clients" style={{ textDecoration: "none", borderRadius: 999, border: "1px solid #cbd5e1", padding: "7px 12px", fontWeight: 850, color: "#111827" }}>+ New</a>
+            <Link href="/clients" style={{ textDecoration: "none", borderRadius: 999, border: "1px solid #cbd5e1", padding: "7px 12px", fontWeight: 850, color: "#111827" }}>+ New</Link>
           </div>
           <form method="get" style={{ display: "grid", gap: 10 }}>
             <input name="q" defaultValue={q} placeholder="Search name, phone, email, ABN, address" style={inputStyle} />
@@ -290,9 +291,9 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
           </form>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-            <a href={`/clients?filter=active${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "active" ? "#eff6ff" : "#f8fafc", border: filter === "active" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Active<br /><span style={{ color: "#667085", fontSize: 12 }}>{activeCount}</span></a>
-            <a href={`/clients?filter=archived${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "archived" ? "#eff6ff" : "#f8fafc", border: filter === "archived" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Archived<br /><span style={{ color: "#667085", fontSize: 12 }}>{archivedCount}</span></a>
-            <a href={`/clients?filter=deleted${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "deleted" ? "#eff6ff" : "#f8fafc", border: filter === "deleted" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Deleted<br /><span style={{ color: "#667085", fontSize: 12 }}>{deletedCount}</span></a>
+            <Link href={`/clients?filter=active${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "active" ? "#eff6ff" : "#f8fafc", border: filter === "active" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Active<br /><span style={{ color: "#667085", fontSize: 12 }}>{activeCount}</span></Link>
+            <Link href={`/clients?filter=archived${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "archived" ? "#eff6ff" : "#f8fafc", border: filter === "archived" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Archived<br /><span style={{ color: "#667085", fontSize: 12 }}>{archivedCount}</span></Link>
+            <Link href={`/clients?filter=deleted${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "deleted" ? "#eff6ff" : "#f8fafc", border: filter === "deleted" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Deleted<br /><span style={{ color: "#667085", fontSize: 12 }}>{deletedCount}</span></Link>
           </div>
 
           <div style={{ display: "grid", gap: 10, maxHeight: 650, overflow: "auto", paddingRight: 4 }}>

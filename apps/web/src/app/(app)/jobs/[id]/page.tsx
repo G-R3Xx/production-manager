@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getJobById, listJobTasksForTenant, listJobProcessAssignmentsForTenant, buildJobTimeline, jobStageMeta, jobProcessKeyForStage } from "@/server/jobs";
+import { getJobById, listJobTasksForTenant, listJobProcessAssignmentsForTenant, buildJobTimelineFromRecords, jobStageMeta, jobProcessKeyForStage } from "@/server/jobs";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftById, getArtworkApprovalById } from "@/server/quotes";
@@ -61,7 +61,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const job = await getJobById(activeTenant.tenantId, id);
   if (!job) { notFound(); return null; }
 
-  const [tasks, processAssignments, staff, enquiry, survey, quote, artwork, production, timeline] = await Promise.all([
+  const [tasks, processAssignments, staff, enquiry, survey, quote, artwork, production] = await Promise.all([
     listJobTasksForTenant(activeTenant.tenantId, { jobId: job.id }),
     listJobProcessAssignmentsForTenant(activeTenant.tenantId, { jobId: job.id }),
     listUsersForTenant(activeTenant.tenantId),
@@ -70,8 +70,8 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
     job.quoteId ? getQuoteDraftById(activeTenant.tenantId, job.quoteId) : Promise.resolve(null),
     job.artworkApprovalId ? getArtworkApprovalById(activeTenant.tenantId, job.artworkApprovalId) : Promise.resolve(null),
     job.productionJobId ? getProductionJobById(activeTenant.tenantId, job.productionJobId) : Promise.resolve(null),
-    buildJobTimeline(activeTenant.tenantId, job),
   ]);
+  const timeline = buildJobTimelineFromRecords({ job, enquiry, survey, quote, approval: artwork, productionJob: production, tasks });
 
   const stageTone = tone(job.currentStage);
   const canInvoice = ["owner", "manager", "accounts"].includes(activeTenant.tenantRole);
@@ -123,7 +123,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
               <button type="submit" style={{ ...button, minHeight: 52, background: "#155eef", padding: "0 22px", borderRadius: 14, fontSize: 17, boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</button>
             </form>
           ) : <Link href={job.currentHref} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>Open current stage</Link>}
-          {stageLinks.map((item) => <a key={item.label} href={item.href} target={item.external ? "_blank" : undefined} rel={item.external ? "noreferrer" : undefined} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</a>)}
+          {stageLinks.map((item) => item.external ? <a key={item.label} href={item.href} target="_blank" rel="noreferrer" style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</a> : <Link prefetch={false} key={item.label} href={item.href} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</Link>)}
         </div>
       </section>
 
@@ -224,7 +224,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
                 ["MYOB Order", job.myobOrderNumber ? `Order ${job.myobOrderNumber}` : "Not created", null],
                 ...(canInvoice && quoteCanInvoice ? [["Invoices", (job.invoiceStatus || "not_invoiced").replaceAll("_", " "), `/jobs/${job.id}/invoice`]] : []),
                 ["Install Scheduler", job.installSchedulerJobId ? "Linked" : "Not linked", job.installSchedulerJobUrl],
-              ].map(([name, status, href]) => <div key={String(name)} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, padding: "10px 0", borderBottom: "1px solid #f0f2f5" }}><span><strong>{name}</strong><span style={{ display: "block", color: "#667085", fontSize: 12, marginTop: 2 }}>{String(status || "Not required / not started")}</span></span>{href ? <a href={String(href)} target={String(href).startsWith("http") ? "_blank" : undefined} rel={String(href).startsWith("http") ? "noreferrer" : undefined} style={{ color: "#155eef", fontWeight: 900, textDecoration: "none", alignSelf: "center" }}>Open</a> : null}</div>)}
+              ].map(([name, status, href]) => <div key={String(name)} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 12, padding: "10px 0", borderBottom: "1px solid #f0f2f5" }}><span><strong>{name}</strong><span style={{ display: "block", color: "#667085", fontSize: 12, marginTop: 2 }}>{String(status || "Not required / not started")}</span></span>{href ? (String(href).startsWith("http") ? <a href={String(href)} target="_blank" rel="noreferrer" style={{ color: "#155eef", fontWeight: 900, textDecoration: "none", alignSelf: "center" }}>Open</a> : <Link prefetch={false} href={String(href)} style={{ color: "#155eef", fontWeight: 900, textDecoration: "none", alignSelf: "center" }}>Open</Link>) : null}</div>)}
             </div>
           </section>
         </div>
