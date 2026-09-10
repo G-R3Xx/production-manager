@@ -849,49 +849,57 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <span style={{ border: `1px solid ${selectedQuote.emailStatus === "sent" ? "#86efac" : selectedQuote.emailStatus === "failed" ? "#fecaca" : "#e4e7ec"}`, borderRadius: 999, padding: "7px 11px", background: selectedQuote.emailStatus === "sent" ? "#f0fdf4" : selectedQuote.emailStatus === "failed" ? "#fef2f2" : "#fff", color: selectedQuote.emailStatus === "sent" ? "#067647" : selectedQuote.emailStatus === "failed" ? "#b42318" : "#344054", fontSize: 12 }}>Email: <strong>{selectedQuote.emailStatus === "sent" ? `Sent${selectedQuote.emailSentAt ? ` ${formatDateTime(selectedQuote.emailSentAt)}` : ""}` : selectedQuote.emailStatus === "pending" ? "Sending" : selectedQuote.emailStatus === "failed" ? "Failed" : "Not sent"}</strong></span>
                   </div>
 
-                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 12, alignItems: "end" }}>
-                    <div style={{ display: "grid", gap: 6 }}>
+                  <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
+                    <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
                       <strong>Client-facing quote link</strong>
-                      <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Send client link + PDF emails both the online approval link and a downloadable PDF copy, then marks the quote as sent automatically.</p>
-                      <input readOnly value={quotePublicUrl || "Mark quote as sent to generate/confirm the link"} style={{ ...inputStyle, fontSize: 13 }} />
+                      <p style={{ margin: 0, color: "#667085", fontSize: 13, lineHeight: 1.45, maxWidth: 880 }}>Send client link + PDF emails both the online approval link and a downloadable PDF copy, then marks the quote as sent automatically.</p>
                     </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
+                      <input
+                        readOnly
+                        value={quotePublicUrl || "Mark quote as sent to generate/confirm the link"}
+                        style={{ ...inputStyle, fontSize: 13, flex: "1 1 360px", width: "auto", minWidth: 240 }}
+                      />
                       {selectedQuote.status !== "deleted" ? (
-                        <form action={markQuoteSentAction}>
+                        <form action={markQuoteSentAction} style={{ flex: "0 0 auto" }}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
                           <button type="submit" style={buttonStyle}>{selectedQuote.sentAt ? "Mark sent again" : "Mark quote sent"}</button>
                         </form>
                       ) : null}
                       {selectedQuote.status === "deleted" ? (
-                        <form action={restoreQuoteDraftAction}>
+                        <form action={restoreQuoteDraftAction} style={{ flex: "0 0 auto" }}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
                           <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore quote</button>
                         </form>
                       ) : (
-                        <form action={deleteQuoteDraftAction}>
+                        <form action={deleteQuoteDraftAction} style={{ flex: "0 0 auto" }}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
                           <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete quote</button>
                         </form>
                       )}
-                      {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Open client quote</a> : null}
+                      {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Open client quote</a> : null}
                       {selectedQuote.status !== "deleted" ? (
-                        <EmailRecipientModalForm
-                          action={emailQuoteAction}
-                          hiddenFields={{ quoteId: selectedQuote.id }}
-                          defaultEmail={selectedQuote.email}
-                          variant="quote"
-                          alreadySent={selectedQuote.emailStatus === "sent"}
-                          modalTitle={selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}
-                          modalDescription="Confirm or change the email address before Production Manager sends the online quote link and downloadable PDF copy."
-                          submitLabel={selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send link + PDF"}
-                        />
+                        <div style={{ flex: "0 0 auto" }}>
+                          <EmailRecipientModalForm
+                            action={emailQuoteAction}
+                            hiddenFields={{ quoteId: selectedQuote.id }}
+                            defaultEmail={selectedQuote.email}
+                            variant="quote"
+                            alreadySent={selectedQuote.emailStatus === "sent"}
+                            modalTitle={selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}
+                            modalDescription="Confirm or change the email address before Production Manager sends the online quote link and downloadable PDF copy."
+                            submitLabel={selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send link + PDF"}
+                          />
+                        </div>
                       ) : null}
                       {selectedQuote.status !== "accepted" && selectedQuote.status !== "deleted" ? (
-                        <ManualQuoteApprovalModalForm
-                          action={markQuoteAcceptedManuallyAction}
-                          quoteId={selectedQuote.id}
-                          clientName={selectedQuote.clientName}
-                        />
+                        <div style={{ flex: "0 0 auto" }}>
+                          <ManualQuoteApprovalModalForm
+                            action={markQuoteAcceptedManuallyAction}
+                            quoteId={selectedQuote.id}
+                            clientName={selectedQuote.clientName}
+                          />
+                        </div>
                       ) : null}
                     </div>
                   </div>
