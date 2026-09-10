@@ -16,6 +16,7 @@ import { customerMyobPriceLevel, customerMyobPriceLevelName, getCustomerById, ty
 import { listRecipesForTenant, previewRecipeCost } from "@/server/productionResources";
 import { createProductionJobFromWebsiteOrderForTenant, ensureProductionTables } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 import {
   addQuoteLine,
   createQuoteDraftForTenant,
@@ -425,6 +426,7 @@ function serializeFields(definition: Record<string, unknown>, websiteConfig: Rec
 
 export async function ensureWordPressBridgeSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || wordPressBridgeSchemaReady) return;
+  if (!runtimeSchemaFallbackEnabled()) { wordPressBridgeSchemaReady = true; return; }
   await ensureWordPressProductPublishingSchema();
   await ensureProductionTables();
   await pool.query(`ALTER TABLE catalog.materials ADD COLUMN IF NOT EXISTS customer_facing_name varchar(200)`);
@@ -651,7 +653,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.09.10.01",
+    version: "V26.09.10.02",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),

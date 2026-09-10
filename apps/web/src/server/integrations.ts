@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db/client";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export type MyobConnectionRecord = {
   id: string;
@@ -91,6 +92,7 @@ function toIsoOrNull(value: unknown): string | null {
 let myobConnectionAuthSchemaPromise: Promise<void> | null = null;
 
 async function ensureMyobConnectionAuthSchema(): Promise<void> {
+  if (!runtimeSchemaFallbackEnabled()) return;
   if (!myobConnectionAuthSchemaPromise) {
     myobConnectionAuthSchemaPromise = (async () => {
       await pool.query(`

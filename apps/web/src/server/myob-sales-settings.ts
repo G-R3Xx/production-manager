@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export type MyobSalesDefaults = {
   incomeAccountUid: string | null;
@@ -12,6 +13,7 @@ let salesSettingsSchemaReady = false;
 
 export async function ensureMyobSalesSettingsSchema(): Promise<void> {
   if (salesSettingsSchemaReady || !process.env.DATABASE_URL) return;
+  if (!runtimeSchemaFallbackEnabled()) { salesSettingsSchemaReady = true; return; }
   await pool.query(`
     ALTER TABLE app.tenant_settings
       ADD COLUMN IF NOT EXISTS myob_sales_income_account_uid varchar(255),

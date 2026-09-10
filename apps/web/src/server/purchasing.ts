@@ -253,6 +253,26 @@ export async function createPurchaseOrder(tenantId: string, input: {
   return { id, poNumber };
 }
 
+
+export type PurchasingSupplierOption = {
+  id: string;
+  displayName: string;
+  email: string | null;
+  purchaseOrderEmail: string | null;
+  isActive: boolean;
+};
+
+export async function listPurchasingSuppliers(tenantId:string):Promise<PurchasingSupplierOption[]> {
+  await ensurePurchasingSchema();
+  const result=await pool.query<PurchasingSupplierOption>(`
+    SELECT id,display_name AS "displayName",email,purchase_order_email AS "purchaseOrderEmail",is_active AS "isActive"
+    FROM app.suppliers
+    WHERE tenant_id=$1::uuid
+    ORDER BY display_name ASC
+  `,[tenantId]);
+  return result.rows;
+}
+
 export async function listPurchaseOrders(tenantId: string): Promise<PurchaseOrderRecord[]> {
   await ensurePurchasingSchema();
   const result=await pool.query<PurchaseOrderRecord>(`
@@ -272,8 +292,41 @@ export async function listPurchaseOrders(tenantId: string): Promise<PurchaseOrde
 
 export async function getPurchaseOrder(tenantId: string, id: string | null | undefined): Promise<PurchaseOrderRecord|null> {
   if (!id) return null;
-  const list=await listPurchaseOrders(tenantId);
-  return list.find((row)=>row.id===id)??null;
+  await ensurePurchasingSchema();
+  const result=await pool.query<PurchaseOrderRecord>(`
+    SELECT po.id,po.tenant_id AS "tenantId",po.po_number AS "poNumber",po.supplier_id AS "supplierId",
+      s.display_name AS "supplierName",po.status,po.myob_uid AS "myobUid",po.myob_number AS "myobNumber",
+      CASE WHEN po.myob_sync_status='not_synced' AND po.myob_uid IS NOT NULL THEN 'synced' ELSE po.myob_sync_status END AS "myobSyncStatus",
+      po.myob_last_error AS "myobLastError",po.myob_synced_at AS "myobSyncedAt",
+      po.email_to AS "emailTo",po.email_status AS "emailStatus",po.email_sent_at AS "emailSentAt",
+      po.email_last_error AS "emailLastError",po.email_message_id AS "emailMessageId",po.sent_at AS "sentAt",
+      po.order_date::text AS "orderDate",po.promised_date::text AS "promisedDate",po.ship_to_address AS "shipToAddress",
+      po.notes,po.is_tax_inclusive AS "isTaxInclusive",po.created_at AS "createdAt",po.updated_at AS "updatedAt"
+    FROM purchasing.purchase_orders po JOIN app.suppliers s ON s.id=po.supplier_id
+    WHERE po.tenant_id=$1::uuid AND po.id=$2::uuid LIMIT 1
+  `,[tenantId,id]);
+  return result.rows[0]??null;
+}
+
+export type PurchasingMaterialOption = {
+  id: string;
+  supplierId: string | null;
+  name: string;
+  sku: string | null;
+  purchaseCost: string;
+};
+
+export async function listPurchasableMaterialsForSupplier(tenantId:string,supplierId:string):Promise<PurchasingMaterialOption[]> {
+  await ensurePurchasingSchema();
+  const result=await pool.query<PurchasingMaterialOption>(`
+    SELECT id,supplier_id AS "supplierId",name,sku,purchase_cost::text AS "purchaseCost"
+    FROM catalog.materials
+    WHERE tenant_id=$1::uuid
+      AND active=true
+      AND (supplier_id IS NULL OR supplier_id=$2::uuid)
+    ORDER BY name ASC
+  `,[tenantId,supplierId]);
+  return result.rows;
 }
 
 export async function listPurchaseOrderLines(tenantId: string, purchaseOrderId: string): Promise<PurchaseOrderLineRecord[]> {

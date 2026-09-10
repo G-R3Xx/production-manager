@@ -17,7 +17,7 @@ import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
 import { QuoteStatusAutoRefresh } from "./QuoteStatusAutoRefresh";
 import { getMyobSalesDefaults } from "@/server/myob-sales-settings";
-import { fetchMyobSalesReferenceDataForTenant, pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
+import { fetchMyobSalesReferenceDataForTenant } from "@/server/myob-sync";
 import { getProductionJobForQuote } from "@/server/production";
 import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondencePreview";
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
@@ -438,6 +438,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const selected = readParam(params, "selected");
   const focusLine = readParam(params, "focusLine");
   const filter = readParam(params, "filter");
+  const myobSetupRequested = readParam(params, "myobSetup") === "1";
 
   const builderDataNeeded = Boolean(selected);
   const [allQuoteDrafts, materials, enquiry, survey, initialSelectedQuote, companySettings, initialClients, allEnquiries, quoteProducts, salesDefaults] = await Promise.all([
@@ -453,27 +454,18 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null })
   ]);
 
-  let selectedQuote = initialSelectedQuote;
-  let clients = initialClients;
-  const selectedOrderState = String(selectedQuote?.myobOrderStatus ?? "").trim().toLowerCase();
-  const shouldBackfillAcceptedOrder = Boolean(
-    selectedQuote?.status === "accepted"
-    && !selectedQuote.myobOrderUid
-    && (selectedOrderState === "" || selectedOrderState === "not_synced" || selectedOrderState === "ready_to_sync" || selectedOrderState === "synced")
-  );
-  if (selectedQuote && shouldBackfillAcceptedOrder) {
-    try {
-      await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, selectedQuote.id);
-    } catch (autoSyncError) {
-      console.error("Accepted quote MYOB Order backfill failed", autoSyncError);
-    }
-    [selectedQuote, clients] = await Promise.all([
-      getQuoteDraftById(activeTenant.tenantId, selectedQuote.id),
-      listCustomersForTenant(activeTenant.tenantId)
-    ]);
-  }
+  const selectedQuote = initialSelectedQuote;
+  const clients = initialClients;
 
-  const salesReferences = selectedQuote?.status === "accepted"
+  // Never call MYOB as part of a normal quote page GET. Order creation happens
+  // in the acceptance actions; if a legacy order needs attention the existing
+  // Retry control handles it explicitly. Remote account lists are fetched only
+  // when the fallback account is actually missing or an MYOB order has errored.
+  const needsSalesReferenceSetup = Boolean(
+    selectedQuote?.status === "accepted"
+    && (!salesDefaults.incomeAccountUid || selectedQuote.myobOrderStatus === "error")
+  );
+  const salesReferences = needsSalesReferenceSetup && myobSetupRequested
     ? await fetchMyobSalesReferenceDataForTenant(activeTenant.tenantId).catch(() => ({ accounts: [] }))
     : { accounts: [] };
 
@@ -954,21 +946,28 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           </form>
                         ) : null}
 
-                        {selectedQuote.status === "accepted" && salesReferences.accounts.length && (!salesDefaults.incomeAccountUid || selectedQuote.myobOrderStatus === "error") ? (
+                        {needsSalesReferenceSetup ? (
                           <div style={{ border: "1px solid #dfe7f2", borderRadius: 14, background: "#f8fafc", padding: 12, display: "grid", gap: 8 }}>
-                            <form action={saveMyobSalesDefaultsAction} style={{ display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
-                              <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                              <label style={{ display: "grid", gap: 6 }}>
-                                <b style={{ fontSize: 13 }}>MYOB fallback sales income account</b>
-                                <select name="incomeAccountUid" defaultValue={salesDefaults.incomeAccountUid ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
-                                  <option value="">Choose MYOB income account…</option>
-                                  {salesReferences.accounts.map((account) => (
-                                    <option key={account.uid} value={account.uid}>{account.displayId} · {account.name} ({account.classification})</option>
-                                  ))}
-                                </select>
-                              </label>
-                              <button type="submit" style={{ ...buttonStyle, background: "#334155" }}>Save sales account</button>
-                            </form>
+                            {!myobSetupRequested ? (
+                              <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                                <span style={{ fontSize: 12, color: "#667085" }}>A fallback MYOB sales income account may be needed for custom/quick quote lines.</span>
+                                <Link href={`/quotes?selected=${selectedQuote.id}&myobSetup=1`} style={{ ...buttonStyle, background: "#334155", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Load MYOB account setup</Link>
+                              </div>
+                            ) : salesReferences.accounts.length ? (
+                              <form action={saveMyobSalesDefaultsAction} style={{ display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
+                                <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                                <label style={{ display: "grid", gap: 6 }}>
+                                  <b style={{ fontSize: 13 }}>MYOB fallback sales income account</b>
+                                  <select name="incomeAccountUid" defaultValue={salesDefaults.incomeAccountUid ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
+                                    <option value="">Choose MYOB income account…</option>
+                                    {salesReferences.accounts.map((account) => (
+                                      <option key={account.uid} value={account.uid}>{account.displayId} · {account.name} ({account.classification})</option>
+                                    ))}
+                                  </select>
+                                </label>
+                                <button type="submit" style={{ ...buttonStyle, background: "#334155" }}>Save sales account</button>
+                              </form>
+                            ) : <span style={{ fontSize: 12, color: "#b42318" }}>MYOB account list could not be loaded. Check the MYOB connection and retry.</span>}
                             <span style={{ fontSize: 12, color: "#667085" }}>Only required when a custom/quick quote line needs Production Manager to create the PM-CUSTOM fallback MYOB sales item.</span>
                           </div>
                         ) : null}

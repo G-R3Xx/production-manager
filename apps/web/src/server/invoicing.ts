@@ -2,7 +2,7 @@ import "server-only";
 
 import { randomBytes } from "crypto";
 import { pool } from "@production-manager/db";
-import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
+import { relationHasColumns, relationsExist, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 import { getQuoteDraftById, listQuoteLines, type QuoteDraftRecord, type QuoteLineRecord } from "@/server/quotes";
 
 export type InvoiceKind = "full_remaining" | "selected_lines" | "deposit" | "progress" | "final_balance" | "variation";
@@ -118,6 +118,7 @@ let invoiceSchemaPromise: Promise<void> | null = null;
 
 export async function ensureInvoiceWorkflowSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || invoiceSchemaReady) return;
+  if (!runtimeSchemaFallbackEnabled()) { invoiceSchemaReady = true; return; }
   if (invoiceSchemaPromise) return invoiceSchemaPromise;
   invoiceSchemaPromise = (async () => {
     const ready = await relationsExist(["app.invoices", "app.invoice_lines"])

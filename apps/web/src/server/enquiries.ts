@@ -3,7 +3,7 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 import { createNotificationForTenant } from "@/server/notifications";
-import { relationHasColumns } from "@/server/schema-readiness";
+import { relationHasColumns, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 
 export type EnquiryCorrespondenceRecord = {
@@ -48,7 +48,7 @@ export type EnquiryRecord = {
 };
 
 async function ensureEnquiryExtraColumns(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL || !runtimeSchemaFallbackEnabled()) return;
 
   await pool.query(`
     ALTER TABLE app.enquiries

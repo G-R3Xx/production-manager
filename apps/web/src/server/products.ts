@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export type ProductRecord = {
   id: string;
@@ -72,6 +73,7 @@ let wordPressProductPublishingSchemaReady = false;
 
 export async function ensureWordPressProductPublishingSchema(): Promise<void> {
   if (!process.env.DATABASE_URL || wordPressProductPublishingSchemaReady) return;
+  if (!runtimeSchemaFallbackEnabled()) { wordPressProductPublishingSchemaReady = true; return; }
   await pool.query(`
     ALTER TABLE catalog.products
       ADD COLUMN IF NOT EXISTS production_recipe_id uuid REFERENCES catalog.production_recipes(id) ON DELETE SET NULL,
@@ -90,7 +92,7 @@ export async function ensureWordPressProductPublishingSchema(): Promise<void> {
 }
 
 async function ensureDepartmentEnumValue(department: string): Promise<void> {
-  if (!extendedDepartmentValues.has(department)) return;
+  if (!extendedDepartmentValues.has(department) || !runtimeSchemaFallbackEnabled()) return;
   const safeValue = department === "plan_printing" ? "plan_printing" : "poster_printing";
   await pool.query(`ALTER TYPE department ADD VALUE IF NOT EXISTS '${safeValue}'`);
 }
