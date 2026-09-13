@@ -3,6 +3,12 @@ import "server-only";
 import { inflateRawSync } from "node:zlib";
 
 export type XlsxCell = string | number | boolean | null | undefined;
+export type XlsxDataValidation = {
+  sqref: string;
+  values: string[];
+  allowBlank?: boolean;
+};
+
 export type XlsxSheetInput = {
   name: string;
   rows: XlsxCell[][];
@@ -10,6 +16,8 @@ export type XlsxSheetInput = {
   freezeRows?: number;
   headerRow?: number;
   moneyColumns?: number[];
+  sectionRows?: number[];
+  dataValidations?: XlsxDataValidation[];
 };
 
 function xmlEscape(value: unknown): string {
@@ -139,6 +147,7 @@ function cellXml(value: XlsxCell, row: number, col: number, styleId = 0): string
 function sheetXml(sheet: XlsxSheetInput): string {
   const headerRow = sheet.headerRow ?? 1;
   const money = new Set(sheet.moneyColumns ?? []);
+  const sections = new Set(sheet.sectionRows ?? []);
   const cols = (sheet.columnWidths ?? []).map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${Math.max(8, Math.min(48, width))}" customWidth="1"/>`).join("");
   const rows = sheet.rows.map((values, zeroIndex) => {
     const rowNo = zeroIndex + 1;
@@ -147,6 +156,7 @@ function sheetXml(sheet: XlsxSheetInput): string {
       if (rowNo === 1) styleId = 1;
       else if (rowNo < headerRow) styleId = 2;
       else if (rowNo === headerRow) styleId = 3;
+      else if (sections.has(rowNo)) styleId = 5;
       else if (money.has(col)) styleId = 4;
       return cellXml(value, rowNo, col, styleId);
     }).join("");
@@ -157,11 +167,16 @@ function sheetXml(sheet: XlsxSheetInput): string {
     : `<sheetViews><sheetView workbookViewId="0"/></sheetViews>`;
   const maxCols = Math.max(1, ...sheet.rows.map((row) => row.length));
   const maxRows = Math.max(1, sheet.rows.length);
+  const validations = (sheet.dataValidations ?? []).filter((item) => item.sqref && item.values.length).map((item) => {
+    const list = item.values.join(",").replace(/"/g, '""');
+    return `<dataValidation type="list" allowBlank="${item.allowBlank === false ? 0 : 1}" showErrorMessage="1" errorTitle="Choose a value from the list" error="Use the dropdown values supplied by Production Manager." sqref="${xmlEscape(item.sqref)}"><formula1>&quot;${xmlEscape(list)}&quot;</formula1></dataValidation>`;
+  }).join("");
+  const dataValidations = validations ? `<dataValidations count="${sheet.dataValidations?.filter((item) => item.sqref && item.values.length).length ?? 0}">${validations}</dataValidations>` : "";
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` +
     `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">` +
     `<dimension ref="A1:${colName(maxCols - 1)}${maxRows}"/>${freeze}` +
     (cols ? `<cols>${cols}</cols>` : "") +
-    `<sheetData>${rows}</sheetData><autoFilter ref="A${headerRow}:${colName(maxCols - 1)}${maxRows}"/>` +
+    `<sheetData>${rows}</sheetData>${dataValidations}<autoFilter ref="A${headerRow}:${colName(maxCols - 1)}${maxRows}"/>` +
     `</worksheet>`;
 }
 
@@ -176,7 +191,7 @@ export function buildXlsxWorkbook(sheets: XlsxSheetInput[]): Buffer {
     { name: "_rels/.rels", data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`) },
     { name: "xl/workbook.xml", data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${workbookSheets}</sheets></workbook>`) },
     { name: "xl/_rels/workbook.xml.rels", data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${workbookRels}<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`) },
-    { name: "xl/styles.xml", data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="$#,##0.00000"/></numFmts><fonts count="3"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="16"/><color rgb="FF0F172A"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="5"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0"><alignment wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`) }
+    { name: "xl/styles.xml", data: Buffer.from(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="$#,##0.00000"/></numFmts><fonts count="4"><font><sz val="11"/><name val="Arial"/></font><font><b/><sz val="16"/><color rgb="FF0F172A"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FFFFFFFF"/><name val="Arial"/></font><font><b/><sz val="11"/><color rgb="FF1D4ED8"/><name val="Arial"/></font></fonts><fills count="4"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF0F766E"/><bgColor indexed="64"/></patternFill></fill><fill><patternFill patternType="solid"><fgColor rgb="FFEFF6FF"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="6"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"><alignment wrapText="1"/></xf><xf numFmtId="0" fontId="2" fillId="2" borderId="0" xfId="0"><alignment wrapText="1"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="0" fontId="3" fillId="3" borderId="0" xfId="0"><alignment wrapText="1"/></xf></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`) }
   ];
   safeSheets.forEach((sheet, index) => entries.push({ name: `xl/worksheets/sheet${index + 1}.xml`, data: Buffer.from(sheetXml(sheet)) }));
   return zipStore(entries);

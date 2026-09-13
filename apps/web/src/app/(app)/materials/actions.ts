@@ -6,7 +6,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createMaterial, listMaterialsForTenant, setMaterialActive, updateMaterial } from "@/server/materials";
 import { listSuppliersForTenant } from "@/server/suppliers";
-import { bulkApplyMaterialSheet, previewMaterialPriceSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
+import { bulkApplyMaterialSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
 
 function readString(formData: FormData, key: string): string { return String(formData.get(key) ?? "").trim(); }
@@ -55,28 +55,25 @@ function canManageMaterialPrices(role: string): boolean {
   return role === "owner" || role === "manager";
 }
 
-function uploadedSpreadsheet(formData: FormData): { file: File | null; kind: "xlsx" | "csv" | null; error: string | null } {
+function uploadedSpreadsheet(formData: FormData): { file: File | null; error: string | null } {
   const candidate = formData.get("file");
-  if (!candidate || typeof candidate !== "object" || !("arrayBuffer" in candidate)) return { file: null, kind: null, error: "Choose an Excel workbook or CSV file first." };
+  if (!candidate || typeof candidate !== "object" || !("arrayBuffer" in candidate)) return { file: null, error: "Choose the edited Production Manager .xlsx workbook first." };
   const file = candidate as File;
-  if (file.size > 8_000_000) return { file: null, kind: null, error: "Spreadsheet is too large. Keep material workbooks under 8 MB." };
+  if (file.size > 8_000_000) return { file: null, error: "Spreadsheet is too large. Keep material workbooks under 8 MB." };
   const lower = String(file.name || "").toLowerCase();
-  if (lower.endsWith(".xlsx")) return { file, kind: "xlsx", error: null };
-  if (lower.endsWith(".csv")) return { file, kind: "csv", error: null };
-  return { file: null, kind: null, error: "Use the PM .xlsx workbook, or a supported legacy .csv file." };
+  if (!lower.endsWith(".xlsx")) return { file: null, error: "Use the Production Manager .xlsx material workbook." };
+  return { file, error: null };
 }
 
 export async function previewMaterialPriceSheetAction(formData: FormData) {
   const active = await tenant();
   if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can bulk manage materials." };
   const upload = uploadedSpreadsheet(formData);
-  if (!upload.file || !upload.kind) return { ok: false as const, error: upload.error ?? "Choose a spreadsheet first." };
+  if (!upload.file) return { ok: false as const, error: upload.error ?? "Choose the PM .xlsx workbook first." };
   try {
     const [materials, suppliers] = await Promise.all([listMaterialsForTenant(active.tenantId), listSuppliersForTenant(active.tenantId)]);
-    const preview = upload.kind === "xlsx"
-      ? previewMaterialPriceWorkbook(Buffer.from(await upload.file.arrayBuffer()), materials, suppliers)
-      : previewMaterialPriceSheet(await upload.file.text(), materials);
-    if (preview.format === "unknown") return { ok: false as const, error: "Spreadsheet format was not recognised. Download a fresh Production Manager material workbook, or use the supported legacy Small Format CSV." };
+    const preview = previewMaterialPriceWorkbook(Buffer.from(await upload.file.arrayBuffer()), materials, suppliers);
+    if (preview.format === "unknown") return { ok: false as const, error: "Spreadsheet format was not recognised. Download a fresh Production Manager material workbook." };
     return { ok: true as const, fileName: upload.file.name || "material-workbook.xlsx", preview };
   } catch (error) {
     console.error("Material spreadsheet preview failed", error);
@@ -88,12 +85,10 @@ export async function applyMaterialPriceSheetAction(formData: FormData) {
   const active = await tenant();
   if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can bulk manage materials." };
   const upload = uploadedSpreadsheet(formData);
-  if (!upload.file || !upload.kind) return { ok: false as const, error: upload.error ?? "Choose a spreadsheet first." };
+  if (!upload.file) return { ok: false as const, error: upload.error ?? "Choose the PM .xlsx workbook first." };
   try {
     const [materials, suppliers] = await Promise.all([listMaterialsForTenant(active.tenantId), listSuppliersForTenant(active.tenantId)]);
-    const preview = upload.kind === "xlsx"
-      ? previewMaterialPriceWorkbook(Buffer.from(await upload.file.arrayBuffer()), materials, suppliers)
-      : previewMaterialPriceSheet(await upload.file.text(), materials);
+    const preview = previewMaterialPriceWorkbook(Buffer.from(await upload.file.arrayBuffer()), materials, suppliers);
     if (preview.format === "unknown") return { ok: false as const, error: "Spreadsheet format was not recognised." };
     const result = await bulkApplyMaterialSheet(active.tenantId, preview, upload.file.name || preview.format);
     const syncIds = [...new Set([...result.updatedIds, ...result.createdIds])];

@@ -140,43 +140,140 @@ const WORKBOOK_HEADERS = [
   "Minimum Billable Sheet Fraction", "Roll Billing Increment Metres", "Reverse Printable", "Used For Backing", "Price Checked", "Notes"
 ];
 
+type MaterialSection = {
+  label: string;
+  types: string[];
+  defaultType: string;
+};
+
+const MATERIAL_TYPE_OPTIONS = [
+  "sheet_media", "roll_media", "roll_laminate", "paper_stock", "card_stock", "cello_stock", "binding", "finishing", "fixing", "item", "other"
+];
+const ACTION_OPTIONS = ["KEEP", "ADD", "HIDE", "DELETE", "RESTORE"];
+
+const MATERIAL_SECTIONS: Record<(typeof GROUPS)[number]["key"], MaterialSection[]> = {
+  signage: [
+    { label: "Sheet stock · ACM / acrylic / corflute / PVC", types: ["sheet_media", "sheet"], defaultType: "sheet_media" },
+    { label: "Roll media · SAV / banner / printable film", types: ["roll_media", "roll"], defaultType: "roll_media" },
+    { label: "Laminate", types: ["roll_laminate", "roll laminate"], defaultType: "roll_laminate" },
+    { label: "Hardware / fixings", types: ["fixing", "hardware"], defaultType: "fixing" },
+    { label: "Finishing / consumables", types: ["finishing", "item", "consumable"], defaultType: "finishing" },
+    { label: "Other", types: ["other"], defaultType: "other" }
+  ],
+  "small-format": [
+    { label: "Paper", types: ["paper_stock", "paper"], defaultType: "paper_stock" },
+    { label: "Card", types: ["card_stock", "card stock"], defaultType: "card_stock" },
+    { label: "Cello / coating", types: ["cello_stock"], defaultType: "cello_stock" },
+    { label: "Binding / tape", types: ["binding"], defaultType: "binding" },
+    { label: "Finishing / consumables", types: ["finishing", "item", "consumable"], defaultType: "finishing" },
+    { label: "Other", types: ["other"], defaultType: "other" }
+  ],
+  "plan-printing": [
+    { label: "Paper", types: ["paper_stock", "paper"], defaultType: "paper_stock" },
+    { label: "Roll media", types: ["roll_media", "roll"], defaultType: "roll_media" },
+    { label: "Sheet media", types: ["sheet_media", "sheet"], defaultType: "sheet_media" },
+    { label: "Other", types: ["card_stock", "cello_stock", "binding", "finishing", "fixing", "item", "other"], defaultType: "other" }
+  ],
+  "poster-printing": [
+    { label: "Paper", types: ["paper_stock", "paper"], defaultType: "paper_stock" },
+    { label: "Roll media", types: ["roll_media", "roll"], defaultType: "roll_media" },
+    { label: "Sheet media", types: ["sheet_media", "sheet"], defaultType: "sheet_media" },
+    { label: "Other", types: ["card_stock", "cello_stock", "binding", "finishing", "fixing", "item", "other"], defaultType: "other" }
+  ],
+  shared: [
+    { label: "Hardware / fixings", types: ["fixing", "hardware"], defaultType: "fixing" },
+    { label: "Finishing consumables", types: ["finishing"], defaultType: "finishing" },
+    { label: "Binding / tape", types: ["binding"], defaultType: "binding" },
+    { label: "General consumables", types: ["item", "consumable"], defaultType: "item" },
+    { label: "Other", types: ["sheet_media", "sheet", "roll_media", "roll", "roll_laminate", "paper_stock", "paper", "card_stock", "card stock", "cello_stock", "other"], defaultType: "other" }
+  ]
+};
+
+function canonicalMaterialType(value: unknown): string {
+  const raw = text(value).toLowerCase().replace(/-/g, "_");
+  switch (raw) {
+    case "sheet": return "sheet_media";
+    case "roll": return "roll_media";
+    case "paper": return "paper_stock";
+    case "card stock": return "card_stock";
+    case "roll laminate": return "roll_laminate";
+    case "hardware": return "fixing";
+    case "consumable": return "item";
+    default: return MATERIAL_TYPE_OPTIONS.includes(raw) ? raw : "other";
+  }
+}
+
+function sectionForMaterial(groupKey: (typeof GROUPS)[number]["key"], material: MaterialRecord): MaterialSection {
+  const sections = MATERIAL_SECTIONS[groupKey];
+  const type = canonicalMaterialType(material.materialType);
+  return sections.find((section) => section.types.map(canonicalMaterialType).includes(type)) ?? sections[sections.length - 1];
+}
+
+function workbookMaterialRow(material: MaterialRecord): XlsxCell[] {
+  return [
+    "KEEP", material.id, materialSheetState(material), material.name, material.customerFacingName ?? "", material.supplierName ?? "", material.supplierId ?? "", material.sku ?? "", canonicalMaterialType(material.materialType),
+    material.purchaseUom ?? "", material.stockUom ?? "", cleanNumber(material.stockQuantity) ?? 0, Number(material.purchaseCost || 0), calculatedUnitCost(material), cleanNumber(material.widthMm) ?? "", cleanNumber(material.lengthMm) ?? "", cleanNumber(material.rollWidthMm) ?? "", cleanNumber(material.gsm) ?? "",
+    cleanNumber(material.minimumBillableSheetFraction) ?? "", cleanNumber(material.rollBillingIncrementMetres) ?? "", material.reversePrintable ? "Yes" : "No", material.usedForBacking ? "Yes" : "No", priceCheckedAt(material), material.notes ?? ""
+  ];
+}
+
+function blankAddRow(defaultType: string): XlsxCell[] {
+  return ["ADD", "", "New", "", "", "", "", "", defaultType, defaultPurchaseUom(defaultType), defaultStockUom(defaultType), "", "", "", "", "", "", "", "", "", "No", "No", "", ""];
+}
+
 export function buildMaterialPriceWorkbook(materials: MaterialRecord[]): Buffer {
   const materialSheets = GROUPS.map((group) => {
     const rows: XlsxCell[][] = [
       [`${group.label} materials`],
-      ["Edit Purchase Cost and Price Checked for existing rows. Add a new row with Action = ADD and leave PM Material ID blank."],
-      ["Actions: ADD = create new material · HIDE = remove from normal selection but retain history · DELETE = archive/remove from normal lists (never hard-deletes historical records) · RESTORE = reactivate."],
+      ["Materials are grouped by type below. Edit prices in place, or use the ready-made ADD rows inside the correct type section."],
+      ["Action dropdown: KEEP = normal price update · ADD = new material · HIDE = remove from active selection · DELETE = archive · RESTORE = reactivate."],
       WORKBOOK_HEADERS
     ];
-    materials.filter((material) => materialGroup(material) === group.key).forEach((material) => {
-      rows.push([
-        "", material.id, materialSheetState(material), material.name, material.customerFacingName ?? "", material.supplierName ?? "", material.supplierId ?? "", material.sku ?? "", material.materialType ?? "",
-        material.purchaseUom ?? "", material.stockUom ?? "", cleanNumber(material.stockQuantity) ?? 0, Number(material.purchaseCost || 0), calculatedUnitCost(material), cleanNumber(material.widthMm) ?? "", cleanNumber(material.lengthMm) ?? "", cleanNumber(material.rollWidthMm) ?? "", cleanNumber(material.gsm) ?? "",
-        cleanNumber(material.minimumBillableSheetFraction) ?? "", cleanNumber(material.rollBillingIncrementMetres) ?? "", material.reversePrintable ? "Yes" : "No", material.usedForBacking ? "Yes" : "No", priceCheckedAt(material), material.notes ?? ""
-      ]);
-    });
-    // Give the user blank rows ready for ADD in Google Sheets.
-    for (let i = 0; i < 12; i += 1) rows.push(["", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]);
+    const sectionRows: number[] = [];
+    const addRowNumbers: number[] = [];
+    const groupMaterials = materials.filter((material) => materialGroup(material) === group.key);
+
+    for (const section of MATERIAL_SECTIONS[group.key]) {
+      const sectionMaterials = groupMaterials
+        .filter((material) => sectionForMaterial(group.key, material).label === section.label)
+        .sort((left, right) => left.name.localeCompare(right.name, "en-AU", { sensitivity: "base" }));
+      sectionRows.push(rows.length + 1);
+      rows.push(["", "", "Type", section.label, "", "", "", "", section.defaultType, "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""]);
+      for (const material of sectionMaterials) rows.push(workbookMaterialRow(material));
+      for (let i = 0; i < 5; i += 1) {
+        addRowNumbers.push(rows.length + 1);
+        rows.push(blankAddRow(section.defaultType));
+      }
+    }
+
+    const lastRow = rows.length;
     return {
       name: group.sheet,
       rows,
       freezeRows: 4,
       headerRow: 4,
       moneyColumns: [12, 13],
-      columnWidths: [12, 20, 14, 30, 28, 22, 20, 18, 18, 14, 14, 18, 15, 17, 12, 12, 14, 10, 18, 18, 16, 16, 16, 36]
+      sectionRows,
+      dataValidations: [
+        { sqref: `A5:A${lastRow}`, values: ACTION_OPTIONS, allowBlank: true },
+        { sqref: addRowNumbers.map((row) => `I${row}`).join(" "), values: MATERIAL_TYPE_OPTIONS, allowBlank: false },
+        { sqref: addRowNumbers.map((row) => `U${row}`).join(" "), values: ["No", "Yes"], allowBlank: false },
+        { sqref: addRowNumbers.map((row) => `V${row}`).join(" "), values: ["No", "Yes"], allowBlank: false }
+      ],
+      columnWidths: [12, 20, 14, 32, 28, 22, 20, 18, 18, 14, 14, 18, 15, 17, 12, 12, 14, 10, 18, 18, 16, 16, 16, 36]
     };
   });
   const instructions = {
     name: "Instructions",
     rows: [
       ["Production Manager material workbook"],
-      ["Open this .xlsx in Google Sheets. Each department has its own tab."],
-      ["Existing material: change Purchase Cost and/or Price Checked. Leave Action blank."],
-      ["New material: use the correct department tab, add a row, set Action to ADD, leave PM Material ID blank, then complete at least Internal Material Name, Material Type, Purchase UOM, Stock UOM, Pack Qty / Roll Length and Purchase Cost."],
-      ["Hide material: set Action to HIDE. Delete/archive: set Action to DELETE. Restore an inactive material: set Action to RESTORE."],
-      ["DELETE is deliberately non-destructive: PM archives the material so old quotes, jobs and purchase records remain valid."],
-      ["Supplier for a new material must match an existing PM supplier name exactly. Existing rows retain their current supplier."],
-      ["When finished in Google Sheets: File → Download → Microsoft Excel (.xlsx), then upload that file to Production Manager and Preview before Apply."]
+      ["Open this .xlsx in Google Sheets. Each department has its own tab, and each tab is split into clear material-type sections."],
+      ["Existing material: leave Action as KEEP and change Purchase Cost and/or Price Checked. PM will detect the price change automatically."],
+      ["New material: use one of the pre-created ADD rows in the correct type section. Leave PM Material ID blank and complete the material details."],
+      ["Action cells are dropdowns: KEEP, ADD, HIDE, DELETE or RESTORE."],
+      ["HIDE removes a material from normal active selection. DELETE safely archives it; historical quotes/jobs are never hard-deleted. RESTORE makes it active again."],
+      ["For new materials, Supplier must match an existing PM supplier name exactly. Pack Qty / Roll Length and Purchase Cost are required."],
+      ["When finished in Google Sheets: File → Download → Microsoft Excel (.xlsx), then upload that workbook to Production Manager and Preview before Apply."]
     ],
     freezeRows: 1,
     headerRow: 1,
@@ -260,12 +357,15 @@ export function previewMaterialPriceWorkbook(buffer: Buffer, materials: Material
   for (const sheet of workbook) {
     const group = groupFromSheet(sheet.name); if (!group) continue; const headerIndex = findHeader(sheet.rows); if (headerIndex < 0) continue;
     const headers = sheet.rows[headerIndex].map(normaliseHeader); const idx = (...keys: string[]) => headers.findIndex((header) => keys.includes(header));
-    const actionIndex = idx("action"); const idIndex = idx("pmmaterialid", "materialid"); const nameIndex = idx("internalmaterialname", "materialname"); const customerIndex = idx("customerfacingname"); const supplierIndex = idx("supplier"); const supplierIdIndex = idx("pmsupplierid"); const skuIndex = idx("sku"); const typeIndex = idx("materialtype"); const purchaseUomIndex = idx("purchaseuom"); const stockUomIndex = idx("stockuom"); const qtyIndex = idx("packqtyrolllength", "stockquantity"); const costIndex = idx("purchasecost"); const widthIndex = idx("widthmm"); const lengthIndex = idx("lengthmm"); const rollWidthIndex = idx("rollwidthmm"); const gsmIndex = idx("gsm"); const sheetFractionIndex = idx("minimumbillablesheetfraction"); const rollIncrementIndex = idx("rollbillingincrementmetres"); const reverseIndex = idx("reverseprintable"); const backingIndex = idx("usedforbacking"); const checkedIndex = idx("pricechecked", "pricecheckedat"); const notesIndex = idx("notes");
+    const actionIndex = idx("action"); const idIndex = idx("pmmaterialid", "materialid"); const statusIndex = idx("status"); const nameIndex = idx("internalmaterialname", "materialname"); const customerIndex = idx("customerfacingname"); const supplierIndex = idx("supplier"); const supplierIdIndex = idx("pmsupplierid"); const skuIndex = idx("sku"); const typeIndex = idx("materialtype"); const purchaseUomIndex = idx("purchaseuom"); const stockUomIndex = idx("stockuom"); const qtyIndex = idx("packqtyrolllength", "stockquantity"); const costIndex = idx("purchasecost"); const widthIndex = idx("widthmm"); const lengthIndex = idx("lengthmm"); const rollWidthIndex = idx("rollwidthmm"); const gsmIndex = idx("gsm"); const sheetFractionIndex = idx("minimumbillablesheetfraction"); const rollIncrementIndex = idx("rollbillingincrementmetres"); const reverseIndex = idx("reverseprintable"); const backingIndex = idx("usedforbacking"); const checkedIndex = idx("pricechecked", "pricecheckedat"); const notesIndex = idx("notes");
 
     for (let rowIndex = headerIndex + 1; rowIndex < sheet.rows.length; rowIndex += 1) {
       const row = sheet.rows[rowIndex]; const id = idIndex >= 0 ? text(row[idIndex]) : ""; const name = nameIndex >= 0 ? text(row[nameIndex]) : ""; const action = actionIndex >= 0 ? normalizeAction(row[actionIndex]) : "";
       if (!id && !name && !action && !row.some((cell) => text(cell))) continue;
+      if (statusIndex >= 0 && normalizeAction(row[statusIndex]) === "TYPE") continue;
       const material = id ? materialMap.get(id) : undefined; const proposed = costIndex >= 0 ? cleanNumber(row[costIndex]) : null; const checked = checkedIndex >= 0 ? parseDate(row[checkedIndex]) : null; const sourceName = name || material?.name || `Row ${rowIndex + 1}`; const rowNumber = rowIndex + 1;
+      const templateOnly = !id && action === "ADD" && !name && proposed == null && !(supplierIndex >= 0 && text(row[supplierIndex])) && !(skuIndex >= 0 && text(row[skuIndex])) && !(notesIndex >= 0 && text(row[notesIndex]));
+      if (templateOnly) continue;
 
       if (id) {
         if (!material) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName, sourceSupplier: supplierIndex >= 0 ? text(row[supplierIndex]) || null : null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "unmatched", note: "PM Material ID was not found. Download a fresh workbook." }); continue; }
@@ -289,8 +389,8 @@ export function previewMaterialPriceWorkbook(buffer: Buffer, materials: Material
       const supplierName = supplierIndex >= 0 ? text(row[supplierIndex]) : ""; const supplierIdFromSheet = supplierIdIndex >= 0 ? text(row[supplierIdIndex]) : ""; let supplierId: string | null = null;
       if (supplierIdFromSheet && suppliers.some((s) => s.id === supplierIdFromSheet)) supplierId = supplierIdFromSheet;
       else if (supplierName) { const matches = suppliersByName.get(normalise(supplierName)) ?? []; if (matches.length === 1) supplierId = matches[0].id; else { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: matches.length > 1 ? "Supplier name matches more than one PM supplier." : "Supplier name was not found in PM. Add/select the supplier in PM first, or leave Supplier blank." }); continue; } }
-      const materialType = text(typeIndex >= 0 ? row[typeIndex] : "") || defaultMaterialType(group); const stockUom = text(stockUomIndex >= 0 ? row[stockUomIndex] : "") || defaultStockUom(materialType); const purchaseUom = text(purchaseUomIndex >= 0 ? row[purchaseUomIndex] : "") || defaultPurchaseUom(materialType); const stockQuantity = cleanNumber(qtyIndex >= 0 ? row[qtyIndex] : "") ?? 1;
-      if (stockQuantity <= 0) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName || null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "Pack Qty / Roll Length must be greater than zero." }); continue; }
+      const materialType = canonicalMaterialType(text(typeIndex >= 0 ? row[typeIndex] : "") || defaultMaterialType(group)); const stockUom = text(stockUomIndex >= 0 ? row[stockUomIndex] : "") || defaultStockUom(materialType); const purchaseUom = text(purchaseUomIndex >= 0 ? row[purchaseUomIndex] : "") || defaultPurchaseUom(materialType); const stockQuantity = cleanNumber(qtyIndex >= 0 ? row[qtyIndex] : "");
+      if (stockQuantity == null || stockQuantity <= 0) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName || null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "Pack Qty / Roll Length is required and must be greater than zero." }); continue; }
       const newMaterial: NewMaterialRow = { materialGroup: group, supplierId, name, customerFacingName: text(customerIndex >= 0 ? row[customerIndex] : "") || null, sku: text(skuIndex >= 0 ? row[skuIndex] : "") || null, materialType, stockUom, purchaseUom, stockQuantity, purchaseCost: proposed, widthMm: cleanNumber(widthIndex >= 0 ? row[widthIndex] : ""), lengthMm: cleanNumber(lengthIndex >= 0 ? row[lengthIndex] : ""), rollWidthMm: cleanNumber(rollWidthIndex >= 0 ? row[rollWidthIndex] : ""), gsm: cleanNumber(gsmIndex >= 0 ? row[gsmIndex] : ""), minimumBillableSheetFraction: cleanNumber(sheetFractionIndex >= 0 ? row[sheetFractionIndex] : ""), rollBillingIncrementMetres: cleanNumber(rollIncrementIndex >= 0 ? row[rollIncrementIndex] : ""), reversePrintable: boolValue(reverseIndex >= 0 ? row[reverseIndex] : false), usedForBacking: boolValue(backingIndex >= 0 ? row[backingIndex] : false), priceCheckedAt: checked, notes: text(notesIndex >= 0 ? row[notesIndex] : "") || null };
       previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName || null, matchedMaterialId: null, matchedMaterialName: "New material", currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "add", status: "change", note: `Will create as ${group.replace(/-/g, " ")} / ${materialType}.`, newMaterial });
     }

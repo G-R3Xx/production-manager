@@ -20,7 +20,7 @@ type PreviewRow = {
   note: string;
 };
 type Preview = {
-  format: "production-manager-xlsx" | "production-manager" | "legacy-small-format" | "unknown";
+  format: "production-manager-xlsx" | "unknown";
   rows: PreviewRow[];
   parsedRows: number;
   matchedRows: number;
@@ -81,9 +81,7 @@ export function MaterialPriceSheetManager() {
       const result = await previewMaterialPriceSheetAction(formData) as PreviewResult;
       if (!result.ok) { setPreview(null); setError(result.error); return; }
       setPreview(result.preview);
-      setMessage(result.preview.format === "legacy-small-format"
-        ? "Legacy Small Format CSV detected. PM will only apply safe price matches. For add/hide/delete, use the new PM Excel workbook."
-        : "PM material workbook detected. Department tabs and stable Material IDs will be used to apply changes safely.");
+      setMessage("PM material workbook detected. Department/type sections and stable Material IDs will be used to apply changes safely.");
     });
   }
   function applyChanges() {
@@ -122,23 +120,22 @@ export function MaterialPriceSheetManager() {
       <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 18, color: "#1e3a8a" }}>Spreadsheet material manager</summary>
       <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
         <div style={{ display: "grid", gap: 6, color: "#475467", lineHeight: 1.5 }}>
-          <strong style={{ color: "#101828" }}>One Google Sheets workbook, split into department tabs.</strong>
-          <span>The workbook contains <b>Signage</b>, <b>Small Format</b>, <b>Plan Printing</b>, <b>Poster Printing</b> and <b>Shared + Consumables</b>. Update prices, add new materials, hide old stock, archive/delete it, or restore it — then upload the workbook and preview before anything is changed.</span>
+          <strong style={{ color: "#101828" }}>One Google Sheets workbook, split by department and material type.</strong>
+          <span>The workbook contains <b>Signage</b>, <b>Small Format</b>, <b>Plan Printing</b>, <b>Poster Printing</b> and <b>Shared + Consumables</b>. Inside each tab, stock is further grouped into sections such as <b>Sheet stock</b>, <b>Laminate</b>, <b>Paper</b>, <b>Card</b>, <b>Cello / coating</b>, <b>Binding</b> and <b>Consumables</b>.</span>
         </div>
 
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <a href="/api/materials/price-sheet" style={{ minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 12, padding: "0 14px", background: "#2563eb", color: "#fff", fontWeight: 850, textDecoration: "none" }}>Download material workbook (.xlsx)</a>
-          <a href="/api/materials/price-sheet?format=csv&group=small-format" style={{ minHeight: 42, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 12, padding: "0 14px", background: "#fff", color: "#1d4ed8", border: "1px solid #bfdbfe", fontWeight: 850, textDecoration: "none" }}>Legacy Small Format CSV</a>
         </div>
 
         <div style={{ border: "1px solid #dbeafe", background: "#eff6ff", borderRadius: 12, padding: 12, color: "#1e3a8a", fontSize: 13, lineHeight: 1.5 }}>
-          <b>Google Sheets:</b> upload/open the .xlsx in Google Sheets. When finished choose <b>File → Download → Microsoft Excel (.xlsx)</b>, then upload that file below. For new material rows set <b>Action = ADD</b>. For existing rows use <b>HIDE</b>, <b>DELETE</b> or <b>RESTORE</b> in the Action column.
+          <b>Google Sheets:</b> upload/open the .xlsx in Google Sheets. The <b>Action</b> cells already contain dropdowns. Existing stock is set to <b>KEEP</b>; ready-made blank rows are set to <b>ADD</b>. Choose <b>HIDE</b>, <b>DELETE</b> or <b>RESTORE</b> when required. When finished choose <b>File → Download → Microsoft Excel (.xlsx)</b>, then upload that file below.
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10, alignItems: "end" }}>
           <label style={{ display: "grid", gap: 6 }}>
             <span style={{ fontWeight: 800, fontSize: 13, color: "#344054" }}>Upload edited workbook</span>
-            <input id="material-price-workbook" type="file" accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} style={{ minHeight: 42, border: "1px solid #d0d5dd", borderRadius: 12, background: "#fff", padding: 8 }} />
+            <input id="material-price-workbook" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => chooseFile(event.target.files?.[0] ?? null)} style={{ minHeight: 42, border: "1px solid #d0d5dd", borderRadius: 12, background: "#fff", padding: 8 }} />
           </label>
           <button type="button" onClick={runPreview} disabled={isPending || !file} style={{ minHeight: 42, borderRadius: 12, border: "none", background: isPending || !file ? "#98a2b3" : "#111827", color: "#fff", fontWeight: 850, padding: "0 16px", cursor: isPending || !file ? "not-allowed" : "pointer" }}>{isPending ? "Checking…" : "Preview changes"}</button>
         </div>
@@ -149,7 +146,7 @@ export function MaterialPriceSheetManager() {
         {preview ? (
           <div style={{ display: "grid", gap: 12 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-              <span style={{ borderRadius: 999, padding: "5px 10px", background: "#eef2ff", color: "#4338ca", fontWeight: 850, fontSize: 12 }}>{preview.format === "production-manager-xlsx" ? "PM multi-tab workbook" : preview.format === "legacy-small-format" ? "Legacy Small Format CSV" : "PM CSV"}</span>
+              <span style={{ borderRadius: 999, padding: "5px 10px", background: "#eef2ff", color: "#4338ca", fontWeight: 850, fontSize: 12 }}>PM material workbook</span>
               <span style={{ fontSize: 13, color: "#475467" }}>{preview.changeRows} changes · {preview.unchangedRows} unchanged · {preview.unmatchedRows + preview.ambiguousRows + preview.invalidRows} need attention</span>
               {preview.addRows ? <span style={{ fontSize: 12, fontWeight: 850, color: "#067647" }}>{preview.addRows} add</span> : null}
               {preview.hideRows ? <span style={{ fontSize: 12, fontWeight: 850 }}>{preview.hideRows} hide</span> : null}
