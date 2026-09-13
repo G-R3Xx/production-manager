@@ -1740,6 +1740,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (flowType === "small_format") {
+      // `costs` is a PER-FINISHED-ITEM costing model. `unitPrice` is calculated from
+      // rawCost and the quote quantity is applied once, later, when `lineTotal` is
+      // calculated. Small-format used to put whole-line stock/print/coating costs in
+      // this array and then multiply them by quantity a second time, which made runs
+      // such as 500 business cards hundreds of times too expensive.
       const itemArea = areaSqm;
       if (selectedSmallStock && itemArea > 0 && quantityNumber > 0) {
         const stockDimensions = bestSheetDimensions(selectedSmallStock);
@@ -1751,35 +1756,60 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const requiredPieces = quantityNumber * setsPerBook * copiesPerSet;
         const sheets = perSheet > 0 ? Math.ceil(requiredPieces / perSheet) : requiredPieces;
         const rate = sheetUnitRate(selectedSmallStock);
-        rows.push({ label: isDuplicateBook ? "Carbon/NCR stock" : "Paper / card stock", detail: selectedSmallStock.name, amount: sheets, unit: "sheet", rate: rate.rate, cost: sheets * rate.rate, note: [spacingUsageNote || null, isDuplicateBook ? `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies · ${perSheet > 0 ? `${perSheet} up per parent sheet` : "parent sheet size missing"}` : perSheet > 0 ? `${perSheet} up per parent sheet` : rate.note ?? "parent sheet size missing"].filter(Boolean).join(" · ") });
+        const sheetsPerFinishedItem = sheets / quantityNumber;
+        rows.push({
+          label: isDuplicateBook ? "Carbon/NCR stock" : "Paper / card stock",
+          detail: selectedSmallStock.name,
+          amount: sheetsPerFinishedItem,
+          unit: "sheet",
+          rate: rate.rate,
+          cost: sheetsPerFinishedItem * rate.rate,
+          note: [
+            spacingUsageNote || null,
+            isDuplicateBook
+              ? `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies · ${perSheet > 0 ? `${perSheet} up per parent sheet · ${sheets} sheets total` : "parent sheet size missing"}`
+              : perSheet > 0
+                ? `${perSheet} up per parent sheet · ${sheets} sheets total for qty ${usage(quantityNumber)}`
+                : rate.note ?? "parent sheet size missing"
+          ].filter(Boolean).join(" · ")
+        });
       }
 
       if (artworkChoice === "required") {
         const minutes = numberValue(artworkMinutes, 0);
         if (minutes > 0) {
           const rate = labourRate / 60;
-          rows.push({ label: "Artwork", detail: "Artwork/design time", amount: minutes, unit: "min", rate, cost: minutes * rate, note: `${minutesLabel(minutes)} · ${money(labourRate)}/hr` });
+          const minutesPerFinishedItem = minutes / quantityNumber;
+          rows.push({
+            label: "Artwork",
+            detail: "Artwork/design time",
+            amount: minutesPerFinishedItem,
+            unit: "min",
+            rate,
+            cost: minutesPerFinishedItem * rate,
+            note: `${minutesLabel(minutes)} once per quote line · ${money(labourRate)}/hr`
+          });
         }
       }
 
       if (isDuplicateBook && itemArea > 0 && quantityNumber > 0) {
         const setsPerBook = Math.max(1, numberValue(ncrSetsPerBook, 1));
         const copiesPerSet = Math.max(1, ncrCopiesCount || 1);
-        const printedArea = itemArea * quantityNumber * setsPerBook * copiesPerSet;
-        rows.push({ label: "Carbon book print", detail: pageColourSummary(copiesPerSet, ncrPageColours), amount: printedArea, unit: "sqm", rate: monoRatePerSqm, cost: printedArea * monoRatePerSqm, note: `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies` });
+        const printedAreaPerBook = itemArea * setsPerBook * copiesPerSet;
+        rows.push({ label: "Carbon book print", detail: pageColourSummary(copiesPerSet, ncrPageColours), amount: printedAreaPerBook, unit: "sqm", rate: monoRatePerSqm, cost: printedAreaPerBook * monoRatePerSqm, note: `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies` });
       }
 
       if (smallPrintColour && itemArea > 0 && quantityNumber > 0) {
-        const printedArea = itemArea * quantityNumber * sideMultiplier;
-        if (smallPrintColour === "mono") rows.push({ label: "Mono print", detail: "Small-format print charge", amount: printedArea, unit: "sqm", rate: monoRatePerSqm, cost: printedArea * monoRatePerSqm, note: sides === "double" ? "double sided" : undefined });
-        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: "Small-format print charge", amount: printedArea, unit: "sqm", rate: inkRatePerSqm, cost: printedArea * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
-        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: "Small-format print charge", amount: printedArea, unit: "sqm", rate: inkRatePerSqm * 2, cost: printedArea * inkRatePerSqm * 2, note: sides === "double" ? "double sided" : undefined });
+        const printedAreaPerFinishedItem = itemArea * sideMultiplier;
+        if (smallPrintColour === "mono") rows.push({ label: "Mono print", detail: "Small-format print charge", amount: printedAreaPerFinishedItem, unit: "sqm", rate: monoRatePerSqm, cost: printedAreaPerFinishedItem * monoRatePerSqm, note: sides === "double" ? "double sided" : undefined });
+        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: "Small-format print charge", amount: printedAreaPerFinishedItem, unit: "sqm", rate: inkRatePerSqm, cost: printedAreaPerFinishedItem * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
+        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: "Small-format print charge", amount: printedAreaPerFinishedItem, unit: "sqm", rate: inkRatePerSqm * 2, cost: printedAreaPerFinishedItem * inkRatePerSqm * 2, note: sides === "double" ? "double sided" : undefined });
       }
 
       if (selectedSmallCoating && smallCoatingId !== "none" && itemArea > 0 && quantityNumber > 0) {
         const rate = isRollMaterial(selectedSmallCoating) ? rollRate(selectedSmallCoating) : sheetUnitRate(selectedSmallCoating);
-        const amount = itemArea * quantityNumber * sideMultiplier;
-        rows.push({ label: "Cello / coating", detail: selectedSmallCoating.name, amount, unit: "sqm", rate: rate.rate, cost: amount * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
+        const amountPerFinishedItem = itemArea * sideMultiplier;
+        rows.push({ label: "Cello / coating", detail: selectedSmallCoating.name, amount: amountPerFinishedItem, unit: "sqm", rate: rate.rate, cost: amountPerFinishedItem * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
       }
 
       for (const item of smallFinishingOptions) {
@@ -2798,6 +2828,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           <div style={{ display: "grid", gap: 2 }}>
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
             <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>
+            {canOverrideMarkup && flowType === "small_format" && !useMyobPlanPricing ? (
+              <details style={{ marginTop: 4, color: "#475467", fontSize: 11 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 900 }}>
+                  Manager costing · {money(rawCost)} cost each · {money(rawCost * quantityNumber)} line cost before pricing
+                </summary>
+                <div style={{ display: "grid", gap: 4, marginTop: 6 }}>
+                  {costs.map((row, index) => (
+                    <div key={`${row.label}-${index}`} style={{ display: "flex", gap: 8, justifyContent: "space-between", flexWrap: "wrap" }}>
+                      <span>{row.label}{row.detail ? ` · ${row.detail}` : ""}</span>
+                      <strong>{usage(row.amount)} {row.unit} × {money(row.rate)} = {money(row.cost)} / item</strong>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            ) : null}
             {canOverrideMarkup ? (useMyobPlanPricing && selectedPlanMatrixPrice ? (
               <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>Markup is not applied to this line because MYOB matrix pricing is controlling the sell price.</span>
             ) : (
