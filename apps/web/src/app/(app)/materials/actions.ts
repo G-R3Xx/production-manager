@@ -4,7 +4,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createMaterial, listMaterialsForTenant, setMaterialActive, updateMaterial } from "@/server/materials";
+import { createMaterial, listMaterialsForTenant, saveMaterialPriceManagerChanges, setMaterialActive, updateMaterial, type MaterialPriceManagerChange } from "@/server/materials";
 import { listSuppliersForTenant } from "@/server/suppliers";
 import { bulkApplyMaterialSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
@@ -102,6 +102,7 @@ export async function applyMaterialPriceSheetAction(formData: FormData) {
       ok: true as const,
       updated: preview.updateRows,
       added: result.createdIds.length,
+      supplierPlaceholders: result.createdSupplierPlaceholders,
       hidden: result.hidden,
       deleted: result.deleted,
       restored: result.restored,
@@ -111,6 +112,48 @@ export async function applyMaterialPriceSheetAction(formData: FormData) {
     };
   } catch (error) {
     console.error("Material spreadsheet apply failed", error);
+    return { ok: false as const, error: getErrorMessage(error) };
+  }
+}
+
+
+export async function saveMaterialPriceManagerAction(formData: FormData) {
+  const active = await tenant();
+  if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can manage material prices." };
+
+  const raw = readString(formData, "changes");
+  if (!raw) return { ok: false as const, error: "No material changes were supplied." };
+
+  let changes: MaterialPriceManagerChange[];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error("Invalid material changes.");
+    changes = parsed as MaterialPriceManagerChange[];
+  } catch {
+    return { ok: false as const, error: "Material changes could not be read. Refresh the page and try again." };
+  }
+
+  try {
+    const result = await saveMaterialPriceManagerChanges(active.tenantId, changes);
+    const syncIds = [...new Set([...result.updatedIds, ...result.createdIds])];
+    let syncQueued = 0;
+    if (readChecked(formData, "syncMyob") && syncIds.length) {
+      const queued = await Promise.all(syncIds.map((id) => queueMyobMasterDataSync(active.tenantId, "material", id).catch(() => false)));
+      syncQueued = queued.filter(Boolean).length;
+    }
+    revalidatePath("/materials");
+    return {
+      ok: true as const,
+      updated: result.updatedIds.length,
+      added: result.createdIds.length,
+      supplierPlaceholders: result.placeholderSuppliers,
+      hidden: result.hidden,
+      archived: result.archived,
+      restored: result.restored,
+      syncQueued
+    };
+  } catch (error) {
+    console.error("Material Price Manager save failed", error);
     return { ok: false as const, error: getErrorMessage(error) };
   }
 }

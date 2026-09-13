@@ -10,6 +10,7 @@ import { startPurchaseOrderAction } from "../purchasing/actions";
 import { CreateMaterialForm, EditMaterialForm } from "./MaterialForms";
 import { AutoRefreshWhenPending } from "@/components/AutoRefreshWhenPending";
 import { MaterialPriceSheetManager } from "./MaterialPriceSheetManager";
+import { MaterialPriceManager } from "./MaterialPriceManager";
 import { MyobSyncStatus, readMyobSyncStatus } from "@/components/MyobSyncStatus";
 
 type MaterialsPageProps = {
@@ -322,10 +323,38 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
         </div>
       </section>
 
-      {canManagePrices ? <MaterialPriceSheetManager /> : null}
+      {canManagePrices ? (
+        <>
+          <MaterialPriceManager
+            tenantId={activeTenant.tenantId}
+            materials={materials.map((material) => ({
+              id: material.id,
+              name: material.name,
+              customerFacingName: material.customerFacingName,
+              supplierName: material.supplierName,
+              sku: material.sku,
+              materialType: material.materialType,
+              materialGroup: material.materialGroup,
+              stockUom: material.stockUom,
+              purchaseUom: material.purchaseUom,
+              stockQuantity: material.stockQuantity,
+              purchaseCost: material.purchaseCost,
+              widthMm: material.widthMm,
+              lengthMm: material.lengthMm,
+              rollWidthMm: material.rollWidthMm,
+              gsm: material.gsm,
+              active: material.active,
+              priceCheckedAt: typeof material.costJson?.priceCheckedAt === "string" ? String(material.costJson.priceCheckedAt) : "",
+              catalogState: typeof material.costJson?.catalogSheetState === "string" ? String(material.costJson.catalogSheetState) : ""
+            }))}
+            suppliers={suppliers.map((supplier) => ({ displayName: supplier.displayName, isActive: supplier.isActive }))}
+          />
+          <MaterialPriceSheetManager />
+        </>
+      ) : null}
 
       <section style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.95fr) minmax(0, 1.25fr)", gap: 16, alignItems: "start" }}>
-        <details open style={{ ...cardStyle, display: "grid", gap: 16 }}>
+        <details open={!canManagePrices} style={{ ...cardStyle, display: "grid", gap: 16 }}>
           <summary style={{ cursor: "pointer", fontSize: 22, fontWeight: 800 }}>Create material</summary>
           <CreateMaterialForm suppliers={suppliers} />
         </details>

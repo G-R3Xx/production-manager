@@ -12,6 +12,8 @@ export type MaterialSheetOperation = "update" | "add" | "hide" | "delete" | "res
 type NewMaterialRow = {
   materialGroup: string;
   supplierId: string | null;
+  supplierName: string | null;
+  createSupplierPlaceholder: boolean;
   name: string;
   customerFacingName: string | null;
   sku: string | null;
@@ -272,7 +274,7 @@ export function buildMaterialPriceWorkbook(materials: MaterialRecord[]): Buffer 
       ["New material: use one of the pre-created ADD rows in the correct type section. Leave PM Material ID blank and complete the material details."],
       ["Action cells are dropdowns: KEEP, ADD, HIDE, DELETE or RESTORE."],
       ["HIDE removes a material from normal active selection. DELETE safely archives it; historical quotes/jobs are never hard-deleted. RESTORE makes it active again."],
-      ["For new materials, Supplier must match an existing PM supplier name exactly. Pack Qty / Roll Length and Purchase Cost are required."],
+      ["For new materials, enter the Supplier name. If it does not already exist in PM, the import will create an active placeholder supplier for you to complete later. Pack Qty / Roll Length and Purchase Cost are required."],
       ["When finished in Google Sheets: File → Download → Microsoft Excel (.xlsx), then upload that workbook to Production Manager and Preview before Apply."]
     ],
     freezeRows: 1,
@@ -386,13 +388,14 @@ export function previewMaterialPriceWorkbook(buffer: Buffer, materials: Material
       if (action !== "ADD") { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name || `Row ${rowNumber}`, sourceSupplier: supplierIndex >= 0 ? text(row[supplierIndex]) || null : null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "New rows must have Action = ADD and a blank PM Material ID." }); continue; }
       if (!name) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: `Row ${rowNumber}`, sourceSupplier: null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "Internal Material Name is required for ADD." }); continue; }
       if (proposed == null || proposed < 0) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierIndex >= 0 ? text(row[supplierIndex]) || null : null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: null, priceCheckedAt: checked, operation: "none", status: "invalid", note: "Purchase Cost is required for ADD." }); continue; }
-      const supplierName = supplierIndex >= 0 ? text(row[supplierIndex]) : ""; const supplierIdFromSheet = supplierIdIndex >= 0 ? text(row[supplierIdIndex]) : ""; let supplierId: string | null = null;
+      const supplierName = supplierIndex >= 0 ? text(row[supplierIndex]) : ""; const supplierIdFromSheet = supplierIdIndex >= 0 ? text(row[supplierIdIndex]) : ""; let supplierId: string | null = null; let createSupplierPlaceholder = false;
       if (supplierIdFromSheet && suppliers.some((s) => s.id === supplierIdFromSheet)) supplierId = supplierIdFromSheet;
-      else if (supplierName) { const matches = suppliersByName.get(normalise(supplierName)) ?? []; if (matches.length === 1) supplierId = matches[0].id; else { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: matches.length > 1 ? "Supplier name matches more than one PM supplier." : "Supplier name was not found in PM. Add/select the supplier in PM first, or leave Supplier blank." }); continue; } }
+      else if (supplierIdFromSheet && !supplierName) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "PM Supplier ID was not found. Enter the supplier name or download a fresh workbook." }); continue; }
+      else if (supplierName) { const matches = suppliersByName.get(normalise(supplierName)) ?? []; if (matches.length === 1) supplierId = matches[0].id; else if (matches.length > 1) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "Supplier name matches more than one PM supplier. Use the PM Supplier ID from a fresh workbook or rename the duplicate suppliers first." }); continue; } else createSupplierPlaceholder = true; }
       const materialType = canonicalMaterialType(text(typeIndex >= 0 ? row[typeIndex] : "") || defaultMaterialType(group)); const stockUom = text(stockUomIndex >= 0 ? row[stockUomIndex] : "") || defaultStockUom(materialType); const purchaseUom = text(purchaseUomIndex >= 0 ? row[purchaseUomIndex] : "") || defaultPurchaseUom(materialType); const stockQuantity = cleanNumber(qtyIndex >= 0 ? row[qtyIndex] : "");
       if (stockQuantity == null || stockQuantity <= 0) { previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName || null, matchedMaterialId: null, matchedMaterialName: null, currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "none", status: "invalid", note: "Pack Qty / Roll Length is required and must be greater than zero." }); continue; }
-      const newMaterial: NewMaterialRow = { materialGroup: group, supplierId, name, customerFacingName: text(customerIndex >= 0 ? row[customerIndex] : "") || null, sku: text(skuIndex >= 0 ? row[skuIndex] : "") || null, materialType, stockUom, purchaseUom, stockQuantity, purchaseCost: proposed, widthMm: cleanNumber(widthIndex >= 0 ? row[widthIndex] : ""), lengthMm: cleanNumber(lengthIndex >= 0 ? row[lengthIndex] : ""), rollWidthMm: cleanNumber(rollWidthIndex >= 0 ? row[rollWidthIndex] : ""), gsm: cleanNumber(gsmIndex >= 0 ? row[gsmIndex] : ""), minimumBillableSheetFraction: cleanNumber(sheetFractionIndex >= 0 ? row[sheetFractionIndex] : ""), rollBillingIncrementMetres: cleanNumber(rollIncrementIndex >= 0 ? row[rollIncrementIndex] : ""), reversePrintable: boolValue(reverseIndex >= 0 ? row[reverseIndex] : false), usedForBacking: boolValue(backingIndex >= 0 ? row[backingIndex] : false), priceCheckedAt: checked, notes: text(notesIndex >= 0 ? row[notesIndex] : "") || null };
-      previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName || null, matchedMaterialId: null, matchedMaterialName: "New material", currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "add", status: "change", note: `Will create as ${group.replace(/-/g, " ")} / ${materialType}.`, newMaterial });
+      const newMaterial: NewMaterialRow = { materialGroup: group, supplierId, supplierName: supplierName || null, createSupplierPlaceholder, name, customerFacingName: text(customerIndex >= 0 ? row[customerIndex] : "") || null, sku: text(skuIndex >= 0 ? row[skuIndex] : "") || null, materialType, stockUom, purchaseUom, stockQuantity, purchaseCost: proposed, widthMm: cleanNumber(widthIndex >= 0 ? row[widthIndex] : ""), lengthMm: cleanNumber(lengthIndex >= 0 ? row[lengthIndex] : ""), rollWidthMm: cleanNumber(rollWidthIndex >= 0 ? row[rollWidthIndex] : ""), gsm: cleanNumber(gsmIndex >= 0 ? row[gsmIndex] : ""), minimumBillableSheetFraction: cleanNumber(sheetFractionIndex >= 0 ? row[sheetFractionIndex] : ""), rollBillingIncrementMetres: cleanNumber(rollIncrementIndex >= 0 ? row[rollIncrementIndex] : ""), reversePrintable: boolValue(reverseIndex >= 0 ? row[reverseIndex] : false), usedForBacking: boolValue(backingIndex >= 0 ? row[backingIndex] : false), priceCheckedAt: checked, notes: text(notesIndex >= 0 ? row[notesIndex] : "") || null };
+      previewRows.push({ rowNumber, sheetName: sheet.name, sourceName: name, sourceSupplier: supplierName || null, matchedMaterialId: null, matchedMaterialName: "New material", currentPurchaseCost: null, proposedPurchaseCost: proposed, priceCheckedAt: checked, operation: "add", status: "change", note: `Will create as ${group.replace(/-/g, " ")} / ${materialType}.${createSupplierPlaceholder ? ` Supplier '${supplierName}' will be created as a placeholder in PM.` : ""}`, newMaterial });
     }
   }
   return makePreview(previewRows, "production-manager-xlsx");
@@ -417,17 +420,43 @@ export function previewMaterialPriceSheet(csv: string, materials: MaterialRecord
 function normalizeMaterialType(value: string): string { switch (value) { case "sheet": return "sheet_media"; case "roll": return "roll_media"; case "paper": return "paper_stock"; case "hardware": return "fixing"; case "consumable": return "item"; default: return value || "other"; } }
 function legacyMaterialType(value: string): string { const normalized = normalizeMaterialType(value); const allowed = new Set(["sheet_media", "roll_media", "roll_laminate", "card_stock", "paper_stock", "cello_stock", "binding", "finishing", "fixing", "item", "other"]); return allowed.has(normalized) ? normalized : "other"; }
 
-export async function bulkApplyMaterialSheet(tenantId: string, preview: MaterialPriceSheetPreview, sourceLabel: string): Promise<{ updatedIds: string[]; createdIds: string[]; hidden: number; deleted: number; restored: number }> {
-  const changes = preview.rows.filter((row) => row.status === "change"); if (!changes.length) return { updatedIds: [], createdIds: [], hidden: 0, deleted: 0, restored: 0 }; if (changes.length > 500) throw new Error("Material workbook contains too many changes. Split the update into smaller files.");
-  const client = await pool.connect(); const updatedIds: string[] = []; const createdIds: string[] = []; let hidden = 0; let deleted = 0; let restored = 0;
+export async function bulkApplyMaterialSheet(tenantId: string, preview: MaterialPriceSheetPreview, sourceLabel: string): Promise<{ updatedIds: string[]; createdIds: string[]; createdSupplierPlaceholders: number; hidden: number; deleted: number; restored: number }> {
+  const changes = preview.rows.filter((row) => row.status === "change"); if (!changes.length) return { updatedIds: [], createdIds: [], createdSupplierPlaceholders: 0, hidden: 0, deleted: 0, restored: 0 }; if (changes.length > 500) throw new Error("Material workbook contains too many changes. Split the update into smaller files.");
+  const client = await pool.connect(); const updatedIds: string[] = []; const createdIds: string[] = []; const placeholderSupplierIds = new Map<string, string>(); let createdSupplierPlaceholders = 0; let hidden = 0; let deleted = 0; let restored = 0;
   try {
     await client.query("BEGIN");
     for (const row of changes) {
       if (row.operation === "add" && row.newMaterial) {
-        const m = row.newMaterial; const result = await client.query<{ id: string }>(`
+        const m = row.newMaterial; let supplierId = m.supplierId;
+        if (!supplierId && m.createSupplierPlaceholder && m.supplierName) {
+          const supplierKey = normalise(m.supplierName);
+          supplierId = placeholderSupplierIds.get(supplierKey) ?? null;
+          if (!supplierId) {
+            const existing = await client.query<{ id: string }>(`
+              SELECT id FROM app.suppliers
+              WHERE tenant_id=$1::uuid AND lower(trim(display_name))=lower(trim($2::text))
+              ORDER BY created_at ASC
+              LIMIT 2
+            `, [tenantId, m.supplierName]);
+            if (existing.rows.length > 1) throw new Error(`Supplier '${m.supplierName}' now matches more than one PM supplier. Resolve the duplicate supplier names and import again.`);
+            if (existing.rows[0]?.id) supplierId = existing.rows[0].id;
+            else {
+              const createdSupplier = await client.query<{ id: string }>(`
+                INSERT INTO app.suppliers (tenant_id,myob_uid,display_name,is_active,notes,payload_json,created_at,updated_at)
+                VALUES ($1::uuid,null,$2::varchar,true,$3::text,jsonb_build_object('placeholder',true,'placeholderSource','material-workbook','priceSheetSource',$4::text),now(),now())
+                RETURNING id
+              `, [tenantId, m.supplierName, "Placeholder supplier created from the Material Workbook. Complete contact, purchasing and MYOB details before first purchase order.", sourceLabel]);
+              supplierId = createdSupplier.rows[0]?.id ?? null;
+              if (!supplierId) throw new Error(`Could not create placeholder supplier '${m.supplierName}'.`);
+              createdSupplierPlaceholders += 1;
+            }
+            placeholderSupplierIds.set(supplierKey, supplierId);
+          }
+        }
+        const result = await client.query<{ id: string }>(`
           INSERT INTO catalog.materials (tenant_id,supplier_id,source_product_id,name,customer_facing_name,sku,type,material_type,material_group,minimum_billable_sheet_fraction,roll_billing_increment_metres,reverse_printable,used_for_backing,stock_uom,purchase_uom,stock_quantity,purchase_cost,width_mm,length_mm,roll_width_mm,gsm,notes,cost_json,active,created_at,updated_at)
           VALUES ($1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,$9::numeric,$10::numeric,$11::boolean,$12::boolean,$13::varchar,$14::varchar,$15::numeric,$16::numeric,$17::numeric,$18::numeric,$19::numeric,$20::numeric,$21::varchar,jsonb_build_object('purchaseCost',$16::numeric,'priceSheetSource',$22::text)||CASE WHEN $23::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$23::text) END,true,now(),now()) RETURNING id
-        `, [tenantId, m.supplierId, m.name, m.customerFacingName, m.sku, legacyMaterialType(m.materialType), normalizeMaterialType(m.materialType), m.materialGroup, m.minimumBillableSheetFraction, m.rollBillingIncrementMetres, m.reversePrintable, m.usedForBacking, m.stockUom, m.purchaseUom, m.stockQuantity, m.purchaseCost, m.widthMm, m.lengthMm, m.rollWidthMm, m.gsm, m.notes, sourceLabel, m.priceCheckedAt]);
+        `, [tenantId, supplierId, m.name, m.customerFacingName, m.sku, legacyMaterialType(m.materialType), normalizeMaterialType(m.materialType), m.materialGroup, m.minimumBillableSheetFraction, m.rollBillingIncrementMetres, m.reversePrintable, m.usedForBacking, m.stockUom, m.purchaseUom, m.stockQuantity, m.purchaseCost, m.widthMm, m.lengthMm, m.rollWidthMm, m.gsm, m.notes, sourceLabel, m.priceCheckedAt]);
         if (result.rows[0]?.id) createdIds.push(result.rows[0].id); continue;
       }
       if (!row.matchedMaterialId) continue;
@@ -444,7 +473,7 @@ export async function bulkApplyMaterialSheet(tenantId: string, preview: Material
     }
     await client.query("COMMIT");
   } catch (error) { await client.query("ROLLBACK").catch(() => undefined); throw error; } finally { client.release(); }
-  return { updatedIds: [...new Set(updatedIds)], createdIds, hidden, deleted, restored };
+  return { updatedIds: [...new Set(updatedIds)], createdIds, createdSupplierPlaceholders, hidden, deleted, restored };
 }
 
 export async function bulkUpdateMaterialPrices(tenantId: string, preview: MaterialPriceSheetPreview, sourceLabel: string): Promise<string[]> {

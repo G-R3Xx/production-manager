@@ -418,3 +418,214 @@ export async function updateMaterialMyobLink(tenantId: string, materialId: strin
     WHERE tenant_id=$1::uuid AND id=$2::uuid
   `,[tenantId,materialId,input.myobUid,input.myobDisplayId??null,input.myobSyncState??"synced",JSON.stringify(input.myobPayloadJson??{})]);
 }
+
+export type MaterialPriceManagerAction = "KEEP" | "ADD" | "HIDE" | "ARCHIVE" | "RESTORE";
+
+export type MaterialPriceManagerChange = {
+  id: string | null;
+  action: MaterialPriceManagerAction;
+  materialGroup: string;
+  materialType: string;
+  name: string;
+  customerFacingName: string | null;
+  supplierName: string | null;
+  sku: string | null;
+  purchaseUom: string;
+  stockUom: string;
+  stockQuantity: string;
+  purchaseCost: string;
+  widthMm: string | null;
+  lengthMm: string | null;
+  rollWidthMm: string | null;
+  gsm: string | null;
+  priceCheckedAt: string | null;
+};
+
+function cleanMaterialManagerText(value: unknown, max = 200): string {
+  return String(value ?? "").trim().slice(0, max);
+}
+
+function cleanMaterialManagerNumber(value: unknown, allowNull = false): string | null {
+  const raw = String(value ?? "").trim().replace(/,/g, "").replace(/\$/g, "");
+  if (!raw) return allowNull ? null : "0";
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) throw new Error(`Invalid numeric value '${raw}'.`);
+  if (parsed < 0) throw new Error("Material quantities and costs cannot be negative.");
+  return String(parsed);
+}
+
+function cleanMaterialManagerGroup(value: unknown): string {
+  const raw = cleanMaterialManagerText(value, 50).toLowerCase().replace(/_/g, "-");
+  return ["signage", "small-format", "plan-printing", "poster-printing", "shared"].includes(raw) ? raw : "shared";
+}
+
+function cleanMaterialManagerType(value: unknown): string {
+  const normalized = normalizeMaterialType(cleanMaterialManagerText(value, 50).toLowerCase().replace(/-/g, "_"));
+  return ["sheet_media", "roll_media", "roll_laminate", "card_stock", "paper_stock", "cello_stock", "binding", "finishing", "fixing", "item", "other"].includes(normalized) ? normalized : "other";
+}
+
+function cleanPriceCheckedDate(value: unknown): string | null {
+  const raw = cleanMaterialManagerText(value, 20);
+  if (!raw) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) throw new Error(`Price checked date '${raw}' must use YYYY-MM-DD.`);
+  return raw;
+}
+
+export async function saveMaterialPriceManagerChanges(
+  tenantId: string,
+  changes: MaterialPriceManagerChange[]
+): Promise<{ updatedIds: string[]; createdIds: string[]; placeholderSuppliers: number; hidden: number; archived: number; restored: number }> {
+  await ensureMaterialPricingColumns();
+  if (!changes.length) return { updatedIds: [], createdIds: [], placeholderSuppliers: 0, hidden: 0, archived: 0, restored: 0 };
+  if (changes.length > 500) throw new Error("Save up to 500 material changes at a time.");
+
+  const client = await pool.connect();
+  const updatedIds: string[] = [];
+  const createdIds: string[] = [];
+  const supplierCache = new Map<string, string | null>();
+  let placeholderSuppliers = 0;
+  let hidden = 0;
+  let archived = 0;
+  let restored = 0;
+
+  async function supplierIdFor(nameValue: unknown): Promise<string | null> {
+    const displayName = cleanMaterialManagerText(nameValue, 200);
+    if (!displayName) return null;
+    const key = displayName.toLowerCase().replace(/\s+/g, " ");
+    if (supplierCache.has(key)) return supplierCache.get(key) ?? null;
+
+    const existing = await client.query<{ id: string }>(`
+      SELECT id
+      FROM app.suppliers
+      WHERE tenant_id=$1::uuid
+        AND lower(trim(display_name))=lower(trim($2::text))
+      ORDER BY created_at ASC
+      LIMIT 2
+    `, [tenantId, displayName]);
+    if (existing.rows.length > 1) throw new Error(`Supplier '${displayName}' matches more than one PM supplier. Resolve the duplicate supplier names first.`);
+    if (existing.rows[0]?.id) {
+      supplierCache.set(key, existing.rows[0].id);
+      return existing.rows[0].id;
+    }
+
+    const created = await client.query<{ id: string }>(`
+      INSERT INTO app.suppliers (tenant_id,myob_uid,display_name,is_active,notes,payload_json,created_at,updated_at)
+      VALUES ($1::uuid,null,$2::varchar,true,$3::text,jsonb_build_object('placeholder',true,'placeholderSource','material-price-manager'),now(),now())
+      RETURNING id
+    `, [tenantId, displayName, "Placeholder supplier created from Material Price Manager. Complete contact, purchasing and MYOB details before the first purchase order."]);
+    const id = created.rows[0]?.id ?? null;
+    if (!id) throw new Error(`Could not create placeholder supplier '${displayName}'.`);
+    placeholderSuppliers += 1;
+    supplierCache.set(key, id);
+    return id;
+  }
+
+  try {
+    await client.query("BEGIN");
+
+    for (const rawChange of changes) {
+      const action = String(rawChange.action ?? "KEEP").toUpperCase() as MaterialPriceManagerAction;
+      if (!["KEEP", "ADD", "HIDE", "ARCHIVE", "RESTORE"].includes(action)) throw new Error("Invalid material action.");
+
+      const name = cleanMaterialManagerText(rawChange.name, 200);
+      if (!name) throw new Error("Every saved material row needs an internal material name.");
+      const group = cleanMaterialManagerGroup(rawChange.materialGroup);
+      const materialType = cleanMaterialManagerType(rawChange.materialType);
+      const supplierId = await supplierIdFor(rawChange.supplierName);
+      const purchaseUom = cleanMaterialManagerText(rawChange.purchaseUom, 20) || "unit";
+      const stockUom = cleanMaterialManagerText(rawChange.stockUom, 20) || "unit";
+      const stockQuantity = cleanMaterialManagerNumber(rawChange.stockQuantity) ?? "0";
+      const purchaseCost = cleanMaterialManagerNumber(rawChange.purchaseCost) ?? "0";
+      const widthMm = cleanMaterialManagerNumber(rawChange.widthMm, true);
+      const lengthMm = cleanMaterialManagerNumber(rawChange.lengthMm, true);
+      const rollWidthMm = cleanMaterialManagerNumber(rawChange.rollWidthMm, true);
+      const gsm = cleanMaterialManagerNumber(rawChange.gsm, true);
+      const priceCheckedAt = cleanPriceCheckedDate(rawChange.priceCheckedAt);
+      const customerFacingName = cleanMaterialManagerText(rawChange.customerFacingName, 200) || null;
+      const sku = cleanMaterialManagerText(rawChange.sku, 100) || null;
+
+      if (!rawChange.id || action === "ADD") {
+        const created = await client.query<{ id: string }>(`
+          INSERT INTO catalog.materials (
+            tenant_id,supplier_id,source_product_id,name,customer_facing_name,sku,type,material_type,material_group,
+            minimum_billable_sheet_fraction,roll_billing_increment_metres,reverse_printable,used_for_backing,
+            stock_uom,purchase_uom,stock_quantity,purchase_cost,width_mm,length_mm,roll_width_mm,gsm,notes,cost_json,active,created_at,updated_at
+          ) VALUES (
+            $1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,
+            null,null,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,null,
+            jsonb_build_object('purchaseCost',$12::numeric,'priceManagerSource','in-app') || CASE WHEN $17::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$17::text) END,
+            true,now(),now()
+          )
+          RETURNING id
+        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt]);
+        const id = created.rows[0]?.id;
+        if (!id) throw new Error(`Could not add material '${name}'.`);
+        createdIds.push(id);
+        continue;
+      }
+
+      const result = await client.query<{ id: string }>(`
+        UPDATE catalog.materials
+        SET supplier_id=$3::uuid,
+            name=$4::varchar,
+            customer_facing_name=$5::varchar,
+            sku=$6::varchar,
+            type=$7::material_type,
+            material_type=$8::varchar,
+            material_group=$9::varchar,
+            stock_uom=$10::varchar,
+            purchase_uom=$11::varchar,
+            stock_quantity=$12::numeric,
+            purchase_cost=$13::numeric,
+            width_mm=$14::numeric,
+            length_mm=$15::numeric,
+            roll_width_mm=$16::numeric,
+            gsm=$17::numeric,
+            cost_json=(COALESCE(cost_json,'{}'::jsonb)-'priceCheckedAt')
+              || jsonb_build_object('purchaseCost',$13::numeric,'priceManagerSource','in-app')
+              || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END,
+            updated_at=now()
+        WHERE tenant_id=$1::uuid AND id=$2::uuid
+        RETURNING id
+      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt]);
+      if (!result.rows[0]?.id) throw new Error(`Material '${name}' no longer exists.`);
+      updatedIds.push(rawChange.id);
+
+      if (action === "HIDE" || action === "ARCHIVE") {
+        await client.query(`
+          UPDATE catalog.materials
+          SET active=false,
+              cost_json=COALESCE(cost_json,'{}'::jsonb)||jsonb_build_object('catalogSheetState',$3::text,'priceManagerSource','in-app'),
+              updated_at=now()
+          WHERE tenant_id=$1::uuid AND id=$2::uuid
+        `, [tenantId, rawChange.id, action === "HIDE" ? "hidden" : "deleted"]);
+        if (action === "HIDE") hidden += 1; else archived += 1;
+      } else if (action === "RESTORE") {
+        await client.query(`
+          UPDATE catalog.materials
+          SET active=true,
+              cost_json=(COALESCE(cost_json,'{}'::jsonb)-'catalogSheetState')||jsonb_build_object('priceManagerSource','in-app'),
+              updated_at=now()
+          WHERE tenant_id=$1::uuid AND id=$2::uuid
+        `, [tenantId, rawChange.id]);
+        restored += 1;
+      }
+    }
+
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return {
+    updatedIds: [...new Set(updatedIds)],
+    createdIds: [...new Set(createdIds)],
+    placeholderSuppliers,
+    hidden,
+    archived,
+    restored
+  };
+}

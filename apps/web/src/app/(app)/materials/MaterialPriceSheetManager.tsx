@@ -37,7 +37,7 @@ type Preview = {
 };
 type PreviewResult = { ok: true; fileName: string; preview: Preview } | { ok: false; error: string };
 type ApplyResult =
-  | { ok: true; updated: number; added: number; hidden: number; deleted: number; restored: number; syncQueued: number; skipped: number; unchanged: number }
+  | { ok: true; updated: number; added: number; supplierPlaceholders: number; hidden: number; deleted: number; restored: number; syncQueued: number; skipped: number; unchanged: number }
   | { ok: false; error: string };
 
 const money = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD", minimumFractionDigits: 2, maximumFractionDigits: 5 });
@@ -101,6 +101,7 @@ export function MaterialPriceSheetManager() {
       const parts = [
         result.updated ? `${result.updated} price${result.updated === 1 ? "" : "s"} updated` : "",
         result.added ? `${result.added} material${result.added === 1 ? "" : "s"} added` : "",
+        result.supplierPlaceholders ? `${result.supplierPlaceholders} placeholder supplier${result.supplierPlaceholders === 1 ? "" : "s"} created` : "",
         result.hidden ? `${result.hidden} hidden` : "",
         result.deleted ? `${result.deleted} deleted/archived` : "",
         result.restored ? `${result.restored} restored` : "",
@@ -117,10 +118,10 @@ export function MaterialPriceSheetManager() {
 
   return (
     <details style={{ border: "1px solid #bfdbfe", borderRadius: 18, background: "#f8fbff", padding: 16 }}>
-      <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 18, color: "#1e3a8a" }}>Spreadsheet material manager</summary>
+      <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 18, color: "#1e3a8a" }}>Import / export material workbook (optional)</summary>
       <div style={{ display: "grid", gap: 14, marginTop: 14 }}>
         <div style={{ display: "grid", gap: 6, color: "#475467", lineHeight: 1.5 }}>
-          <strong style={{ color: "#101828" }}>One Google Sheets workbook, split by department and material type.</strong>
+          <strong style={{ color: "#101828" }}>Use this only when you want to work offline or make a very large bulk update in Google Sheets.</strong>
           <span>The workbook contains <b>Signage</b>, <b>Small Format</b>, <b>Plan Printing</b>, <b>Poster Printing</b> and <b>Shared + Consumables</b>. Inside each tab, stock is further grouped into sections such as <b>Sheet stock</b>, <b>Laminate</b>, <b>Paper</b>, <b>Card</b>, <b>Cello / coating</b>, <b>Binding</b> and <b>Consumables</b>.</span>
         </div>
 
@@ -129,7 +130,7 @@ export function MaterialPriceSheetManager() {
         </div>
 
         <div style={{ border: "1px solid #dbeafe", background: "#eff6ff", borderRadius: 12, padding: 12, color: "#1e3a8a", fontSize: 13, lineHeight: 1.5 }}>
-          <b>Google Sheets:</b> upload/open the .xlsx in Google Sheets. The <b>Action</b> cells already contain dropdowns. Existing stock is set to <b>KEEP</b>; ready-made blank rows are set to <b>ADD</b>. Choose <b>HIDE</b>, <b>DELETE</b> or <b>RESTORE</b> when required. When finished choose <b>File → Download → Microsoft Excel (.xlsx)</b>, then upload that file below.
+          <b>Google Sheets:</b> upload/open the .xlsx in Google Sheets. The <b>Action</b> cells already contain dropdowns. Existing stock is set to <b>KEEP</b>; ready-made blank rows are set to <b>ADD</b> and remain ignored until you enter material details. Choose <b>HIDE</b>, <b>DELETE</b> or <b>RESTORE</b> when required. For a new material, you may type a new supplier name — PM will create it as a placeholder supplier if it does not already exist. When finished choose <b>File → Download → Microsoft Excel (.xlsx)</b>, then upload that file below.
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) auto", gap: 10, alignItems: "end" }}>
