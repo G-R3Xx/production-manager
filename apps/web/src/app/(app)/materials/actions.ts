@@ -5,7 +5,8 @@ import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createMaterial, listMaterialsForTenant, setMaterialActive, updateMaterial } from "@/server/materials";
-import { bulkUpdateMaterialPrices, previewMaterialPriceSheet } from "@/server/material-price-sheet";
+import { listSuppliersForTenant } from "@/server/suppliers";
+import { bulkApplyMaterialSheet, previewMaterialPriceSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
 
 function readString(formData: FormData, key: string): string { return String(formData.get(key) ?? "").trim(); }
@@ -54,57 +55,67 @@ function canManageMaterialPrices(role: string): boolean {
   return role === "owner" || role === "manager";
 }
 
-function uploadedCsv(formData: FormData): { file: File | null; error: string | null } {
+function uploadedSpreadsheet(formData: FormData): { file: File | null; kind: "xlsx" | "csv" | null; error: string | null } {
   const candidate = formData.get("file");
-  if (!candidate || typeof candidate !== "object" || !("text" in candidate)) return { file: null, error: "Choose a CSV file first." };
+  if (!candidate || typeof candidate !== "object" || !("arrayBuffer" in candidate)) return { file: null, kind: null, error: "Choose an Excel workbook or CSV file first." };
   const file = candidate as File;
-  if (file.size > 2_000_000) return { file: null, error: "CSV is too large. Keep price sheets under 2 MB." };
-  if (file.name && !file.name.toLowerCase().endsWith(".csv")) return { file: null, error: "Use a .csv price sheet." };
-  return { file, error: null };
+  if (file.size > 8_000_000) return { file: null, kind: null, error: "Spreadsheet is too large. Keep material workbooks under 8 MB." };
+  const lower = String(file.name || "").toLowerCase();
+  if (lower.endsWith(".xlsx")) return { file, kind: "xlsx", error: null };
+  if (lower.endsWith(".csv")) return { file, kind: "csv", error: null };
+  return { file: null, kind: null, error: "Use the PM .xlsx workbook, or a supported legacy .csv file." };
 }
 
 export async function previewMaterialPriceSheetAction(formData: FormData) {
   const active = await tenant();
-  if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can bulk update material prices." };
-  const upload = uploadedCsv(formData);
-  if (!upload.file) return { ok: false as const, error: upload.error ?? "Choose a CSV file first." };
+  if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can bulk manage materials." };
+  const upload = uploadedSpreadsheet(formData);
+  if (!upload.file || !upload.kind) return { ok: false as const, error: upload.error ?? "Choose a spreadsheet first." };
   try {
-    const [csv, materials] = await Promise.all([upload.file.text(), listMaterialsForTenant(active.tenantId)]);
-    const preview = previewMaterialPriceSheet(csv, materials);
-    if (preview.format === "unknown") return { ok: false as const, error: "CSV format was not recognised. Download a Production Manager price sheet, or use the legacy Small Format layout with Stock Type and Sheet Price columns." };
-    return { ok: true as const, fileName: upload.file.name || "price-sheet.csv", preview };
+    const [materials, suppliers] = await Promise.all([listMaterialsForTenant(active.tenantId), listSuppliersForTenant(active.tenantId)]);
+    const preview = upload.kind === "xlsx"
+      ? previewMaterialPriceWorkbook(Buffer.from(await upload.file.arrayBuffer()), materials, suppliers)
+      : previewMaterialPriceSheet(await upload.file.text(), materials);
+    if (preview.format === "unknown") return { ok: false as const, error: "Spreadsheet format was not recognised. Download a fresh Production Manager material workbook, or use the supported legacy Small Format CSV." };
+    return { ok: true as const, fileName: upload.file.name || "material-workbook.xlsx", preview };
   } catch (error) {
-    console.error("Material price sheet preview failed", error);
+    console.error("Material spreadsheet preview failed", error);
     return { ok: false as const, error: getErrorMessage(error) };
   }
 }
 
 export async function applyMaterialPriceSheetAction(formData: FormData) {
   const active = await tenant();
-  if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can bulk update material prices." };
-  const upload = uploadedCsv(formData);
-  if (!upload.file) return { ok: false as const, error: upload.error ?? "Choose a CSV file first." };
+  if (!canManageMaterialPrices(String(active.tenantRole).toLowerCase())) return { ok: false as const, error: "Only Owners and Managers can bulk manage materials." };
+  const upload = uploadedSpreadsheet(formData);
+  if (!upload.file || !upload.kind) return { ok: false as const, error: upload.error ?? "Choose a spreadsheet first." };
   try {
-    const [csv, materials] = await Promise.all([upload.file.text(), listMaterialsForTenant(active.tenantId)]);
-    const preview = previewMaterialPriceSheet(csv, materials);
-    if (preview.format === "unknown") return { ok: false as const, error: "CSV format was not recognised." };
-    const updatedIds = await bulkUpdateMaterialPrices(active.tenantId, preview, upload.file.name || preview.format);
+    const [materials, suppliers] = await Promise.all([listMaterialsForTenant(active.tenantId), listSuppliersForTenant(active.tenantId)]);
+    const preview = upload.kind === "xlsx"
+      ? previewMaterialPriceWorkbook(Buffer.from(await upload.file.arrayBuffer()), materials, suppliers)
+      : previewMaterialPriceSheet(await upload.file.text(), materials);
+    if (preview.format === "unknown") return { ok: false as const, error: "Spreadsheet format was not recognised." };
+    const result = await bulkApplyMaterialSheet(active.tenantId, preview, upload.file.name || preview.format);
+    const syncIds = [...new Set([...result.updatedIds, ...result.createdIds])];
     let syncQueued = 0;
-    if (readChecked(formData, "syncMyob") && updatedIds.length) {
-      const queued = await Promise.all(updatedIds.map((id) => queueMyobMasterDataSync(active.tenantId, "material", id).catch(() => false)));
+    if (readChecked(formData, "syncMyob") && syncIds.length) {
+      const queued = await Promise.all(syncIds.map((id) => queueMyobMasterDataSync(active.tenantId, "material", id).catch(() => false)));
       syncQueued = queued.filter(Boolean).length;
     }
     revalidatePath("/materials");
     return {
       ok: true as const,
-      updated: updatedIds.length,
+      updated: preview.updateRows,
+      added: result.createdIds.length,
+      hidden: result.hidden,
+      deleted: result.deleted,
+      restored: result.restored,
       syncQueued,
       skipped: preview.unmatchedRows + preview.ambiguousRows + preview.invalidRows,
       unchanged: preview.unchangedRows
     };
   } catch (error) {
-    console.error("Material price sheet apply failed", error);
+    console.error("Material spreadsheet apply failed", error);
     return { ok: false as const, error: getErrorMessage(error) };
   }
 }
-
