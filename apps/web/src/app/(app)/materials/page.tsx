@@ -9,6 +9,7 @@ import { setMaterialActiveAction, syncMaterialToMyobAction } from "./actions";
 import { startPurchaseOrderAction } from "../purchasing/actions";
 import { CreateMaterialForm, EditMaterialForm } from "./MaterialForms";
 import { AutoRefreshWhenPending } from "@/components/AutoRefreshWhenPending";
+import { MaterialPriceSheetManager } from "./MaterialPriceSheetManager";
 import { MyobSyncStatus, readMyobSyncStatus } from "@/components/MyobSyncStatus";
 
 type MaterialsPageProps = {
@@ -243,6 +244,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
         {material.supplierId ? <form action={startPurchaseOrderAction}><input type="hidden" name="supplierId" value={material.supplierId} /><input type="hidden" name="materialId" value={material.id} /><button type="submit" style={secondaryButtonStyle}>New PO for this material</button></form> : <span style={{ ...mutedTextStyle, alignSelf: "center" }}>Set a supplier to start a PO from this material.</span>}
       </div> : null}
       <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
+      {typeof material.costJson?.priceCheckedAt === "string" && material.costJson.priceCheckedAt ? <div style={mutedTextStyle}>Price checked: {String(material.costJson.priceCheckedAt)}</div> : null}
       {isSheetType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Sheet billing: {minimumSheetBillingLabel(material)}</div> : null}
       {isRollType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Roll billing: {rollBillingLabel(material)}</div> : null}
       {material.sourceProductName ? <div style={{ ...mutedTextStyle, color: "#b54708" }}>Legacy source product link: {material.sourceProductName}</div> : null}
@@ -260,6 +262,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!activeTenant) redirect("/bootstrap");
+
+  const canManagePrices = ["owner", "manager"].includes(String(activeTenant.tenantRole).toLowerCase());
 
   const [materials, suppliers] = await Promise.all([
     listMaterialsForTenant(activeTenant.tenantId),
@@ -317,6 +321,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
           </div>
         </div>
       </section>
+
+      {canManagePrices ? <MaterialPriceSheetManager /> : null}
 
       <section style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.95fr) minmax(0, 1.25fr)", gap: 16, alignItems: "start" }}>
         <details open style={{ ...cardStyle, display: "grid", gap: 16 }}>

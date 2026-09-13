@@ -28,6 +28,7 @@ export type MaterialRecord = {
   rollWidthMm: string | null;
   gsm: string | null;
   notes: string | null;
+  costJson: Record<string, unknown>;
   myobUid: string | null;
   myobDisplayId: string | null;
   myobSyncState: string | null;
@@ -195,6 +196,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.roll_width_mm::text AS "rollWidthMm",
       m.gsm::text AS gsm,
       m.notes,
+      m.cost_json AS "costJson",
       m.myob_uid AS "myobUid",
       m.myob_display_id AS "myobDisplayId",
       m.myob_sync_state AS "myobSyncState",
@@ -209,7 +211,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
     ORDER BY m.name ASC, m.created_at DESC
   `, [tenantId]);
 
-  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType), myobPayloadJson: row.myobPayloadJson && typeof row.myobPayloadJson === "object" ? row.myobPayloadJson : {} }));
+  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType), costJson: row.costJson && typeof row.costJson === "object" ? row.costJson : {}, myobPayloadJson: row.myobPayloadJson && typeof row.myobPayloadJson === "object" ? row.myobPayloadJson : {} }));
 }
 
 export async function getDashboardMaterialSummary(tenantId: string): Promise<{
@@ -352,6 +354,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       purchase_uom = $16::varchar,
       stock_quantity = $17::numeric,
       purchase_cost = $18::numeric,
+      cost_json = COALESCE(cost_json, '{}'::jsonb) || jsonb_build_object('purchaseCost', $18::numeric),
       width_mm = $19::numeric,
       length_mm = $20::numeric,
       roll_width_mm = $21::numeric,
