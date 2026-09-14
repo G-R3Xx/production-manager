@@ -6,6 +6,8 @@ import { createMachineAction, updateMachineAction, setMachineActiveAction } from
 
 const input = {
   width: "100%",
+  minWidth: 0,
+  boxSizing: "border-box" as const,
   minHeight: 42,
   border: "1px solid #cbd5e1",
   borderRadius: 9,
@@ -170,10 +172,11 @@ export default async function MachinesPage() {
     <main style={{ display: "grid", gap: 20 }}>
       <style>{`
         .machine-grid { display:grid; gap:12px; align-items:end; }
-        .machine-grid label { display:grid; gap:6px; font-weight:700; color:#0f172a; }
-        .machine-grid-details { grid-template-columns:minmax(240px,2fr) minmax(150px,1fr) minmax(160px,1fr); }
-        .machine-grid-performance { grid-template-columns:minmax(150px,1fr) minmax(210px,1.35fr) minmax(160px,1fr); }
-        .machine-grid-costing { grid-template-columns:repeat(4,minmax(150px,1fr)); }
+        .machine-grid label { display:grid; gap:6px; min-width:0; font-weight:700; color:#0f172a; }
+        .machine-grid input,.machine-grid select { min-width:0; max-width:100%; box-sizing:border-box; }
+        .machine-grid-details { grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr); }
+        .machine-grid-performance { grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) minmax(0,1fr); }
+        .machine-grid-costing { grid-template-columns:repeat(4,minmax(0,1fr)); }
         .machine-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .machine-metric { border:1px solid #e2e8f0; border-radius:10px; padding:9px 10px; background:#f8fafc; }
         .machine-metric-label { display:block; color:#64748b; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:.035em; margin-bottom:2px; }
