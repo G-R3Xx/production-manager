@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { addQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
+import { labourForProcess, labourLineCost, normalizeCostingName, recipeForId, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
 export type QuoteChoice = {
   id?: string | null;
@@ -111,6 +112,7 @@ export type QuoteProduct = {
   department?: string | null;
   productFamily?: string | null;
   myobUid?: string | null;
+  productionRecipeId?: string | null;
   myobPriceMatrix?: Record<string, unknown> | null;
   fields: QuoteQuestion[];
   components: QuoteComponent[];
@@ -142,6 +144,7 @@ type QuoteLineBuilderProps = {
   products: QuoteProduct[];
   materials: QuoteMaterial[];
   pricingSettings?: PricingSettings;
+  costingResources?: QuoteCostingResources;
 };
 
 const inputStyle = {
@@ -1219,6 +1222,124 @@ function myobMatrixPriceFor(product: QuoteProduct | undefined, priceLevelCode: s
   return null;
 }
 
+function primaryProductDimensions(product: QuoteProduct | undefined, answers: Record<string, string>): { widthMm: number; heightMm: number } | null {
+  if (!product) return null;
+  for (const field of product.fields) {
+    const dimensions = dimensionsForField(field, answers);
+    if (dimensions) return dimensions;
+  }
+  return null;
+}
+
+function productionResourceBreakdownFor(
+  product: QuoteProduct | undefined,
+  resources: QuoteCostingResources | undefined,
+  answers: Record<string, string>,
+  materialBreakdown: CostBreakdownItem[],
+  quoteQuantity: number,
+  materials: QuoteMaterial[]
+): { rows: CostBreakdownItem[]; warnings: string[] } {
+  if (!product?.productionRecipeId || !resources) return { rows: [], warnings: [] };
+  const recipe = recipeForId(resources, product.productionRecipeId);
+  if (!recipe) return { rows: [], warnings: [] };
+  const dimensions = primaryProductDimensions(product, answers);
+  if (!dimensions) return { rows: [], warnings: [] };
+  const quantity = Math.max(1, quoteQuantity || 1);
+  const areaSqmPerUnit = (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000);
+  const sheetsPerLine = materialBreakdown
+    .filter((item) => item.unit.toLowerCase().includes("sheet"))
+    .reduce((sum, item) => sum + Math.max(0, item.amount) * quantity, 0);
+  const linearMetresPerLine = materialBreakdown
+    .filter((item) => ["lm", "m", "metre", "meter"].includes(item.unit.toLowerCase()))
+    .reduce((sum, item) => sum + Math.max(0, item.amount) * quantity, 0);
+  const recipeMaterial = recipe.materialId ? materials.find((material) => material.id === recipe.materialId) : undefined;
+  const recipeSheetWidth = recipeMaterial
+    ? (() => {
+        const parentWidth = numberValue(recipeMaterial.widthMm, 0);
+        const parentLength = numberValue(recipeMaterial.lengthMm, 0);
+        return parentWidth > 0 && parentLength > 0 ? Math.min(parentWidth, parentLength) : 0;
+      })()
+    : 0;
+  const requiredWidthMm = numberValue(recipeMaterial?.rollWidthMm, 0)
+    || recipeSheetWidth
+    || Math.min(dimensions.widthMm, dimensions.heightMm);
+  const metrics = { quantity, areaSqmPerUnit, sheetsPerLine, linearMetresPerLine, requiredWidthMm };
+  const explicitLabourRows = materialBreakdown.filter((item) => /labour|labor/i.test(`${item.componentLabel} ${item.materialName} ${item.basis}`));
+  const hasExplicitInk = materialBreakdown.some((item) => /\bink\b|print charge/i.test(`${item.componentLabel} ${item.materialName}`));
+  const rows: CostBreakdownItem[] = [];
+  const warnings: string[] = [];
+  const steps = recipe.processSteps.length
+    ? recipe.processSteps
+    : recipe.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null }));
+
+  for (const step of steps) {
+    const process = resources.processes.find((row) => row.id === step.processId);
+    if (!process) continue;
+    const machineSelection = selectMachineForProcess(
+      resources,
+      [process.name],
+      metrics,
+      product.department,
+      step.machineId,
+      step.processId
+    );
+    if (!machineSelection.machine && machineSelection.incompatibleMachines.length) {
+      warnings.push(`${process.name}: ${requiredWidthMm.toFixed(0)}mm required; ${machineSelection.incompatibleMachines.map((machine) => `${machine.name} max ${numberValue(machine.maxWidthMm, 0).toFixed(0)}mm`).join(", ")}.`);
+    }
+    if (machineSelection.machine && machineSelection.machineCostPerUnit > 0) {
+      rows.push(costBreakdownItem({
+        componentLabel: `${process.name} machine`,
+        materialName: machineSelection.machine.name,
+        basis: "Machine running cost",
+        amount: 1,
+        unit: "item",
+        rate: machineSelection.machineCostPerUnit,
+        cost: machineSelection.machineCostPerUnit,
+        note: `${machineSelection.machine.speedValue} ${machineSelection.machine.speedUom.replaceAll("_", " ")} · ${machineSelection.machine.setupMinutes} min setup · ${formatMoney(numberValue(machineSelection.machine.hourlyCost, 0))}/hr`
+      }));
+      const processName = process.name.toLowerCase();
+      const inkRate = numberValue(machineSelection.machine.inkCostPerSqm, 0);
+      if (!hasExplicitInk && inkRate > 0 && /print/.test(processName)) {
+        rows.push(costBreakdownItem({
+          componentLabel: `${process.name} ink`,
+          materialName: machineSelection.machine.name,
+          basis: "Machine ink setting",
+          amount: areaSqmPerUnit,
+          unit: "sqm",
+          rate: inkRate,
+          cost: areaSqmPerUnit * inkRate,
+          note: "ink rate from Machines settings"
+        }));
+      }
+    }
+
+    const processLabourTokens = normalizeCostingName(process.name).split(" ").filter((token) => token.length >= 4);
+    const hasExplicitLabourForProcess = explicitLabourRows.some((item) => {
+      const label = normalizeCostingName(`${item.componentLabel} ${item.materialName} ${item.basis}`);
+      return processLabourTokens.some((token) => label.includes(token));
+    }) || (explicitLabourRows.length === 1 && steps.length === 1);
+    if (!hasExplicitLabourForProcess) {
+      const labour = labourForProcess(resources, [process.name], product.department, step.labourOperationId, step.processId);
+      const lineCost = labourLineCost(labour, metrics);
+      if (labour && lineCost > 0) {
+        const perUnit = lineCost / quantity;
+        rows.push(costBreakdownItem({
+          componentLabel: `${process.name} labour`,
+          materialName: labour.name,
+          basis: "Labour operation",
+          amount: 1,
+          unit: "item",
+          rate: perUnit,
+          cost: perUnit,
+          note: `${formatMoney(numberValue(labour.hourlyRate, 0))}/hr from Labour settings`
+        }));
+      }
+    }
+  }
+
+  return { rows, warnings };
+}
+
 export type QuoteProductPricing = {
   materialBreakdown: CostBreakdownItem[];
   missingMaterials: QuoteComponent[];
@@ -1233,6 +1354,7 @@ export type QuoteProductPricing = {
   pricingSource: "pm_calculated" | "myob_item_matrix";
   myobMatrixBaseUnitPrice: number | null;
   myobMatrixQuantityOver: number | null;
+  machineWarnings: string[];
 };
 
 export function calculateQuoteProductPricing(
@@ -1242,7 +1364,8 @@ export function calculateQuoteProductPricing(
   pricingSettings?: PricingSettings,
   followUpAnswers: Record<string, string> = {},
   customFollowUpAnswers: Record<string, string> = {},
-  quoteQuantity = 1
+  quoteQuantity = 1,
+  costingResources?: QuoteCostingResources
 ): QuoteProductPricing {
   const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
@@ -1250,7 +1373,9 @@ export function calculateQuoteProductPricing(
   const priceLevelFactor = Math.max(0, numberValue(pricingSettings?.priceLevelFactor, 1));
   const manualQuoteDiscountPercent = discountPercentValue(pricingSettings?.manualQuoteDiscountPercent);
   const manualDiscountMultiplier = Math.max(0, 1 - manualQuoteDiscountPercent / 100);
-  const materialBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers, quoteQuantity);
+  const componentBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers, quoteQuantity);
+  const productionResources = productionResourceBreakdownFor(product, costingResources, answers, componentBreakdown, quoteQuantity, materials);
+  const materialBreakdown = [...componentBreakdown, ...productionResources.rows];
   const unitCost = materialBreakdown.reduce((total, item) => total + item.cost, 0);
   const markedUpUnitCost = unitCost * markupMultiplier;
   const myobMatrix = myobMatrixPriceFor(product, pricingSettings?.priceLevelCode, quoteQuantity);
@@ -1270,7 +1395,8 @@ export function calculateQuoteProductPricing(
     manualQuoteDiscountPercent,
     pricingSource: myobMatrix ? "myob_item_matrix" : "pm_calculated",
     myobMatrixBaseUnitPrice: myobMatrix?.unitPrice ?? null,
-    myobMatrixQuantityOver: myobMatrix?.quantityOver ?? null
+    myobMatrixQuantityOver: myobMatrix?.quantityOver ?? null,
+    machineWarnings: productionResources.warnings
   };
 }
 
@@ -1305,7 +1431,7 @@ function productDepartment(product: QuoteProduct): SavedProductDepartment | null
   return null;
 }
 
-export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings }: QuoteLineBuilderProps) {
+export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings, costingResources }: QuoteLineBuilderProps) {
   const eligibleProducts = useMemo(
     () => products.filter((product) => productDepartment(product) !== null),
     [products]
@@ -1382,11 +1508,12 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
   const autoSummary = selectedProduct && visibleFields.length > 0 ? summaryFor(selectedProduct, visibleFields, answers, followUpAnswers, customFollowUpAnswers, materials) : manualSummary;
   const autoPricing = useMemo(
-    () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber),
-    [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber]
+    () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber, costingResources),
+    [selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber, costingResources]
   );
   const materialBreakdown = autoPricing.materialBreakdown;
   const missingMaterials = autoPricing.missingMaterials;
+  const machineWarnings = autoPricing.machineWarnings;
   const autoUnitCost = autoPricing.unitCost;
   const markedUpUnitCost = autoPricing.markedUpUnitCost;
   const autoUnitPrice = autoPricing.unitPrice;
@@ -1821,6 +1948,12 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
           ) : (
             <span style={{ color: "#667085", fontSize: 13 }}>No automatic price yet. Add answer lines on the Products page with material usage or simple charges such as ink at dollars per m².</span>
           )}
+          {machineWarnings.length > 0 ? (
+            <div style={{ border: "1px solid #fecdd3", background: "#fff1f2", color: "#9f1239", borderRadius: 10, padding: 9, display: "grid", gap: 3, fontSize: 12 }}>
+              <strong>Machine width check</strong>
+              {machineWarnings.map((warning) => <span key={warning}>{warning}</span>)}
+            </div>
+          ) : null}
           {missingMaterials.length > 0 ? (
             <span style={{ color: "#b54708", fontSize: 13 }}>
               Missing linked material for: {missingMaterials.map((component) => component.label ?? "material row").join(", ")}.
@@ -1839,7 +1972,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         </div>
       </div>
 
-      <button type="submit" style={buttonStyle}>Add saved product to quote</button>
+      <button type="submit" disabled={machineWarnings.length > 0} style={{ ...buttonStyle, opacity: machineWarnings.length > 0 ? 0.45 : 1, cursor: machineWarnings.length > 0 ? "not-allowed" : "pointer" }}>{machineWarnings.length > 0 ? "Machine width exceeds configured capacity" : "Add saved product to quote"}</button>
     </form>
   );
 }

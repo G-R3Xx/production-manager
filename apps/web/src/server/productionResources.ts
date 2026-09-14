@@ -902,6 +902,7 @@ export async function previewRecipeCost(
   let machineCost = 0;
   let inkCost = 0;
   let labourCost = 0;
+  const machineWarnings: string[] = [];
   const breakdown: Array<{
     processName: string;
     machineName: string | null;
@@ -911,6 +912,29 @@ export async function previewRecipeCost(
     labourCost: number;
   }> = [];
 
+  const materialRollWidthMm = Number(material?.roll_width_mm || 0);
+  const materialWidthMm = Number(material?.width_mm || 0);
+  const materialLengthMm = Number(material?.length_mm || 0);
+  const requiredMachineWidthMm = materialRollWidthMm > 0
+    ? materialRollWidthMm
+    : materialWidthMm > 0 && materialLengthMm > 0
+      ? Math.min(materialWidthMm, materialLengthMm)
+      : Math.min(Math.max(0, widthMm), Math.max(0, heightMm));
+
+  const machineRunHours = (machine: MachineRecord): number => {
+    const speed = Number(machine.speedValue || 0);
+    if (speed <= 0) return 0;
+    if (machine.speedUom === "linear_metres_per_hour") return Number(base.materialUsage.linearMetres || 0) / speed;
+    if (machine.speedUom === "sheets_per_hour") return Number(base.materialUsage.sheets || 0) / speed;
+    return base.areaSqm / speed;
+  };
+  const machineLineCost = (machine: MachineRecord): number =>
+    (machineRunHours(machine) + Number(machine.setupMinutes || 0) / 60) * Number(machine.hourlyCost || 0);
+  const machineFits = (machine: MachineRecord): boolean => {
+    const maxWidth = Number(machine.maxWidthMm || 0);
+    return maxWidth <= 0 || requiredMachineWidthMm <= 0 || requiredMachineWidthMm <= maxWidth + 0.0001;
+  };
+
   const orderedSteps = recipe.processSteps.length
     ? recipe.processSteps
     : recipe.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null }));
@@ -918,31 +942,29 @@ export async function previewRecipeCost(
   for (const step of orderedSteps) {
     const process = processMap.get(step.processId);
     if (!process) continue;
-    const selectedMachine = step.machineId
-      ? machineMap.get(step.machineId)
-      : machines.find((row) => row.active && row.processIds.includes(step.processId));
+    const candidates = step.machineId
+      ? [machineMap.get(step.machineId)].filter((row): row is MachineRecord => Boolean(row))
+      : machines.filter((row) => row.active && row.processIds.includes(step.processId));
+    const compatibleMachines = candidates.filter(machineFits);
+    const incompatibleMachines = candidates.filter((machine) => !machineFits(machine));
+    const selectedMachine = [...compatibleMachines].sort((a, b) => machineLineCost(a) - machineLineCost(b))[0];
+    if (!selectedMachine && incompatibleMachines.length > 0) {
+      machineWarnings.push(
+        `${process.name} requires ${Math.round(requiredMachineWidthMm)}mm media width; ${incompatibleMachines.map((machine) => `${machine.name} max ${Math.round(Number(machine.maxWidthMm || 0))}mm`).join(", ")}.`
+      );
+    }
     const selectedLabour = step.labourOperationId
       ? labourMap.get(step.labourOperationId)
       : process.labourOperationId
         ? labourMap.get(process.labourOperationId)
         : undefined;
 
-    let runHours = 0;
-    const speed = Number(selectedMachine?.speedValue || 0);
-    if (speed > 0) {
-      if (selectedMachine?.speedUom === "linear_metres_per_hour") {
-        runHours = Number(base.materialUsage.linearMetres || 0) / speed;
-      } else if (selectedMachine?.speedUom === "sheets_per_hour") {
-        runHours = Number(base.materialUsage.sheets || 0) / speed;
-      } else {
-        runHours = base.areaSqm / speed;
-      }
-    }
-
+    const runHours = selectedMachine ? machineRunHours(selectedMachine) : 0;
     const stepMachineCost = selectedMachine
       ? (runHours + Number(selectedMachine.setupMinutes || 0) / 60) * Number(selectedMachine.hourlyCost || 0)
       : 0;
-    const stepInkCost = selectedMachine
+    const isPrintProcess = /print/i.test(`${process.name} ${process.processType}`);
+    const stepInkCost = selectedMachine && isPrintProcess
       ? base.areaSqm * Number(selectedMachine.inkCostPerSqm || 0)
       : 0;
     const stepLabourCost = selectedLabour
@@ -976,6 +998,7 @@ export async function previewRecipeCost(
     labourCost: Math.round(labourCost * 100) / 100,
     totalCost: Math.round(total * 100) / 100,
     sellPrice: Math.round(total * Number(recipe.markupMultiplier) * Number(recipe.profitMultiplier) * 100) / 100,
-    processBreakdown: breakdown
+    processBreakdown: breakdown,
+    machineWarnings
   };
 }

@@ -179,6 +179,7 @@ export type QuickQuoteSnapshot = {
     myobMatrixQuantityOver?: number;
     myobMatrixLevelKey?: string;
     pricingBreakdown?: Array<Record<string, unknown>>;
+    machineCosting?: Record<string, unknown>;
   };
 };
 

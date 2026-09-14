@@ -23,6 +23,8 @@ import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondence
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalModalForm";
 import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
+import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, listRecipesForTenant } from "@/server/productionResources";
+import type { QuoteCostingResources } from "./quoteCostingResources";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -441,7 +443,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const myobSetupRequested = readParam(params, "myobSetup") === "1";
 
   const builderDataNeeded = Boolean(selected);
-  const [allQuoteDrafts, materials, enquiry, survey, initialSelectedQuote, companySettings, initialClients, allEnquiries, quoteProducts, salesDefaults] = await Promise.all([
+  const [allQuoteDrafts, materials, enquiry, survey, initialSelectedQuote, companySettings, initialClients, allEnquiries, quoteProducts, salesDefaults, costingSource] = await Promise.all([
     listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? listMaterialsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
@@ -451,11 +453,56 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     listCustomersForTenant(activeTenant.tenantId),
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([]),
-    selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null })
+    selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null }),
+    builderDataNeeded
+      ? Promise.all([
+          listProcessesForTenant(activeTenant.tenantId),
+          listMachinesForTenant(activeTenant.tenantId),
+          listLabourForTenant(activeTenant.tenantId),
+          listRecipesForTenant(activeTenant.tenantId)
+        ])
+      : Promise.resolve([[], [], [], []] as const)
   ]);
 
   const selectedQuote = initialSelectedQuote;
   const clients = initialClients;
+  const [costingProcesses, costingMachines, costingLabour, costingRecipes] = costingSource;
+  const quoteCostingResources: QuoteCostingResources = {
+    processes: costingProcesses.filter((row) => row.active).map((row) => ({
+      id: row.id,
+      name: row.name,
+      department: row.department,
+      processType: row.processType,
+      labourOperationId: row.labourOperationId
+    })),
+    machines: costingMachines.filter((row) => row.active).map((row) => ({
+      id: row.id,
+      name: row.name,
+      machineType: row.machineType,
+      maxWidthMm: row.maxWidthMm,
+      speedValue: row.speedValue,
+      speedUom: row.speedUom,
+      hourlyCost: row.hourlyCost,
+      setupMinutes: row.setupMinutes,
+      inkCostPerSqm: row.inkCostPerSqm,
+      processIds: row.processIds
+    })),
+    labour: costingLabour.filter((row) => row.active).map((row) => ({
+      id: row.id,
+      name: row.name,
+      department: row.department,
+      hourlyRate: row.hourlyRate,
+      calculationBasis: row.calculationBasis,
+      calculationValue: row.calculationValue,
+      minimumMinutes: row.minimumMinutes
+    })),
+    recipes: costingRecipes.filter((row) => row.active).map((row) => ({
+      id: row.id,
+      materialId: row.materialId,
+      processIds: row.processIds,
+      processSteps: row.processSteps
+    }))
+  };
 
   // Never call MYOB as part of a normal quote page GET. Order creation happens
   // in the acceptance actions; if a legacy order needs attention the existing
@@ -487,6 +534,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         department: product.department,
         productFamily: product.productFamily,
         myobUid: product.myobUid,
+        productionRecipeId: product.productionRecipeId,
         myobPriceMatrix: product.payloadJson?.myobPriceMatrix && typeof product.payloadJson.myobPriceMatrix === "object" && !Array.isArray(product.payloadJson.myobPriceMatrix)
           ? product.payloadJson.myobPriceMatrix as Record<string, unknown>
           : null,
@@ -1028,6 +1076,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         materials={activeMaterials}
                         myobMatrixItems={myobMatrixItems}
                         canOverrideMarkup={canOverrideQuoteMarkup}
+                        costingResources={quoteCostingResources}
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",
@@ -1171,6 +1220,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           materials={activeMaterials}
                           myobMatrixItems={myobMatrixItems}
                           canOverrideMarkup={canOverrideQuoteMarkup}
+                          costingResources={quoteCostingResources}
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                             accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",

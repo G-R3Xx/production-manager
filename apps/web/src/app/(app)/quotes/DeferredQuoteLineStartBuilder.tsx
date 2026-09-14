@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type ComponentType } from "react";
 import type { QuoteProduct } from "./QuoteLineBuilder";
 import type { MyobMatrixItem, PricingSettings, QuoteMaterial } from "./QuoteMaterialFlowBuilder";
+import type { QuoteCostingResources } from "./quoteCostingResources";
 
 type Props = {
   quoteId: string;
@@ -11,6 +12,7 @@ type Props = {
   myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: PricingSettings;
   canOverrideMarkup?: boolean;
+  costingResources?: QuoteCostingResources;
 };
 
 export function DeferredQuoteLineStartBuilder(props: Props) {

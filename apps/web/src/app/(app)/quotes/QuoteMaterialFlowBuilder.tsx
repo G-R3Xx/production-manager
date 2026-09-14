@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
+import { labourRateForProcess, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
 export type QuoteMaterial = {
   id: string;
@@ -76,6 +77,7 @@ type QuoteMaterialFlowBuilderProps = {
   pricingSettings?: PricingSettings;
   editingLine?: EditableQuoteLine | null;
   canOverrideMarkup?: boolean;
+  costingResources?: QuoteCostingResources;
 };
 
 type FlowType = QuickQuoteFlowType;
@@ -1109,7 +1111,7 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const standardMarkupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const standardAccessEquipmentMarkupMultiplier = multiplierValue(pricingSettings?.accessEquipmentMarkupMultiplier, standardMarkupMultiplier);
@@ -1449,6 +1451,131 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   });
   const componentHasCost = pricedComponentParts.length > 0 || numberValue(componentLabourMinutes, 0) > 0;
 
+  const costingDepartment = flowType === "small_format"
+    ? "small_format"
+    : flowType === "plan_printing"
+      ? "plan_printing"
+      : flowType === "poster_printing"
+        ? "poster_printing"
+        : flowType === "signage"
+          ? "signage"
+          : "general";
+
+  const signagePrintSheetUse = flowType === "signage" && selectedMainMaterial && !isRollMaterial(selectedMainMaterial) && width > 0 && height > 0
+    ? sheetUsageForQuoteLine(selectedMainMaterial, usageWidth, usageHeight, Math.max(1, Math.ceil(quantityNumber * sideMultiplier)))
+    : null;
+  const signagePrintRollUse = flowType === "signage" && needsInkStep && activeRollMaterial && width > 0 && height > 0
+    ? roundedRollMetresForQuantity(usageWidth, usageHeight, activeRollMaterial, Math.max(1, Math.ceil(quantityNumber * sideMultiplier)), effectiveDropDirection, safeDropOverlapMm)
+    : null;
+  const smallStockDimensionsForMachine = selectedSmallStock ? bestSheetDimensions(selectedSmallStock) : null;
+  const smallPiecesPerSheetForMachine = smallStockDimensionsForMachine && width > 0 && height > 0
+    ? piecesPerSheet(smallStockDimensionsForMachine.width, smallStockDimensionsForMachine.length, usageWidth, usageHeight)
+    : 0;
+  const smallRequiredPiecesForMachine = flowType === "small_format" && isDuplicateBook
+    ? quantityNumber * Math.max(1, numberValue(ncrSetsPerBook, 1)) * Math.max(1, ncrCopiesCount || 1)
+    : quantityNumber;
+  const smallSheetsForMachine = selectedSmallStock && !isRollMaterial(selectedSmallStock)
+    ? (smallPiecesPerSheetForMachine > 0 ? Math.ceil(smallRequiredPiecesForMachine / smallPiecesPerSheetForMachine) : smallRequiredPiecesForMachine)
+    : 0;
+  const smallRollUseForMachine = selectedSmallStock && isRollMaterial(selectedSmallStock) && width > 0 && height > 0
+    ? roundedRollMetresForQuantity(usageWidth, usageHeight, selectedSmallStock, Math.max(1, Math.ceil(quantityNumber * sideMultiplier)))
+    : null;
+
+  const printRequiredWidthMm = flowType === "signage"
+    ? (numberValue(activeRollMaterial?.rollWidthMm, 0) || (() => { const d = selectedMainMaterial ? bestSheetDimensions(selectedMainMaterial) : null; return d ? Math.min(d.width, d.length) : Math.min(width, height); })())
+    : (numberValue(selectedSmallStock?.rollWidthMm, 0) || (smallStockDimensionsForMachine ? Math.min(smallStockDimensionsForMachine.width, smallStockDimensionsForMachine.length) : Math.min(width, height)));
+  const printMachineMetrics = {
+    quantity: quantityNumber,
+    areaSqmPerUnit: flowType === "small_format" && isDuplicateBook
+      ? areaSqm * Math.max(1, numberValue(ncrSetsPerBook, 1)) * Math.max(1, ncrCopiesCount || 1)
+      : areaSqm * sideMultiplier,
+    sheetsPerLine: flowType === "signage" ? signagePrintSheetUse?.physicalSheets ?? 0 : smallSheetsForMachine,
+    linearMetresPerLine: flowType === "signage" ? signagePrintRollUse?.unroundedAmount ?? 0 : smallRollUseForMachine?.unroundedAmount ?? 0,
+    requiredWidthMm: printRequiredWidthMm
+  };
+  const printMachineSelection = (flowType === "signage" ? needsInkStep && printed : isPrintDepartment || flowType === "small_format" ? Boolean(smallPrintColour) : false)
+    ? selectMachineForProcess(costingResources, ["direct print", "print"], printMachineMetrics, costingDepartment)
+    : null;
+
+  const laminateRollUseForMachine = selectedLaminate && width > 0 && height > 0
+    ? roundedRollMetresForQuantity(usageWidth, usageHeight, selectedLaminate, Math.max(1, Math.ceil(quantityNumber * sideMultiplier)), effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview)
+    : null;
+  const laminateMachineSelection = ((flowType === "signage" && selectedLaminate && laminateId !== "none") || ((flowType === "small_format" || isPrintDepartment) && selectedSmallCoating && smallCoatingId !== "none"))
+    ? selectMachineForProcess(costingResources, ["laminate", "laminating", "cello", "coating"], {
+        quantity: quantityNumber,
+        areaSqmPerUnit: areaSqm * sideMultiplier,
+        linearMetresPerLine: laminateRollUseForMachine?.unroundedAmount ?? 0,
+        requiredWidthMm: numberValue((selectedLaminate ?? selectedSmallCoating)?.rollWidthMm, 0) || Math.min(width, height)
+      }, costingDepartment)
+    : null;
+
+  const signageParentDimensionsForMachine = selectedMainMaterial && !isRollMaterial(selectedMainMaterial)
+    ? bestSheetDimensions(selectedMainMaterial)
+    : null;
+  const signageProcessWidthMm = numberValue(activeRollMaterial?.rollWidthMm, 0)
+    || (signageParentDimensionsForMachine ? Math.min(signageParentDimensionsForMachine.width, signageParentDimensionsForMachine.length) : 0)
+    || Math.min(width, height);
+  const jingweiMachineSelection = flowType === "signage" && finishings.includes("jingwei")
+    ? selectMachineForProcess(costingResources, ["jewei cut", "jingwei cut", "jewei", "jingwei"], {
+        quantity: quantityNumber,
+        areaSqmPerUnit: areaSqm,
+        sheetsPerLine: signagePrintSheetUse?.physicalSheets ?? quantityNumber,
+        requiredWidthMm: signageProcessWidthMm
+      }, costingDepartment)
+    : null;
+  const eyeletMachineSelection = flowType === "signage" && finishings.includes("eyelets")
+    ? selectMachineForProcess(costingResources, ["eyelets", "eyelet"], {
+        quantity: quantityNumber,
+        areaSqmPerUnit: areaSqm,
+        linearMetresPerLine: Math.max(0, 2 * ((width + height) / 1000) * quantityNumber),
+        requiredWidthMm: 0
+      }, costingDepartment)
+    : null;
+  const mountMachineSelection = flowType === "signage" && finishings.includes("print_vinyl_application")
+    ? selectMachineForProcess(costingResources, ["mount apply", "mounting application", "mount apply vinyl"], {
+        quantity: quantityNumber,
+        areaSqmPerUnit: areaSqm,
+        requiredWidthMm: signageProcessWidthMm
+      }, costingDepartment)
+    : null;
+  const trimMachineSelection = (flowType === "small_format" || isPrintDepartment) && smallFinishings.includes("trim")
+    ? selectMachineForProcess(costingResources, ["trim cut", "trim", "cut"], {
+        quantity: quantityNumber,
+        areaSqmPerUnit: areaSqm,
+        sheetsPerLine: smallSheetsForMachine,
+        requiredWidthMm: numberValue(selectedSmallStock?.rollWidthMm, 0)
+          || (smallStockDimensionsForMachine ? Math.min(smallStockDimensionsForMachine.width, smallStockDimensionsForMachine.length) : Math.min(width, height))
+      }, costingDepartment)
+    : null;
+
+  const printLabourRate = labourRateForProcess(costingResources, ["direct print", "print"], costingDepartment, labourRate);
+  const laminateLabourRate = labourRateForProcess(costingResources, ["laminate", "laminating", "cello", "coating"], costingDepartment, labourRate);
+  const eyeletLabourRate = labourRateForProcess(costingResources, ["eyelets", "eyelet"], costingDepartment, labourRate);
+  const jingweiLabourRate = labourRateForProcess(costingResources, ["jewei cut", "jingwei cut", "jewei", "jingwei"], costingDepartment, labourRate);
+  const mountLabourRate = labourRateForProcess(costingResources, ["mount apply", "mounting application"], costingDepartment, labourRate);
+  const trimLabourRate = labourRateForProcess(costingResources, ["trim cut", "trim", "cut"], costingDepartment, labourRate);
+  const printInkRatePerSqm = printMachineSelection?.machine
+    ? (numberValue(printMachineSelection.machine.inkCostPerSqm, 0) > 0 ? numberValue(printMachineSelection.machine.inkCostPerSqm, 0) : inkRatePerSqm)
+    : inkRatePerSqm;
+
+  const machineCompatibilityIssues = [
+    printMachineSelection && !printMachineSelection.machine && printMachineSelection.incompatibleMachines.length
+      ? `Print job requires ${dimensionMm(printRequiredWidthMm)}mm machine width; ${printMachineSelection.incompatibleMachines.map((machine) => `${machine.name} max ${dimensionMm(numberValue(machine.maxWidthMm, 0))}mm`).join(", ")}.`
+      : null,
+    laminateMachineSelection && !laminateMachineSelection.machine && laminateMachineSelection.incompatibleMachines.length
+      ? `Laminate/coating width exceeds the configured machine maximum (${laminateMachineSelection.incompatibleMachines.map((machine) => `${machine.name} ${dimensionMm(numberValue(machine.maxWidthMm, 0))}mm`).join(", ")}).`
+      : null,
+    jingweiMachineSelection && !jingweiMachineSelection.machine && jingweiMachineSelection.incompatibleMachines.length
+      ? `Jingwei cutting width exceeds the configured machine maximum (${jingweiMachineSelection.incompatibleMachines.map((machine) => `${machine.name} ${dimensionMm(numberValue(machine.maxWidthMm, 0))}mm`).join(", ")}).`
+      : null,
+    mountMachineSelection && !mountMachineSelection.machine && mountMachineSelection.incompatibleMachines.length
+      ? `Mount / apply width exceeds the configured machine maximum (${mountMachineSelection.incompatibleMachines.map((machine) => `${machine.name} ${dimensionMm(numberValue(machine.maxWidthMm, 0))}mm`).join(", ")}).`
+      : null,
+    trimMachineSelection && !trimMachineSelection.machine && trimMachineSelection.incompatibleMachines.length
+      ? `Trim/cut width exceeds the configured machine maximum (${trimMachineSelection.incompatibleMachines.map((machine) => `${machine.name} ${dimensionMm(numberValue(machine.maxWidthMm, 0))}mm`).join(", ")}).`
+      : null
+  ].filter((message): message is string => Boolean(message));
+
   function toggleFinishing(key: string) {
     setFinishings((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key]);
     setUnitPriceOverridden(false);
@@ -1523,7 +1650,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const methodLabel = printMethods.find((item) => item.key === resolvedPrintMethod)?.label ?? "Print";
         if (minutes > 0) {
           const amount = labourMinutesPerUnit(minutes, printSetupLabourBasis, quantityNumber);
-          const rate = labourRate / 60;
+          const rate = printLabourRate / 60;
           rows.push({
             label: "Print setup labour",
             detail: methodLabel,
@@ -1531,9 +1658,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             unit: "min",
             rate,
             cost: amount * rate,
-            note: labourChargeNote(minutes, printSetupLabourBasis, labourRate)
+            note: labourChargeNote(minutes, printSetupLabourBasis, printLabourRate)
           });
         }
+      }
+
+      if (printMachineSelection?.machine && printMachineSelection.machineCostPerUnit > 0) {
+        rows.push({
+          label: "Print machine",
+          detail: printMachineSelection.machine.name,
+          amount: 1,
+          unit: "item",
+          rate: printMachineSelection.machineCostPerUnit,
+          cost: printMachineSelection.machineCostPerUnit,
+          note: `${printMachineSelection.machine.speedValue} ${printMachineSelection.machine.speedUom.replaceAll("_", " ")} · ${minutesLabel(printMachineSelection.machine.setupMinutes)} machine setup · ${money(numberValue(printMachineSelection.machine.hourlyCost, 0))}/hr`
+        });
       }
 
       if (selectedMedia && needsAdditionalMediaCost && areaSqm > 0) {
@@ -1568,10 +1707,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const inkUse = roundedInkSquareMetresForQuoteLine(inkAreaPerFaceSqm, sideMultiplier, quantityNumber, inkRollUse, inkBillingIncrementSqm);
         const inkNote = [inkUse.note, sides === "double" ? "double sided" : null].filter(Boolean).join(" · ") || undefined;
         if (ink === "cmyk" || ink === "both") {
-          rows.push({ label: "CMYK ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
+          rows.push({ label: "CMYK ink", detail: printMachineSelection?.machine?.name ?? "Print", amount: inkUse.amount, unit: "sqm", rate: printInkRatePerSqm, cost: inkUse.amount * printInkRatePerSqm, note: [inkNote, printMachineSelection?.machine ? "ink rate from machine settings" : "fallback quote ink rate"].filter(Boolean).join(" · ") || undefined });
         }
         if (ink === "white" || ink === "both") {
-          rows.push({ label: "White ink", detail: "Sell charge", amount: inkUse.amount, unit: "sqm", rate: inkRatePerSqm, cost: inkUse.amount * inkRatePerSqm, note: inkNote });
+          rows.push({ label: "White ink", detail: printMachineSelection?.machine?.name ?? "Print", amount: inkUse.amount, unit: "sqm", rate: printInkRatePerSqm, cost: inkUse.amount * printInkRatePerSqm, note: [inkNote, printMachineSelection?.machine ? "ink rate from machine settings" : "fallback quote ink rate"].filter(Boolean).join(" · ") || undefined });
         }
       }
 
@@ -1610,11 +1749,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           cost: amount * rate.rate,
           note: [spacingUsageNote || null, lm.note, sides === "double" ? "double sided" : null, quantityNumber > 1 ? `${usage(lm.amount)}lm total for qty ${usage(quantityNumber)}` : null, rate.note].filter(Boolean).join(" · ") || undefined
         });
+        if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
+          rows.push({ label: "Laminate machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: `Machine settings · ${money(numberValue(laminateMachineSelection.machine.hourlyCost, 0))}/hr` });
+        }
         const minutes = numberValue(laminateMinutes, 0);
         if (minutes > 0) {
           const amount = labourMinutesPerUnit(minutes, laminateLabourBasis, quantityNumber);
-          const rate = labourRate / 60;
-          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, laminateLabourBasis, labourRate) });
+          const rate = laminateLabourRate / 60;
+          rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, laminateLabourBasis, laminateLabourRate) });
         }
       }
 
@@ -1627,23 +1769,31 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             const rate = eachRate(eyeletMaterial);
             rows.push({ label: "Eyelets", detail: eyeletMaterial.name, amount: qty, unit: "each", rate: rate.rate, cost: qty * rate.rate, note: [eyeletPresetLabel, rate.note].filter(Boolean).join(" · ") || undefined });
           }
+          if (eyeletMachineSelection?.machine && eyeletMachineSelection.machineCostPerUnit > 0) {
+            rows.push({ label: "Eyelet machine", detail: eyeletMachineSelection.machine.name, amount: 1, unit: "item", rate: eyeletMachineSelection.machineCostPerUnit, cost: eyeletMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+          }
           const eyeletMinutes = numberValue(finishingMinutes[item.key], 0);
           if (qty > 0 && eyeletMinutes > 0) {
             const basis = finishingLabourBasis[item.key] ?? "per_item";
             const amount = basis === "per_item"
               ? qty * eyeletMinutes
               : labourMinutesPerUnit(eyeletMinutes, "line_total", quantityNumber);
-            const rate = labourRate / 60;
-            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(eyeletMinutes, basis, labourRate, "per eyelet") });
+            const rate = eyeletLabourRate / 60;
+            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(eyeletMinutes, basis, eyeletLabourRate, "per eyelet") });
           }
           continue;
+        }
+        const processMachine = item.key === "jingwei" ? jingweiMachineSelection : item.key === "print_vinyl_application" ? mountMachineSelection : null;
+        if (processMachine?.machine && processMachine.machineCostPerUnit > 0) {
+          rows.push({ label: `${item.label} machine`, detail: processMachine.machine.name, amount: 1, unit: "item", rate: processMachine.machineCostPerUnit, cost: processMachine.machineCostPerUnit, note: "Machine cost from Machines settings" });
         }
         const minutes = numberValue(finishingMinutes[item.key], 0);
         if (minutes > 0) {
           const basis = finishingLabourBasis[item.key] ?? "line_total";
           const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
-          const rate = labourRate / 60;
-          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
+          const operationRate = item.key === "jingwei" ? jingweiLabourRate : item.key === "print_vinyl_application" ? mountLabourRate : labourRate;
+          const rate = operationRate / 60;
+          rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, operationRate) });
         }
       }
 
@@ -1714,27 +1864,38 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         }
       }
 
+      if (printMachineSelection?.machine && printMachineSelection.machineCostPerUnit > 0) {
+        rows.push({ label: "Print machine", detail: printMachineSelection.machine.name, amount: 1, unit: "item", rate: printMachineSelection.machineCostPerUnit, cost: printMachineSelection.machineCostPerUnit, note: `${printMachineSelection.machine.speedValue} ${printMachineSelection.machine.speedUom.replaceAll("_", " ")} · ${money(numberValue(printMachineSelection.machine.hourlyCost, 0))}/hr` });
+      }
+
       if (smallPrintColour && itemArea > 0) {
         const printedArea = itemArea * sideMultiplier;
         if (smallPrintColour === "mono") rows.push({ label: "Mono print", detail: flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: monoRatePerSqm, cost: printedArea * monoRatePerSqm, note: sides === "double" ? "double sided" : undefined });
-        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: inkRatePerSqm, cost: printedArea * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
-        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: inkRatePerSqm * 2, cost: printedArea * inkRatePerSqm * 2, note: sides === "double" ? "double sided" : undefined });
+        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: printMachineSelection?.machine?.name ?? flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: printInkRatePerSqm, cost: printedArea * printInkRatePerSqm, note: [sides === "double" ? "double sided" : null, printMachineSelection?.machine ? "ink rate from machine settings" : "fallback quote ink rate"].filter(Boolean).join(" · ") || undefined });
+        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: printMachineSelection?.machine?.name ?? flowDepartmentProductName(flowType), amount: printedArea, unit: "sqm", rate: printInkRatePerSqm * 2, cost: printedArea * printInkRatePerSqm * 2, note: [sides === "double" ? "double sided" : null, printMachineSelection?.machine ? "ink rate from machine settings" : "fallback quote ink rate"].filter(Boolean).join(" · ") || undefined });
       }
 
       if (selectedSmallCoating && smallCoatingId !== "none" && itemArea > 0) {
         const rate = isRollMaterial(selectedSmallCoating) ? rollRate(selectedSmallCoating) : sheetUnitRate(selectedSmallCoating);
         const amount = itemArea * sideMultiplier;
         rows.push({ label: "Coating / laminate", detail: selectedSmallCoating.name, amount, unit: "sqm", rate: rate.rate, cost: amount * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
+        if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
+          rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+        }
       }
 
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
+        if (item.key === "trim" && trimMachineSelection?.machine && trimMachineSelection.machineCostPerUnit > 0) {
+          rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+        }
         const minutes = numberValue(smallFinishingMinutes[item.key], 0);
         if (minutes > 0) {
           const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
           const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
-          const rate = labourRate / 60;
-          rows.push({ label: item.label, detail: "Finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
+          const operationRate = item.key === "trim" ? trimLabourRate : labourRate;
+          const rate = operationRate / 60;
+          rows.push({ label: item.label, detail: "Finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, operationRate) });
         }
       }
     }
@@ -1799,27 +1960,38 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         rows.push({ label: "Carbon book print", detail: pageColourSummary(copiesPerSet, ncrPageColours), amount: printedAreaPerBook, unit: "sqm", rate: monoRatePerSqm, cost: printedAreaPerBook * monoRatePerSqm, note: `${usage(quantityNumber)} books × ${usage(setsPerBook)} sets × ${copiesPerSet} copies` });
       }
 
+      if (printMachineSelection?.machine && printMachineSelection.machineCostPerUnit > 0) {
+        rows.push({ label: "Print machine", detail: printMachineSelection.machine.name, amount: 1, unit: "item", rate: printMachineSelection.machineCostPerUnit, cost: printMachineSelection.machineCostPerUnit, note: `${printMachineSelection.machine.speedValue} ${printMachineSelection.machine.speedUom.replaceAll("_", " ")} · ${money(numberValue(printMachineSelection.machine.hourlyCost, 0))}/hr` });
+      }
+
       if (smallPrintColour && itemArea > 0 && quantityNumber > 0) {
         const printedAreaPerFinishedItem = itemArea * sideMultiplier;
         if (smallPrintColour === "mono") rows.push({ label: "Mono print", detail: "Small-format print charge", amount: printedAreaPerFinishedItem, unit: "sqm", rate: monoRatePerSqm, cost: printedAreaPerFinishedItem * monoRatePerSqm, note: sides === "double" ? "double sided" : undefined });
-        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: "Small-format print charge", amount: printedAreaPerFinishedItem, unit: "sqm", rate: inkRatePerSqm, cost: printedAreaPerFinishedItem * inkRatePerSqm, note: sides === "double" ? "double sided" : undefined });
-        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: "Small-format print charge", amount: printedAreaPerFinishedItem, unit: "sqm", rate: inkRatePerSqm * 2, cost: printedAreaPerFinishedItem * inkRatePerSqm * 2, note: sides === "double" ? "double sided" : undefined });
+        if (smallPrintColour === "cmyk") rows.push({ label: "CMYK print", detail: printMachineSelection?.machine?.name ?? "Small-format print", amount: printedAreaPerFinishedItem, unit: "sqm", rate: printInkRatePerSqm, cost: printedAreaPerFinishedItem * printInkRatePerSqm, note: [sides === "double" ? "double sided" : null, printMachineSelection?.machine ? "ink rate from machine settings" : "fallback quote ink rate"].filter(Boolean).join(" · ") || undefined });
+        if (smallPrintColour === "special") rows.push({ label: "CMYK + special print", detail: printMachineSelection?.machine?.name ?? "Small-format print", amount: printedAreaPerFinishedItem, unit: "sqm", rate: printInkRatePerSqm * 2, cost: printedAreaPerFinishedItem * printInkRatePerSqm * 2, note: [sides === "double" ? "double sided" : null, printMachineSelection?.machine ? "ink rate from machine settings" : "fallback quote ink rate"].filter(Boolean).join(" · ") || undefined });
       }
 
       if (selectedSmallCoating && smallCoatingId !== "none" && itemArea > 0 && quantityNumber > 0) {
         const rate = isRollMaterial(selectedSmallCoating) ? rollRate(selectedSmallCoating) : sheetUnitRate(selectedSmallCoating);
         const amountPerFinishedItem = itemArea * sideMultiplier;
         rows.push({ label: "Cello / coating", detail: selectedSmallCoating.name, amount: amountPerFinishedItem, unit: "sqm", rate: rate.rate, cost: amountPerFinishedItem * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
+        if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
+          rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+        }
       }
 
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
+        if (item.key === "trim" && trimMachineSelection?.machine && trimMachineSelection.machineCostPerUnit > 0) {
+          rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+        }
         const minutes = numberValue(smallFinishingMinutes[item.key], 0);
         if (minutes > 0) {
           const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
           const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
-          const rate = labourRate / 60;
-          rows.push({ label: item.label, detail: "Bindery / finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, labourRate) });
+          const operationRate = item.key === "trim" ? trimLabourRate : labourRate;
+          const rate = operationRate / 60;
+          rows.push({ label: item.label, detail: "Bindery / finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, operationRate) });
         }
       }
     }
@@ -2141,7 +2313,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
   const planMatrixPricingReady = flowType !== "plan_printing" || planPricingMode === "pm_calculated" || Boolean(selectedPlanMatrixItem && selectedPlanMatrixPrice);
 
-  const canSave = flowType === "component"
+  const canSaveBase = flowType === "component"
     ? Boolean(componentName.trim() && componentHasCost)
     : flowType === "service"
     ? Boolean(serviceType && (
@@ -2155,6 +2327,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       : flowType === "small_format"
         ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
         : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!canChooseReversePrint || !printed || printDirection) && (!backingApplicable || Boolean(backingId)) && (!printed || Boolean(laminateId)) && dispatchComplete);
+  const canSave = canSaveBase && machineCompatibilityIssues.length === 0;
 
   const configurationSnapshot: QuickQuoteSnapshot = {
     version: 1,
@@ -2281,7 +2454,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       myobMatrixUnitPrice: selectedPlanMatrixPrice?.unitPrice,
       myobMatrixQuantityOver: selectedPlanMatrixPrice?.quantityOver,
       myobMatrixLevelKey: selectedPlanMatrixPrice?.levelKey,
-      pricingBreakdown: costs.map((row) => ({ ...row }))
+      pricingBreakdown: costs.map((row) => ({ ...row })),
+      machineCosting: {
+        printMachineId: printMachineSelection?.machine?.id ?? null,
+        printMachineName: printMachineSelection?.machine?.name ?? null,
+        laminateMachineId: laminateMachineSelection?.machine?.id ?? null,
+        laminateMachineName: laminateMachineSelection?.machine?.name ?? null,
+        jingweiMachineId: jingweiMachineSelection?.machine?.id ?? null,
+        jingweiMachineName: jingweiMachineSelection?.machine?.name ?? null,
+        eyeletMachineId: eyeletMachineSelection?.machine?.id ?? null,
+        eyeletMachineName: eyeletMachineSelection?.machine?.name ?? null,
+        trimMachineId: trimMachineSelection?.machine?.id ?? null,
+        trimMachineName: trimMachineSelection?.machine?.name ?? null
+      }
     }
   };
 
@@ -2816,6 +3001,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             <strong style={{ color: "#1d4ed8" }}>Configure the complete quote line</strong>
             <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line. Live auto-refresh is paused while this editor is open so your unsaved selections are protected.</div>
           </div>
+          {machineCompatibilityIssues.length ? (
+            <div style={{ borderRadius: 14, background: "#fff1f2", border: "1px solid #fecdd3", padding: "12px 14px", color: "#9f1239", display: "grid", gap: 4 }}>
+              <strong>Machine width check</strong>
+              {machineCompatibilityIssues.map((message) => <span key={message} style={{ fontSize: 12, lineHeight: 1.45 }}>{message}</span>)}
+              <span style={{ fontSize: 12 }}>Change the stock/orientation, or update the machine Max width in Settings → Machines before saving this line.</span>
+            </div>
+          ) : null}
           {allSignageSteps.map((step, index) => (
             <section key={step} style={{ display: "grid", gap: 7 }}>
               <strong style={{ color: "#344054", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em" }}>{index + 1}. {allStepLabels[step] ?? step.replaceAll("_", " ")}</strong>

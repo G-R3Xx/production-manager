@@ -50,7 +50,7 @@ export type ProductSummaryRecord = Pick<
 
 export type QuoteProductRecord = Pick<
   ProductRecord,
-  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId" | "myobUid"
+  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId" | "myobUid" | "productionRecipeId"
 > & {
   definitionJson: Record<string, unknown>;
   payloadJson: Record<string, unknown>;
@@ -201,6 +201,7 @@ export async function listQuoteProductsForTenant(tenantId: string): Promise<Quot
         p.status::text AS status,
         p.default_template_id AS "defaultTemplateId",
         p.myob_uid AS "myobUid",
+        p.production_recipe_id::text AS "productionRecipeId",
         COALESCE(ct.definition_json, '{}'::jsonb) AS "definitionJson",
         COALESCE(p.payload_json, '{}'::jsonb) AS "payloadJson"
       FROM catalog.products p

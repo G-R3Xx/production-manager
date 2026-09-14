@@ -55,6 +55,7 @@ type PreviewSummary = {
     machineName: string | null;
     labourName?: string | null;
   }>;
+  machineWarnings?: string[];
 } | null;
 
 type Props = {
@@ -1014,6 +1015,7 @@ export function ProductProductionFlowBuilder({
         </div>
         <Link href={`/products/${productId}?tab=pricing`} style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>Open full price check →</Link>
       </div>
+      {preview?.machineWarnings?.length ? <div style={{ marginTop: 14, border: "1px solid #fca5a5", borderRadius: 12, background: "#fff1f2", color: "#b42318", padding: 12, display: "grid", gap: 4 }}><strong>Machine width needs attention</strong>{preview.machineWarnings.map((warning) => <span key={warning} style={{ fontSize: 13 }}>{warning}</span>)}</div> : null}
       {preview ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 9, marginTop: 15 }}>
         {[["Material", preview.materialCost], ["Machines", preview.machineCost], ["Ink", preview.inkCost], ["Labour", preview.labourCost], ["Total cost", preview.totalCost], ["Sell price", preview.sellPrice]].map(([label, value]) => <div key={String(label)} style={{ padding: 12, borderRadius: 12, background: "#fff", border: "1px solid #dbe4f0" }}><div style={{ fontSize: 12, color: "#64748b" }}>{label}</div><div style={{ marginTop: 5, fontSize: 18, fontWeight: 950 }}>{currency.format(Number(value))}</div></div>)}
       </div> : <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "#fff", border: "1px solid #dbe4f0", color: "#475569" }}>Save the product setup to calculate its cost and sell price.</div>}

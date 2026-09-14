@@ -3,6 +3,7 @@
 import { lazy, Suspense, useState } from "react";
 import type { QuoteProduct } from "./QuoteLineBuilder";
 import type { MyobMatrixItem, PricingSettings, QuoteMaterial } from "./QuoteMaterialFlowBuilder";
+import type { QuoteCostingResources } from "./quoteCostingResources";
 
 const QuoteLineBuilder = lazy(() => import("./QuoteLineBuilder").then((module) => ({ default: module.QuoteLineBuilder })));
 const QuoteMaterialFlowBuilder = lazy(() => import("./QuoteMaterialFlowBuilder").then((module) => ({ default: module.QuoteMaterialFlowBuilder })));
@@ -16,6 +17,7 @@ type QuoteLineStartBuilderProps = {
   myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: PricingSettings;
   canOverrideMarkup?: boolean;
+  costingResources?: QuoteCostingResources;
 };
 
 const optionButton = (active: boolean) => ({
@@ -38,6 +40,7 @@ export function QuoteLineStartBuilder({
   myobMatrixItems = [],
   pricingSettings,
   canOverrideMarkup = false,
+  costingResources,
 }: QuoteLineStartBuilderProps) {
   const [mode, setMode] = useState<StartMode>("saved");
 
@@ -71,6 +74,7 @@ export function QuoteLineStartBuilder({
               products={products}
               materials={materials}
               pricingSettings={pricingSettings}
+              costingResources={costingResources}
             />
           ) : (
             <QuoteMaterialFlowBuilder
@@ -79,6 +83,7 @@ export function QuoteLineStartBuilder({
               myobMatrixItems={myobMatrixItems}
               canOverrideMarkup={canOverrideMarkup}
               pricingSettings={pricingSettings}
+              costingResources={costingResources}
             />
           )}
         </Suspense>
