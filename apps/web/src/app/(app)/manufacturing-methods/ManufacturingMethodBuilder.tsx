@@ -19,10 +19,10 @@ type StepNumber = 1 | 2 | 3 | 4;
 
 const departmentOptions = [
   { value: "signage", label: "Signage", description: "Boards, roll media, vinyl and fabricated signs" },
-  { value: "print", label: "Small format", description: "Business cards, flyers, books and paper products" },
-  { value: "plans", label: "Plan printing", description: "Architectural plans and technical drawings" },
-  { value: "display", label: "Displays & posters", description: "Posters, display graphics and presentation products" },
-  { value: "vehicle", label: "Vehicle graphics", description: "Vehicle print, laminate, cut and installation" },
+  { value: "small_format", label: "Small format", description: "Business cards, flyers, books and paper products" },
+  { value: "plan_printing", label: "Plan printing", description: "Architectural plans and technical drawings" },
+  { value: "poster_printing", label: "Displays & posters", description: "Posters, display graphics and presentation products" },
+  { value: "vehicle_graphics", label: "Vehicle graphics", description: "Vehicle print, laminate, cut and installation" },
   { value: "general", label: "General / service", description: "Install-only, labour or shared production methods" }
 ] as const;
 
@@ -84,12 +84,12 @@ function materialDepartmentScore(material: MaterialRecord, department: string): 
     if (/sheet|roll|laminate|vinyl/.test(type)) return 3;
     if (/acm|corflute|coreflute|acrylic|pvc|vinyl|banner/.test(haystack)) return 2;
   }
-  if (department === "print") {
+  if (department === "small_format") {
     if (group === "small-format") return 4;
     if (/paper|card|cello|binding/.test(type)) return 3;
   }
-  if (department === "plans" && group === "plan-printing") return 4;
-  if (department === "display" && group === "poster-printing") return 4;
+  if (department === "plan_printing" && group === "plan-printing") return 4;
+  if (department === "poster_printing" && group === "poster-printing") return 4;
   if (group === "shared" || group === "general") return 1;
   return 0;
 }
@@ -136,7 +136,8 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
   const initialMaterialId = recipe?.materialId ?? "";
   const initialMaterial = materials.find((material) => material.id === initialMaterialId);
   const [step, setStep] = useState<StepNumber>(1);
-  const [department, setDepartment] = useState(recipe?.department ?? "signage");
+  const legacyDepartment = recipe?.department === "print" ? "small_format" : recipe?.department === "plans" ? "plan_printing" : recipe?.department === "display" ? "poster_printing" : recipe?.department === "vehicle" ? "vehicle_graphics" : recipe?.department;
+  const [department, setDepartment] = useState(legacyDepartment ?? "signage");
   const [name, setName] = useState(recipe?.name ?? "");
   const [materialId, setMaterialId] = useState(initialMaterialId);
   const [materialSearch, setMaterialSearch] = useState("");
@@ -208,7 +209,7 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
         <StepButton number={1} current={step} title="What are you making?" complete={stepComplete[1]} onClick={() => setStep(1)} />
         <StepButton number={2} current={step} title="Material" complete={Boolean(materialId) || department === "general"} onClick={() => setStep(2)} />
-        <StepButton number={3} current={step} title="Production steps" complete={stepComplete[3]} onClick={() => setStep(3)} />
+        <StepButton number={3} current={step} title="Processes" complete={stepComplete[3]} onClick={() => setStep(3)} />
         <StepButton number={4} current={step} title="Review" complete={stepComplete[4]} onClick={() => setStep(4)} />
       </div>
 
@@ -267,8 +268,8 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
       {step === 3 ? (
         <section style={panel}>
           <div style={{ fontSize: 12, fontWeight: 950, textTransform: "uppercase", color: "#0f766e" }}>Step 3</div>
-          <h3 style={{ margin: "6px 0 4px", fontSize: 24 }}>Add the production steps in order</h3>
-          <p style={{ margin: "0 0 16px", color: "#64748b", lineHeight: 1.55 }}>Add only what this method normally requires. The order below becomes the production sequence and determines the compatible machine and labour costs.</p>
+          <h3 style={{ margin: "6px 0 4px", fontSize: 24 }}>Add the processes in order</h3>
+          <p style={{ margin: "0 0 16px", color: "#64748b", lineHeight: 1.55 }}>Add only what this method normally requires. Each Process already knows its machine and labour; this screen only defines the production order.</p>
 
           {selectedProcesses.length ? (
             <div style={{ display: "grid", gap: 8, marginBottom: 16 }}>
@@ -277,7 +278,7 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
                   <div style={{ display: "grid", placeItems: "center", width: 32, height: 32, borderRadius: 999, background: "#0f766e", color: "#fff", fontWeight: 950 }}>{index + 1}</div>
                   <div>
                     <div style={{ fontWeight: 950 }}>{process.name}</div>
-                    <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>{process.processType} · {departmentLabel(process.department)}{process.labourOperationName ? ` · ${process.labourOperationName}` : ""}</div>
+                    <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>{process.processType} · {departmentLabel(process.department)}{process.machineNames?.[0] ? ` · ${process.machineNames[0]}` : ""}{process.labourOperationName ? ` · ${process.labourOperationName}` : ""}</div>
                   </div>
                   <div style={{ display: "flex", gap: 6 }}>
                     <button type="button" aria-label="Move up" disabled={index === 0} onClick={() => moveProcess(index, -1)} style={{ ...secondaryButton, minHeight: 34, padding: "0 10px", opacity: index === 0 ? 0.4 : 1 }}>↑</button>
@@ -307,7 +308,7 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
             </div>
           ) : (
             <div style={{ padding: 16, borderRadius: 13, border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412" }}>
-              <strong>No production steps are available.</strong> Create simple steps such as Direct print, Trim, Laminate, Eyelets or Install first. <Link href="/processes" style={{ color: "inherit", fontWeight: 950 }}>Open Production Steps →</Link>
+              <strong>No processes are available.</strong> Create simple steps such as Direct print, Trim, Laminate, Eyelets or Install first. <Link href="/processes" style={{ color: "inherit", fontWeight: 950 }}>Open Process Library →</Link>
             </div>
           )}
         </section>
@@ -322,7 +323,7 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
             <div style={{ padding: 14, borderRadius: 13, background: "#f8fafc", border: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 12 }}>Method</div><div style={{ marginTop: 5, fontWeight: 950 }}>{name || "Name not entered"}</div></div>
             <div style={{ padding: 14, borderRadius: 13, background: "#f8fafc", border: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 12 }}>Department</div><div style={{ marginTop: 5, fontWeight: 950 }}>{departmentLabel(department)}</div></div>
             <div style={{ padding: 14, borderRadius: 13, background: "#f8fafc", border: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 12 }}>Material</div><div style={{ marginTop: 5, fontWeight: 950 }}>{selectedMaterial?.name ?? "No physical material"}</div></div>
-            <div style={{ padding: 14, borderRadius: 13, background: "#f8fafc", border: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 12 }}>Sequence</div><div style={{ marginTop: 5, fontWeight: 950 }}>{selectedProcesses.map((process) => process.name).join(" → ") || "No production steps"}</div></div>
+            <div style={{ padding: 14, borderRadius: 13, background: "#f8fafc", border: "1px solid #e2e8f0" }}><div style={{ color: "#64748b", fontSize: 12 }}>Sequence</div><div style={{ marginTop: 5, fontWeight: 950 }}>{selectedProcesses.map((process) => process.name).join(" → ") || "No processes"}</div></div>
           </div>
 
           <details style={{ marginTop: 14, border: "1px solid #dbe4f0", borderRadius: 13, padding: 13, background: "#fff" }}>

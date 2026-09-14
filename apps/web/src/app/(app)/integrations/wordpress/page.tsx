@@ -34,7 +34,7 @@ export default async function WordPressIntegrationPage({ searchParams }: Props) 
       <div>
         <div style={{ fontSize: 12, fontWeight: 950, color: "#7c3aed", textTransform: "uppercase", letterSpacing: ".08em" }}>Website connection</div>
         <h1 style={{ margin: "7px 0", fontSize: 38 }}>WordPress & WooCommerce</h1>
-        <p style={{ margin: 0, color: "#64748b", maxWidth: 800, lineHeight: 1.6 }}>Production Manager owns products, manufacturing methods and pricing. WordPress pulls the published catalogue and sends completed WooCommerce orders back with their exact configuration.</p>
+        <p style={{ margin: 0, color: "#64748b", maxWidth: 800, lineHeight: 1.6 }}>Production Manager owns products, production methods and pricing. WordPress pulls the published catalogue and sends completed WooCommerce orders back with their exact configuration.</p>
       </div>
       <Link href="/settings" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>← Settings</Link>
     </header>

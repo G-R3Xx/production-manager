@@ -10,6 +10,13 @@ export type LabourOption = {
   active: boolean;
 };
 
+export type MachineOption = {
+  id: string;
+  name: string;
+  machineType: string;
+  active: boolean;
+};
+
 const presets = [
   {
     id: "direct-print",
@@ -72,7 +79,7 @@ const presets = [
     icon: "+",
     name: "",
     processType: "other",
-    description: "Create a different production step."
+    description: "Create a different reusable process."
   }
 ] as const;
 
@@ -96,7 +103,7 @@ const processTypes = [
   { value: "other", label: "Other" }
 ];
 
-export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
+export function ProcessBuilder({ labour, machines }: { labour: LabourOption[]; machines: MachineOption[] }) {
   const [selectedPreset, setSelectedPreset] = useState("direct-print");
   const [name, setName] = useState("Direct print");
   const [processType, setProcessType] = useState("print");
@@ -122,8 +129,8 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
 
       <div>
         <div style={stepLabel}>1 · What happens to the job?</div>
-        <h2 style={{ margin: "6px 0 8px", fontSize: 25 }}>Choose a common production step</h2>
-        <p style={helpText}>A step is one action. You will put several steps together later when creating a manufacturing method.</p>
+        <h2 style={{ margin: "6px 0 8px", fontSize: 25 }}>Choose a common process</h2>
+        <p style={helpText}>A process is one reusable action. Configure its default machine and labour here once, then reuse it in Production Methods and Products.</p>
         <div style={presetGrid}>
           {presets.map((preset) => {
             const active = preset.id === selectedPreset;
@@ -142,7 +149,7 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
               >
                 <span style={{ ...presetIcon, color: active ? "#0f766e" : "#475569" }}>{preset.icon}</span>
                 <span style={{ minWidth: 0 }}>
-                  <strong style={{ display: "block", fontSize: 16, color: "#0f172a" }}>{preset.name || "Custom step"}</strong>
+                  <strong style={{ display: "block", fontSize: 16, color: "#0f172a" }}>{preset.name || "Custom process"}</strong>
                   <span style={{ display: "block", marginTop: 4, color: "#64748b", lineHeight: 1.35, fontSize: 13 }}>{preset.description}</span>
                 </span>
               </button>
@@ -157,7 +164,7 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
         <div style={stepLabel}>2 · Name it and choose where it belongs</div>
         <div style={formGrid}>
           <label style={fieldLabel}>
-            Step name
+            Process name
             <input
               name="name"
               value={name}
@@ -175,7 +182,7 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
                 <option key={department.value} value={department.value}>{department.label}</option>
               ))}
             </select>
-            <span style={fieldHelp}>This keeps step choices relevant when building products.</span>
+            <span style={fieldHelp}>This keeps process choices relevant when building Production Methods.</span>
           </label>
         </div>
       </div>
@@ -183,8 +190,18 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
       <div style={divider} />
 
       <div>
-        <div style={stepLabel}>3 · Does this step normally need staff time?</div>
+        <div style={stepLabel}>3 · Assign the resources that normally perform it</div>
         <div style={formGrid}>
+          <label style={fieldLabel}>
+            Default machine <span style={{ color: "#94a3b8", fontWeight: 700 }}>(optional)</span>
+            <select name="machineId" defaultValue="" style={inputStyle}>
+              <option value="">No machine cost</option>
+              {machines.filter((row) => row.active).map((row) => (
+                <option key={row.id} value={row.id}>{row.name} · {row.machineType}</option>
+              ))}
+            </select>
+            <span style={fieldHelp}>Machine speed, setup, width, hourly cost and ink/click rates come from Resources. This is the only place a process is linked to a machine.</span>
+          </label>
           <label style={fieldLabel}>
             Default labour task <span style={{ color: "#94a3b8", fontWeight: 700 }}>(optional)</span>
             <select name="labourOperationId" defaultValue="" style={inputStyle}>
@@ -193,24 +210,24 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
                 <option key={row.id} value={row.id}>{row.name}</option>
               ))}
             </select>
-            <span style={fieldHelp}>Choose labour only when hands-on staff time should be costed automatically. Machine cost is linked separately on the Machines page.</span>
+            <span style={fieldHelp}>Choose hands-on staff time only when it should be costed automatically for this process.</span>
           </label>
-          <div style={explanationCard}>
-            <strong style={{ color: "#0f172a" }}>Example</strong>
-            <span style={{ color: "#475569", lineHeight: 1.5 }}>
-              “Direct print” may use a printer machine with no default labour. “Eyelets” may use a finishing labour task so staff time is included.
-            </span>
-          </div>
+        </div>
+        <div style={{ ...explanationCard, marginTop: 12 }}>
+          <strong style={{ color: "#0f172a" }}>One source of truth</strong>
+          <span style={{ color: "#475569", lineHeight: 1.5 }}>
+            Example: Direct print → HP-R530 + Print operator. Production Methods simply reuse Direct print; they no longer redefine the machine or labour.
+          </span>
         </div>
       </div>
 
       <div>
         <button type="button" onClick={() => setShowAdvanced((value) => !value)} style={textButton}>
-          {showAdvanced ? "Hide advanced category" : "Advanced: change step category"}
+          {showAdvanced ? "Hide advanced category" : "Advanced: change process category"}
         </button>
         {showAdvanced ? (
           <label style={{ ...fieldLabel, maxWidth: 420, marginTop: 10 }}>
-            Step category
+            Process category
             <select value={processType} onChange={(event) => setProcessType(event.target.value)} style={inputStyle}>
               {processTypes.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}
             </select>
@@ -222,11 +239,11 @@ export function ProcessBuilder({ labour }: { labour: LabourOption[] }) {
       <div style={reviewBar}>
         <div>
           <div style={{ fontSize: 12, color: "#0f766e", fontWeight: 900, textTransform: "uppercase", letterSpacing: ".06em" }}>Ready to add</div>
-          <div style={{ marginTop: 4, fontSize: 18, fontWeight: 950, color: "#0f172a" }}>{name || "Name your production step"}</div>
+          <div style={{ marginTop: 4, fontSize: 18, fontWeight: 950, color: "#0f172a" }}>{name || "Name your process"}</div>
           <div style={{ marginTop: 3, color: "#64748b", fontSize: 13 }}>{selected.description}</div>
         </div>
         <button type="submit" disabled={!name.trim()} style={{ ...primaryButton, opacity: name.trim() ? 1 : 0.45 }}>
-          Add production step
+          Add process
         </button>
       </div>
     </form>

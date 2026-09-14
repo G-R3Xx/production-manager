@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listLabourForTenant, type LabourRecord } from "@/server/productionResources";
@@ -6,6 +7,7 @@ import { setLabourActiveAction } from "./actions";
 import { LabourOperationForm } from "./LabourOperationForm";
 import { labourBasisLabel, labourBasisUnit, storedLabourValueToMinutes, type LabourBasis } from "./labourConfig";
 import styles from "./labour.module.css";
+import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 
 const DEPARTMENT_LABELS: Record<string, string> = {
   signage: "Signage",
@@ -126,12 +128,17 @@ export default async function LabourPage({
 
   return (
     <main className={styles.page}>
+      <ProductionSetupNav active="resources" />
       <header className={styles.header}>
-        <div className={styles.eyebrow}>Production resources</div>
+        <div className={styles.eyebrow}>Resources · labour</div>
         <h1 className={styles.title}>Labour & time rates</h1>
         <p className={styles.subtitle}>
-          Create reusable labour charges in plain minutes. Add them to production actions inside a Product; Production Manager then calculates the labour cost automatically.
+          Store reusable human labour/time rules here. Link them to a Process once; Products and Production Methods then inherit the labour cost automatically.
         </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <Link href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Machines</Link>
+          <Link href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Labour & time</Link>
+        </div>
       </header>
 
       {params.message ? <div className={styles.message}>{params.message}</div> : null}
@@ -142,7 +149,7 @@ export default async function LabourPage({
         <div>
           <h2>Set each labour rule up once</h2>
           <p>
-            Example: create “Mounting / application” at 15 minutes per m². You can then reuse it on Corflute, ACM, acrylic and other products without entering the rate again.
+            Example: create “Mounting / application” at 15 minutes per m², then link it to the Mount / apply Process. Every Production Method that uses that Process inherits the same labour rule.
           </p>
         </div>
       </section>
@@ -161,7 +168,7 @@ export default async function LabourPage({
         <div className={styles.listHeader}>
           <div>
             <h2>Available labour operations</h2>
-            <p>These appear when assigning costing resources to a product’s production actions.</p>
+            <p>These appear in the Process Library when assigning the normal human labour for an action.</p>
           </div>
           <span className={styles.countPill}>{activeRows.length} active</span>
         </div>

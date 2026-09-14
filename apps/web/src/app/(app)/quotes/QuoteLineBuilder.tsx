@@ -1308,7 +1308,7 @@ function productionResourceBreakdownFor(
       [process.name],
       metrics,
       product.department,
-      step.machineId,
+      null,
       step.processId
     );
     if (!machineSelection.machine && machineSelection.incompatibleMachines.length) {
@@ -1347,7 +1347,7 @@ function productionResourceBreakdownFor(
       return processLabourTokens.some((token) => label.includes(token));
     }) || (explicitLabourRows.length === 1 && steps.length === 1);
     if (!hasExplicitLabourForProcess) {
-      const labour = labourForProcess(resources, [process.name], product.department, step.labourOperationId, step.processId);
+      const labour = labourForProcess(resources, [process.name], product.department, null, step.processId);
       const lineCost = labourLineCost(labour, metrics);
       if (labour && lineCost > 0) {
         const perUnit = lineCost / quantity;
@@ -1540,7 +1540,7 @@ function smallFormatProfileAdjustments(input: {
     printProcess ? [printProcess.name] : ["small format print", "digital print", "direct print", "print"],
     { quantity, areaSqmPerUnit, sheetsPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: 2 },
     product.department,
-    printStep?.machineId ?? null,
+    null,
     printStep?.processId ?? null
   );
   const machine = machineSelection.machine;
@@ -1561,7 +1561,7 @@ function smallFormatProfileAdjustments(input: {
       }));
     } else if (sheetsPerLine > 0) {
       warnings.push(machine
-        ? `${machine.name}: ${mode === "mono" ? "mono" : "colour"} click rate is not set in Settings → Machines.`
+        ? `${machine.name}: ${mode === "mono" ? "mono" : "colour"} click rate is not set in Production Setup → Resources → Machines.`
         : "Small-format click costing is enabled, but no compatible print machine is linked to this product's print process.");
     }
   }

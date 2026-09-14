@@ -13,6 +13,7 @@ import {
 import { listMaterialsForTenant } from "@/server/materials";
 import { createRecipeAction, setRecipeActiveAction, updateRecipeAction } from "./actions";
 import { ManufacturingMethodBuilder } from "./ManufacturingMethodBuilder";
+import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 
 type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 
@@ -81,15 +82,17 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
   const activeProcesses = processes.filter((row) => row.active);
   const activeMachines = machines.filter((row) => row.active);
   const activeLabour = labour.filter((row) => row.active);
-  const activeRecipes = recipes.filter((row) => row.active);
+  const activeRecipes = recipes.filter((row) => row.active && row.managedBy !== "product_build");
+  const legacyProductRecipes = recipes.filter((row) => row.active && row.managedBy === "product_build");
   const archivedRecipes = recipes.filter((row) => !row.active);
 
   return (
     <main style={{ display: "grid", gap: 20 }}>
+      <ProductionSetupNav active="methods" />
       <header>
-        <div style={{ fontSize: 12, fontWeight: 900, color: "#0f766e", textTransform: "uppercase" }}>Shared costing engine</div>
-        <h1 style={{ margin: "6px 0", fontSize: 36 }}>Manufacturing methods</h1>
-        <p style={{ color: "#64748b", maxWidth: 950, lineHeight: 1.6 }}>A method is the reusable recipe behind a product: its main material, the production steps in order, and the pricing rules. Create it once, then select it in the Product Build tab so internal quotes and WordPress use the same calculation.</p>
+        <div style={{ fontSize: 12, fontWeight: 900, color: "#0f766e", textTransform: "uppercase" }}>Reusable production recipes</div>
+        <h1 style={{ margin: "6px 0", fontSize: 36 }}>Production methods</h1>
+        <p style={{ color: "#64748b", maxWidth: 950, lineHeight: 1.6 }}>A Production Method is only the ordered recipe behind a product: its main material and saved Processes in sequence. Machine and labour resources stay inside each Process, so there is only one place to maintain how an action is costed.</p>
       </header>
 
       {message ? <div style={{ padding: 14, borderRadius: 13, border: "1px solid #a7f3d0", background: "#f0fdf4", color: "#166534", fontWeight: 850 }}>{message}</div> : null}
@@ -98,13 +101,13 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
       <section style={{ ...card, background: "linear-gradient(135deg,#f0fdfa,#ffffff)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div style={{ maxWidth: 720 }}>
-            <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Before creating methods</div>
-            <h2 style={{ margin: "6px 0 4px" }}>Production setup readiness</h2>
-            <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Materials provide stock cost. Production Steps describe what happens. Machines and labour provide the running cost. You can create a basic method without every resource, but missing resources will show as $0 in the preview.</p>
+            <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Production setup check</div>
+            <h2 style={{ margin: "6px 0 4px" }}>Ready to build methods</h2>
+            <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Materials provide stock cost. Processes describe what happens and already carry their normal machine/labour resources. A method simply puts those Processes in the right order.</p>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(135px,1fr))", gap: 9, flex: "1 1 620px" }}>
             <ReadinessCard label="Materials" count={activeMaterials.length} ready={activeMaterials.length > 0} href="/materials" action="Add materials" />
-            <ReadinessCard label="Production steps" count={activeProcesses.length} ready={activeProcesses.length > 0} href="/processes" action="Add steps" />
+            <ReadinessCard label="Processes" count={activeProcesses.length} ready={activeProcesses.length > 0} href="/processes" action="Add processes" />
             <ReadinessCard label="Machines" count={activeMachines.length} ready={activeMachines.length > 0} href="/machines" action="Add machines" />
             <ReadinessCard label="Labour rates" count={activeLabour.length} ready={activeLabour.length > 0} href="/labour" action="Add labour" />
           </div>
@@ -115,10 +118,10 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 16 }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Guided setup</div>
-            <h2 style={{ margin: "5px 0" }}>Create a manufacturing method</h2>
+            <h2 style={{ margin: "5px 0" }}>Create a production method</h2>
             <p style={{ margin: 0, color: "#64748b" }}>Example: Corflute 5mm → Direct print → Trim → Eyelets.</p>
           </div>
-          <span style={{ borderRadius: 999, background: "#e0f2fe", color: "#075985", padding: "7px 11px", fontSize: 12, fontWeight: 900 }}>{activeRecipes.length} active methods</span>
+          <span style={{ borderRadius: 999, background: "#e0f2fe", color: "#075985", padding: "7px 11px", fontSize: 12, fontWeight: 900 }}>{activeRecipes.length} active production methods</span>
         </div>
         <ManufacturingMethodBuilder action={createRecipeAction} materials={materials} processes={processes} />
       </section>
@@ -156,8 +159,8 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
       <section style={{ display: "grid", gap: 13 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
           <div>
-            <h2 style={{ margin: 0 }}>Existing methods</h2>
-            <p style={{ margin: "5px 0 0", color: "#64748b" }}>Test a price, edit the guided recipe, or archive methods no longer used.</p>
+            <h2 style={{ margin: 0 }}>Existing production methods</h2>
+            <p style={{ margin: "5px 0 0", color: "#64748b" }}>Test a price, edit the sequence, or archive methods no longer used.</p>
           </div>
         </div>
 
@@ -197,7 +200,22 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
               <button style={{ minHeight: 42, border: 0, borderRadius: 10, background: "#0f172a", color: "#fff", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>Test price</button>
             </form>
           </article>
-        )) : <div style={{ ...card, color: "#64748b" }}>No manufacturing methods yet. Use the guided builder above to create the first one.</div>}
+        )) : <div style={{ ...card, color: "#64748b" }}>No Production Methods yet. Use the guided builder above to create the first one.</div>}
+
+        {legacyProductRecipes.length ? (
+          <details style={{ ...card, background: "#f8fafc" }}>
+            <summary style={{ cursor: "pointer", fontWeight: 900 }}>Existing product-created methods ({legacyProductRecipes.length})</summary>
+            <p style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>These were created by the older Product builder. Existing products continue to work, but new setup should use shared Production Methods above. Reassign a product from its Build tab when convenient.</p>
+            <div style={{ display: "grid", gap: 9, marginTop: 12 }}>
+              {legacyProductRecipes.map((recipe) => (
+                <div key={recipe.id} style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", border: "1px solid #e2e8f0", borderRadius: 12, padding: 12, background: "#fff" }}>
+                  <div><strong>{recipe.name}</strong><div style={{ marginTop: 3, color: "#64748b", fontSize: 13 }}>{recipe.processNames.join(" → ") || "No processes"}</div></div>
+                  <span style={{ borderRadius: 999, background: "#fff7ed", color: "#9a3412", padding: "5px 8px", fontSize: 11, fontWeight: 900 }}>Legacy product method</span>
+                </div>
+              ))}
+            </div>
+          </details>
+        ) : null}
 
         {archivedRecipes.length ? (
           <details style={card}>

@@ -3,6 +3,8 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMachinesForTenant, listProcessesForTenant } from "@/server/productionResources";
 import { createMachineAction, updateMachineAction, setMachineActiveAction } from "./actions";
+import Link from "next/link";
+import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 
 const input = {
   width: "100%",
@@ -41,31 +43,6 @@ const groupTitle = {
 
 const types = ["printer", "cutter", "laminator", "router", "laser", "other"];
 const speedUnits = ["sqm_per_hour", "linear_metres_per_hour", "sheets_per_hour", "a4_faces_per_minute"];
-
-function ProcessChecks({ rows, selected = [] }: { rows: any[]; selected?: string[] }) {
-  return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-      {rows.map((x) => (
-        <label
-          key={x.id}
-          style={{
-            padding: "8px 11px",
-            border: "1px solid #dbe4f0",
-            borderRadius: 9,
-            background: "#fff",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-            cursor: "pointer",
-          }}
-        >
-          <input type="checkbox" name="processIds" value={x.id} defaultChecked={selected.includes(x.id)} />
-          {x.name}
-        </label>
-      ))}
-    </div>
-  );
-}
 
 function MachineFields({ machine }: { machine?: any }) {
   return (
@@ -190,14 +167,17 @@ export default async function MachinesPage() {
         }
       `}</style>
 
+      <ProductionSetupNav active="resources" />
       <header>
-        <div style={{ fontSize: 12, fontWeight: 900, color: "#0284c7", textTransform: "uppercase" }}>
-          Settings · production resources
-        </div>
+        <div style={{ fontSize: 12, fontWeight: 900, color: "#0284c7", textTransform: "uppercase" }}>Resources · machines</div>
         <h1 style={{ margin: "6px 0", fontSize: 36 }}>Machines</h1>
-        <p style={{ color: "#64748b" }}>
-          Machine setup, speed, hourly cost, ink, digital click/impression rates and maximum media width are used directly by Product and Quote costing. Link each machine to the processes it can perform.
+        <p style={{ color: "#64748b", maxWidth: 980, lineHeight: 1.55 }}>
+          Store facts about each machine here: speed, capacity, setup and operating costs. To decide which machine performs Direct print, Laminate, Trim or another action, assign it once under <b>Processes</b>.
         </p>
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <Link href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Machines</Link>
+          <Link href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Labour & time</Link>
+        </div>
       </header>
 
       <section style={card}>
@@ -205,7 +185,7 @@ export default async function MachinesPage() {
           <div>
             <h2 style={{ margin: 0 }}>Add machine</h2>
             <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Enter only the costs that apply to this machine. Wide-format ink and digital click charges are kept separate.
+              Enter only the facts and costs that apply to this machine. After creating it, open Processes to assign it to the work it performs.
             </p>
           </div>
         </div>
@@ -213,10 +193,6 @@ export default async function MachinesPage() {
         <form action={createMachineAction} style={{ display: "grid", gap: 12, marginTop: 16 }}>
           <MachineFields />
 
-          <div style={fieldGroup}>
-            <div style={groupTitle}>Processes this machine can perform</div>
-            <ProcessChecks rows={processes.filter((x: any) => x.active)} />
-          </div>
 
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
             <button
@@ -275,10 +251,6 @@ export default async function MachinesPage() {
                       <form action={updateMachineAction} style={{ display: "grid", gap: 12 }}>
                         <input type="hidden" name="id" value={r.id} />
                         <MachineFields machine={r} />
-                        <div style={fieldGroup}>
-                          <div style={groupTitle}>Processes this machine can perform</div>
-                          <ProcessChecks rows={processes} selected={r.processIds} />
-                        </div>
                         <div style={{ display: "flex", justifyContent: "flex-end" }}>
                           <button
                             style={{
@@ -330,13 +302,16 @@ export default async function MachinesPage() {
               </div>
 
               <div style={{ marginTop: 12 }}>
-                <div style={{ ...groupTitle, marginBottom: 7 }}>Processes</div>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 7 }}>
+                  <div style={{ ...groupTitle, margin: 0 }}>Used by processes</div>
+                  <Link href="/processes" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Manage in Processes →</Link>
+                </div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {machineProcesses.length ? machineProcesses.map((name) => (
                     <span key={name} style={{ border: "1px solid #dbe4f0", background: "#f8fafc", borderRadius: 999, padding: "5px 8px", fontSize: 12, fontWeight: 700 }}>
                       {name}
                     </span>
-                  )) : <span style={{ color: "#94a3b8", fontSize: 13 }}>No processes linked</span>}
+                  )) : <span style={{ color: "#94a3b8", fontSize: 13 }}>Not assigned to a process yet</span>}
                 </div>
               </div>
             </article>

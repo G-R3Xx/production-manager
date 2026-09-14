@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
-import { saveProductProductionFlow, type ProductProductionFlowStepInput } from "@/server/productionResources";
+import { assignProductionMethodToProduct, saveProductProductionFlow, type ProductProductionFlowStepInput } from "@/server/productionResources";
 import {
   getProductById,
   touchProductWebsiteSync,
@@ -1040,6 +1040,24 @@ function mergeInternalQuoteFields(
   return { ...definition, fields: orderedFields, components };
 }
 
+export async function assignProductProductionMethodAction(formData: FormData) {
+  const productId = read(formData, "productId");
+  const recipeId = read(formData, "productionMethodId");
+  const { tenant } = await context(productId);
+  if (!recipeId) redirect(`/products/${productId}?tab=build&error=Choose%20a%20Production%20Method`);
+  try {
+    await assignProductionMethodToProduct(tenant.tenantId, productId, recipeId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The Production Method could not be assigned.";
+    redirect(`/products/${productId}?tab=build&error=${encodeURIComponent(message)}`);
+  }
+  revalidatePath("/products");
+  revalidatePath(`/products/${productId}`);
+  revalidatePath("/quotes");
+  revalidatePath("/integrations/wordpress");
+  redirect(`/products/${productId}?tab=build&message=Production%20Method%20updated`);
+}
+
 export async function saveInternalProductSetupAction(formData: FormData) {
   const productId = read(formData, "productId");
   const { tenant, product } = await context(productId);
@@ -1106,16 +1124,8 @@ export async function saveInternalProductSetupAction(formData: FormData) {
   const blackStandoffMaterialName = read(formData, "blackStandoffMaterialName") || null;
 
   try {
-    const steps = parseProductionFlowSteps(read(formData, "flowJson"));
-    await saveProductProductionFlow({
-      tenantId: tenant.tenantId,
-      productId,
-      productName: product.name,
-      department: product.department,
-      materialId: mainMaterialId,
-      steps
-    });
-
+    // Production Methods are maintained centrally under Settings → Production setup.
+    // Product option changes must not silently create or rewrite production processes/methods.
     const template = await ensureProductEditorTemplate({
       tenantId: tenant.tenantId,
       productId,

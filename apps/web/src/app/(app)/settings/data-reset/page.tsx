@@ -88,7 +88,7 @@ export default async function DataResetPage({ searchParams }: { searchParams?: P
           <section style={{ ...card, borderColor: "#bbf7d0", background: "#f7fff9" }}>
             <h2 style={{ marginTop: 0, color: "#166534" }}>Kept exactly as configured</h2>
             <p style={{ margin: 0, color: "#365314", lineHeight: 1.65 }}>
-              Clients, suppliers, materials, products, product options/configurators, manufacturing methods, production steps, machines, labour/rates,
+              Clients, suppliers, materials, products, product options/configurators, production methods, processes, machines, labour/rates,
               company settings and branding, staff/roles, MYOB connection and tokens, master-data MYOB links, WordPress connection/product publishing,
               and purchase orders are retained.
             </p>

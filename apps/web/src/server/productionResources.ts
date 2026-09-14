@@ -15,6 +15,8 @@ export type ProcessRecord = {
   processType: string;
   labourOperationId: string | null;
   labourOperationName: string | null;
+  machineIds: string[];
+  machineNames: string[];
   active: boolean;
 };
 
@@ -63,16 +65,19 @@ export type RecipeRecord = {
   wastePercent: string;
   markupMultiplier: string;
   profitMultiplier: string;
+  managedBy: string | null;
+  managedProductId: string | null;
   active: boolean;
 };
 
-type MachineInput = Omit<MachineRecord, "id" | "active"> & { tenantId: string };
+type MachineInput = Omit<MachineRecord, "id" | "active" | "processIds"> & { tenantId: string };
 type LabourInput = Omit<LabourRecord, "id" | "active"> & { tenantId: string };
 type ProcessInput = {
   tenantId: string;
   name: string;
   department: string;
   processType: string;
+  machineId: string | null;
   labourOperationId: string | null;
 };
 type RecipeInput = {
@@ -102,41 +107,99 @@ async function loadProcessesForTenant(tenantId: string): Promise<ProcessRecord[]
       p.process_type AS "processType",
       p.labour_operation_id::text AS "labourOperationId",
       l.name AS "labourOperationName",
+      COALESCE((
+        SELECT jsonb_agg(mp.machine_id::text ORDER BY mp.priority, m.name)
+        FROM catalog.machine_processes mp
+        JOIN catalog.machines m ON m.id = mp.machine_id
+        WHERE mp.tenant_id = p.tenant_id AND mp.process_id = p.id
+      ), '[]'::jsonb) AS "machineIds",
+      COALESCE((
+        SELECT jsonb_agg(m.name ORDER BY mp.priority, m.name)
+        FROM catalog.machine_processes mp
+        JOIN catalog.machines m ON m.id = mp.machine_id
+        WHERE mp.tenant_id = p.tenant_id AND mp.process_id = p.id
+      ), '[]'::jsonb) AS "machineNames",
       p.active
     FROM catalog.processes p
     LEFT JOIN catalog.labour_operations l ON l.id = p.labour_operation_id
     WHERE p.tenant_id = $1::uuid
     ORDER BY p.active DESC, p.name
   `, [tenantId]);
-  return result.rows;
+  return result.rows.map((row) => ({
+    ...row,
+    machineIds: Array.isArray(row.machineIds) ? row.machineIds : [],
+    machineNames: Array.isArray(row.machineNames) ? row.machineNames : []
+  }));
 }
 
 export const listProcessesForTenant = cache(loadProcessesForTenant);
 
+async function replaceProcessMachines(client: DbClient, tenantId: string, processId: string, machineId: string | null): Promise<void> {
+  await client.query(`
+    DELETE FROM catalog.machine_processes
+    WHERE tenant_id = $1::uuid AND process_id = $2::uuid
+  `, [tenantId, processId]);
+  if (!machineId) return;
+  const machine = await client.query(`
+    SELECT id::text
+    FROM catalog.machines
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+    LIMIT 1
+  `, [tenantId, machineId]);
+  if (!(machine.rows[0] as { id?: string } | undefined)?.id) throw new Error("The selected machine is no longer available.");
+  await client.query(`
+    INSERT INTO catalog.machine_processes (tenant_id, machine_id, process_id, priority)
+    VALUES ($1::uuid, $2::uuid, $3::uuid, 1)
+  `, [tenantId, machineId, processId]);
+}
+
 export async function createProcess(input: ProcessInput): Promise<{ id: string }> {
-  const result = await pool.query<{ id: string }>(`
-    INSERT INTO catalog.processes (
-      tenant_id,
-      name,
-      department,
-      process_type,
-      labour_operation_id
-    ) VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid)
-    RETURNING id::text
-  `, [input.tenantId, input.name, input.department, input.processType, input.labourOperationId ?? ""]);
-  return result.rows[0] ?? { id: "" };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<{ id: string }>(`
+      INSERT INTO catalog.processes (
+        tenant_id,
+        name,
+        department,
+        process_type,
+        labour_operation_id
+      ) VALUES ($1::uuid, $2, $3, $4, NULLIF($5, '')::uuid)
+      RETURNING id::text
+    `, [input.tenantId, input.name, input.department, input.processType, input.labourOperationId ?? ""]);
+    const id = result.rows[0]?.id ?? "";
+    await replaceProcessMachines(client, input.tenantId, id, input.machineId);
+    await client.query("COMMIT");
+    return { id };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateProcess(input: ProcessInput & { id: string }): Promise<void> {
-  await pool.query(`
-    UPDATE catalog.processes
-    SET name = $3,
-        department = $4,
-        process_type = $5,
-        labour_operation_id = NULLIF($6, '')::uuid,
-        updated_at = now()
-    WHERE tenant_id = $1::uuid AND id = $2::uuid
-  `, [input.tenantId, input.id, input.name, input.department, input.processType, input.labourOperationId ?? ""]);
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`
+      UPDATE catalog.processes
+      SET name = $3,
+          department = $4,
+          process_type = $5,
+          labour_operation_id = NULLIF($6, '')::uuid,
+          updated_at = now()
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+    `, [input.tenantId, input.id, input.name, input.department, input.processType, input.labourOperationId ?? ""]);
+    await replaceProcessMachines(client, input.tenantId, input.id, input.machineId);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function setProcessActive(tenantId: string, id: string, active: boolean): Promise<void> {
@@ -180,30 +243,11 @@ async function loadMachinesForTenant(tenantId: string): Promise<MachineRecord[]>
 
 export const listMachinesForTenant = cache(loadMachinesForTenant);
 
-async function replaceMachineProcesses(
-  client: DbClient,
-  tenantId: string,
-  machineId: string,
-  processIds: string[]
-): Promise<void> {
-  await client.query(`
-    DELETE FROM catalog.machine_processes
-    WHERE tenant_id = $1::uuid AND machine_id = $2::uuid
-  `, [tenantId, machineId]);
-
-  for (let index = 0; index < processIds.length; index += 1) {
-    await client.query(`
-      INSERT INTO catalog.machine_processes (tenant_id, machine_id, process_id, priority)
-      VALUES ($1::uuid, $2::uuid, $3::uuid, $4)
-    `, [tenantId, machineId, processIds[index], index + 1]);
-  }
-}
-
 export async function createMachine(input: MachineInput): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const result = await client.query<{ id: string }>(`
+    await client.query(`
       INSERT INTO catalog.machines (
         tenant_id,
         name,
@@ -217,7 +261,6 @@ export async function createMachine(input: MachineInput): Promise<void> {
         capabilities_json
       ) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::numeric, $5::numeric, $6, $7::numeric, $8::numeric, $9::numeric,
         jsonb_build_object('colourImpressionCost', $10::numeric, 'monoImpressionCost', $11::numeric))
-      RETURNING id::text
     `, [
       input.tenantId,
       input.name,
@@ -231,7 +274,6 @@ export async function createMachine(input: MachineInput): Promise<void> {
       input.colourImpressionCost,
       input.monoImpressionCost
     ]);
-    await replaceMachineProcesses(client, input.tenantId, result.rows[0]?.id ?? "", input.processIds);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -275,7 +317,6 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
       input.colourImpressionCost,
       input.monoImpressionCost
     ]);
-    await replaceMachineProcesses(client, input.tenantId, input.id, input.processIds);
     await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
@@ -392,6 +433,8 @@ async function loadRecipesForTenant(tenantId: string): Promise<RecipeRecord[]> {
       r.waste_percent::text AS "wastePercent",
       r.markup_multiplier::text AS "markupMultiplier",
       r.profit_multiplier::text AS "profitMultiplier",
+      NULLIF(r.recipe_json ->> 'managedBy', '') AS "managedBy",
+      NULLIF(r.recipe_json ->> 'productId', '') AS "managedProductId",
       r.active,
       COALESCE(
         jsonb_agg(rp.process_id::text ORDER BY rp.position) FILTER (WHERE rp.process_id IS NOT NULL),
@@ -587,27 +630,8 @@ async function resolveProductFlowProcess(
   `, [tenantId, normalizeProductionFlowName(preset.name)]);
 
   const existingRow = existing.rows[0] as { id?: string } | undefined;
-  if (existingRow?.id) {
-    await client.query(`
-      UPDATE catalog.processes
-      SET active = true, updated_at = now()
-      WHERE tenant_id = $1::uuid AND id = $2::uuid
-    `, [tenantId, existingRow.id]);
-    return existingRow.id;
-  }
-
-  const created = await client.query(`
-    INSERT INTO catalog.processes (
-      tenant_id,
-      name,
-      department,
-      process_type,
-      labour_operation_id
-    ) VALUES ($1::uuid, $2, $3, $4, NULL)
-    RETURNING id::text
-  `, [tenantId, preset.name, department || "general", preset.processType]);
-
-  return (created.rows[0] as { id?: string } | undefined)?.id ?? "";
+  if (existingRow?.id) return existingRow.id;
+  throw new Error(`The ${preset.name} Process does not exist. Create it once under Settings → Production setup → Processes, then select it here.`);
 }
 
 async function validateOptionalResource(
@@ -664,13 +688,8 @@ export async function saveProductProductionFlow(input: {
       seenProcessIds.add(processId);
       resolvedSteps.push({
         processId,
-        machineId: await validateOptionalResource(client, "machines", input.tenantId, step.machineId),
-        labourOperationId: await validateOptionalResource(
-          client,
-          "labour_operations",
-          input.tenantId,
-          step.labourOperationId
-        )
+        machineId: null,
+        labourOperationId: null
       });
     }
 
@@ -779,6 +798,34 @@ export async function saveProductProductionFlow(input: {
 
     await client.query("COMMIT");
     return { recipeId };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+
+export async function assignProductionMethodToProduct(tenantId: string, productId: string, recipeId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const recipe = await client.query<{ id: string }>(`
+      SELECT id::text
+      FROM catalog.production_recipes
+      WHERE tenant_id = $1::uuid AND id = $2::uuid AND active = true
+      LIMIT 1
+    `, [tenantId, recipeId]);
+    if (!recipe.rows[0]?.id) throw new Error("The selected Production Method is no longer available.");
+    await client.query(`
+      UPDATE catalog.products
+      SET production_recipe_id = $3::uuid,
+          website_sync_version = website_sync_version + 1,
+          updated_at = now()
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+    `, [tenantId, productId, recipeId]);
+    await client.query("COMMIT");
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -956,9 +1003,7 @@ export async function previewRecipeCost(
   for (const step of orderedSteps) {
     const process = processMap.get(step.processId);
     if (!process) continue;
-    const candidates = step.machineId
-      ? [machineMap.get(step.machineId)].filter((row): row is MachineRecord => Boolean(row))
-      : machines.filter((row) => row.active && row.processIds.includes(step.processId));
+    const candidates = machines.filter((row) => row.active && row.processIds.includes(step.processId));
     const compatibleMachines = candidates.filter(machineFits);
     const incompatibleMachines = candidates.filter((machine) => !machineFits(machine));
     const selectedMachine = [...compatibleMachines].sort((a, b) => machineLineCost(a) - machineLineCost(b))[0];
@@ -967,11 +1012,9 @@ export async function previewRecipeCost(
         `${process.name} requires ${Math.round(requiredMachineWidthMm)}mm media width; ${incompatibleMachines.map((machine) => `${machine.name} max ${Math.round(Number(machine.maxWidthMm || 0))}mm`).join(", ")}.`
       );
     }
-    const selectedLabour = step.labourOperationId
-      ? labourMap.get(step.labourOperationId)
-      : process.labourOperationId
-        ? labourMap.get(process.labourOperationId)
-        : undefined;
+    const selectedLabour = process.labourOperationId
+      ? labourMap.get(process.labourOperationId)
+      : undefined;
 
     const runHours = selectedMachine ? machineRunHours(selectedMachine) : 0;
     const stepMachineCost = selectedMachine

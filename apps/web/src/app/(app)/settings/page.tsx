@@ -9,11 +9,8 @@ const groups = [
     { href: "/users", title: "Staff & roles", body: "Users, access levels and team membership.", icon: "♙" },
     { href: "/suppliers", title: "Suppliers", body: "Supplier records used by materials and purchasing.", icon: "◫" }
   ]},
-  { title: "Advanced production setup", items: [
-    { href: "/manufacturing-methods", title: "Manufacturing methods", body: "Review the methods created by Products, or maintain unusual shared production workflows.", icon: "⌘" },
-    { href: "/processes", title: "Production steps", body: "Maintain the reusable print, laminate, cut, pack and install actions available inside Products.", icon: "⇢" },
-    { href: "/machines", title: "Machines", body: "Equipment, capabilities, speeds and operating costs.", icon: "⚙" },
-    { href: "/labour", title: "Labour & rates", body: "Reusable labour time and cost rules entered in plain minutes.", icon: "◷" }
+  { title: "Production setup", items: [
+    { href: "/production-setup", title: "Production setup", body: "One place for machine and labour resources, reusable processes and ordered production methods.", icon: "⚙" }
   ]},
   { title: "Connections", items: [
     { href: "/integrations", title: "MYOB & services", body: "MYOB, Install Scheduler and operational connections.", icon: "↔" },

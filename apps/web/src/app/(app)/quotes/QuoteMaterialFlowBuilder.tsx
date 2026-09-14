@@ -3005,7 +3005,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             <div style={{ borderRadius: 14, background: "#fff1f2", border: "1px solid #fecdd3", padding: "12px 14px", color: "#9f1239", display: "grid", gap: 4 }}>
               <strong>Machine width check</strong>
               {machineCompatibilityIssues.map((message) => <span key={message} style={{ fontSize: 12, lineHeight: 1.45 }}>{message}</span>)}
-              <span style={{ fontSize: 12 }}>Change the stock/orientation, or update the machine Max width in Settings → Machines before saving this line.</span>
+              <span style={{ fontSize: 12 }}>Change the stock/orientation, or update the machine Max width in Production Setup → Resources → Machines before saving this line.</span>
             </div>
           ) : null}
           {allSignageSteps.map((step, index) => (

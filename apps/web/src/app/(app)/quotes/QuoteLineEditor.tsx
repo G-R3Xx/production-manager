@@ -950,7 +950,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
               <legend style={labelTextStyle}>Pricing to save</legend>
               <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
                 <input type="radio" name="productPricingMode" value="recipe" checked={productPricingMode === "recipe"} onChange={() => setProductPricingMode("recipe")} />
-                <span><strong>Keep the product manufacturing method</strong><br /><small style={{ color: "#64748b" }}>Copies the linked materials, labour, charges and available option lists. These selections become its defaults.</small></span>
+                <span><strong>Keep the product Production Method</strong><br /><small style={{ color: "#64748b" }}>Copies the linked materials, labour, charges and available option lists. These selections become its defaults.</small></span>
               </label>
               <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
                 <input type="radio" name="productPricingMode" value="current_price" checked={productPricingMode === "current_price"} onChange={() => setProductPricingMode("current_price")} />

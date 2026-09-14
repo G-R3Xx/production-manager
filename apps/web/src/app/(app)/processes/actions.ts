@@ -22,6 +22,7 @@ const input = (form: FormData, tenantId: string) => ({
   name: s(form, "name"),
   department: s(form, "department") || "general",
   processType: s(form, "processType") || "other",
+  machineId: s(form, "machineId") || null,
   labourOperationId: s(form, "labourOperationId") || null
 });
 
@@ -31,7 +32,7 @@ export async function createProcessAction(form: FormData) {
   if (!tenant) redirect("/bootstrap");
 
   const value = input(form, tenant.tenantId);
-  if (!value.name) redirect("/processes?error=Enter%20a%20name%20for%20the%20production%20step");
+  if (!value.name) redirect("/processes?error=Enter%20a%20name%20for%20the%20process");
 
   await createProcess(value);
   redirect(`/processes?message=${encodeURIComponent(`${value.name} added`)}`);
@@ -53,14 +54,15 @@ export async function createStarterProcessesAction() {
       name: process.name,
       department: "signage",
       processType: process.processType,
+      machineId: null,
       labourOperationId: null
     });
     created += 1;
   }
 
   const message = created
-    ? `${created} recommended production step${created === 1 ? "" : "s"} added`
-    : "Recommended production steps already exist";
+    ? `${created} recommended process${created === 1 ? "" : "s"} added`
+    : "Recommended processes already exist";
   redirect(`/processes?message=${encodeURIComponent(message)}`);
 }
 
@@ -71,7 +73,7 @@ export async function updateProcessAction(form: FormData) {
 
   const value = input(form, tenant.tenantId);
   const id = s(form, "id");
-  if (!id || !value.name) redirect("/processes?error=Enter%20a%20name%20for%20the%20production%20step");
+  if (!id || !value.name) redirect("/processes?error=Enter%20a%20name%20for%20the%20process");
 
   await updateProcess({ ...value, id });
   redirect(`/processes?message=${encodeURIComponent(`${value.name} updated`)}`);

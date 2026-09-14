@@ -3,7 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listProcessesForTenant, listLabourForTenant } from "@/server/productionResources";
+import { listProcessesForTenant, listLabourForTenant, listMachinesForTenant } from "@/server/productionResources";
+import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 import { ProcessBuilder } from "./ProcessBuilder";
 import { createStarterProcessesAction, setProcessActiveAction, updateProcessAction } from "./actions";
 
@@ -56,9 +57,10 @@ export default async function ProcessesPage({
   if (!tenant) redirect("/bootstrap");
 
   const params = (await searchParams) ?? {};
-  const [rows, labour] = await Promise.all([
+  const [rows, labour, machines] = await Promise.all([
     listProcessesForTenant(tenant.tenantId),
-    listLabourForTenant(tenant.tenantId)
+    listLabourForTenant(tenant.tenantId),
+    listMachinesForTenant(tenant.tenantId)
   ]);
 
   const activeRows = rows.filter((row) => row.active);
@@ -66,11 +68,12 @@ export default async function ProcessesPage({
 
   return (
     <main style={{ display: "grid", gap: 22 }}>
+      <ProductionSetupNav active="processes" />
       <header>
-        <div style={eyebrow}>Settings · advanced production setup</div>
-        <h1 style={{ margin: "6px 0", fontSize: 38 }}>Production steps</h1>
+        <div style={eyebrow}>Process library</div>
+        <h1 style={{ margin: "6px 0", fontSize: 38 }}>Processes</h1>
         <p style={{ margin: 0, maxWidth: 960, color: "#64748b", lineHeight: 1.6 }}>
-          A production step is one thing that happens to a job—such as print, laminate, trim, eyelet, pack or install. Manufacturing methods combine these steps in the order the work is completed.
+          A process is one reusable action—such as Direct print, Laminate, Trim / cut or Eyelets. Assign its normal machine and labour here once. Production Methods only arrange these processes in order.
         </p>
       </header>
 
@@ -78,11 +81,11 @@ export default async function ProcessesPage({
       {params.error ? <div style={errorBanner}>{params.error}</div> : null}
 
       <section style={flowGrid}>
-        <FlowCard number="1" title="Production step" body="One action, such as Direct print or Trim / cut." active />
+        <FlowCard number="1" title="Resources" body="Machines and labour store capability, speed and cost." href="/machines" />
         <FlowArrow />
-        <FlowCard number="2" title="Machine or labour" body="Connect the equipment or staff time that performs the step." href="/machines" />
+        <FlowCard number="2" title="Process" body="Connect one action to its normal machine and labour." active />
         <FlowArrow />
-        <FlowCard number="3" title="Manufacturing method" body="Arrange the steps in the exact order a product is made." href="/manufacturing-methods" />
+        <FlowCard number="3" title="Production method" body="Arrange saved processes in the exact order a product is made." href="/manufacturing-methods" />
       </section>
 
       {!activeRows.length ? (
@@ -90,27 +93,27 @@ export default async function ProcessesPage({
           <div style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "center", flexWrap: "wrap" }}>
             <div style={{ maxWidth: 760 }}>
               <div style={eyebrow}>Fastest way to get started</div>
-              <h2 style={{ margin: "6px 0 8px", fontSize: 25 }}>Add the recommended signage steps</h2>
+              <h2 style={{ margin: "6px 0 8px", fontSize: 25 }}>Add the recommended signage processes</h2>
               <p style={{ margin: 0, color: "#475569", lineHeight: 1.55 }}>
                 This creates Direct print, Roll print, Laminate, Trim / cut, Mount / apply, Finishing, Pack and Install. You can edit or archive any of them later, and existing names will not be duplicated.
               </p>
             </div>
             <form action={createStarterProcessesAction}>
-              <button style={primaryButton}>Add recommended steps</button>
+              <button style={primaryButton}>Add recommended processes</button>
             </form>
           </div>
         </section>
       ) : null}
 
       <section style={card}>
-        <ProcessBuilder labour={labour.map((row) => ({ id: row.id, name: row.name, department: row.department, active: row.active }))} />
+        <ProcessBuilder labour={labour.map((row) => ({ id: row.id, name: row.name, department: row.department, active: row.active }))} machines={machines.map((row) => ({ id: row.id, name: row.name, machineType: row.machineType, active: row.active }))} />
       </section>
 
       <section style={{ display: "grid", gap: 14 }}>
         <div style={{ display: "flex", alignItems: "end", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div>
-            <div style={eyebrow}>Available to manufacturing methods</div>
-            <h2 style={{ margin: "5px 0 0", fontSize: 27 }}>Active production steps</h2>
+            <div style={eyebrow}>Available to production methods</div>
+            <h2 style={{ margin: "5px 0 0", fontSize: 27 }}>Active processes</h2>
           </div>
           <div style={{ color: "#64748b", fontWeight: 800 }}>{activeRows.length} active</div>
         </div>
@@ -118,22 +121,22 @@ export default async function ProcessesPage({
         {activeRows.length ? (
           <div style={processGrid}>
             {activeRows.map((row) => (
-              <ProcessCard key={row.id} row={row} labour={labour} />
+              <ProcessCard key={row.id} row={row} labour={labour} machines={machines} />
             ))}
           </div>
         ) : (
           <div style={emptyState}>
-            <strong>No production steps yet.</strong>
-            <span>Use the recommended starter set or add your first step above.</span>
+            <strong>No processes yet.</strong>
+            <span>Use the recommended starter set or add your first process above.</span>
           </div>
         )}
       </section>
 
       {archivedRows.length ? (
         <details style={card}>
-          <summary style={{ cursor: "pointer", fontWeight: 900, color: "#475569" }}>Archived production steps ({archivedRows.length})</summary>
+          <summary style={{ cursor: "pointer", fontWeight: 900, color: "#475569" }}>Archived processes ({archivedRows.length})</summary>
           <div style={{ ...processGrid, marginTop: 16 }}>
-            {archivedRows.map((row) => <ProcessCard key={row.id} row={row} labour={labour} />)}
+            {archivedRows.map((row) => <ProcessCard key={row.id} row={row} labour={labour} machines={machines} />)}
           </div>
         </details>
       ) : null}
@@ -141,7 +144,7 @@ export default async function ProcessesPage({
   );
 }
 
-function ProcessCard({ row, labour }: { row: Awaited<ReturnType<typeof listProcessesForTenant>>[number]; labour: Awaited<ReturnType<typeof listLabourForTenant>> }) {
+function ProcessCard({ row, labour, machines }: { row: Awaited<ReturnType<typeof listProcessesForTenant>>[number]; labour: Awaited<ReturnType<typeof listLabourForTenant>>; machines: Awaited<ReturnType<typeof listMachinesForTenant>> }) {
   return (
     <article style={{ ...card, opacity: row.active ? 1 : 0.64, position: "relative", display: "grid", gap: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "flex-start" }}>
@@ -162,16 +165,17 @@ function ProcessCard({ row, labour }: { row: Awaited<ReturnType<typeof listProce
               <form action={updateProcessAction} style={{ display: "grid", gap: 16 }}>
                 <input type="hidden" name="id" value={row.id} />
                 <div>
-                  <div style={eyebrow}>Edit production step</div>
+                  <div style={eyebrow}>Edit process</div>
                   <h3 style={{ margin: "5px 0 0", fontSize: 23 }}>{row.name}</h3>
                 </div>
                 <div style={editGrid}>
-                  <label style={fieldLabel}>Step name<input name="name" defaultValue={row.name} required style={inputStyle} /></label>
+                  <label style={fieldLabel}>Process name<input name="name" defaultValue={row.name} required style={inputStyle} /></label>
                   <label style={fieldLabel}>Work area<select name="department" defaultValue={row.department} style={inputStyle}>{departments.map((department) => <option key={department.value} value={department.value}>{department.label}</option>)}</select></label>
-                  <label style={fieldLabel}>Step category<select name="processType" defaultValue={row.processType} style={inputStyle}>{types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
+                  <label style={fieldLabel}>Process category<select name="processType" defaultValue={row.processType} style={inputStyle}>{types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
+                  <label style={fieldLabel}>Default machine<select name="machineId" defaultValue={row.machineIds[0] ?? ""} style={inputStyle}><option value="">No machine cost</option>{machines.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
                   <label style={fieldLabel}>Default labour<select name="labourOperationId" defaultValue={row.labourOperationId ?? ""} style={inputStyle}><option value="">No default labour</option>{labour.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
                 </div>
-                <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>Machine costs are assigned from the Machines page. Default labour is optional and should only be linked when this step normally requires hands-on staff time.</div>
+                <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>This Process is now the single place that links its machine and normal labour. Production Methods and Products reuse these resources rather than redefining them.</div>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}><button style={primaryButton}>Save changes</button></div>
               </form>
             </div>
@@ -184,8 +188,9 @@ function ProcessCard({ row, labour }: { row: Awaited<ReturnType<typeof listProce
         </div>
       </div>
 
-      <div style={{ paddingTop: 12, borderTop: "1px solid #e2e8f0", color: "#475569", fontSize: 14 }}>
-        Default labour: <strong style={{ color: "#0f172a" }}>{row.labourOperationName ?? "Not linked"}</strong>
+      <div style={{ paddingTop: 12, borderTop: "1px solid #e2e8f0", color: "#475569", fontSize: 14, display: "flex", gap: 18, flexWrap: "wrap" }}>
+        <span>Machine: <strong style={{ color: "#0f172a" }}>{row.machineNames[0] ?? "Not linked"}</strong></span>
+        <span>Labour: <strong style={{ color: "#0f172a" }}>{row.labourOperationName ?? "Not linked"}</strong></span>
       </div>
     </article>
   );

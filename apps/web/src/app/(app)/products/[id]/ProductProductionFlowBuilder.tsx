@@ -655,11 +655,6 @@ export function ProductProductionFlowBuilder({
     markChanged();
   };
 
-  const flowJson = JSON.stringify(steps.map((step) => ({
-    processToken: step.processToken,
-    machineId: step.machineId,
-    labourOperationId: step.labourOperationId
-  })));
   const currentIndex = builderSteps.findIndex((step) => step.key === activeStep);
   const previousStep = currentIndex > 0 ? builderSteps[currentIndex - 1] : null;
   const nextStep = currentIndex < builderSteps.length - 1 ? builderSteps[currentIndex + 1] : null;
@@ -713,7 +708,7 @@ export function ProductProductionFlowBuilder({
         <div>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: ".08em" }}>Default product builder</div>
           <h2 style={{ margin: "6px 0" }}>Guided product builder</h2>
-          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>Choose the substrate, available quote options and the answers staff should see first. Every tab is already loaded, so moving between Material, Print, Ink, Laminate, Finishing and Artwork is instant. Save once from Review. This builder is using the <b>{department.replace(/_/g, " ")}</b> workflow.</p>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>Choose the substrate, available quote options and the answers staff should see first. This screen configures what can be sold and selected while quoting. The actual production sequence is controlled by the Production Method selected above.</p>
         </div>
         <Link href={`/products/advanced?selected=${productId}`} style={{ textDecoration: "none", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", fontWeight: 900 }}>Advanced raw setup</Link>
       </div>
@@ -742,7 +737,6 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="height" value={height} />
       <input type="hidden" name="quantity" value={quantity} />
       <input type="hidden" name="recipeWastePercent" value={initialWastePercent} />
-      <input type="hidden" name="flowJson" value={flowJson} />
       <input type="hidden" name="deliveryMethod" value={deliveryMethod} />
       <input type="hidden" name="printMethod" value={defaultPrintMethod} />
       <input type="hidden" name="printMethodsCsv" value={printOptions.join(",")} />
@@ -973,7 +967,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "review" ? <section style={{ ...panel, background: "linear-gradient(180deg,#f0fdfa,#fff)" }}>
-        <h3 style={{ margin: 0 }}>9. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This single save updates the reusable quote product, production flow and website fields together.</p>
+        <h3 style={{ margin: 0 }}>9. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This save updates the reusable quote options and website fields. It does not redefine the selected Production Method.</p>
         <div style={{ display: "grid", gap: 9, padding: 16, borderRadius: 14, background: "#fff", border: "1px solid #ccfbf1" }}>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Product summary</div>
           <h3 style={{ margin: 0 }}>{baseMaterialMode === "option" ? `${baseMaterialQuestionLabel}: ${baseMaterialChoices.map((choice) => choice.label || materials.find((material) => material.id === choice.materialId)?.name).filter(Boolean).join(", ") || "No choices"}` : selectedMaterial?.name ?? "No physical material"} · {width} × {height} mm · Qty {quantity}</h3>
@@ -996,14 +990,10 @@ export function ProductProductionFlowBuilder({
         </div>
       </section> : null}
 
-      <details style={{ ...panel, padding: 0, overflow: "hidden" }}>
-        <summary style={{ cursor: "pointer", padding: 17, fontWeight: 950, color: "#475569" }}>Advanced sequence and uncommon production steps</summary>
-        <div style={{ borderTop: "1px solid #e2e8f0", padding: 17, display: "grid", gap: 12 }}>
-          <p style={{ margin: 0, color: "#64748b" }}>The normal production sequence is generated from the defaults. Open this only for a special sequence or a custom saved production step.</p>
-          {steps.length ? <div style={{ display: "grid", gap: 8 }}>{steps.map((step, index) => <article key={`${step.processToken}-${index}`} style={{ display: "grid", gridTemplateColumns: "34px minmax(0,1fr) auto", gap: 9, alignItems: "center", border: "1px solid #dbe4f0", borderRadius: 12, padding: 10, background: "#f8fafc" }}><span style={{ width: 30, height: 30, borderRadius: 999, display: "grid", placeItems: "center", background: "#0f172a", color: "#fff", fontWeight: 950 }}>{index + 1}</span><strong>{step.name}</strong><div style={{ display: "flex", gap: 5 }}><button type="button" disabled={index === 0} onClick={() => moveStep(index, -1)} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", width: 32, height: 32 }}>↑</button><button type="button" disabled={index === steps.length - 1} onClick={() => moveStep(index, 1)} style={{ border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", width: 32, height: 32 }}>↓</button><button type="button" onClick={() => removeStep(index)} style={{ border: "1px solid #fecaca", borderRadius: 8, background: "#fff", color: "#b91c1c", height: 32 }}>Remove</button></div></article>)}</div> : <div style={{ color: "#64748b" }}>No production actions selected.</div>}
-          {otherProcesses.length ? <div><strong>Other saved steps</strong><div style={{ display: "flex", flexWrap: "wrap", gap: 7, marginTop: 8 }}>{otherProcesses.map((process) => <button key={process.id} type="button" onClick={() => addOtherProcess(process)} style={{ border: "1px solid #cbd5e1", borderRadius: 999, background: "#fff", padding: "7px 10px", fontWeight: 850 }}>+ {process.name}</button>)}</div></div> : null}
-        </div>
-      </details>
+      <section style={{ ...panel, background: "#f8fafc", padding: 15 }}>
+        <div style={{ fontSize: 12, fontWeight: 950, color: "#475569", textTransform: "uppercase" }}>Production sequence</div>
+        <p style={{ margin: "5px 0 0", color: "#64748b", lineHeight: 1.5 }}>Process order is managed centrally in the Product's selected Production Method. To change how this item is manufactured, edit that method under Settings → Production setup → Production Methods.</p>
+      </section>
     </form>
 
     <section style={{ ...panel, background: "#f8fafc" }}>

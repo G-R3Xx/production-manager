@@ -16,6 +16,7 @@ import { ProductRemovalControl } from "../ProductRemovalControl";
 import { WebsiteImageManager, type WebsiteImageItem, type WebsiteImageOptionField } from "./WebsiteImageManager";
 import {
   addSimpleProductQuestionAction,
+  assignProductProductionMethodAction,
   deleteSimpleProductQuestionAction,
   moveSimpleProductQuestionAction,
   saveProductGeneralAction,
@@ -124,6 +125,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     pricingPreviewPromise
   ]);
   const currentRecipe = recipes.find((recipe) => recipe.id === product.productionRecipeId) ?? null;
+  const selectableProductionMethods = recipes.filter((recipe) => recipe.active && (recipe.managedBy !== "product_build" || recipe.id === currentRecipe?.id));
   const definition = asObject(template?.definitionJson);
   const smallFormatCostingProfile = asObject(definition.smallFormatCostingProfile);
   const fields = asArray(definition.fields)
@@ -332,6 +334,28 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     </section> : null}
 
     {tab === "build" ? <section style={{ display: "grid", gap: 16 }}>
+      <section style={{ ...card, background: "linear-gradient(180deg,#eef6ff,#fff)" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>Production method</div>
+            <h2 style={{ margin: "6px 0" }}>How is this product made?</h2>
+            <p style={{ margin: 0, color: "#64748b", maxWidth: 850, lineHeight: 1.55 }}>Choose one reusable Production Method. Processes, machines and labour are maintained centrally in Settings → Production setup; this Product no longer creates its own manufacturing process.</p>
+          </div>
+          <Link href="/manufacturing-methods" style={{ textDecoration: "none", border: "1px solid #bfdbfe", borderRadius: 11, padding: "9px 12px", color: "#1d4ed8", fontWeight: 900 }}>Open Production Methods →</Link>
+        </div>
+        <form action={assignProductProductionMethodAction} style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto", gap: 10, alignItems: "end", marginTop: 15 }}>
+          <input type="hidden" name="productId" value={product.id} />
+          <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>
+            Production Method
+            <select name="productionMethodId" defaultValue={currentRecipe?.id ?? ""} style={input} required>
+              <option value="">Choose a Production Method…</option>
+              {selectableProductionMethods.map((recipe) => <option key={recipe.id} value={recipe.id}>{recipe.name}{recipe.managedBy === "product_build" ? " · existing legacy method" : ""}</option>)}
+            </select>
+          </label>
+          <button style={{ minHeight: 44, border: 0, borderRadius: 11, background: "#2563eb", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer" }}>Save method</button>
+        </form>
+        {!selectableProductionMethods.length ? <div style={{ marginTop: 12, border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: 11, padding: 12 }}>No shared Production Methods exist yet. Create one under Production Setup → Production Methods first.</div> : null}
+      </section>
       <ProductProductionFlowBuilder
         productId={product.id}
         department={product.department}
@@ -406,7 +430,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
             <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Small format costing</div>
             <h2 style={{ margin:"6px 0" }}>Digital print costing profile</h2>
             <p style={{ margin:"0 0 4px",color:"#64748b",maxWidth:900 }}>Use the same method as the approved small-format calculator: parent-sheet yield + fixed spoilage sheets + digital click charge + setup labour + printer attendance, then product-specific overhead and profit.</p>
-            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Click rates come from Settings → Machines. For the supplied manager calculator method, set the small-format printer speed to <b>A4 faces per minute</b> (for example 100) and link it to this product's print process. Sheets/hour is also supported.</p>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Click rates come from Production Setup → Resources → Machines. For the supplied manager calculator method, set the small-format printer speed to <b>A4 faces per minute</b> (for example 100) and link it to this product's print process. Sheets/hour is also supported.</p>
           </div>
           <span style={{ borderRadius:999,padding:"7px 10px",fontSize:12,fontWeight:950,background:smallFormatCostingProfile.enabled === true ? "#dcfce7" : "#f1f5f9",color:smallFormatCostingProfile.enabled === true ? "#166534" : "#475569" }}>{smallFormatCostingProfile.enabled === true ? "Active on quotes" : "Uses global pricing"}</span>
         </div>
@@ -520,10 +544,10 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         </section>
 
         <section style={card}>
-          <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Production instructions</div>
-          <h2 style={{ margin:"6px 0" }}>{currentRecipe?.name || "Production workflow not saved"}</h2>
+          <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Production Method</div>
+          <h2 style={{ margin:"6px 0" }}>{currentRecipe?.name || "Production Method not selected"}</h2>
           <div style={{ color:"#64748b" }}>Material: <b>{materials.find((material)=>material.id===currentRecipe?.materialId)?.name || "No physical material / not selected"}</b></div>
-          {initialProductionSteps.length ? <div style={{ display:"grid",gap:8,marginTop:15 }}>{initialProductionSteps.map((step,index)=><div key={`${step.processToken}-${index}`} style={{ display:"grid",gridTemplateColumns:"31px 1fr",gap:9,alignItems:"center",padding:10,borderRadius:11,background:"#f0fdfa",border:"1px solid #ccfbf1" }}><span style={{ width:28,height:28,borderRadius:999,display:"grid",placeItems:"center",background:"#0f766e",color:"#fff",fontWeight:950,fontSize:12 }}>{index+1}</span><strong>{step.name}</strong></div>)}</div> : <div style={{ marginTop:14,color:"#64748b" }}>No production actions saved yet.</div>}
+          {initialProductionSteps.length ? <div style={{ display:"grid",gap:8,marginTop:15 }}>{initialProductionSteps.map((step,index)=><div key={`${step.processToken}-${index}`} style={{ display:"grid",gridTemplateColumns:"31px 1fr",gap:9,alignItems:"center",padding:10,borderRadius:11,background:"#f0fdfa",border:"1px solid #ccfbf1" }}><span style={{ width:28,height:28,borderRadius:999,display:"grid",placeItems:"center",background:"#0f766e",color:"#fff",fontWeight:950,fontSize:12 }}>{index+1}</span><strong>{step.name}</strong></div>)}</div> : <div style={{ marginTop:14,color:"#64748b" }}>No Processes are saved in this Production Method.</div>}
         </section>
       </div>
 
@@ -533,7 +557,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           <h2 style={{ margin:"6px 0" }}>{product.productionRecipeId && fields.length ? "Ready to quote" : "Setup incomplete"}</h2>
           <div style={{ display:"grid",gap:8,marginTop:13 }}>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Product details</span><b>{product.name ? "Ready" : "Missing"}</b></div>
-            <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Material/workflow</span><b>{product.productionRecipeId ? "Ready" : "Not saved"}</b></div>
+            <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Production Method</span><b>{product.productionRecipeId ? "Ready" : "Not saved"}</b></div>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Quote choices</span><b>{fields.length ? "Ready" : "Not saved"}</b></div>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Website</span><b>{product.websiteEnabled ? "Published" : "Optional / off"}</b></div>
           </div>
