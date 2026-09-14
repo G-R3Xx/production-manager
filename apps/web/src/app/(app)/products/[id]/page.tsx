@@ -20,6 +20,7 @@ import {
   moveSimpleProductQuestionAction,
   saveProductGeneralAction,
   saveProductWebsiteAction,
+  saveSmallFormatCostingProfileAction,
   updateSimpleProductQuestionAction
 } from "./actions";
 
@@ -124,6 +125,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   ]);
   const currentRecipe = recipes.find((recipe) => recipe.id === product.productionRecipeId) ?? null;
   const definition = asObject(template?.definitionJson);
+  const smallFormatCostingProfile = asObject(definition.smallFormatCostingProfile);
   const fields = asArray(definition.fields)
     .map((field) => normaliseSharedField(asObject(field)))
     .filter((field) => String(field.key ?? "") !== "quantity")
@@ -398,6 +400,35 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         previewQuantity={quantity}
         initialWastePercent={Number(currentRecipe?.wastePercent ?? 5)}
       />
+      {product.department === "small_format" ? <section style={{ ...card, background:"linear-gradient(180deg,#f0fdfa,#fff)" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",flexWrap:"wrap" }}>
+          <div>
+            <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Small format costing</div>
+            <h2 style={{ margin:"6px 0" }}>Digital print costing profile</h2>
+            <p style={{ margin:"0 0 4px",color:"#64748b",maxWidth:900 }}>Use the same method as the approved small-format calculator: parent-sheet yield + fixed spoilage sheets + digital click charge + setup labour + printer attendance, then product-specific overhead and profit.</p>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Click rates come from Settings → Machines. For the supplied manager calculator method, set the small-format printer speed to <b>A4 faces per minute</b> (for example 100) and link it to this product's print process. Sheets/hour is also supported.</p>
+          </div>
+          <span style={{ borderRadius:999,padding:"7px 10px",fontSize:12,fontWeight:950,background:smallFormatCostingProfile.enabled === true ? "#dcfce7" : "#f1f5f9",color:smallFormatCostingProfile.enabled === true ? "#166534" : "#475569" }}>{smallFormatCostingProfile.enabled === true ? "Active on quotes" : "Uses global pricing"}</span>
+        </div>
+        <form action={saveSmallFormatCostingProfileAction} style={{ display:"grid",gap:14,marginTop:16 }}>
+          <input type="hidden" name="productId" value={product.id}/>
+          <label style={{ display:"flex",gap:9,alignItems:"center",fontWeight:900 }}><input type="checkbox" name="smallFormatCostingEnabled" defaultChecked={smallFormatCostingProfile.enabled === true}/> Use this small-format costing profile for this saved product</label>
+          <label style={{ display:"flex",gap:9,alignItems:"center",fontWeight:850 }}><input type="checkbox" name="useMachineClickRate" defaultChecked={smallFormatCostingProfile.useMachineClickRate !== false}/> Use the selected print machine's colour/mono click rate instead of square-metre ink costing</label>
+          <div style={{ display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(170px,1fr))",gap:12 }}>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Waste / spoilage sheets<input name="wasteSheets" type="number" min="0" step="1" defaultValue={smallFormatCostingProfile.wasteSheets ?? 0} style={input}/><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Added to the calculated parent-sheet requirement and included in click impressions.</span></label>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Print setup minutes<input name="printSetupMinutes" type="number" min="0" step="1" defaultValue={smallFormatCostingProfile.printSetupMinutes ?? 0} style={input}/><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>One-off operator setup time for the whole quote line.</span></label>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Printer attendance %<input name="operatorAttendancePercent" type="number" min="0" max="100" step="1" defaultValue={smallFormatCostingProfile.operatorAttendancePercent ?? 40} style={input}/><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Percentage of machine run time that requires an operator.</span></label>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Default print sides<select name="defaultPrintSides" defaultValue={String(smallFormatCostingProfile.defaultPrintSides ?? 1)} style={input}><option value="1">Single sided</option><option value="2">Double sided</option></select><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Used when the saved product does not expose a sides choice on the quote.</span></label>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Default print mode<select name="defaultPrintMode" defaultValue={String(smallFormatCostingProfile.defaultPrintMode ?? "colour")} style={input}><option value="colour">Colour</option><option value="mono">Mono / black</option></select><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Used for the machine click rate when no colour choice exists on the quote.</span></label>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Overhead %<input name="overheadPercent" type="number" min="0" step="0.1" defaultValue={smallFormatCostingProfile.overheadPercent ?? 50} style={input}/><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Applied to total job cost before profit.</span></label>
+            <label style={{ display:"grid",gap:7,fontWeight:850 }}>Profit %<input name="profitPercent" type="number" min="0" step="0.1" defaultValue={smallFormatCostingProfile.profitPercent ?? 25} style={input}/><span style={{ color:"#64748b",fontSize:12,fontWeight:650 }}>Applied after overhead, matching the manager calculator.</span></label>
+          </div>
+          <div style={{ border:"1px solid #bae6d3",borderRadius:13,background:"#f0fdf4",padding:"11px 13px",fontSize:13,color:"#166534" }}>
+            Example formula: <b>Total cost × (1 + overhead %) × (1 + profit %)</b>. A 50% overhead and 60% profit becomes ×1.50 ×1.60.
+          </div>
+          <button style={{ justifySelf:"start",minHeight:44,border:0,borderRadius:11,background:"#0f766e",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Save small format costing</button>
+        </form>
+      </section> : null}
       <details style={{ ...card,padding:0,overflow:"hidden" }}>
         <summary style={{ cursor:"pointer",padding:18,display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",listStyle:"none" }}><span><span style={{ display:"block",fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>Optional</span><strong style={{ display:"block",fontSize:20,marginTop:4 }}>Customer choices used in quotes and on the website</strong><span style={{ display:"block",fontSize:13,color:"#64748b",marginTop:4 }}>These exact labels, choices, defaults and order are shared with WordPress when the product is published.</span></span><span style={{ color:"#475569",fontWeight:950 }}>Review shared choices ↓</span></summary>
         <div style={{ padding:21,borderTop:"1px solid #dbe4f0" }}>

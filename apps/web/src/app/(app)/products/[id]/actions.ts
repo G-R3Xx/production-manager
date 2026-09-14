@@ -1534,3 +1534,31 @@ export async function moveSimpleProductQuestionAction(formData: FormData) {
   await saveDefinition(productId, template.id, tenant.tenantId, { ...definition, fields });
   redirect(`/products/${productId}?tab=build&message=Question%20order%20updated`);
 }
+
+export async function saveSmallFormatCostingProfileAction(formData: FormData) {
+  const productId = read(formData, "productId");
+  const { tenant, product, template, definition } = await editableDefinition(productId);
+  if (product.department !== "small_format") {
+    redirect(`/products/${productId}?tab=build&error=Small%20format%20costing%20profiles%20are%20only%20available%20for%20Small%20Format%20products`);
+  }
+  const num = (key: string, fallback = 0) => {
+    const value = Number(read(formData, key));
+    return Number.isFinite(value) ? Math.max(0, value) : fallback;
+  };
+  const profile = {
+    enabled: formData.get("smallFormatCostingEnabled") === "on",
+    useMachineClickRate: formData.get("useMachineClickRate") === "on",
+    wasteSheets: num("wasteSheets", 0),
+    printSetupMinutes: num("printSetupMinutes", 0),
+    operatorAttendancePercent: Math.min(100, num("operatorAttendancePercent", 0)),
+    overheadPercent: num("overheadPercent", 0),
+    profitPercent: num("profitPercent", 0),
+    defaultPrintSides: read(formData, "defaultPrintSides") === "2" ? 2 : 1,
+    defaultPrintMode: read(formData, "defaultPrintMode") === "mono" ? "mono" : "colour"
+  };
+  await saveDefinition(productId, template.id, tenant.tenantId, {
+    ...definition,
+    smallFormatCostingProfile: profile
+  });
+  redirect(`/products/${productId}?tab=build&message=Small%20format%20costing%20profile%20saved`);
+}

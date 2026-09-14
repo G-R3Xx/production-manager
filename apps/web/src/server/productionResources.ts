@@ -28,6 +28,8 @@ export type MachineRecord = {
   hourlyCost: string;
   setupMinutes: string;
   inkCostPerSqm: string;
+  colourImpressionCost: string;
+  monoImpressionCost: string;
   processIds: string[];
   active: boolean;
 };
@@ -157,6 +159,8 @@ async function loadMachinesForTenant(tenantId: string): Promise<MachineRecord[]>
       m.hourly_cost::text AS "hourlyCost",
       m.setup_minutes::text AS "setupMinutes",
       m.ink_cost_per_sqm::text AS "inkCostPerSqm",
+      COALESCE(m.capabilities_json->>'colourImpressionCost', '0') AS "colourImpressionCost",
+      COALESCE(m.capabilities_json->>'monoImpressionCost', '0') AS "monoImpressionCost",
       m.active,
       COALESCE(
         jsonb_agg(mp.process_id::text) FILTER (WHERE mp.process_id IS NOT NULL),
@@ -209,8 +213,10 @@ export async function createMachine(input: MachineInput): Promise<void> {
         speed_uom,
         hourly_cost,
         setup_minutes,
-        ink_cost_per_sqm
-      ) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::numeric, $5::numeric, $6, $7::numeric, $8::numeric, $9::numeric)
+        ink_cost_per_sqm,
+        capabilities_json
+      ) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::numeric, $5::numeric, $6, $7::numeric, $8::numeric, $9::numeric,
+        jsonb_build_object('colourImpressionCost', $10::numeric, 'monoImpressionCost', $11::numeric))
       RETURNING id::text
     `, [
       input.tenantId,
@@ -221,7 +227,9 @@ export async function createMachine(input: MachineInput): Promise<void> {
       input.speedUom,
       input.hourlyCost,
       input.setupMinutes,
-      input.inkCostPerSqm
+      input.inkCostPerSqm,
+      input.colourImpressionCost,
+      input.monoImpressionCost
     ]);
     await replaceMachineProcesses(client, input.tenantId, result.rows[0]?.id ?? "", input.processIds);
     await client.query("COMMIT");
@@ -247,6 +255,10 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
           hourly_cost = $8::numeric,
           setup_minutes = $9::numeric,
           ink_cost_per_sqm = $10::numeric,
+          capabilities_json = COALESCE(capabilities_json, '{}'::jsonb) || jsonb_build_object(
+            'colourImpressionCost', $11::numeric,
+            'monoImpressionCost', $12::numeric
+          ),
           updated_at = now()
       WHERE tenant_id = $1::uuid AND id = $2::uuid
     `, [
@@ -259,7 +271,9 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
       input.speedUom,
       input.hourlyCost,
       input.setupMinutes,
-      input.inkCostPerSqm
+      input.inkCostPerSqm,
+      input.colourImpressionCost,
+      input.monoImpressionCost
     ]);
     await replaceMachineProcesses(client, input.tenantId, input.id, input.processIds);
     await client.query("COMMIT");

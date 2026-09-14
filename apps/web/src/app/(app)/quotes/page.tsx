@@ -485,6 +485,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       hourlyCost: row.hourlyCost,
       setupMinutes: row.setupMinutes,
       inkCostPerSqm: row.inkCostPerSqm,
+      colourImpressionCost: row.colourImpressionCost,
+      monoImpressionCost: row.monoImpressionCost,
       processIds: row.processIds
     })),
     labour: costingLabour.filter((row) => row.active).map((row) => ({
@@ -539,7 +541,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           ? product.payloadJson.myobPriceMatrix as Record<string, unknown>
           : null,
         fields,
-        components
+        components,
+        smallFormatCostingProfile: definition.smallFormatCostingProfile && typeof definition.smallFormatCostingProfile === "object" && !Array.isArray(definition.smallFormatCostingProfile)
+          ? definition.smallFormatCostingProfile as Record<string, unknown>
+          : null
       };
     })
     .filter((product) => product.fields.length > 0 || product.components.length > 0);

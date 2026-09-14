@@ -16,6 +16,8 @@ export type QuoteCostingMachine = {
   hourlyCost: string;
   setupMinutes: string;
   inkCostPerSqm: string;
+  colourImpressionCost: string;
+  monoImpressionCost: string;
   processIds: string[];
 };
 
@@ -55,6 +57,8 @@ export type MachineCostMetrics = {
   sheetsPerLine?: number;
   linearMetresPerLine?: number;
   requiredWidthMm?: number;
+  sides?: number;
+  a4FacesPerParentSheet?: number;
 };
 
 export type MachineCostSelection = {
@@ -120,8 +124,16 @@ function lineMachineCost(machine: QuoteCostingMachine, metrics: MachineCostMetri
   const speed = Math.max(0, n(machine.speedValue, 0));
   const hourly = Math.max(0, n(machine.hourlyCost, 0));
   const setupHours = Math.max(0, n(machine.setupMinutes, 0)) / 60;
-  const runAmount = speedAmountFor(machine, metrics);
-  const runHours = speed > 0 ? runAmount / speed : 0;
+  let runHours = 0;
+  if (speed > 0 && machine.speedUom === "a4_faces_per_minute") {
+    const sheets = Math.max(0, metrics.sheetsPerLine ?? metrics.quantity ?? 0);
+    const sides = Math.max(1, metrics.sides ?? 1);
+    const facesPerParentSheet = Math.max(0.1, metrics.a4FacesPerParentSheet ?? 2);
+    runHours = (sheets * sides * facesPerParentSheet) / speed / 60;
+  } else {
+    const runAmount = speedAmountFor(machine, metrics);
+    runHours = speed > 0 ? runAmount / speed : 0;
+  }
   return (setupHours + runHours) * hourly;
 }
 

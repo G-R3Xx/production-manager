@@ -105,6 +105,30 @@ export type QuoteMaterial = {
   rollWidthMm?: string | null;
 };
 
+export type SmallFormatCostingProfile = {
+  enabled?: boolean;
+  wasteSheets?: string | number | null;
+  printSetupMinutes?: string | number | null;
+  operatorAttendancePercent?: string | number | null;
+  overheadPercent?: string | number | null;
+  profitPercent?: string | number | null;
+  useMachineClickRate?: boolean;
+  defaultPrintSides?: string | number | null;
+  defaultPrintMode?: "colour" | "mono" | string | null;
+};
+
+type NormalizedSmallFormatCostingProfile = {
+  enabled: true;
+  wasteSheets: number;
+  printSetupMinutes: number;
+  operatorAttendancePercent: number;
+  overheadPercent: number;
+  profitPercent: number;
+  useMachineClickRate: boolean;
+  defaultPrintSides: 1 | 2;
+  defaultPrintMode: "colour" | "mono";
+};
+
 export type QuoteProduct = {
   id: string;
   name: string;
@@ -114,6 +138,7 @@ export type QuoteProduct = {
   myobUid?: string | null;
   productionRecipeId?: string | null;
   myobPriceMatrix?: Record<string, unknown> | null;
+  smallFormatCostingProfile?: SmallFormatCostingProfile | Record<string, unknown> | null;
   fields: QuoteQuestion[];
   components: QuoteComponent[];
 };
@@ -133,6 +158,7 @@ export type CostBreakdownItem = {
 export type PricingSettings = {
   markupMultiplier?: string | number | null;
   profitMultiplier?: string | number | null;
+  labourRate?: string | number | null;
   priceLevelFactor?: string | number | null;
   priceLevelName?: string | null;
   priceLevelCode?: string | null;
@@ -1263,7 +1289,9 @@ function productionResourceBreakdownFor(
   const requiredWidthMm = numberValue(recipeMaterial?.rollWidthMm, 0)
     || recipeSheetWidth
     || Math.min(dimensions.widthMm, dimensions.heightMm);
-  const metrics = { quantity, areaSqmPerUnit, sheetsPerLine, linearMetresPerLine, requiredWidthMm };
+  const smallFormatProfile = product.department === "small_format" ? normalizedSmallFormatProfile(product) : null;
+  const sides = product.department === "small_format" ? smallFormatSides(product, answers, smallFormatProfile) : 1;
+  const metrics = { quantity, areaSqmPerUnit, sheetsPerLine, linearMetresPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: product.department === "small_format" ? 2 : undefined };
   const explicitLabourRows = materialBreakdown.filter((item) => /labour|labor/i.test(`${item.componentLabel} ${item.materialName} ${item.basis}`));
   const hasExplicitInk = materialBreakdown.some((item) => /\bink\b|print charge/i.test(`${item.componentLabel} ${item.materialName}`));
   const rows: CostBreakdownItem[] = [];
@@ -1355,6 +1383,7 @@ export type QuoteProductPricing = {
   myobMatrixBaseUnitPrice: number | null;
   myobMatrixQuantityOver: number | null;
   machineWarnings: string[];
+  pricingProfileLabel: string | null;
 };
 
 export function calculateQuoteProductPricing(
@@ -1367,15 +1396,33 @@ export function calculateQuoteProductPricing(
   quoteQuantity = 1,
   costingResources?: QuoteCostingResources
 ): QuoteProductPricing {
-  const markupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
-  const profitMultiplier = multiplierValue(pricingSettings?.profitMultiplier, 1.2);
+  const profile = normalizedSmallFormatProfile(product);
+  const markupMultiplier = profile ? 1 + profile.overheadPercent / 100 : multiplierValue(pricingSettings?.markupMultiplier, 1.5);
+  const profitMultiplier = profile ? 1 + profile.profitPercent / 100 : multiplierValue(pricingSettings?.profitMultiplier, 1.2);
   const sellMultiplier = markupMultiplier * profitMultiplier;
   const priceLevelFactor = Math.max(0, numberValue(pricingSettings?.priceLevelFactor, 1));
   const manualQuoteDiscountPercent = discountPercentValue(pricingSettings?.manualQuoteDiscountPercent);
   const manualDiscountMultiplier = Math.max(0, 1 - manualQuoteDiscountPercent / 100);
   const componentBreakdown = componentCostBreakdownFor(product, materials, answers, followUpAnswers, customFollowUpAnswers, quoteQuantity);
+  const profileAdjustments = product && profile ? smallFormatProfileAdjustments({
+    product,
+    profile,
+    resources: costingResources,
+    answers,
+    componentRows: componentBreakdown,
+    quoteQuantity,
+    materials,
+    fallbackLabourRate: numberValue(pricingSettings?.labourRate, 66)
+  }) : null;
   const productionResources = productionResourceBreakdownFor(product, costingResources, answers, componentBreakdown, quoteQuantity, materials);
-  const materialBreakdown = [...componentBreakdown, ...productionResources.rows];
+  const filteredProductionRows = profileAdjustments
+    ? productionResources.rows.filter((row) => {
+        if (profileAdjustments.suppressMachineInk && row.basis === "Machine ink setting") return false;
+        if (profileAdjustments.suppressPrintLabour && /print.*labour/i.test(row.componentLabel)) return false;
+        return true;
+      })
+    : productionResources.rows;
+  const materialBreakdown = [...componentBreakdown, ...(profileAdjustments?.rows ?? []), ...filteredProductionRows];
   const unitCost = materialBreakdown.reduce((total, item) => total + item.cost, 0);
   const markedUpUnitCost = unitCost * markupMultiplier;
   const myobMatrix = myobMatrixPriceFor(product, pricingSettings?.priceLevelCode, quoteQuantity);
@@ -1396,8 +1443,170 @@ export function calculateQuoteProductPricing(
     pricingSource: myobMatrix ? "myob_item_matrix" : "pm_calculated",
     myobMatrixBaseUnitPrice: myobMatrix?.unitPrice ?? null,
     myobMatrixQuantityOver: myobMatrix?.quantityOver ?? null,
-    machineWarnings: productionResources.warnings
+    machineWarnings: [...productionResources.warnings, ...(profileAdjustments?.warnings ?? [])],
+    pricingProfileLabel: profile ? `Small format profile · ${formatUsage(profile.overheadPercent)}% overhead · ${formatUsage(profile.profitPercent)}% profit` : null
   };
+}
+
+
+function normalizedSmallFormatProfile(product: QuoteProduct | undefined): NormalizedSmallFormatCostingProfile | null {
+  if (!product || String(product.department ?? "").toLowerCase() !== "small_format") return null;
+  const raw = product.smallFormatCostingProfile;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw) || raw.enabled !== true) return null;
+  return {
+    enabled: true,
+    wasteSheets: Math.max(0, numberValue(raw.wasteSheets as any, 0)),
+    printSetupMinutes: Math.max(0, numberValue(raw.printSetupMinutes as any, 0)),
+    operatorAttendancePercent: Math.max(0, Math.min(100, numberValue(raw.operatorAttendancePercent as any, 0))),
+    overheadPercent: Math.max(0, numberValue(raw.overheadPercent as any, 0)),
+    profitPercent: Math.max(0, numberValue(raw.profitPercent as any, 0)),
+    useMachineClickRate: raw.useMachineClickRate !== false,
+    defaultPrintSides: numberValue(raw.defaultPrintSides as any, 1) >= 2 ? 2 : 1,
+    defaultPrintMode: String(raw.defaultPrintMode ?? "colour").toLowerCase() === "mono" ? "mono" : "colour"
+  };
+}
+
+function smallFormatSides(product: QuoteProduct, answers: Record<string, string>, profile?: NormalizedSmallFormatCostingProfile | null): number {
+  const value = answerForField(product, answers, ["sides", "front_back", "print_sides", "printed_sides"]).toLowerCase();
+  if (!value) return profile?.defaultPrintSides ?? 1;
+  return value.includes("double") || value.includes("both") || value === "2" ? 2 : 1;
+}
+
+function smallFormatPrintMode(product: QuoteProduct, answers: Record<string, string>, profile?: NormalizedSmallFormatCostingProfile | null): "mono" | "colour" {
+  const value = answerForField(product, answers, ["print_colour", "print_color", "colour", "color", "ink", "print_type"]).toLowerCase();
+  if (!value) return profile?.defaultPrintMode ?? "colour";
+  return /mono|black|b\/?w|greyscale|grayscale/.test(value) ? "mono" : "colour";
+}
+
+function smallFormatProfileAdjustments(input: {
+  product: QuoteProduct;
+  profile: NormalizedSmallFormatCostingProfile;
+  resources?: QuoteCostingResources;
+  answers: Record<string, string>;
+  componentRows: CostBreakdownItem[];
+  quoteQuantity: number;
+  materials: QuoteMaterial[];
+  fallbackLabourRate: number;
+}): { rows: CostBreakdownItem[]; warnings: string[]; suppressMachineInk: boolean; suppressPrintLabour: boolean } {
+  const { product, profile, resources, answers, componentRows, quoteQuantity, materials, fallbackLabourRate } = input;
+  const quantity = Math.max(1, quoteQuantity || 1);
+  const dimensions = primaryProductDimensions(product, answers);
+  const areaSqmPerUnit = dimensions ? dimensions.widthMm * dimensions.heightMm / 1_000_000 : 0;
+  const stockRows = componentRows.filter((row) => {
+    if (!row.materialId || !row.unit.toLowerCase().includes("sheet")) return false;
+    const material = materials.find((item) => item.id === row.materialId);
+    const type = String(material?.materialType ?? "").toLowerCase();
+    return type.includes("paper") || type.includes("card") || type.includes("sheet");
+  });
+  const baseSheetsPerLine = stockRows.reduce((sum, row) => sum + Math.max(0, row.amount) * quantity, 0);
+  const wasteSheets = profile.wasteSheets;
+  const sheetsPerLine = baseSheetsPerLine + wasteSheets;
+  const firstStockRow = stockRows[0];
+  const rows: CostBreakdownItem[] = [];
+  const warnings: string[] = [];
+
+  if (wasteSheets > 0 && firstStockRow) {
+    const wasteCostLine = wasteSheets * Math.max(0, firstStockRow.rate);
+    rows.push(costBreakdownItem({
+      componentLabel: "Setup / spoilage sheets",
+      materialId: firstStockRow.materialId,
+      materialName: firstStockRow.materialName,
+      basis: "Fixed waste sheets",
+      amount: wasteSheets / quantity,
+      unit: "sheet",
+      rate: firstStockRow.rate,
+      cost: wasteCostLine / quantity,
+      note: `${formatUsage(wasteSheets)} extra parent sheets across the quote line`
+    }));
+  }
+
+  const recipe = recipeForId(resources, product.productionRecipeId);
+  const printStep = recipe?.processSteps.find((step) => {
+    const process = resources?.processes.find((row) => row.id === step.processId);
+    return Boolean(process && /print/i.test(process.name));
+  }) ?? recipe?.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null })).find((step) => {
+    const process = resources?.processes.find((row) => row.id === step.processId);
+    return Boolean(process && /print/i.test(process.name));
+  }) ?? null;
+  const printProcess = printStep ? resources?.processes.find((row) => row.id === printStep.processId) ?? null : null;
+  const firstStockMaterial = firstStockRow?.materialId ? materials.find((item) => item.id === firstStockRow.materialId) : undefined;
+  const parentWidth = numberValue(firstStockMaterial?.widthMm, 0);
+  const parentLength = numberValue(firstStockMaterial?.lengthMm, 0);
+  const requiredWidthMm = parentWidth > 0 && parentLength > 0 ? Math.min(parentWidth, parentLength) : dimensions ? Math.min(dimensions.widthMm, dimensions.heightMm) : 0;
+  const sides = smallFormatSides(product, answers, profile);
+  const mode = smallFormatPrintMode(product, answers, profile);
+  const machineSelection = selectMachineForProcess(
+    resources,
+    printProcess ? [printProcess.name] : ["small format print", "digital print", "direct print", "print"],
+    { quantity, areaSqmPerUnit, sheetsPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: 2 },
+    product.department,
+    printStep?.machineId ?? null,
+    printStep?.processId ?? null
+  );
+  const machine = machineSelection.machine;
+
+  if (profile.useMachineClickRate) {
+    const clickRate = machine ? Math.max(0, numberValue(mode === "mono" ? machine.monoImpressionCost : machine.colourImpressionCost, 0)) : 0;
+    const impressions = sheetsPerLine * sides;
+    if (machine && clickRate > 0 && impressions > 0) {
+      rows.push(costBreakdownItem({
+        componentLabel: mode === "mono" ? "Mono impressions" : "Colour impressions",
+        materialName: machine.name,
+        basis: "Digital click / impression charge",
+        amount: impressions / quantity,
+        unit: "side",
+        rate: clickRate,
+        cost: impressions * clickRate / quantity,
+        note: `${formatUsage(sheetsPerLine)} parent sheets × ${sides} side${sides === 1 ? "" : "s"} · rate from Machines`
+      }));
+    } else if (sheetsPerLine > 0) {
+      warnings.push(machine
+        ? `${machine.name}: ${mode === "mono" ? "mono" : "colour"} click rate is not set in Settings → Machines.`
+        : "Small-format click costing is enabled, but no compatible print machine is linked to this product's print process.");
+    }
+  }
+
+  const labour = labourForProcess(resources, printProcess ? [printProcess.name] : ["small format print", "digital print", "direct print", "print"], product.department, printStep?.labourOperationId ?? null, printStep?.processId ?? null);
+  const hourlyRate = Math.max(0, numberValue(labour?.hourlyRate, fallbackLabourRate));
+  if (profile.printSetupMinutes > 0 && hourlyRate > 0) {
+    const lineCost = profile.printSetupMinutes / 60 * hourlyRate;
+    rows.push(costBreakdownItem({
+      componentLabel: "Print setup labour",
+      materialName: labour?.name ?? "Small format labour",
+      basis: "Fixed setup time",
+      amount: profile.printSetupMinutes / quantity,
+      unit: "min",
+      rate: hourlyRate / 60,
+      cost: lineCost / quantity,
+      note: `${formatUsage(profile.printSetupMinutes)} minutes once per quote line · ${formatMoney(hourlyRate)}/hr`
+    }));
+  }
+
+  if (profile.operatorAttendancePercent > 0 && machine && hourlyRate > 0) {
+    const speed = Math.max(0, numberValue(machine.speedValue, 0));
+    let runHours = 0;
+    if (speed > 0) {
+      if (machine.speedUom === "a4_faces_per_minute") runHours = (sheetsPerLine * sides * 2) / speed / 60;
+      else if (machine.speedUom === "sheets_per_hour") runHours = sheetsPerLine / speed;
+      else if (machine.speedUom === "linear_metres_per_hour") runHours = 0;
+      else runHours = areaSqmPerUnit * quantity * sides / speed;
+    }
+    const attendedHours = runHours * profile.operatorAttendancePercent / 100;
+    if (attendedHours > 0) {
+      rows.push(costBreakdownItem({
+        componentLabel: "Printer attendance",
+        materialName: labour?.name ?? "Small format labour",
+        basis: `${formatUsage(profile.operatorAttendancePercent)}% of print runtime`,
+        amount: attendedHours * 60 / quantity,
+        unit: "min",
+        rate: hourlyRate / 60,
+        cost: attendedHours * hourlyRate / quantity,
+        note: `${formatUsage(runHours * 60)} min machine runtime × ${formatUsage(profile.operatorAttendancePercent)}% · ${formatMoney(hourlyRate)}/hr`
+      }));
+    }
+  }
+
+  return { rows, warnings, suppressMachineInk: profile.useMachineClickRate, suppressPrintLabour: true };
 }
 
 function sanitiseAnswersForAvailableChoices(product: QuoteProduct | undefined, answers: Record<string, string>): Record<string, string> {
@@ -1514,6 +1723,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const materialBreakdown = autoPricing.materialBreakdown;
   const missingMaterials = autoPricing.missingMaterials;
   const machineWarnings = autoPricing.machineWarnings;
+  const pricingProfileLabel = autoPricing.pricingProfileLabel;
   const autoUnitCost = autoPricing.unitCost;
   const markedUpUnitCost = autoPricing.markedUpUnitCost;
   const autoUnitPrice = autoPricing.unitPrice;
@@ -1668,7 +1878,9 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         myobPriceLevelFactor: priceLevelFactor,
         myobMatrixBaseUnitPrice,
         myobMatrixQuantityOver,
-        manualQuoteDiscountPercent
+        manualQuoteDiscountPercent,
+        smallFormatCostingProfile: selectedProduct?.smallFormatCostingProfile ?? null,
+        pricingProfileLabel
       })} />
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
 
@@ -1927,8 +2139,9 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
               </>
             ) : (
               <>
-                <div><b>Global markup:</b> ×{formatUsage(markupMultiplier)} = {formatMoney(markedUpUnitCost)} per unit</div>
-                <div><b>Global profit:</b> ×{formatUsage(profitMultiplier)} · base multiplier ×{formatUsage(sellMultiplier)}</div>
+                <div><b>{pricingProfileLabel ? "Overhead" : "Global markup"}:</b> ×{formatUsage(markupMultiplier)} = {formatMoney(markedUpUnitCost)} per unit{pricingProfileLabel ? "" : ""}</div>
+                <div><b>{pricingProfileLabel ? "Product profit" : "Global profit"}:</b> ×{formatUsage(profitMultiplier)} · base multiplier ×{formatUsage(sellMultiplier)}</div>
+                {pricingProfileLabel ? <div style={{ color: "#0f766e", fontWeight: 850 }}>{pricingProfileLabel}</div> : null}
                 <div><b>MYOB price level:</b> {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"}{pricingSettings?.priceLevelCode && pricingSettings?.priceLevelName !== pricingSettings?.priceLevelCode ? ` (${pricingSettings.priceLevelCode})` : ""} · PM calculated-work factor ×{formatUsage(priceLevelFactor)}</div>
               </>
             )}
@@ -1950,7 +2163,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
           )}
           {machineWarnings.length > 0 ? (
             <div style={{ border: "1px solid #fecdd3", background: "#fff1f2", color: "#9f1239", borderRadius: 10, padding: 9, display: "grid", gap: 3, fontSize: 12 }}>
-              <strong>Machine width check</strong>
+              <strong>Costing / machine check</strong>
               {machineWarnings.map((warning) => <span key={warning}>{warning}</span>)}
             </div>
           ) : null}
