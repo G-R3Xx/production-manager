@@ -354,6 +354,115 @@ async function loadLabourForTenant(tenantId: string): Promise<LabourRecord[]> {
 
 export const listLabourForTenant = cache(loadLabourForTenant);
 
+
+export type ProcessSetupResources = {
+  processes: ProcessRecord[];
+  machines: MachineRecord[];
+  labour: LabourRecord[];
+};
+
+async function loadProcessSetupResourcesForTenant(tenantId: string): Promise<ProcessSetupResources> {
+  // Production Setup is opened frequently while configuring products. Pull the three
+  // small reference collections in one Postgres round trip instead of opening three
+  // concurrent serverless DB connections for every navigation.
+  const result = await pool.query<{
+    processes: ProcessRecord[];
+    machines: MachineRecord[];
+    labour: LabourRecord[];
+  }>(`
+    SELECT
+      COALESCE((
+        SELECT jsonb_agg(to_jsonb(process_row) ORDER BY process_row.active DESC, process_row.name)
+        FROM (
+          SELECT
+            p.id::text AS id,
+            p.name,
+            p.department,
+            p.process_type AS "processType",
+            p.labour_operation_id::text AS "labourOperationId",
+            l.name AS "labourOperationName",
+            COALESCE((
+              SELECT jsonb_agg(mp.machine_id::text ORDER BY mp.priority, m.name)
+              FROM catalog.machine_processes mp
+              JOIN catalog.machines m ON m.id = mp.machine_id
+              WHERE mp.tenant_id = p.tenant_id AND mp.process_id = p.id
+            ), '[]'::jsonb) AS "machineIds",
+            COALESCE((
+              SELECT jsonb_agg(m.name ORDER BY mp.priority, m.name)
+              FROM catalog.machine_processes mp
+              JOIN catalog.machines m ON m.id = mp.machine_id
+              WHERE mp.tenant_id = p.tenant_id AND mp.process_id = p.id
+            ), '[]'::jsonb) AS "machineNames",
+            p.active
+          FROM catalog.processes p
+          LEFT JOIN catalog.labour_operations l ON l.id = p.labour_operation_id
+          WHERE p.tenant_id = $1::uuid
+        ) process_row
+      ), '[]'::jsonb) AS processes,
+      COALESCE((
+        SELECT jsonb_agg(to_jsonb(machine_row) ORDER BY machine_row.active DESC, machine_row.name)
+        FROM (
+          SELECT
+            m.id::text AS id,
+            m.name,
+            m.machine_type AS "machineType",
+            m.max_width_mm::text AS "maxWidthMm",
+            m.speed_value::text AS "speedValue",
+            m.speed_uom AS "speedUom",
+            m.hourly_cost::text AS "hourlyCost",
+            m.setup_minutes::text AS "setupMinutes",
+            m.ink_cost_per_sqm::text AS "inkCostPerSqm",
+            COALESCE(m.capabilities_json->>'colourImpressionCost', '0') AS "colourImpressionCost",
+            COALESCE(m.capabilities_json->>'monoImpressionCost', '0') AS "monoImpressionCost",
+            COALESCE((
+              SELECT jsonb_agg(mp.process_id::text ORDER BY mp.priority, mp.process_id)
+              FROM catalog.machine_processes mp
+              WHERE mp.tenant_id = m.tenant_id AND mp.machine_id = m.id
+            ), '[]'::jsonb) AS "processIds",
+            m.active
+          FROM catalog.machines m
+          WHERE m.tenant_id = $1::uuid
+        ) machine_row
+      ), '[]'::jsonb) AS machines,
+      COALESCE((
+        SELECT jsonb_agg(to_jsonb(labour_row) ORDER BY labour_row.active DESC, labour_row.name)
+        FROM (
+          SELECT
+            id::text AS id,
+            name,
+            department,
+            hourly_rate::text AS "hourlyRate",
+            calculation_basis AS "calculationBasis",
+            calculation_value::text AS "calculationValue",
+            minimum_minutes::text AS "minimumMinutes",
+            active
+          FROM catalog.labour_operations
+          WHERE tenant_id = $1::uuid
+        ) labour_row
+      ), '[]'::jsonb) AS labour
+  `, [tenantId]);
+
+  const row = result.rows[0];
+  const processes = Array.isArray(row?.processes) ? row.processes : [];
+  const machines = Array.isArray(row?.machines) ? row.machines : [];
+  const labour = Array.isArray(row?.labour) ? row.labour : [];
+
+  return {
+    processes: processes.map((process) => ({
+      ...process,
+      machineIds: Array.isArray(process.machineIds) ? process.machineIds : [],
+      machineNames: Array.isArray(process.machineNames) ? process.machineNames : []
+    })),
+    machines: machines.map((machine) => ({
+      ...machine,
+      processIds: Array.isArray(machine.processIds) ? machine.processIds : []
+    })),
+    labour
+  };
+}
+
+export const listProcessSetupResourcesForTenant = cache(loadProcessSetupResourcesForTenant);
+
 export async function createLabour(input: LabourInput): Promise<void> {
   await pool.query(`
     INSERT INTO catalog.labour_operations (

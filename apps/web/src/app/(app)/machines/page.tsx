@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listMachinesForTenant, listProcessesForTenant } from "@/server/productionResources";
+import { listMachinesForTenant } from "@/server/productionResources";
 import { createMachineAction, updateMachineAction, setMachineActiveAction } from "./actions";
 import Link from "next/link";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
@@ -138,12 +138,7 @@ export default async function MachinesPage() {
   const t = await resolveActiveTenantForAuthUserId(u.id);
   if (!t) redirect("/bootstrap");
 
-  const [rows, processes] = await Promise.all([
-    listMachinesForTenant(t.tenantId),
-    listProcessesForTenant(t.tenantId),
-  ]);
-
-  const processNameById = new Map(processes.map((p: any) => [p.id, p.name]));
+  const rows = await listMachinesForTenant(t.tenantId);
 
   return (
     <main style={{ display: "grid", gap: 20 }}>
@@ -215,7 +210,6 @@ export default async function MachinesPage() {
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(360px,1fr))", gap: 14 }}>
         {rows.map((r: any) => {
-          const machineProcesses = r.processIds.map((id: string) => processNameById.get(id)).filter(Boolean) as string[];
           return (
             <article key={r.id} style={{ ...card, opacity: r.active ? 1 : 0.62, position: "relative" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
@@ -301,18 +295,8 @@ export default async function MachinesPage() {
                 </div>
               </div>
 
-              <div style={{ marginTop: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 7 }}>
-                  <div style={{ ...groupTitle, margin: 0 }}>Used by processes</div>
-                  <Link href="/processes" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Manage in Processes →</Link>
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {machineProcesses.length ? machineProcesses.map((name) => (
-                    <span key={name} style={{ border: "1px solid #dbe4f0", background: "#f8fafc", borderRadius: 999, padding: "5px 8px", fontSize: 12, fontWeight: 700 }}>
-                      {name}
-                    </span>
-                  )) : <span style={{ color: "#94a3b8", fontSize: 13 }}>Not assigned to a process yet</span>}
-                </div>
+              <div style={{ marginTop: 12, paddingTop: 11, borderTop: "1px solid #e2e8f0" }}>
+                <Link href="/processes" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Machine assignments are managed in Processes →</Link>
               </div>
             </article>
           );

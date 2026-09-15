@@ -4,9 +4,7 @@ import type { CSSProperties } from "react";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
-  listLabourForTenant,
-  listMachinesForTenant,
-  listProcessesForTenant,
+  listProcessSetupResourcesForTenant,
   listRecipesForTenant,
   previewRecipeCost
 } from "@/server/productionResources";
@@ -62,13 +60,14 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
   if (!tenant) redirect("/bootstrap");
 
   const params = (await searchParams) ?? {};
-  const [materials, processes, recipes, machines, labour] = await Promise.all([
+  const [materials, recipes, setup] = await Promise.all([
     listMaterialsForTenant(tenant.tenantId),
-    listProcessesForTenant(tenant.tenantId),
     listRecipesForTenant(tenant.tenantId),
-    listMachinesForTenant(tenant.tenantId),
-    listLabourForTenant(tenant.tenantId)
+    listProcessSetupResourcesForTenant(tenant.tenantId)
   ]);
+  const processes = setup.processes;
+  const machines = setup.machines;
+  const labour = setup.labour;
 
   const previewId = read(params, "preview");
   const width = Math.max(1, Number(read(params, "width") || 600));

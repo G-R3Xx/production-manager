@@ -1,9 +1,8 @@
 import type { CSSProperties } from "react";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listProcessesForTenant, listLabourForTenant, listMachinesForTenant } from "@/server/productionResources";
+import { listProcessSetupResourcesForTenant, type LabourRecord, type MachineRecord, type ProcessRecord } from "@/server/productionResources";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 import { ProcessBuilder } from "./ProcessBuilder";
 import { createStarterProcessesAction, setProcessActiveAction, updateProcessAction } from "./actions";
@@ -57,11 +56,10 @@ export default async function ProcessesPage({
   if (!tenant) redirect("/bootstrap");
 
   const params = (await searchParams) ?? {};
-  const [rows, labour, machines] = await Promise.all([
-    listProcessesForTenant(tenant.tenantId),
-    listLabourForTenant(tenant.tenantId),
-    listMachinesForTenant(tenant.tenantId)
-  ]);
+  const setup = await listProcessSetupResourcesForTenant(tenant.tenantId);
+  const rows = setup.processes;
+  const labour = setup.labour;
+  const machines = setup.machines;
 
   const activeRows = rows.filter((row) => row.active);
   const archivedRows = rows.filter((row) => !row.active);
@@ -79,14 +77,6 @@ export default async function ProcessesPage({
 
       {params.message ? <div style={successBanner}>{params.message}</div> : null}
       {params.error ? <div style={errorBanner}>{params.error}</div> : null}
-
-      <section style={flowGrid}>
-        <FlowCard number="1" title="Resources" body="Machines and labour store capability, speed and cost." href="/machines" />
-        <FlowArrow />
-        <FlowCard number="2" title="Process" body="Connect one action to its normal machine and labour." active />
-        <FlowArrow />
-        <FlowCard number="3" title="Production method" body="Arrange saved processes in the exact order a product is made." href="/manufacturing-methods" />
-      </section>
 
       {!activeRows.length ? (
         <section style={{ ...card, borderColor: "#99f6e4", background: "linear-gradient(135deg,#f0fdfa,#ecfeff)" }}>
@@ -144,7 +134,7 @@ export default async function ProcessesPage({
   );
 }
 
-function ProcessCard({ row, labour, machines }: { row: Awaited<ReturnType<typeof listProcessesForTenant>>[number]; labour: Awaited<ReturnType<typeof listLabourForTenant>>; machines: Awaited<ReturnType<typeof listMachinesForTenant>> }) {
+function ProcessCard({ row, labour, machines }: { row: ProcessRecord; labour: LabourRecord[]; machines: MachineRecord[] }) {
   return (
     <article style={{ ...card, opacity: row.active ? 1 : 0.64, position: "relative", display: "grid", gap: 14 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "flex-start" }}>
@@ -196,25 +186,8 @@ function ProcessCard({ row, labour, machines }: { row: Awaited<ReturnType<typeof
   );
 }
 
-function FlowCard({ number, title, body, href, active = false }: { number: string; title: string; body: string; href?: string; active?: boolean }) {
-  const content = (
-    <div style={{ ...flowCard, borderColor: active ? "#5eead4" : "#dbe4f0", background: active ? "#f0fdfa" : "#fff" }}>
-      <span style={{ ...flowNumber, background: active ? "#0f766e" : "#e2e8f0", color: active ? "#fff" : "#475569" }}>{number}</span>
-      <span><strong style={{ display: "block", color: "#0f172a" }}>{title}</strong><span style={{ display: "block", marginTop: 3, color: "#64748b", fontSize: 13, lineHeight: 1.4 }}>{body}</span></span>
-    </div>
-  );
-  return href ? <Link href={href} style={{ textDecoration: "none" }}>{content}</Link> : content;
-}
-
-function FlowArrow() {
-  return <div style={{ alignSelf: "center", color: "#94a3b8", fontSize: 24, fontWeight: 900 }}>→</div>;
-}
-
 const eyebrow: CSSProperties = { fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase", letterSpacing: ".07em" };
 const card: CSSProperties = { border: "1px solid #dbe4f0", borderRadius: 17, background: "#fff", padding: 20, boxShadow: "0 8px 24px rgba(15,23,42,.05)" };
-const flowGrid: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0,1fr) auto minmax(0,1fr) auto minmax(0,1fr)", gap: 10, alignItems: "stretch" };
-const flowCard: CSSProperties = { height: "100%", display: "flex", alignItems: "flex-start", gap: 11, border: "1px solid", borderRadius: 14, padding: 14 };
-const flowNumber: CSSProperties = { width: 30, height: 30, borderRadius: 999, display: "grid", placeItems: "center", flex: "0 0 30px", fontWeight: 950 };
 const processGrid: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))", gap: 14 };
 const processIcon: CSSProperties = { width: 42, height: 42, borderRadius: 12, background: "#f0fdfa", color: "#0f766e", display: "grid", placeItems: "center", fontSize: 21, fontWeight: 950, flex: "0 0 42px" };
 const pill: CSSProperties = { borderRadius: 999, background: "#f1f5f9", color: "#475569", padding: "5px 9px", fontSize: 12, fontWeight: 850 };
