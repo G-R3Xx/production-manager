@@ -34,8 +34,17 @@ const card = { border: "1px solid #dbe4f0", borderRadius: 20, padding: 21, backg
 const input = { width: "100%", minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", boxSizing: "border-box" as const, background: "#fff" };
 const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" });
 const tabs = [
-  ["build", "Guided builder"], ["pricing", "Price check"], ["preview", "Summary"], ["general", "Product details"]
+  ["build", "Product setup"], ["pricing", "Production test"], ["preview", "Review"], ["general", "Details"]
 ] as const;
+
+function smallFormatPreviewDefaults(productName: string) {
+  const name = productName.toLowerCase();
+  if (/business card|\bcards?\b/.test(name)) return { width: 90, height: 55, quantity: 250 };
+  if (/\bdl\b/.test(name)) return { width: 99, height: 210, quantity: 100 };
+  if (/carbon|ncr/.test(name)) return { width: 148, height: 210, quantity: 10 };
+  if (/booklet|book|pad/.test(name)) return { width: 148, height: 210, quantity: 25 };
+  return { width: 210, height: 297, quantity: 100 };
+}
 
 function fieldDisplay(field: Record<string, any>, config: Record<string, any>): string {
   const displays = asObject(config.fieldDisplays);
@@ -100,9 +109,17 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
   const tab = requestedTab === "website" || tabs.some(([value]) => value === requestedTab) ? requestedTab : "build";
   const templateNeeded = ["build", "preview", "website"].includes(tab);
   const config = asObject(product.websiteConfigJson);
-  const width = Math.max(1, Number(read(query, "width") || config.defaultWidthMm || 600));
-  const height = Math.max(1, Number(read(query, "height") || config.defaultHeightMm || 450));
-  const quantity = Math.max(1, Number(read(query, "quantity") || config.defaultQuantity || 1));
+  const smallFormatDefaults = smallFormatPreviewDefaults(product.name);
+  const configuredWidth = Number(config.defaultWidthMm ?? 0);
+  const configuredHeight = Number(config.defaultHeightMm ?? 0);
+  const configuredQuantity = Number(config.defaultQuantity ?? 0);
+  const hasSensibleSmallFormatSize = configuredWidth > 0 && configuredHeight > 0 && Math.max(configuredWidth, configuredHeight) <= 350;
+  const defaultWidth = product.department === "small_format" ? (hasSensibleSmallFormatSize ? configuredWidth : smallFormatDefaults.width) : configuredWidth || 600;
+  const defaultHeight = product.department === "small_format" ? (hasSensibleSmallFormatSize ? configuredHeight : smallFormatDefaults.height) : configuredHeight || 450;
+  const defaultQuantity = product.department === "small_format" ? (configuredQuantity > 1 ? configuredQuantity : smallFormatDefaults.quantity) : configuredQuantity || 1;
+  const width = Math.max(1, Number(read(query, "width") || defaultWidth));
+  const height = Math.max(1, Number(read(query, "height") || defaultHeight));
+  const quantity = Math.max(1, Number(read(query, "quantity") || defaultQuantity));
   const templatePromise = templateNeeded && product.defaultTemplateId
     ? getConfiguratorTemplateById(tenant.tenantId, product.defaultTemplateId).catch(() => null)
     : Promise.resolve(null);
@@ -117,7 +134,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         Awaited<ReturnType<typeof listMaterialsForTenant>>,
         Awaited<ReturnType<typeof listProcessesForTenant>>
       ]);
-  const pricingPreviewPromise = (["pricing", "build", "preview"].includes(tab)) && product.productionRecipeId
+  const pricingPreviewPromise = (["pricing", "preview"].includes(tab)) && product.productionRecipeId
     ? previewRecipeCost(tenant.tenantId, product.productionRecipeId, width, height, quantity).catch(() => null)
     : Promise.resolve(null);
   const [template, [recipes, materials, processes], pricingPreview] = await Promise.all([
@@ -176,7 +193,9 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     const option = asArray(baseMaterialField?.options).find((choice) => triggerValues.includes(String(choice?.value ?? "")) || String(choice?.value ?? "") === materialId);
     return { materialId, label: String(option?.label ?? component.label ?? materialId) };
   });
-  const initialBaseMaterialMode = initialBaseMaterialChoices.length ? "option" : currentRecipe?.materialId ? "fixed" : "none";
+  const fixedBaseMaterialComponent = definitionComponents.find((component) => Boolean(component.materialId) && String(component.role ?? "") === "base_material");
+  const initialFixedMaterialId = String(currentRecipe?.materialId ?? fixedBaseMaterialComponent?.materialId ?? "");
+  const initialBaseMaterialMode = initialBaseMaterialChoices.length ? "option" : initialFixedMaterialId ? "fixed" : "none";
   const optionBaseMaterialIds = new Set(initialBaseMaterialChoices.map((choice) => choice.materialId));
   const eyeletStockComponent = definitionComponents.find((component) => Boolean(component.materialId) && /eyelet|grommet/i.test(String(component.label ?? "")));
   const eyeletFollowUpComponent = definitionComponents.find((component) => {
@@ -297,6 +316,10 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
       labourOperationId: step.labourOperationId
     }];
   });
+  const hasConfiguredBaseMaterial = initialBaseMaterialMode !== "none";
+  const hasProductionMethod = Boolean(product.productionRecipeId);
+  const hasQuoteChoices = fields.length > 0;
+  const productSetupReady = hasConfiguredBaseMaterial && hasProductionMethod && hasQuoteChoices;
   return <main style={{ display: "grid", gap: 18 }}>
     <header style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-start" }}>
       <div>
@@ -305,12 +328,17 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         <h1 style={{ margin: "6px 0", fontSize: 38 }}>{product.name}</h1>
         <div style={{ color: "#64748b" }}>{product.sku || "No SKU"} · {product.department.replace(/_/g," ")} · {product.status === "active" ? "Ready for quoting" : product.status === "deleted" ? "Removed" : product.status}</div>
       </div>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
         {product.websiteEnabled ? <span style={{ borderRadius: 999, padding: "7px 10px", fontSize: 12, fontWeight: 950, background: "#dcfce7", color: "#166534" }}>Also published online</span> : null}
         {product.status !== "deleted" ? <form action={duplicateProductAction} style={{ margin: 0 }}><input type="hidden" name="productId" value={product.id} /><button type="submit" style={{ minHeight: 40, border: "1px solid #bfdbfe", borderRadius: 11, padding: "0 13px", background: "#eff6ff", color: "#1d4ed8", fontWeight: 900, cursor: "pointer" }}>Duplicate</button></form> : null}
-        <Link href={`/products/${product.id}?tab=website`} style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", color: "#475569", fontWeight: 850 }}>Website publishing (optional)</Link>
-        <Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", color: "#334155", fontWeight: 850 }}>Advanced setup</Link>
-        <ProductRemovalControl productId={product.id} productName={product.name} status={product.status} source="detail" />
+        <details style={{ position: "relative" }}>
+          <summary style={{ minHeight: 40, display: "flex", alignItems: "center", border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 13px", background: "#fff", color: "#334155", fontWeight: 900, cursor: "pointer", listStyle: "none" }}>More ▾</summary>
+          <div style={{ position: "absolute", right: 0, zIndex: 20, width: 255, marginTop: 7, padding: 9, display: "grid", gap: 7, border: "1px solid #cbd5e1", borderRadius: 13, background: "#fff", boxShadow: "0 16px 34px rgba(15,23,42,.16)" }}>
+            <Link href={`/products/${product.id}?tab=website`} style={{ textDecoration: "none", border: "1px solid #e2e8f0", borderRadius: 9, padding: "9px 11px", color: "#475569", fontWeight: 850 }}>Website publishing</Link>
+            <Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration: "none", border: "1px solid #e2e8f0", borderRadius: 9, padding: "9px 11px", color: "#334155", fontWeight: 850 }}>Advanced setup</Link>
+            <ProductRemovalControl productId={product.id} productName={product.name} status={product.status} source="detail" />
+          </div>
+        </details>
       </div>
     </header>
 
@@ -336,12 +364,12 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     </section> : null}
 
     {tab === "build" ? <section style={{ display: "grid", gap: 16 }}>
-      <section style={{ ...card, background: "linear-gradient(180deg,#eef6ff,#fff)" }}>
+      <section style={{ ...card, order: 3, background: "linear-gradient(180deg,#eef6ff,#fff)" }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
-            <div style={{ fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>Production method</div>
+            <div style={{ fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>3 · Production method</div>
             <h2 style={{ margin: "6px 0" }}>How is this product made?</h2>
-            <p style={{ margin: 0, color: "#64748b", maxWidth: 850, lineHeight: 1.55 }}>Choose one reusable Production Method. Processes, machines and labour are maintained centrally in Settings → Production setup; this Product no longer creates its own manufacturing process.</p>
+            <p style={{ margin: 0, color: "#64748b", maxWidth: 850, lineHeight: 1.55 }}>Once the product, materials and customer choices are defined, choose the reusable method that makes it. Processes, machines and labour remain maintained centrally in Settings → Production setup.</p>
           </div>
           <Link href="/manufacturing-methods" style={{ textDecoration: "none", border: "1px solid #bfdbfe", borderRadius: 11, padding: "9px 12px", color: "#1d4ed8", fontWeight: 900 }}>Open Production Methods →</Link>
         </div>
@@ -358,9 +386,10 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         </form>
         {!selectableProductionMethods.length ? <div style={{ marginTop: 12, border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: 11, padding: 12 }}>No shared Production Methods exist yet. Create one under Production Setup → Production Methods first.</div> : null}
       </section>
-      <ProductProductionFlowBuilder
+      <div style={{ order: 1 }}><ProductProductionFlowBuilder
         productId={product.id}
         department={product.department}
+        productKind={String(definition.setupPreset ?? "")}
         currentStatus={product.status}
         materials={materials.filter((material) => material.active || material.id === currentRecipe?.materialId || optionBaseMaterialIds.has(material.id) || linkedStandoffMaterialIds.has(material.id) || linkedVinylBackingMaterialIds.has(material.id)).map((material) => ({
           id: material.id,
@@ -384,7 +413,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           labourOperationId: process.labourOperationId,
           labourOperationName: process.labourOperationName
         }))}
-        initialMaterialId={currentRecipe?.materialId ?? ""}
+        initialMaterialId={initialFixedMaterialId}
         initialBaseMaterialMode={initialBaseMaterialMode}
         initialBaseMaterialQuestionLabel={String(baseMaterialField?.label ?? "Material / thickness")}
         initialBaseMaterialChoices={initialBaseMaterialChoices}
@@ -411,25 +440,15 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         initialDefaultHoleQuantity={initialDefaultHoleQuantity}
         initialSilverStandoffMaterialId={String(standoffComponentFor("silver")?.materialId ?? "")}
         initialBlackStandoffMaterialId={String(standoffComponentFor("black")?.materialId ?? "")}
-        preview={pricingPreview ? {
-          materialCost: pricingPreview.materialCost,
-          machineCost: pricingPreview.machineCost,
-          inkCost: pricingPreview.inkCost,
-          labourCost: pricingPreview.labourCost,
-          totalCost: pricingPreview.totalCost,
-          sellPrice: pricingPreview.sellPrice,
-          processBreakdown: pricingPreview.processBreakdown,
-          machineWarnings: pricingPreview.machineWarnings
-        } : null}
         previewWidth={width}
         previewHeight={height}
         previewQuantity={quantity}
         initialWastePercent={Number(currentRecipe?.wastePercent ?? 5)}
-      />
-      {product.department === "small_format" ? <section style={{ ...card, background:"linear-gradient(180deg,#f0fdfa,#fff)" }}>
+      /></div>
+      {product.department === "small_format" ? <section style={{ ...card, order: 4, background:"linear-gradient(180deg,#f0fdfa,#fff)" }}>
         <div style={{ display:"flex",justifyContent:"space-between",gap:16,alignItems:"flex-start",flexWrap:"wrap" }}>
           <div>
-            <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Small format costing</div>
+            <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>4 · Costing rules</div>
             <h2 style={{ margin:"6px 0" }}>Digital print costing profile</h2>
             <p style={{ margin:"0 0 4px",color:"#64748b",maxWidth:900 }}>Use the same method as the approved small-format calculator: parent-sheet yield + fixed spoilage sheets + digital click charge + setup labour + printer attendance, then product-specific overhead and profit.</p>
             <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Click rates come from Production Setup → Resources → Machines. For the supplied manager calculator method, set the small-format printer speed to <b>A4 faces per minute</b> (for example 100) and link it to this product's print process. Sheets/hour is also supported.</p>
@@ -455,8 +474,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           <button style={{ justifySelf:"start",minHeight:44,border:0,borderRadius:11,background:"#0f766e",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Save small format costing</button>
         </form>
       </section> : null}
-      <details style={{ ...card,padding:0,overflow:"hidden" }}>
-        <summary style={{ cursor:"pointer",padding:18,display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",listStyle:"none" }}><span><span style={{ display:"block",fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>Optional</span><strong style={{ display:"block",fontSize:20,marginTop:4 }}>Customer choices used in quotes and on the website</strong><span style={{ display:"block",fontSize:13,color:"#64748b",marginTop:4 }}>These exact labels, choices, defaults and order are shared with WordPress when the product is published.</span></span><span style={{ color:"#475569",fontWeight:950 }}>Review shared choices ↓</span></summary>
+      <details open={product.department === "small_format"} style={{ ...card,order:2,padding:0,overflow:"hidden" }}>
+        <summary style={{ cursor:"pointer",padding:18,display:"flex",justifyContent:"space-between",gap:14,alignItems:"center",listStyle:"none" }}><span><span style={{ display:"block",fontSize:12,fontWeight:950,color:"#2563eb",textTransform:"uppercase",letterSpacing:".08em" }}>2 · Customer quote choices</span><strong style={{ display:"block",fontSize:20,marginTop:4 }}>What staff and customers choose while quoting</strong><span style={{ display:"block",fontSize:13,color:"#64748b",marginTop:4 }}>These choices define the specification and can change material use and cost. The same labels, defaults and order are used online when this product is published.</span></span><span style={{ color:"#475569",fontWeight:950 }}>Review and edit choices ↓</span></summary>
         <div style={{ padding:21,borderTop:"1px solid #dbe4f0" }}>
           <div style={{ display:"flex",justifyContent:"flex-end",marginBottom:12 }}><Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration:"none",border:"1px solid #cbd5e1",color:"#334155",borderRadius:11,padding:"10px 14px",fontWeight:900 }}>Advanced rules</Link></div>
         <div style={{ display:"grid",gap:11,marginTop:16 }}>
@@ -491,13 +510,30 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         </form>
         </div>
       </details>
+      <section style={{ ...card, order: 5, background: productSetupReady ? "linear-gradient(180deg,#ecfdf5,#fff)" : "linear-gradient(180deg,#fff7ed,#fff)" }}>
+        <div style={{ display:"flex",justifyContent:"space-between",gap:18,alignItems:"flex-start",flexWrap:"wrap" }}>
+          <div>
+            <div style={{ fontSize:12,fontWeight:950,color:productSetupReady ? "#047857" : "#c2410c",textTransform:"uppercase",letterSpacing:".08em" }}>{product.department === "small_format" ? "5" : "4"} · Review and test</div>
+            <h2 style={{ margin:"6px 0" }}>{productSetupReady ? "Ready for a production test" : "Finish the required setup"}</h2>
+            <p style={{ margin:0,color:"#64748b",maxWidth:820,lineHeight:1.55 }}>The production test checks the linked method, machines, processes and labour at the normal size. Create a draft quote to verify the final customer price after all product choices, stock, overhead and profit are applied.</p>
+          </div>
+          {productSetupReady ? <Link href={`/products/${product.id}?tab=pricing&width=${width}&height=${height}&quantity=${quantity}`} style={{ textDecoration:"none",borderRadius:11,background:"#0f766e",color:"#fff",padding:"12px 16px",fontWeight:950 }}>Open production test →</Link> : null}
+        </div>
+        <div style={{ display:"grid",gridTemplateColumns:"repeat(3,minmax(170px,1fr))",gap:10,marginTop:16 }}>
+          {[
+            ["Material / stock", hasConfiguredBaseMaterial, hasConfiguredBaseMaterial ? "Configured" : "Choose stock above"],
+            ["Quote choices", hasQuoteChoices, hasQuoteChoices ? `${fields.length} saved` : "Save product choices"],
+            ["Production method", hasProductionMethod, hasProductionMethod ? currentRecipe?.name ?? "Configured" : "Choose a method"]
+          ].map(([label,ready,detail]) => <div key={String(label)} style={{ padding:13,borderRadius:12,background:"#fff",border:"1px solid #dbe4f0" }}><div style={{ display:"flex",justifyContent:"space-between",gap:8 }}><strong>{label}</strong><span style={{ color:ready ? "#15803d" : "#c2410c",fontWeight:950 }}>{ready ? "Ready" : "Needed"}</span></div><div style={{ marginTop:5,color:"#64748b",fontSize:12 }}>{detail}</div></div>)}
+        </div>
+      </section>
     </section> : null}
 
     {tab === "pricing" ? <section style={{ display:"grid",gap:16 }}>
-      <div style={card}><h2 style={{ marginTop:0 }}>Pricing</h2><p style={{ color:"#64748b",lineHeight:1.6 }}>Check the internal cost and sell price for a typical size and quantity before staff use this product on a quote.</p>
-        {product.productionRecipeId ? <form method="get" style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr) auto",gap:10 }}><input type="hidden" name="tab" value="pricing"/><label style={{ display:"grid",gap:7,fontWeight:850 }}>Width mm<input name="width" type="number" defaultValue={width} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Height mm<input name="height" type="number" defaultValue={height} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Quantity<input name="quantity" type="number" defaultValue={quantity} style={input}/></label><button style={{ minHeight:44,alignSelf:"end",border:0,borderRadius:11,background:"#0f172a",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Calculate</button></form> : <div style={{ padding:16,borderRadius:14,background:"#fff7ed",border:"1px solid #fed7aa",color:"#9a3412" }}>Choose the material and production actions on the Build tab first.</div>}
+      <div style={card}><h2 style={{ marginTop:0 }}>Production method test</h2><p style={{ color:"#64748b",lineHeight:1.6 }}>Test the selected Production Method's linked material, machines, processes and labour at a typical size and quantity. This is a resource estimate—not the final quoted product price.</p>
+        {product.productionRecipeId ? <form method="get" style={{ display:"grid",gridTemplateColumns:"repeat(3,1fr) auto",gap:10 }}><input type="hidden" name="tab" value="pricing"/><label style={{ display:"grid",gap:7,fontWeight:850 }}>Width mm<input name="width" type="number" defaultValue={width} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Height mm<input name="height" type="number" defaultValue={height} style={input}/></label><label style={{ display:"grid",gap:7,fontWeight:850 }}>Quantity<input name="quantity" type="number" defaultValue={quantity} style={input}/></label><button style={{ minHeight:44,alignSelf:"end",border:0,borderRadius:11,background:"#0f172a",color:"#fff",fontWeight:950,padding:"0 18px",cursor:"pointer" }}>Calculate</button></form> : <div style={{ padding:16,borderRadius:14,background:"#fff7ed",border:"1px solid #fed7aa",color:"#9a3412" }}>Choose the material and Production Method on the Product setup tab first.</div>}
       </div>
-      {pricingPreview ? <div style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ display:"flex",justifyContent:"space-between",gap:14 }}><div><div style={{ fontSize:12,fontWeight:900,color:"#0f766e",textTransform:"uppercase" }}>Live shared calculation</div><h2 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h2></div><Link href="/settings" style={{ color:"#0f766e",fontWeight:900 }}>Advanced costing settings →</Link></div>{pricingPreview.machineWarnings?.length ? <div style={{ marginTop:12,border:"1px solid #fca5a5",borderRadius:12,background:"#fff1f2",color:"#b42318",padding:11,fontWeight:800 }}>{pricingPreview.machineWarnings.join(" ")}</div> : null}<div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:9,marginTop:14 }}>{[["Material",pricingPreview.materialCost],["Machines",pricingPreview.machineCost],["Ink",pricingPreview.inkCost],["Labour",pricingPreview.labourCost],["Total cost",pricingPreview.totalCost],["Sell price",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ padding:13,borderRadius:12,background:"#fff",border:"1px solid #ccfbf1" }}><div style={{ fontSize:12,color:"#64748b" }}>{label}</div><div style={{ marginTop:5,fontSize:20,fontWeight:950 }}>{aud.format(Number(value))}</div></div>)}</div></div> : null}
+      {pricingPreview ? <div style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ display:"flex",justifyContent:"space-between",gap:14 }}><div><div style={{ fontSize:12,fontWeight:900,color:"#0f766e",textTransform:"uppercase" }}>Method / resource estimate</div><h2 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h2></div><Link href="/settings" style={{ color:"#0f766e",fontWeight:900 }}>Production setup →</Link></div>{pricingPreview.machineWarnings?.length ? <div style={{ marginTop:12,border:"1px solid #fca5a5",borderRadius:12,background:"#fff1f2",color:"#b42318",padding:11,fontWeight:800 }}>{pricingPreview.machineWarnings.join(" ")}</div> : null}<div style={{ display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:9,marginTop:14 }}>{[["Material",pricingPreview.materialCost],["Machines",pricingPreview.machineCost],["Ink",pricingPreview.inkCost],["Labour",pricingPreview.labourCost],["Method cost",pricingPreview.totalCost],["Method estimate",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ padding:13,borderRadius:12,background:"#fff",border:"1px solid #ccfbf1" }}><div style={{ fontSize:12,color:"#64748b" }}>{label}</div><div style={{ marginTop:5,fontSize:20,fontWeight:950 }}>{aud.format(Number(value))}</div></div>)}</div><div style={{ marginTop:14,padding:13,borderRadius:12,background:"#fff",border:"1px solid #bae6d3",color:"#475569",lineHeight:1.55 }}><b>Final price check:</b> add this product to a draft Quote and choose the actual stock, sides, finishing and quantity. That path applies the complete product configuration, including the small-format profile, overhead and profit.</div></div> : null}
     </section> : null}
 
     {tab === "website" ? <section style={card}>
@@ -563,9 +599,9 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Quote choices</span><b>{fields.length ? "Ready" : "Not saved"}</b></div>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Website</span><b>{product.websiteEnabled ? "Published" : "Optional / off"}</b></div>
           </div>
-          <Link href={`/products/${product.id}?tab=build`} style={{ display:"block",marginTop:16,textAlign:"center",textDecoration:"none",borderRadius:11,background:"#2563eb",color:"#fff",padding:"12px 14px",fontWeight:950 }}>Edit guided builder</Link>
+          <Link href={`/products/${product.id}?tab=build`} style={{ display:"block",marginTop:16,textAlign:"center",textDecoration:"none",borderRadius:11,background:"#2563eb",color:"#fff",padding:"12px 14px",fontWeight:950 }}>Edit product setup</Link>
         </section>
-        {pricingPreview ? <section style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase" }}>Typical price check</div><h3 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h3><div style={{ display:"grid",gap:8,marginTop:13 }}>{[["Material",pricingPreview.materialCost],["Ink",pricingPreview.inkCost],["Labour + machine",pricingPreview.labourCost+pricingPreview.machineCost],["Total cost",pricingPreview.totalCost],["Sell price",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ display:"flex",justifyContent:"space-between",gap:10,paddingBottom:7,borderBottom:"1px solid #dbe4f0" }}><span>{label}</span><b>{aud.format(Number(value))}</b></div>)}</div></section> : null}
+        {pricingPreview ? <section style={{ ...card,background:"linear-gradient(180deg,#f0fdfa,#fff)" }}><div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase" }}>Production method estimate</div><h3 style={{ margin:"6px 0" }}>{width} × {height} mm · Qty {quantity}</h3><div style={{ display:"grid",gap:8,marginTop:13 }}>{[["Material",pricingPreview.materialCost],["Ink",pricingPreview.inkCost],["Labour + machine",pricingPreview.labourCost+pricingPreview.machineCost],["Method cost",pricingPreview.totalCost],["Method estimate",pricingPreview.sellPrice]].map(([label,value])=><div key={String(label)} style={{ display:"flex",justifyContent:"space-between",gap:10,paddingBottom:7,borderBottom:"1px solid #dbe4f0" }}><span>{label}</span><b>{aud.format(Number(value))}</b></div>)}</div><p style={{ margin:"12px 0 0",color:"#64748b",fontSize:12,lineHeight:1.5 }}>Use a draft Quote for the final product sell price after customer choices and product-specific pricing rules are applied.</p></section> : null}
       </aside>
     </section> : null}
   </main>;

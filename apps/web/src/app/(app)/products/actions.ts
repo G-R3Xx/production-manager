@@ -433,7 +433,7 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
   if (["business_cards", "flyers"].includes(setupPreset)) {
     const isCards = setupPreset === "business_cards";
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: isCards ? "90x55,85x55,Custom=custom" : "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Small format finished size." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: isCards ? "90x55" : "DL", optionsCsv: isCards ? "90x55,85x55,Custom=custom" : "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Small format finished size." }),
       quoteField({ key: "sides", label: "Front / back", type: "select", defaultValue: null, optionsCsv: "Front only=single_sided,Front and back=double_sided", helpText: "Controls print faces." }),
       quoteField({ key: "cello", label: "Celloglaze", type: "select", defaultValue: null, optionsCsv: "None=none,Gloss cello=gloss_cello,Matt cello=matt_cello", helpText: "Optional cello. Cello stock is only allocated when selected." }),
       quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: isCards ? "250" : "100", helpText: "Quantity being quoted." })
@@ -447,7 +447,7 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (setupPreset === "books") {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Book/pad finished size." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "A5", optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Book/pad finished size." }),
       quoteField({ key: "page_count", label: "Pages", type: "quantity", defaultValue: "50", helpText: "Pages per book or pad." }),
       quoteField({ key: "cover_colour", label: "Cover colour", type: "color", defaultValue: null, optionsCsv: "White=white,Black=black,Blue=blue,Green=green,Red=red,Yellow=yellow", helpText: "Cover stock colour." }),
       quoteField({ key: "binding_type", label: "Binding", type: "select", defaultValue: null, optionsCsv: "Pad binding=pad_binding,Saddle stitch=saddle_stitch,Wire bind=wire_bind,Perfect bind=perfect_bind", helpText: "Binding method." }),
@@ -462,7 +462,7 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
 
   if (setupPreset === "carbon_books") {
     fields.push(
-      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: null, optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Carbon book finished size." }),
+      quoteField({ key: "finished_size", label: "Size", type: "size_select", defaultValue: "A5", optionsCsv: "A4=A4,A5=A5,DL=DL,Custom=custom", helpText: "Carbon book finished size." }),
       quoteField({ key: "page_count", label: "Pages", type: "quantity", defaultValue: "50", helpText: "Numbered pages/sets per book." }),
       quoteField({ key: "copy_set", label: "Copies", type: "select", defaultValue: null, optionsCsv: "Duplicate=duplicate,Triplicate=triplicate,Quadruplicate=quadruplicate", helpText: "Duplicate/triplicate copy count per set." }),
       quoteField({ key: "copy_colours", label: "Copy colours", type: "select", defaultValue: null, optionsCsv: "White / Yellow=white_yellow,White / Yellow / Pink=white_yellow_pink,White / Green / Blue=white_green_blue,Custom=custom", helpText: "Carbonless copy paper colour set." }),
@@ -783,10 +783,23 @@ export async function createTestingProductionSetupAction() {
 
     if (product.department === "small_format") {
       const { template, definition } = await getEditableDefinition({ tenantId, productId: product.id });
-      if (!(definition as Record<string, any>).smallFormatCostingProfile) {
+      const definitionRecord = definition as Record<string, any>;
+      const normalFinishedSize = method.sku === "STARTER-CARDS"
+        ? "90x55"
+        : method.sku === "STARTER-DL-FLYERS"
+          ? "DL"
+          : "A5";
+      let finishedSizeDefaultAdded = false;
+      const fields = (Array.isArray(definitionRecord.fields) ? definitionRecord.fields : []).map((field: Record<string, any>) => {
+        if (String(field?.key ?? "") !== "finished_size" || String(field?.defaultValue ?? "").trim()) return field;
+        finishedSizeDefaultAdded = true;
+        return { ...field, defaultValue: normalFinishedSize };
+      });
+      if (!definitionRecord.smallFormatCostingProfile || finishedSizeDefaultAdded) {
         await updateConfiguratorDefinitionJson(tenantId, template.id, {
           ...definition,
-          smallFormatCostingProfile: {
+          fields,
+          smallFormatCostingProfile: definitionRecord.smallFormatCostingProfile ?? {
             enabled: true,
             useMachineClickRate: true,
             wasteSheets: 5,

@@ -43,24 +43,10 @@ type BaseMaterialChoice = {
   label: string;
 };
 
-type PreviewSummary = {
-  materialCost: number;
-  machineCost: number;
-  inkCost: number;
-  labourCost: number;
-  totalCost: number;
-  sellPrice: number;
-  processBreakdown: Array<{
-    processName: string;
-    machineName: string | null;
-    labourName?: string | null;
-  }>;
-  machineWarnings?: string[];
-} | null;
-
 type Props = {
   productId: string;
   department: string;
+  productKind: string;
   currentStatus: string;
   materials: MaterialOption[];
   processes: ProcessOption[];
@@ -91,7 +77,6 @@ type Props = {
   initialDefaultHoleQuantity: number;
   initialSilverStandoffMaterialId: string;
   initialBlackStandoffMaterialId: string;
-  preview: PreviewSummary;
   previewWidth: number;
   previewHeight: number;
   previewQuantity: number;
@@ -111,6 +96,32 @@ const builderSteps: Array<{ key: BuilderStep; number: number; label: string; hin
   { key: "fulfilment", number: 8, label: "Supply", hint: "Pickup, delivery, install" },
   { key: "review", number: 9, label: "Review", hint: "Save once" }
 ];
+
+function builderStepsForProduct(department: string, productKind: string) {
+  const keys: BuilderStep[] = department === "small_format"
+    ? productKind === "carbon_books"
+      ? ["material", "size", "print", "finishing", "review"]
+      : ["material", "size", "print", "laminate", "finishing", "review"]
+    : productKind === "cut_vinyl"
+      ? ["material", "size", "finishing", "artwork", "fulfilment", "review"]
+      : productKind === "roll_print"
+        ? ["material", "size", "media_ink", "laminate", "finishing", "artwork", "fulfilment", "review"]
+        : builderSteps.map((step) => step.key);
+
+  return keys.map((key) => {
+    const base = builderSteps.find((step) => step.key === key)!;
+    if (department !== "small_format") return base;
+    const smallLabels: Partial<Record<BuilderStep, { label: string; hint: string }>> = {
+      material: { label: "Stock", hint: "Paper and card" },
+      size: { label: "Defaults", hint: "Size and quantity" },
+      print: { label: "Print", hint: "Sides and method" },
+      laminate: { label: "Cello", hint: "Optional film" },
+      finishing: { label: "Finish", hint: "Trim, bind and pack" },
+      review: { label: "Review", hint: "Save product setup" }
+    };
+    return { ...base, ...(smallLabels[key] ?? {}) };
+  });
+}
 
 const eyeletPresets = [
   { value: "four_corners", label: "4 corners", qty: 4 },
@@ -331,12 +342,13 @@ function choiceCardStyle(selected: boolean) {
 
 function SaveButton() {
   const { pending } = useFormStatus();
-  return <button disabled={pending} style={{ minHeight: 50, border: 0, borderRadius: 12, background: pending ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: 950, padding: "0 22px", cursor: pending ? "wait" : "pointer" }}>{pending ? "Saving product…" : "Save guided product"}</button>;
+  return <button disabled={pending} style={{ minHeight: 50, border: 0, borderRadius: 12, background: pending ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: 950, padding: "0 22px", cursor: pending ? "wait" : "pointer" }}>{pending ? "Saving product…" : "Save product setup"}</button>;
 }
 
 export function ProductProductionFlowBuilder({
   productId,
   department,
+  productKind,
   currentStatus,
   materials,
   processes,
@@ -367,12 +379,13 @@ export function ProductProductionFlowBuilder({
   initialDefaultHoleQuantity,
   initialSilverStandoffMaterialId,
   initialBlackStandoffMaterialId,
-  preview,
   previewWidth,
   previewHeight,
   previewQuantity,
   initialWastePercent
 }: Props) {
+  const isSmallFormat = department === "small_format";
+  const activeBuilderSteps = useMemo(() => builderStepsForProduct(department, productKind), [department, productKind]);
   const startingPrintOptions = unique([...(initialPrintOptions.length ? initialPrintOptions : []), initialDefaultPrintMethod || "none"]);
   const startingInkOptions = unique([...(initialInkOptions.length ? initialInkOptions : []), initialDefaultInk || "cmyk"]);
   const startingArtworkOptions = unique([...(initialArtworkOptions.length ? initialArtworkOptions : ["client_supplied", "artwork_required"]), initialDefaultArtwork || "client_supplied"]);
@@ -655,9 +668,10 @@ export function ProductProductionFlowBuilder({
     markChanged();
   };
 
-  const currentIndex = builderSteps.findIndex((step) => step.key === activeStep);
-  const previousStep = currentIndex > 0 ? builderSteps[currentIndex - 1] : null;
-  const nextStep = currentIndex < builderSteps.length - 1 ? builderSteps[currentIndex + 1] : null;
+  const currentIndex = activeBuilderSteps.findIndex((step) => step.key === activeStep);
+  const previousStep = currentIndex > 0 ? activeBuilderSteps[currentIndex - 1] : null;
+  const nextStep = currentIndex < activeBuilderSteps.length - 1 ? activeBuilderSteps[currentIndex + 1] : null;
+  const stepNumber = (key: BuilderStep) => activeBuilderSteps.findIndex((step) => step.key === key) + 1;
   const effectiveVinylBackingIds = unique(vinylBackingGroups
     .filter((group) => group.materials.some((material) => vinylBackingMaterialIds.includes(material.id)))
     .flatMap((group) => group.materials.map((material) => material.id)));
@@ -706,19 +720,19 @@ export function ProductProductionFlowBuilder({
     <section style={{ ...panel, background: "linear-gradient(180deg,#eff6ff,#fff)" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div>
-          <div style={{ fontSize: 12, fontWeight: 950, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: ".08em" }}>Default product builder</div>
-          <h2 style={{ margin: "6px 0" }}>Guided product builder</h2>
-          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>Choose the substrate, available quote options and the answers staff should see first. This screen configures what can be sold and selected while quoting. The actual production sequence is controlled by the Production Method selected above.</p>
+          <div style={{ fontSize: 12, fontWeight: 950, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: ".08em" }}>1 · Product and materials</div>
+          <h2 style={{ margin: "6px 0" }}>{isSmallFormat ? "Set up the stock and normal product defaults" : "Guided product builder"}</h2>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>{isSmallFormat ? "Start with the paper or card stock, then set the normal finished size, print and finishing defaults. Customer choices and the shared Production Method are configured immediately after this section." : "Choose the substrate, available quote options and the answers staff should see first. The shared Production Method is selected after the product itself is defined."}</p>
         </div>
         <Link href={`/products/advanced?selected=${productId}`} style={{ textDecoration: "none", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", fontWeight: 900 }}>Advanced raw setup</Link>
       </div>
     </section>
 
-    <nav style={{ display: "grid", gridTemplateColumns: "repeat(9,minmax(110px,1fr))", gap: 7, padding: 8, borderRadius: 17, background: "#e9eef6", overflowX: "auto" }}>
-      {builderSteps.map((step) => {
+    <nav style={{ display: "grid", gridTemplateColumns: `repeat(${activeBuilderSteps.length},minmax(110px,1fr))`, gap: 7, padding: 8, borderRadius: 17, background: "#e9eef6", overflowX: "auto" }}>
+      {activeBuilderSteps.map((step, stepIndex) => {
         const active = step.key === activeStep;
-        const complete = builderSteps.findIndex((item) => item.key === step.key) < currentIndex;
-        return <button key={step.key} type="button" onClick={() => setActiveStep(step.key)} style={{ minWidth: 110, border: active ? "1px solid #bfdbfe" : "1px solid transparent", borderRadius: 12, background: active ? "#fff" : "transparent", boxShadow: active ? "0 5px 16px rgba(15,23,42,.08)" : "none", padding: "10px 8px", textAlign: "left", cursor: "pointer", color: active ? "#0f172a" : "#64748b" }}><span style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={{ width: 25, height: 25, borderRadius: 999, display: "grid", placeItems: "center", background: active ? "#2563eb" : complete ? "#16a34a" : "#cbd5e1", color: "#fff", fontSize: 12, fontWeight: 950 }}>{complete ? "✓" : step.number}</span><span><strong style={{ display: "block", fontSize: 13 }}>{step.label}</strong><span style={{ fontSize: 10 }}>{step.hint}</span></span></span></button>;
+        const complete = stepIndex < currentIndex;
+        return <button key={step.key} type="button" onClick={() => setActiveStep(step.key)} style={{ minWidth: 110, border: active ? "1px solid #bfdbfe" : "1px solid transparent", borderRadius: 12, background: active ? "#fff" : "transparent", boxShadow: active ? "0 5px 16px rgba(15,23,42,.08)" : "none", padding: "10px 8px", textAlign: "left", cursor: "pointer", color: active ? "#0f172a" : "#64748b" }}><span style={{ display: "flex", gap: 7, alignItems: "center" }}><span style={{ width: 25, height: 25, borderRadius: 999, display: "grid", placeItems: "center", background: active ? "#2563eb" : complete ? "#16a34a" : "#cbd5e1", color: "#fff", fontSize: 12, fontWeight: 950 }}>{complete ? "✓" : stepIndex + 1}</span><span><strong style={{ display: "block", fontSize: 13 }}>{step.label}</strong><span style={{ fontSize: 10 }}>{step.hint}</span></span></span></button>;
       })}
     </nav>
 
@@ -771,11 +785,12 @@ export function ProductProductionFlowBuilder({
       <input type="hidden" name="blackStandoffMaterialName" value={selectedBlackStandoffMaterial?.name ?? "Black standoff"} />
 
       {activeStep === "material" ? <section style={panel}>
-        <div><h3 style={{ margin: 0 }}>1. Choose how the base material is selected</h3><p style={{ margin: "5px 0 0", color: "#64748b" }}>Use one fixed stock item, let the quote or website choice select the stock, or create a service-only product.</p></div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(190px,1fr))", gap: 10, marginTop: 15 }}>
+        <div><h3 style={{ margin: 0 }}>{stepNumber("material")}. Choose how the base material is selected</h3><p style={{ margin: "5px 0 0", color: "#64748b" }}>{isSmallFormat ? "Choose the normal paper/card stock, or let the quote select between stocked paper options." : "Use one fixed stock item, let the quote or website choice select the stock, or create a service-only product."}</p></div>
+        {isSmallFormat && baseMaterialMode === "none" ? <div style={{ marginTop: 14, padding: 13, borderRadius: 12, background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", fontWeight: 850 }}>Materials not configured yet. Choose a fixed stock or customer-selectable stock below before testing the price.</div> : null}
+        <div style={{ display: "grid", gridTemplateColumns: `repeat(${isSmallFormat ? 2 : 3},minmax(190px,1fr))`, gap: 10, marginTop: 15 }}>
           <button type="button" onClick={() => setMaterialMode("fixed")} style={choiceCardStyle(baseMaterialMode === "fixed")}><strong>One fixed material</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>Every quote uses the same substrate or roll stock.</span></button>
           <button type="button" onClick={() => setMaterialMode("option")} style={choiceCardStyle(baseMaterialMode === "option")}><strong>Selected by customer option</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>One product can choose 3 mm, 4.5 mm, 6 mm or other stocked materials.</span></button>
-          <button type="button" onClick={() => setMaterialMode("none")} style={choiceCardStyle(baseMaterialMode === "none")}><strong>No physical material</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>Customer-supplied signage, installation-only or service work.</span></button>
+          {!isSmallFormat ? <button type="button" onClick={() => setMaterialMode("none")} style={choiceCardStyle(baseMaterialMode === "none")}><strong>No physical material</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 6 }}>Customer-supplied signage, installation-only or service work.</span></button> : null}
         </div>
 
         {baseMaterialMode !== "none" ? <div style={{ marginTop: 17, display: "grid", gap: 12 }}>
@@ -814,7 +829,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "size" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>2. Set the normal size and quantity</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>These are only defaults. Staff can change them on every quote.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("size")}. Set the normal size and quantity</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>These are only defaults. Staff can change them on every quote.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(150px,1fr))", gap: 11 }}>
           <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Finished width mm<input type="number" min="1" value={width} onChange={(event: ChangeEvent<HTMLInputElement>) => { setWidth(Math.max(1, Number(event.target.value) || 1)); markChanged(); }} style={input} /></label>
           <label style={{ display: "grid", gap: 6, fontWeight: 850 }}>Finished height mm<input type="number" min="1" value={height} onChange={(event: ChangeEvent<HTMLInputElement>) => { setHeight(Math.max(1, Number(event.target.value) || 1)); markChanged(); }} style={input} /></label>
@@ -825,7 +840,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "print" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>3. Choose available print methods</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick every method staff may use, then mark the answer that should appear first.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("print")}. Choose available print methods</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick every method staff may use, then mark the answer that should appear first.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(190px,1fr))", gap: 10 }}>
           {printChoices.map((choice) => {
             const available = printOptions.includes(choice.value);
@@ -840,7 +855,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "media_ink" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>4. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("media_ink")}. Choose roll media and ink choices</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Roll media is only used when Roll print is selected. Ink choices are shown on the quote and website when relevant.</p>
         <div style={{ display: "grid", gap: 18 }}>
           {printOptions.includes("roll_stock") ? <label style={{ display: "grid", gap: 7, fontWeight: 850 }}>Default roll stock / print media<select value={rollMediaId} onChange={(event) => { setRollMediaId(event.target.value); markChanged(); }} style={input}><option value="">Choose when quoting / no default stock</option>{rollMediaGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label} — {autoGroupDescription(group)}</option>)}</select><small style={{ color: "#64748b", fontWeight: 650 }}>Roll stocks with the same customer-facing name are treated as width variants. Production Manager chooses the lowest-cost stock that fits the finished size.</small></label> : selectedMainMaterialIsRoll ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfdf5", color: "#065f46", border: "1px solid #a7f3d0" }}><b>{selectedMaterial?.name}</b> is already the product’s roll stock. Staff will enter only the finished size and the system will calculate the required linear metres automatically.</div> : <div style={{ padding: 13, borderRadius: 12, background: "#f8fafc", color: "#64748b" }}>Roll print is not available, so no separate roll media is required.</div>}
           {reversePrintableApplicable ? <div style={{ padding: 13, borderRadius: 12, background: "#ecfeff", color: "#155e75", border: "1px solid #a5f3fc" }}><b>Reverse print enabled.</b> This product will offer <b>Standard print</b> and <b>Reverse print</b>. Choosing Reverse print will reveal the backing-film choices below. Laminate options remain available in the normal Laminate step.</div> : null}
@@ -877,7 +892,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "laminate" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>5. Choose laminate options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick the customer-facing laminate choices. Same-name roll widths are grouped automatically and the system selects the best fitting stock. Choose None or one laminate as the normal default.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("laminate")}. Choose laminate options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick the customer-facing laminate choices. Same-name roll widths are grouped automatically and the system selects the best fitting stock. Choose None or one laminate as the normal default.</p>
         <div style={{ display: "grid", gap: 12 }}>
           <button type="button" onClick={() => setDefaultLaminate("none")} style={{ ...choiceCardStyle(defaultLaminateMaterialId === "none"), minHeight: 64 }}><strong>No laminate</strong><span style={{ display: "block", color: "#64748b", fontSize: 12, marginTop: 5 }}>{defaultLaminateMaterialId === "none" ? "Default answer" : "Always available"}</span></button>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(230px,1fr))", gap: 10 }}>
@@ -897,7 +912,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "finishing" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>6. Choose finishing defaults</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Tick the finishing choices normally included. Staff can change them on each quote. Eyelets use the proven Quick Quote placement control.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("finishing")}. Choose finishing defaults</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>{isSmallFormat ? "Choose the normal trim, binding, packing and other finishing included with this product. Staff can change the applicable options on each quote." : "Tick the finishing choices normally included. Staff can change them on each quote. Eyelets use the proven Quick Quote placement control."}</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
           {finishingChoices.map((choice) => {
             const selected = finishingValues.includes(choice.value);
@@ -935,7 +950,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "artwork" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>7. Choose artwork options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Use the same artwork question staff see in Quick Quote. Tick the answers customers may choose, then set the normal default.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("artwork")}. Choose artwork options</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Use the same artwork question staff see in Quick Quote. Tick the answers customers may choose, then set the normal default.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(190px,1fr))", gap: 10 }}>
           {artworkChoices.map((choice) => {
             const available = artworkOptions.includes(choice.value);
@@ -954,7 +969,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "fulfilment" ? <section style={panel}>
-        <h3 style={{ margin: 0 }}>8. Choose the normal supply method</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Pickup remains free, Delivery adds the fixed fee below, and Install sends the configured product through for a tailored quote.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("fulfilment")}. Choose the normal supply method</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Pickup remains free, Delivery adds the fixed fee below, and Install sends the configured product through for a tailored quote.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(170px,1fr))", gap: 10 }}>
           {[
             ["pickup", "Pickup", "No price change. Customer collects the finished order."],
@@ -967,10 +982,10 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "review" ? <section style={{ ...panel, background: "linear-gradient(180deg,#f0fdfa,#fff)" }}>
-        <h3 style={{ margin: 0 }}>9. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This save updates the reusable quote options and website fields. It does not redefine the selected Production Method.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("review")}. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This save updates the reusable quote options and website fields. It does not redefine the selected Production Method.</p>
         <div style={{ display: "grid", gap: 9, padding: 16, borderRadius: 14, background: "#fff", border: "1px solid #ccfbf1" }}>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Product summary</div>
-          <h3 style={{ margin: 0 }}>{baseMaterialMode === "option" ? `${baseMaterialQuestionLabel}: ${baseMaterialChoices.map((choice) => choice.label || materials.find((material) => material.id === choice.materialId)?.name).filter(Boolean).join(", ") || "No choices"}` : selectedMaterial?.name ?? "No physical material"} · {width} × {height} mm · Qty {quantity}</h3>
+          <h3 style={{ margin: 0 }}>{baseMaterialMode === "option" ? `${baseMaterialQuestionLabel}: ${baseMaterialChoices.map((choice) => choice.label || materials.find((material) => material.id === choice.materialId)?.name).filter(Boolean).join(", ") || "No choices"}` : selectedMaterial?.name ?? (isSmallFormat ? "Materials not configured" : "No physical material")} · {width} × {height} mm · Qty {quantity}</h3>
           {baseMaterialMode === "option" ? <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Default base material:</b> {baseMaterialChoices.find((choice) => choice.materialId === materialId)?.label ?? selectedMaterial?.name ?? "Not selected"} · Each answer is linked to its own inventory material.</div> : null}
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Print choices:</b> {printOptions.map((value) => printChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {printChoices.find((choice) => choice.value === defaultPrintMethod)?.label ?? defaultPrintMethod}</div>
           <div style={{ color: "#475569", lineHeight: 1.65 }}><b>Roll media:</b> {selectedRollMedia?.name ?? "Chosen while quoting"} · <b>Ink choices:</b> {inkOptions.map((value) => inkChoices.find((choice) => choice.value === value)?.label ?? value).join(", ")} · <b>Default:</b> {inkChoices.find((choice) => choice.value === defaultInk)?.label ?? defaultInk}</div>
@@ -982,7 +997,7 @@ export function ProductProductionFlowBuilder({
           {mountingHardwareEnabled ? <div style={{ color: "#1e3a8a" }}><b>Holes / standoffs:</b> default {defaultHoleQuantity} hole{defaultHoleQuantity === 1 ? "" : "s"} per sign plus a position note · Silver: {selectedSilverStandoffMaterial?.name ?? "not available"} · Black: {selectedBlackStandoffMaterial?.name ?? "not available"}</div> : null}
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginTop: 16, flexWrap: "wrap" }}>
-          <button type="button" onClick={() => setActiveStep("fulfilment")} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← Supply</button>
+          {previousStep ? <button type="button" onClick={() => setActiveStep(previousStep.key)} style={{ minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", fontWeight: 900, padding: "0 15px", cursor: "pointer" }}>← {previousStep.label}</button> : <span />}
           <div style={{ display: "grid", gap: 9, justifyItems: "end" }}>
             <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850, fontSize: 13, color: "#475569" }}><input type="checkbox" name="makeActive" defaultChecked={currentStatus === "draft" || currentStatus === "active"} /> Available for staff to quote</label>
             <SaveButton />
@@ -990,25 +1005,6 @@ export function ProductProductionFlowBuilder({
         </div>
       </section> : null}
 
-      <section style={{ ...panel, background: "#f8fafc", padding: 15 }}>
-        <div style={{ fontSize: 12, fontWeight: 950, color: "#475569", textTransform: "uppercase" }}>Production sequence</div>
-        <p style={{ margin: "5px 0 0", color: "#64748b", lineHeight: 1.5 }}>Process order is managed centrally in the Product's selected Production Method. To change how this item is manufactured, edit that method under Settings → Production setup → Production Methods.</p>
-      </section>
     </form>
-
-    <section style={{ ...panel, background: "#f8fafc" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div>
-          <div style={{ fontSize: 12, fontWeight: 950, color: "#475569", textTransform: "uppercase" }}>Current saved price check</div>
-          <h3 style={{ margin: "5px 0" }}>{previewWidth} × {previewHeight} mm · Qty {previewQuantity}</h3>
-          <p style={{ margin: 0, color: "#64748b" }}>{dirty ? "Your new choices are held locally. Save once from Review to refresh the calculation." : "This is the internal cost and sell price used while quoting."}</p>
-        </div>
-        <Link href={`/products/${productId}?tab=pricing`} style={{ color: "#2563eb", fontWeight: 900, textDecoration: "none" }}>Open full price check →</Link>
-      </div>
-      {preview?.machineWarnings?.length ? <div style={{ marginTop: 14, border: "1px solid #fca5a5", borderRadius: 12, background: "#fff1f2", color: "#b42318", padding: 12, display: "grid", gap: 4 }}><strong>Machine width needs attention</strong>{preview.machineWarnings.map((warning) => <span key={warning} style={{ fontSize: 13 }}>{warning}</span>)}</div> : null}
-      {preview ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(130px,1fr))", gap: 9, marginTop: 15 }}>
-        {[["Material", preview.materialCost], ["Machines", preview.machineCost], ["Ink", preview.inkCost], ["Labour", preview.labourCost], ["Total cost", preview.totalCost], ["Sell price", preview.sellPrice]].map(([label, value]) => <div key={String(label)} style={{ padding: 12, borderRadius: 12, background: "#fff", border: "1px solid #dbe4f0" }}><div style={{ fontSize: 12, color: "#64748b" }}>{label}</div><div style={{ marginTop: 5, fontSize: 18, fontWeight: 950 }}>{currency.format(Number(value))}</div></div>)}
-      </div> : <div style={{ marginTop: 14, padding: 14, borderRadius: 12, background: "#fff", border: "1px solid #dbe4f0", color: "#475569" }}>Save the product setup to calculate its cost and sell price.</div>}
-    </section>
   </div>;
 }
