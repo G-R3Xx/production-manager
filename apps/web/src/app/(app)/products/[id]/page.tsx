@@ -13,6 +13,7 @@ import {
 import { normalizeProductionFlowName } from "@/lib/productionFlowPresets";
 import { ProductProductionFlowBuilder } from "./ProductProductionFlowBuilder";
 import { ProductRemovalControl } from "../ProductRemovalControl";
+import { duplicateProductAction } from "../actions";
 import { WebsiteImageManager, type WebsiteImageItem, type WebsiteImageOptionField } from "./WebsiteImageManager";
 import {
   addSimpleProductQuestionAction,
@@ -306,6 +307,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
       </div>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         {product.websiteEnabled ? <span style={{ borderRadius: 999, padding: "7px 10px", fontSize: 12, fontWeight: 950, background: "#dcfce7", color: "#166534" }}>Also published online</span> : null}
+        {product.status !== "deleted" ? <form action={duplicateProductAction} style={{ margin: 0 }}><input type="hidden" name="productId" value={product.id} /><button type="submit" style={{ minHeight: 40, border: "1px solid #bfdbfe", borderRadius: 11, padding: "0 13px", background: "#eff6ff", color: "#1d4ed8", fontWeight: 900, cursor: "pointer" }}>Duplicate</button></form> : null}
         <Link href={`/products/${product.id}?tab=website`} style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", color: "#475569", fontWeight: 850 }}>Website publishing (optional)</Link>
         <Link href={`/products/advanced?selected=${product.id}`} style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", color: "#334155", fontWeight: 850 }}>Advanced setup</Link>
         <ProductRemovalControl productId={product.id} productName={product.name} status={product.status} source="detail" />

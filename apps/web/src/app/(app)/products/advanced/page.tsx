@@ -80,6 +80,13 @@ const starterTypes: StarterType[] = [
     quickAnswers: "Size · Media · Laminate · Qty"
   },
   {
+    value: "cut_vinyl",
+    label: "Cut vinyl graphics",
+    plainName: "Cut Vinyl Graphics",
+    description: "Unprinted cut vinyl with stock type, colour, weeding, application tape and installation choices.",
+    quickAnswers: "Size · Vinyl · Colour · Weed · Apply"
+  },
+  {
     value: "business_cards",
     label: "Business cards",
     plainName: "Business Cards",

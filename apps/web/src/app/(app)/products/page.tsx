@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listProductSummariesForTenant } from "@/server/products";
-import { createProductAction } from "./actions";
+import { createProductAction, createStarterProductLibraryAction, duplicateProductAction } from "./actions";
 import { ProductRemovalControl } from "./ProductRemovalControl";
 
 type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -15,6 +15,7 @@ const starterTypes = [
   ["sign_acm", "Rigid sign — ACM"], ["sign_corflute", "Rigid sign — Corflute"],
   ["sign_acrylic", "Rigid sign — Acrylic"], ["sign_pvc", "Rigid sign — PVC"],
   ["banner", "Banner"], ["roll_print", "Roll print / sticker"],
+  ["cut_vinyl", "Cut vinyl graphics"],
   ["business_cards", "Business cards"], ["flyers", "Flyers / brochures"],
   ["books", "Books / pads"], ["carbon_books", "Duplicate / triplicate books"]
 ];
@@ -64,6 +65,20 @@ export default async function ProductsPage({ searchParams }: Props) {
       </form>
     </section>
 
+    <section style={{ ...card, padding: 18, background: "linear-gradient(135deg,#eff6ff,#ffffff 58%,#f5f3ff)" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 18, flexWrap: "wrap" }}>
+        <div style={{ maxWidth: 850 }}>
+          <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 950, textTransform: "uppercase", letterSpacing: ".07em" }}>Starter product library</div>
+          <h2 style={{ margin: "5px 0" }}>Add the common products in one go</h2>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Creates Cards, Carbon Copy Books, Booklets, DL Flyers, Corflute Signs, ACM Signs, Printed Roll Stock and Cut Vinyl Graphics as editable drafts. You can change every question, material and production method, then duplicate a product whenever you need a variation.</p>
+        </div>
+        <form action={createStarterProductLibraryAction}>
+          <button style={{ minHeight: 44, border: 0, borderRadius: 12, background: "#1d4ed8", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer", whiteSpace: "nowrap" }}>Add starter products</button>
+        </form>
+      </div>
+      <div style={{ marginTop: 10, color: "#475569", fontSize: 13 }}>Safe to run again: products with the same starter SKU or name are skipped.</div>
+    </section>
+
     <section style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
       <form method="get" style={{ display: "flex", gap: 8, flex: "1 1 460px" }}>
         <input name="q" defaultValue={read(params,"q")} placeholder="Search products" style={{ ...input, flex: 1 }} />
@@ -93,7 +108,11 @@ export default async function ProductsPage({ searchParams }: Props) {
           </div>
           <div style={{ color: "#2563eb", fontWeight: 900, fontSize: 13 }}>Open guided builder →</div>
         </Link>
-        <div style={{ borderTop: "1px solid #e2e8f0", padding: "10px 14px", display: "flex", justifyContent: "flex-end", background: "#f8fafc" }}>
+        <div style={{ borderTop: "1px solid #e2e8f0", padding: "10px 14px", display: "flex", justifyContent: "flex-end", gap: 8, background: "#f8fafc" }}>
+          {product.status !== "deleted" ? <form action={duplicateProductAction} style={{ margin: 0 }}>
+            <input type="hidden" name="productId" value={product.id} />
+            <button type="submit" title={`Duplicate ${product.name}`} style={{ minHeight: 34, border: "1px solid #bfdbfe", borderRadius: 10, background: "#eff6ff", color: "#1d4ed8", fontWeight: 900, padding: "0 11px", cursor: "pointer" }}>Duplicate</button>
+          </form> : null}
           <ProductRemovalControl productId={product.id} productName={product.name} status={product.status} source="library" compact />
         </div>
       </article>)}

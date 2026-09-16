@@ -5,7 +5,14 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
-import { createProduct, getProductById, setProductStatusForTenant, updateProduct } from "@/server/products";
+import {
+  createProduct,
+  getProductById,
+  listProductSummariesForTenant,
+  setProductStatusForTenant,
+  updateProduct,
+  updateProductProductionRecipe
+} from "@/server/products";
 
 function readString(formData: FormData, key: string): string {
   return String(formData.get(key) ?? "").trim();
@@ -234,6 +241,8 @@ function productFamilyForStarter(starterType: string): string {
       return "banners";
     case "roll_print":
       return "roll_media";
+    case "cut_vinyl":
+      return "stickers_labels";
     case "business_cards":
     case "flyers":
       return "small_format_print";
@@ -264,6 +273,8 @@ function starterName(starterType: string): string {
       return "Banner";
     case "roll_print":
       return "Roll print";
+    case "cut_vinyl":
+      return "Cut vinyl graphics";
     case "business_cards":
       return "Business cards";
     case "flyers":
@@ -386,6 +397,25 @@ function makeQuoteBehaviour(starterType: string, baseMaterialId: string | null =
     );
   }
 
+  if (setupPreset === "cut_vinyl") {
+    fields.push(
+      quoteField({ key: "finished_size", label: "Graphic size", type: "size_select", defaultValue: null, optionsCsv: "300x300,600x600,1000x1000,Custom=custom", helpText: "Overall finished graphic size. Custom size can be entered while quoting." }),
+      quoteField({ key: "vinyl_type", label: "Vinyl type", type: "select", defaultValue: null, optionsCsv: "Monomeric=monomeric,Polymeric=polymeric,Cast vinyl=cast,Reflective=reflective", helpText: "Choose the cut-vinyl grade. Link the matching roll material after creating the product." }),
+      quoteField({ key: "vinyl_colour", label: "Vinyl colour", type: "text", defaultValue: null, helpText: "Enter the required stock colour, brand or colour code." }),
+      quoteField({ key: "weed_complexity", label: "Cut / weeding complexity", type: "select", defaultValue: "standard", optionsCsv: "Simple=simple,Standard=standard,Detailed=detailed", helpText: "Allows cutting and weeding time to reflect the artwork complexity." }),
+      quoteField({ key: "application_tape", label: "Application tape", type: "yes_no", defaultValue: "yes", optionsCsv: "Yes=yes,No=no", helpText: "Include application tape with the finished graphic." }),
+      quoteField({ key: "supply_method", label: "Supply / application", type: "select", defaultValue: "loose", optionsCsv: "Supply loose=loose,Apply to supplied panel=apply_panel,Install on site=install", helpText: "Choose whether the graphic is supplied ready to apply, mounted to a panel, or installed." }),
+      quoteField({ key: "quantity", label: "Quantity", type: "quantity", defaultValue: "1", helpText: "Number of finished graphics." })
+    );
+    components.push(
+      ...makeBaseMaterialComponent(baseMaterialId, "roll_metres", baseLabel),
+      component({ label: "Cut vinyl roll", role: "quote_selected_material", ruleType: "per_linear_metre", unit: "lm", usageOptionKey: "vinyl_type", optionValues: ["monomeric", "polymeric", "cast", "reflective"], notes: "Link the appropriate coloured cut-vinyl roll material. Size and quantity drive roll usage." }),
+      component({ label: "Application tape", role: "quote_selected_material", ruleType: "per_linear_metre", unit: "lm", triggerOptionKey: "application_tape", triggerOptionValues: ["yes"], notes: "Application tape is consumed only when selected." }),
+      component({ label: "Cut and weed", kind: "labour", role: "quote_finishing", ruleType: "selected_by_option", unit: "each", triggerOptionKey: "weed_complexity", triggerOptionValues: ["simple", "standard", "detailed"], labourRateName: "Cutting", notes: "Cutting and weeding labour. Adjust the time/rate in the product after linking your normal cutting operation." }),
+      component({ label: "Apply / install vinyl", kind: "labour", role: "quote_finishing", ruleType: "selected_by_option", unit: "each", triggerOptionKey: "supply_method", triggerOptionValues: ["apply_panel", "install"], labourRateName: "Installation", notes: "Application labour is included only when the graphic is applied or installed." })
+    );
+  }
+
   if (["business_cards", "flyers"].includes(setupPreset)) {
     const isCards = setupPreset === "business_cards";
     fields.push(
@@ -485,6 +515,137 @@ async function getEditableDefinition(input: ProductEditorTemplateInput) {
   };
 }
 
+async function createConfiguredProduct(input: {
+  tenantId: string;
+  name: string;
+  sku: string | null;
+  starterType: string;
+  department?: string;
+  productFamily?: string;
+  baseMaterialId?: string | null;
+  baseUsage?: string;
+  definition?: Record<string, unknown>;
+  productionRecipeId?: string | null;
+}): Promise<{ id: string }> {
+  const department = input.department || departmentForStarter(input.starterType);
+  const productFamily = input.productFamily || productFamilyForStarter(input.starterType);
+  const created = await createProduct({
+    tenantId: input.tenantId,
+    sku: input.sku,
+    name: input.name,
+    department,
+    productFamily,
+    status: "draft",
+    calculatorType: "configurator_template",
+    defaultTemplateId: null,
+    taxCode: "GST"
+  });
+
+  if (!created.id) return created;
+
+  const template = await ensureProductEditorTemplate({
+    tenantId: input.tenantId,
+    productId: created.id,
+    currentTemplateId: null,
+    productName: input.name,
+    department,
+    productFamily
+  });
+
+  await updateConfiguratorDefinitionJson(
+    input.tenantId,
+    template.id,
+    input.definition ?? makeQuoteBehaviour(input.starterType, input.baseMaterialId ?? null, input.baseUsage ?? "part_sheet")
+  );
+
+  if (input.productionRecipeId) {
+    await updateProductProductionRecipe(input.tenantId, created.id, input.productionRecipeId);
+  }
+
+  return created;
+}
+
+const starterProductLibrary = [
+  { name: "Cards", sku: "STARTER-CARDS", starterType: "business_cards" },
+  { name: "Carbon Copy Books", sku: "STARTER-CARBON-BOOKS", starterType: "carbon_books" },
+  { name: "Booklets", sku: "STARTER-BOOKLETS", starterType: "books" },
+  { name: "DL Flyers", sku: "STARTER-DL-FLYERS", starterType: "flyers" },
+  { name: "Corflute Signs", sku: "STARTER-CORFLUTE", starterType: "sign_corflute" },
+  { name: "ACM Signs", sku: "STARTER-ACM", starterType: "sign_acm" },
+  { name: "Printed Roll Stock", sku: "STARTER-ROLL-PRINT", starterType: "roll_print" },
+  { name: "Cut Vinyl Graphics", sku: "STARTER-CUT-VINYL", starterType: "cut_vinyl" }
+] as const;
+
+export async function createStarterProductLibraryAction() {
+  const activeTenant = await requireTenant();
+  const existing = await listProductSummariesForTenant(activeTenant.tenantId, { includeDeleted: true });
+  const existingSkus = new Set(existing.map((product) => String(product.sku ?? "").trim().toLocaleLowerCase("en-AU")).filter(Boolean));
+  const existingNames = new Set(existing.map((product) => product.name.trim().toLocaleLowerCase("en-AU")));
+  let created = 0;
+
+  for (const starter of starterProductLibrary) {
+    const skuKey = starter.sku.toLocaleLowerCase("en-AU");
+    const nameKey = starter.name.toLocaleLowerCase("en-AU");
+    if (existingSkus.has(skuKey) || existingNames.has(nameKey)) continue;
+
+    await createConfiguredProduct({
+      tenantId: activeTenant.tenantId,
+      name: starter.name,
+      sku: starter.sku,
+      starterType: starter.starterType
+    });
+    existingSkus.add(skuKey);
+    existingNames.add(nameKey);
+    created += 1;
+  }
+
+  const message = created
+    ? `${created} editable starter product${created === 1 ? "" : "s"} added as drafts`
+    : "All starter products already exist";
+  redirect(`/products?message=${encodeURIComponent(message)}`);
+}
+
+function cloneDefinitionWithFreshIds(definition: Record<string, any>): Record<string, unknown> {
+  return {
+    ...definition,
+    fields: (Array.isArray(definition.fields) ? definition.fields : []).map((field: Record<string, any>) => ({
+      ...field,
+      id: randomUUID(),
+      options: (Array.isArray(field.options) ? field.options : []).map((option: Record<string, any>) => ({ ...option, id: randomUUID() }))
+    })),
+    components: (Array.isArray(definition.components) ? definition.components : []).map((item: Record<string, any>) => ({ ...item, id: randomUUID() }))
+  };
+}
+
+export async function duplicateProductAction(formData: FormData) {
+  const activeTenant = await requireTenant();
+  const productId = readString(formData, "productId");
+  if (!productId) redirect("/products?error=Choose%20a%20product%20to%20duplicate");
+
+  const { product, definition } = await getEditableDefinition({ tenantId: activeTenant.tenantId, productId });
+  const existing = await listProductSummariesForTenant(activeTenant.tenantId, { includeDeleted: true });
+  const names = new Set(existing.map((item) => item.name.trim().toLocaleLowerCase("en-AU")));
+  let copyNumber = 1;
+  let copyName = `${product.name} (copy)`;
+  while (names.has(copyName.toLocaleLowerCase("en-AU"))) {
+    copyNumber += 1;
+    copyName = `${product.name} (copy ${copyNumber})`;
+  }
+
+  const created = await createConfiguredProduct({
+    tenantId: activeTenant.tenantId,
+    name: copyName,
+    sku: null,
+    starterType: String((definition as Record<string, any>).setupPreset ?? "custom"),
+    department: product.department,
+    productFamily: product.productFamily,
+    definition: cloneDefinitionWithFreshIds(definition),
+    productionRecipeId: product.productionRecipeId
+  });
+
+  redirect(`/products/${created.id}?tab=general&message=${encodeURIComponent("Product duplicated as a draft. Give the copy its own name and SKU.")}`);
+}
+
 export async function createProductAction(formData: FormData) {
   const activeTenant = await requireTenant();
 
@@ -498,30 +659,16 @@ export async function createProductAction(formData: FormData) {
 
   if (!name) redirect("/products?error=Product%20name%20is%20required");
 
-  const created = await createProduct({
+  const created = await createConfiguredProduct({
     tenantId: activeTenant.tenantId,
     sku: sku || null,
     name,
+    starterType,
     department,
     productFamily,
-    status: "draft",
-    calculatorType: "configurator_template",
-    defaultTemplateId: null,
-    taxCode: "GST"
+    baseMaterialId,
+    baseUsage
   });
-
-  if (created.id) {
-    const template = await ensureProductEditorTemplate({
-      tenantId: activeTenant.tenantId,
-      productId: created.id,
-      currentTemplateId: null,
-      productName: name,
-      department,
-      productFamily
-    });
-
-    await updateConfiguratorDefinitionJson(activeTenant.tenantId, template.id, makeQuoteBehaviour(starterType, baseMaterialId, baseUsage));
-  }
 
   redirect(`/products/${created.id}?tab=build&message=Product%20created.%20Choose%20the%20material,%20size%20and%20normal%20production%20options.`);
 }
