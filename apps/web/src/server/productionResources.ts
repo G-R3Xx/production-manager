@@ -245,11 +245,11 @@ async function loadMachinesForTenant(tenantId: string): Promise<MachineRecord[]>
 
 export const listMachinesForTenant = cache(loadMachinesForTenant);
 
-export async function createMachine(input: MachineInput): Promise<void> {
+export async function createMachine(input: MachineInput): Promise<{ id: string }> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(`
+    const result = await client.query<{ id: string }>(`
       INSERT INTO catalog.machines (
         tenant_id,
         name,
@@ -267,6 +267,7 @@ export async function createMachine(input: MachineInput): Promise<void> {
           'monoImpressionCost', $11::numeric,
           'maxStackSheets', $12::numeric
         ))
+      RETURNING id::text
     `, [
       input.tenantId,
       input.name,
@@ -282,6 +283,7 @@ export async function createMachine(input: MachineInput): Promise<void> {
       input.maxStackSheets
     ]);
     await client.query("COMMIT");
+    return { id: result.rows[0]?.id ?? "" };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
@@ -473,8 +475,8 @@ async function loadProcessSetupResourcesForTenant(tenantId: string): Promise<Pro
 
 export const listProcessSetupResourcesForTenant = cache(loadProcessSetupResourcesForTenant);
 
-export async function createLabour(input: LabourInput): Promise<void> {
-  await pool.query(`
+export async function createLabour(input: LabourInput): Promise<{ id: string }> {
+  const result = await pool.query<{ id: string }>(`
     INSERT INTO catalog.labour_operations (
       tenant_id,
       name,
@@ -484,6 +486,7 @@ export async function createLabour(input: LabourInput): Promise<void> {
       calculation_value,
       minimum_minutes
     ) VALUES ($1::uuid, $2, $3, $4::numeric, $5, $6::numeric, $7::numeric)
+    RETURNING id::text
   `, [
     input.tenantId,
     input.name,
@@ -493,6 +496,7 @@ export async function createLabour(input: LabourInput): Promise<void> {
     input.calculationValue,
     input.minimumMinutes
   ]);
+  return { id: result.rows[0]?.id ?? "" };
 }
 
 export async function updateLabour(input: LabourInput & { id: string }): Promise<void> {

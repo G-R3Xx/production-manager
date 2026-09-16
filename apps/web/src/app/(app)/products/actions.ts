@@ -6,6 +6,20 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { ensureProductEditorTemplate, updateConfiguratorDefinitionJson } from "@/server/configurators";
 import {
+  assignProductionMethodToProduct,
+  createLabour,
+  createMachine,
+  createProcess,
+  createRecipe,
+  listProcessSetupResourcesForTenant,
+  listRecipesForTenant,
+  setLabourActive,
+  setMachineActive,
+  setProcessActive,
+  setRecipeActive,
+  type RecipeProcessStep
+} from "@/server/productionResources";
+import {
   createProduct,
   getProductById,
   listProductSummariesForTenant,
@@ -576,11 +590,10 @@ const starterProductLibrary = [
   { name: "Cut Vinyl Graphics", sku: "STARTER-CUT-VINYL", starterType: "cut_vinyl" }
 ] as const;
 
-export async function createStarterProductLibraryAction() {
-  const activeTenant = await requireTenant();
-  const existing = await listProductSummariesForTenant(activeTenant.tenantId, { includeDeleted: true });
-  const existingSkus = new Set(existing.map((product) => String(product.sku ?? "").trim().toLocaleLowerCase("en-AU")).filter(Boolean));
-  const existingNames = new Set(existing.map((product) => product.name.trim().toLocaleLowerCase("en-AU")));
+async function ensureStarterProducts(tenantId: string) {
+  const before = await listProductSummariesForTenant(tenantId, { includeDeleted: true });
+  const existingSkus = new Set(before.map((product) => String(product.sku ?? "").trim().toLocaleLowerCase("en-AU")).filter(Boolean));
+  const existingNames = new Set(before.map((product) => product.name.trim().toLocaleLowerCase("en-AU")));
   let created = 0;
 
   for (const starter of starterProductLibrary) {
@@ -589,7 +602,7 @@ export async function createStarterProductLibraryAction() {
     if (existingSkus.has(skuKey) || existingNames.has(nameKey)) continue;
 
     await createConfiguredProduct({
-      tenantId: activeTenant.tenantId,
+      tenantId,
       name: starter.name,
       sku: starter.sku,
       starterType: starter.starterType
@@ -599,9 +612,206 @@ export async function createStarterProductLibraryAction() {
     created += 1;
   }
 
+  return {
+    created,
+    products: await listProductSummariesForTenant(tenantId, { includeDeleted: true })
+  };
+}
+
+export async function createStarterProductLibraryAction() {
+  const activeTenant = await requireTenant();
+  const { created } = await ensureStarterProducts(activeTenant.tenantId);
+
   const message = created
     ? `${created} editable starter product${created === 1 ? "" : "s"} added as drafts`
     : "All starter products already exist";
+  redirect(`/products?message=${encodeURIComponent(message)}`);
+}
+
+const testMachines = [
+  { key: "digital", name: "TEST — Konica C12000", machineType: "printer", maxWidthMm: "330", speedValue: "120", speedUom: "a4_faces_per_minute", hourlyCost: "18", setupMinutes: "5", inkCostPerSqm: "0", colourImpressionCost: "0.048", monoImpressionCost: "0.012", maxStackSheets: "0" },
+  { key: "guillotine", name: "TEST — Guillotine", machineType: "cutter", maxWidthMm: "720", speedValue: "4", speedUom: "cuts_per_minute", hourlyCost: "12", setupMinutes: "5", inkCostPerSqm: "0", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "350" },
+  { key: "cello", name: "TEST — Celloglazer", machineType: "laminator", maxWidthMm: "330", speedValue: "600", speedUom: "sheets_per_hour", hourlyCost: "10", setupMinutes: "10", inkCostPerSqm: "0", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" },
+  { key: "stitcher", name: "TEST — Saddle Stitcher", machineType: "other", maxWidthMm: "330", speedValue: "1200", speedUom: "sheets_per_hour", hourlyCost: "10", setupMinutes: "10", inkCostPerSqm: "0", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" },
+  { key: "flatbed", name: "TEST — Flatbed UV Printer", machineType: "printer", maxWidthMm: "2500", speedValue: "20", speedUom: "sqm_per_hour", hourlyCost: "45", setupMinutes: "10", inkCostPerSqm: "10", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" },
+  { key: "roll", name: "TEST — Roll Printer", machineType: "printer", maxWidthMm: "1600", speedValue: "15", speedUom: "sqm_per_hour", hourlyCost: "35", setupMinutes: "10", inkCostPerSqm: "10", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" },
+  { key: "laminator", name: "TEST — Roll Laminator", machineType: "laminator", maxWidthMm: "1600", speedValue: "25", speedUom: "linear_metres_per_hour", hourlyCost: "20", setupMinutes: "10", inkCostPerSqm: "0", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" },
+  { key: "cnc", name: "TEST — CNC / Flatbed Cutter", machineType: "router", maxWidthMm: "2500", speedValue: "8", speedUom: "sqm_per_hour", hourlyCost: "35", setupMinutes: "10", inkCostPerSqm: "0", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" },
+  { key: "plotter", name: "TEST — Vinyl Plotter", machineType: "cutter", maxWidthMm: "1370", speedValue: "10", speedUom: "linear_metres_per_hour", hourlyCost: "15", setupMinutes: "5", inkCostPerSqm: "0", colourImpressionCost: "0", monoImpressionCost: "0", maxStackSheets: "0" }
+] as const;
+
+const testLabour = [
+  { key: "print", name: "TEST — Print operator", department: "general", hourlyRate: "59", calculationBasis: "fixed_minutes", calculationValue: "5", minimumMinutes: "5" },
+  { key: "finishing", name: "TEST — Finishing operator", department: "general", hourlyRate: "59", calculationBasis: "fixed_minutes", calculationValue: "10", minimumMinutes: "5" },
+  { key: "guillotine", name: "TEST — Guillotine trim", department: "small_format", hourlyRate: "59", calculationBasis: "guillotine_stacks", calculationValue: "6", minimumMinutes: "5" },
+  { key: "wide", name: "TEST — Wide-format operator", department: "signage", hourlyRate: "59", calculationBasis: "per_sqm_hours", calculationValue: "0.0833", minimumMinutes: "5" }
+] as const;
+
+const testProcesses = [
+  { key: "digital_print", name: "TEST — Digital print", department: "small_format", processType: "print", machine: "digital", labour: "print" },
+  { key: "guillotine_trim", name: "TEST — Guillotine trim", department: "small_format", processType: "cut", machine: "guillotine", labour: "guillotine" },
+  { key: "celloglaze", name: "TEST — Celloglaze", department: "small_format", processType: "laminate", machine: "cello", labour: "finishing" },
+  { key: "saddle_stitch", name: "TEST — Collate / saddle stitch", department: "small_format", processType: "finish", machine: "stitcher", labour: "finishing" },
+  { key: "number_bind", name: "TEST — Number / collate / bind", department: "small_format", processType: "finish", machine: null, labour: "finishing" },
+  { key: "direct_print", name: "TEST — Direct print", department: "signage", processType: "print", machine: "flatbed", labour: "wide" },
+  { key: "roll_print", name: "TEST — Roll print", department: "signage", processType: "print", machine: "roll", labour: "wide" },
+  { key: "roll_laminate", name: "TEST — Roll laminate", department: "signage", processType: "laminate", machine: "laminator", labour: "wide" },
+  { key: "cnc_cut", name: "TEST — CNC / contour cut", department: "signage", processType: "cut", machine: "cnc", labour: "finishing" },
+  { key: "cut_weed", name: "TEST — Cut / weed vinyl", department: "signage", processType: "cut", machine: "plotter", labour: "finishing" },
+  { key: "mount_apply", name: "TEST — Mount / apply", department: "signage", processType: "mount", machine: null, labour: "finishing" },
+  { key: "pack", name: "TEST — Pack", department: "general", processType: "pack", machine: null, labour: "finishing" }
+] as const;
+
+const testMethods = [
+  { sku: "STARTER-CARDS", name: "TEST — Cards", department: "small_format", processes: ["digital_print", "celloglaze", "guillotine_trim", "pack"] },
+  { sku: "STARTER-CARBON-BOOKS", name: "TEST — Carbon Copy Books", department: "small_format", processes: ["digital_print", "number_bind", "guillotine_trim", "pack"] },
+  { sku: "STARTER-BOOKLETS", name: "TEST — Booklets", department: "small_format", processes: ["digital_print", "celloglaze", "saddle_stitch", "guillotine_trim", "pack"] },
+  { sku: "STARTER-DL-FLYERS", name: "TEST — DL Flyers", department: "small_format", processes: ["digital_print", "guillotine_trim", "pack"] },
+  { sku: "STARTER-CORFLUTE", name: "TEST — Corflute Signs", department: "signage", processes: ["direct_print", "cnc_cut", "pack"] },
+  { sku: "STARTER-ACM", name: "TEST — ACM Signs", department: "signage", processes: ["direct_print", "cnc_cut", "pack"] },
+  { sku: "STARTER-ROLL-PRINT", name: "TEST — Printed Roll Stock", department: "signage", processes: ["roll_print", "roll_laminate", "cnc_cut", "pack"] },
+  { sku: "STARTER-CUT-VINYL", name: "TEST — Cut Vinyl Graphics", department: "signage", processes: ["cut_weed", "mount_apply", "pack"] }
+] as const;
+
+function normalizedSetupName(value: string): string {
+  return value.trim().toLocaleLowerCase("en-AU");
+}
+
+export async function createTestingProductionSetupAction() {
+  const activeTenant = await requireTenant();
+  const tenantId = activeTenant.tenantId;
+  const [{ created: starterProductsCreated, products }, setup, existingRecipes] = await Promise.all([
+    ensureStarterProducts(tenantId),
+    listProcessSetupResourcesForTenant(tenantId),
+    listRecipesForTenant(tenantId)
+  ]);
+
+  const machineIds = new Map<string, string>();
+  let machinesCreated = 0;
+  for (const machine of testMachines) {
+    const existing = setup.machines.find((item) => normalizedSetupName(item.name) === normalizedSetupName(machine.name));
+    if (existing) {
+      machineIds.set(machine.key, existing.id);
+      if (!existing.active) await setMachineActive(tenantId, existing.id, true);
+      continue;
+    }
+    const created = await createMachine({ tenantId, ...machine });
+    machineIds.set(machine.key, created.id);
+    machinesCreated += 1;
+  }
+
+  const labourIds = new Map<string, string>();
+  let labourCreated = 0;
+  for (const labour of testLabour) {
+    const existing = setup.labour.find((item) => normalizedSetupName(item.name) === normalizedSetupName(labour.name));
+    if (existing) {
+      labourIds.set(labour.key, existing.id);
+      if (!existing.active) await setLabourActive(tenantId, existing.id, true);
+      continue;
+    }
+    const created = await createLabour({ tenantId, ...labour });
+    labourIds.set(labour.key, created.id);
+    labourCreated += 1;
+  }
+
+  const processIds = new Map<string, string>();
+  let processesCreated = 0;
+  for (const process of testProcesses) {
+    const existing = setup.processes.find((item) => normalizedSetupName(item.name) === normalizedSetupName(process.name));
+    if (existing) {
+      processIds.set(process.key, existing.id);
+      if (!existing.active) await setProcessActive(tenantId, existing.id, true);
+      continue;
+    }
+    const created = await createProcess({
+      tenantId,
+      name: process.name,
+      department: process.department,
+      processType: process.processType,
+      machineId: process.machine ? machineIds.get(process.machine) ?? null : null,
+      labourOperationId: labourIds.get(process.labour) ?? null
+    });
+    processIds.set(process.key, created.id);
+    processesCreated += 1;
+  }
+
+  const recipeIds = new Map<string, string>();
+  let methodsCreated = 0;
+  for (const method of testMethods) {
+    const existing = existingRecipes.find((item) => normalizedSetupName(item.name) === normalizedSetupName(method.name));
+    if (existing) {
+      recipeIds.set(method.sku, existing.id);
+      if (!existing.active) await setRecipeActive(tenantId, existing.id, true);
+      continue;
+    }
+    const steps: RecipeProcessStep[] = method.processes.flatMap((key) => {
+      const processId = processIds.get(key);
+      const process = testProcesses.find((item) => item.key === key);
+      if (!processId || !process) return [];
+      return [{
+        processId,
+        machineId: process.machine ? machineIds.get(process.machine) ?? null : null,
+        labourOperationId: labourIds.get(process.labour) ?? null
+      }];
+    });
+    const created = await createRecipe({
+      tenantId,
+      name: method.name,
+      department: method.department,
+      materialId: null,
+      processIds: steps.map((step) => step.processId),
+      processSteps: steps,
+      wastePercent: "10",
+      markupMultiplier: "1.5",
+      profitMultiplier: "1.2"
+    });
+    recipeIds.set(method.sku, created.id);
+    methodsCreated += 1;
+  }
+
+  let productsAssigned = 0;
+  for (const method of testMethods) {
+    const starter = starterProductLibrary.find((item) => item.sku === method.sku);
+    const product = products.find((item) => item.status !== "deleted" && (
+      String(item.sku ?? "").toLocaleUpperCase() === method.sku ||
+      (starter && normalizedSetupName(item.name) === normalizedSetupName(starter.name))
+    ));
+    const recipeId = recipeIds.get(method.sku);
+    if (!product || !recipeId) continue;
+    await assignProductionMethodToProduct(tenantId, product.id, recipeId);
+    productsAssigned += 1;
+
+    if (product.department === "small_format") {
+      const { template, definition } = await getEditableDefinition({ tenantId, productId: product.id });
+      if (!(definition as Record<string, any>).smallFormatCostingProfile) {
+        await updateConfiguratorDefinitionJson(tenantId, template.id, {
+          ...definition,
+          smallFormatCostingProfile: {
+            enabled: true,
+            useMachineClickRate: true,
+            wasteSheets: 5,
+            printSetupMinutes: 15,
+            operatorAttendancePercent: 40,
+            overheadPercent: 50,
+            profitPercent: 25,
+            defaultPrintSides: method.sku === "STARTER-CARBON-BOOKS" ? 1 : 2,
+            defaultPrintMode: "colour"
+          }
+        });
+      }
+    }
+  }
+
+  const createdParts = [
+    starterProductsCreated ? `${starterProductsCreated} starter products` : "",
+    machinesCreated ? `${machinesCreated} machines` : "",
+    labourCreated ? `${labourCreated} labour rules` : "",
+    processesCreated ? `${processesCreated} processes` : "",
+    methodsCreated ? `${methodsCreated} methods` : ""
+  ].filter(Boolean);
+  const message = createdParts.length
+    ? `Testing setup ready: created ${createdParts.join(", ")} and assigned ${productsAssigned} products`
+    : `Testing setup already existed; ${productsAssigned} products were checked and assigned`;
   redirect(`/products?message=${encodeURIComponent(message)}`);
 }
 

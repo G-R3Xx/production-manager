@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listProductSummariesForTenant } from "@/server/products";
-import { createProductAction, createStarterProductLibraryAction, duplicateProductAction } from "./actions";
+import { createProductAction, createStarterProductLibraryAction, createTestingProductionSetupAction, duplicateProductAction } from "./actions";
 import { ProductRemovalControl } from "./ProductRemovalControl";
 
 type Props = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -72,11 +72,16 @@ export default async function ProductsPage({ searchParams }: Props) {
           <h2 style={{ margin: "5px 0" }}>Add the common products in one go</h2>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Creates Cards, Carbon Copy Books, Booklets, DL Flyers, Corflute Signs, ACM Signs, Printed Roll Stock and Cut Vinyl Graphics as editable drafts. You can change every question, material and production method, then duplicate a product whenever you need a variation.</p>
         </div>
-        <form action={createStarterProductLibraryAction}>
-          <button style={{ minHeight: 44, border: 0, borderRadius: 12, background: "#1d4ed8", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer", whiteSpace: "nowrap" }}>Add starter products</button>
-        </form>
+        <div style={{ display: "flex", gap: 9, flexWrap: "wrap", justifyContent: "flex-end" }}>
+          <form action={createStarterProductLibraryAction}>
+            <button style={{ minHeight: 44, border: 0, borderRadius: 12, background: "#1d4ed8", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer", whiteSpace: "nowrap" }}>Add starter products</button>
+          </form>
+          <form action={createTestingProductionSetupAction}>
+            <button style={{ minHeight: 44, border: "1px solid #7c3aed", borderRadius: 12, background: "#f5f3ff", color: "#6d28d9", fontWeight: 950, padding: "0 18px", cursor: "pointer", whiteSpace: "nowrap" }}>Add testing production setup</button>
+          </form>
+        </div>
       </div>
-      <div style={{ marginTop: 10, color: "#475569", fontSize: 13 }}>Safe to run again: products with the same starter SKU or name are skipped.</div>
+      <div style={{ marginTop: 10, color: "#475569", fontSize: 13 }}>Both installers are safe to run again. Testing resources are clearly prefixed <b>TEST —</b>, and existing real setup is not changed.</div>
     </section>
 
     <section style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
