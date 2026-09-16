@@ -18,6 +18,7 @@ export type QuoteCostingMachine = {
   inkCostPerSqm: string;
   colourImpressionCost: string;
   monoImpressionCost: string;
+  maxStackSheets: string;
   processIds: string[];
 };
 
@@ -59,6 +60,11 @@ export type MachineCostMetrics = {
   requiredWidthMm?: number;
   sides?: number;
   a4FacesPerParentSheet?: number;
+  guillotineCutsPerStack?: number;
+  guillotineMaxStackSheets?: number;
+  guillotineMinutesOverride?: number;
+  guillotineSetupMinutes?: number;
+  guillotineCutsPerMinute?: number;
 };
 
 export type MachineCostSelection = {
@@ -125,7 +131,17 @@ function lineMachineCost(machine: QuoteCostingMachine, metrics: MachineCostMetri
   const hourly = Math.max(0, n(machine.hourlyCost, 0));
   const setupHours = Math.max(0, n(machine.setupMinutes, 0)) / 60;
   let runHours = 0;
-  if (speed > 0 && machine.speedUom === "a4_faces_per_minute") {
+  const overrideMinutes = Math.max(0, metrics.guillotineMinutesOverride ?? 0);
+  if (machine.speedUom === "cuts_per_minute" && overrideMinutes > 0) {
+    return overrideMinutes / 60 * hourly;
+  }
+  if (speed > 0 && machine.speedUom === "cuts_per_minute") {
+    const sheets = Math.max(0, metrics.sheetsPerLine ?? 0);
+    const maxStackSheets = Math.max(0, metrics.guillotineMaxStackSheets ?? n(machine.maxStackSheets, 0));
+    const cutsPerStack = Math.max(0, metrics.guillotineCutsPerStack ?? 0);
+    const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
+    runHours = stacks * cutsPerStack / speed / 60;
+  } else if (speed > 0 && machine.speedUom === "a4_faces_per_minute") {
     const sheets = Math.max(0, metrics.sheetsPerLine ?? metrics.quantity ?? 0);
     const sides = Math.max(1, metrics.sides ?? 1);
     const facesPerParentSheet = Math.max(0.1, metrics.a4FacesPerParentSheet ?? 2);
@@ -214,13 +230,41 @@ export function labourLineCost(
   const sheets = Math.max(0, metrics.sheetsPerLine ?? 0);
   const linearMetres = Math.max(0, metrics.linearMetresPerLine ?? 0);
   let hours = 0;
-  if (labour.calculationBasis === "per_sqm_hours") hours = areaLine * value;
+  if (labour.calculationBasis === "guillotine_stacks") {
+    const overrideMinutes = Math.max(0, metrics.guillotineMinutesOverride ?? 0);
+    if (overrideMinutes > 0) {
+      hours = overrideMinutes / 60;
+    } else {
+      const sheets = Math.max(0, metrics.sheetsPerLine ?? 0);
+      const maxStackSheets = Math.max(0, metrics.guillotineMaxStackSheets ?? 0);
+      const cutsPerMinute = Math.max(0, metrics.guillotineCutsPerMinute ?? 0);
+      const cutsPerStack = Math.max(0, metrics.guillotineCutsPerStack ?? value);
+      const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
+      const runMinutes = cutsPerMinute > 0 ? stacks * cutsPerStack / cutsPerMinute : 0;
+      hours = (Math.max(0, metrics.guillotineSetupMinutes ?? 0) + runMinutes) / 60;
+    }
+  } else if (labour.calculationBasis === "per_sqm_hours") hours = areaLine * value;
   else if (labour.calculationBasis === "per_sheet_hours") hours = sheets * value;
   else if (labour.calculationBasis === "per_linear_metre_hours") hours = linearMetres * value;
   else if (labour.calculationBasis === "per_item_hours") hours = quantity * value;
   else hours = value / 60;
   hours = Math.max(hours, Math.max(0, n(labour.minimumMinutes, 0)) / 60);
   return hours * Math.max(0, n(labour.hourlyRate, 0));
+}
+
+export function guillotineCostingDetails(labour: QuoteCostingLabour | null, metrics: MachineCostMetrics) {
+  if (!labour || labour.calculationBasis !== "guillotine_stacks") return null;
+  const sheets = Math.max(0, metrics.sheetsPerLine ?? 0);
+  const cutsPerStack = Math.max(0, metrics.guillotineCutsPerStack ?? n(labour.calculationValue, 0));
+  const maxStackSheets = Math.max(0, metrics.guillotineMaxStackSheets ?? 0);
+  const cutsPerMinute = Math.max(0, metrics.guillotineCutsPerMinute ?? 0);
+  const setupMinutes = Math.max(0, metrics.guillotineSetupMinutes ?? 0);
+  const overrideMinutes = Math.max(0, metrics.guillotineMinutesOverride ?? 0);
+  const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
+  const totalCuts = stacks * cutsPerStack;
+  const calculatedMinutes = setupMinutes + (cutsPerMinute > 0 ? totalCuts / cutsPerMinute : 0);
+  const chargedMinutes = Math.max(overrideMinutes || calculatedMinutes, Math.max(0, n(labour.minimumMinutes, 0)));
+  return { sheets, cutsPerStack, maxStackSheets, cutsPerMinute, setupMinutes, overrideMinutes, stacks, totalCuts, calculatedMinutes, chargedMinutes };
 }
 
 export function recipeForId(resources: QuoteCostingResources | undefined, recipeId: string | null | undefined): QuoteCostingRecipe | null {

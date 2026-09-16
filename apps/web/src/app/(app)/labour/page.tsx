@@ -41,7 +41,9 @@ function operationSummary(row: LabourRecord) {
     minimum,
     rate,
     unitCost,
-    timeText: row.calculationBasis === "fixed_minutes"
+    timeText: row.calculationBasis === "guillotine_stacks"
+      ? `${number(minutes, 0)} cuts per stack · calculated from stack capacity`
+      : row.calculationBasis === "fixed_minutes"
       ? `${number(minutes)} minutes per use`
       : `${number(minutes)} minutes ${labourBasisUnit(row.calculationBasis)}`
   };
@@ -80,8 +82,8 @@ function LabourOperationCard({ row }: { row: LabourRecord }) {
           <strong>{summary.timeText}</strong>
         </div>
         <div className={styles.summaryItem}>
-          <span>{row.calculationBasis === "fixed_minutes" ? "Cost per use" : "Base unit cost before minimum"}</span>
-          <strong>{money(summary.unitCost)}{row.calculationBasis === "fixed_minutes" ? " per use" : ` ${labourBasisUnit(row.calculationBasis)}`}</strong>
+          <span>{row.calculationBasis === "guillotine_stacks" ? "Costing source" : row.calculationBasis === "fixed_minutes" ? "Cost per use" : "Base unit cost before minimum"}</span>
+          <strong>{row.calculationBasis === "guillotine_stacks" ? "Calculated on quote" : <>{money(summary.unitCost)}{row.calculationBasis === "fixed_minutes" ? " per use" : ` ${labourBasisUnit(row.calculationBasis)}`}</>}</strong>
         </div>
       </div>
 

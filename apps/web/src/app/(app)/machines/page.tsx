@@ -42,7 +42,7 @@ const groupTitle = {
 };
 
 const types = ["printer", "cutter", "laminator", "router", "laser", "other"];
-const speedUnits = ["sqm_per_hour", "linear_metres_per_hour", "sheets_per_hour", "a4_faces_per_minute"];
+const speedUnits = ["sqm_per_hour", "linear_metres_per_hour", "sheets_per_hour", "a4_faces_per_minute", "cuts_per_minute"];
 
 function MachineFields({ machine }: { machine?: any }) {
   return (
@@ -90,7 +90,14 @@ function MachineFields({ machine }: { machine?: any }) {
             Setup time (min)
             <input name="setupMinutes" type="number" step="0.01" defaultValue={machine?.setupMinutes ?? ""} style={input} />
           </label>
+          <label>
+            Maximum sheets per stack
+            <input name="maxStackSheets" type="number" min="0" step="1" defaultValue={machine?.maxStackSheets ?? ""} style={input} />
+          </label>
         </div>
+        <p style={{ margin: "9px 0 0", fontSize: 12, color: "#64748b" }}>
+          For a guillotine, use <b>cuts per minute</b> and enter the largest safe paper stack. Leave stack capacity at 0 for other machines.
+        </p>
       </div>
 
       <div style={fieldGroup}>
@@ -147,7 +154,7 @@ export default async function MachinesPage() {
         .machine-grid label { display:grid; gap:6px; min-width:0; font-weight:700; color:#0f172a; }
         .machine-grid input,.machine-grid select { min-width:0; max-width:100%; box-sizing:border-box; }
         .machine-grid-details { grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr); }
-        .machine-grid-performance { grid-template-columns:minmax(0,1fr) minmax(0,1.35fr) minmax(0,1fr); }
+        .machine-grid-performance { grid-template-columns:repeat(4,minmax(0,1fr)); }
         .machine-grid-costing { grid-template-columns:repeat(4,minmax(0,1fr)); }
         .machine-metrics { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }
         .machine-metric { border:1px solid #e2e8f0; border-radius:10px; padding:9px 10px; background:#f8fafc; }
@@ -285,7 +292,7 @@ export default async function MachinesPage() {
                 </div>
                 <div className="machine-metric">
                   <span className="machine-metric-label">Capacity</span>
-                  <span className="machine-metric-value">{r.maxWidthMm ? `${r.maxWidthMm} mm max width` : "No width limit set"}</span>
+                  <span className="machine-metric-value">{Number(r.maxStackSheets) > 0 ? `${r.maxStackSheets} sheets per stack` : r.maxWidthMm ? `${r.maxWidthMm} mm max width` : "No capacity limit set"}</span>
                 </div>
                 <div className="machine-metric">
                   <span className="machine-metric-label">Print costing</span>

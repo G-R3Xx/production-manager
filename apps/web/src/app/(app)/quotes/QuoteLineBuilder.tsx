@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { addQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
-import { labourForProcess, labourLineCost, normalizeCostingName, recipeForId, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
+import { guillotineCostingDetails, labourForProcess, labourLineCost, normalizeCostingName, recipeForId, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
 export type QuoteChoice = {
   id?: string | null;
@@ -252,6 +252,12 @@ function discountPercentValue(value: string | number | null | undefined): number
 
 function moneyInput(value: number): string {
   return Number.isFinite(value) ? value.toFixed(2) : "0.00";
+}
+
+type GuillotineInputName = "cuts_per_stack" | "max_stack_sheets" | "minutes_override";
+
+function guillotineAnswerKey(processId: string, name: GuillotineInputName): string {
+  return `__procedure_${processId}_${name}`;
 }
 
 function formatMoney(value: string | number | null | undefined): string {
@@ -1303,14 +1309,45 @@ function productionResourceBreakdownFor(
   for (const step of steps) {
     const process = resources.processes.find((row) => row.id === step.processId);
     if (!process) continue;
+    const labour = labourForProcess(resources, [process.name], product.department, step.labourOperationId, step.processId);
+    const isCalculatedGuillotine = labour?.calculationBasis === "guillotine_stacks";
+    const cutsPerStack = isCalculatedGuillotine
+      ? Math.max(0, numberValue(answers[guillotineAnswerKey(process.id, "cuts_per_stack")], numberValue(labour.calculationValue, 0)))
+      : 0;
+    const maxStackOverride = isCalculatedGuillotine
+      ? Math.max(0, numberValue(answers[guillotineAnswerKey(process.id, "max_stack_sheets")], 0))
+      : 0;
+    const minutesOverride = isCalculatedGuillotine
+      ? Math.max(0, numberValue(answers[guillotineAnswerKey(process.id, "minutes_override")], 0))
+      : 0;
+    const stepMetrics = {
+      ...metrics,
+      guillotineCutsPerStack: cutsPerStack,
+      guillotineMaxStackSheets: maxStackOverride || undefined,
+      guillotineMinutesOverride: minutesOverride
+    };
     const machineSelection = selectMachineForProcess(
       resources,
       [process.name],
-      metrics,
+      stepMetrics,
       product.department,
-      null,
+      step.machineId,
       step.processId
     );
+    const machine = machineSelection.machine;
+    const finalStepMetrics = {
+      ...stepMetrics,
+      guillotineMaxStackSheets: maxStackOverride || numberValue(machine?.maxStackSheets, 0),
+      guillotineCutsPerMinute: machine?.speedUom === "cuts_per_minute" ? numberValue(machine.speedValue, 0) : 0,
+      guillotineSetupMinutes: numberValue(machine?.setupMinutes, 0)
+    };
+    const guillotineDetails = guillotineCostingDetails(labour, finalStepMetrics);
+    if (isCalculatedGuillotine && cutsPerStack <= 0) {
+      warnings.push(`${process.name}: enter the number of guillotine cuts required per stack.`);
+    }
+    if (isCalculatedGuillotine && (!machine || machine.speedUom !== "cuts_per_minute" || numberValue(machine.speedValue, 0) <= 0 || (numberValue(machine.maxStackSheets, 0) <= 0 && maxStackOverride <= 0))) {
+      warnings.push(`${process.name}: link a guillotine with cuts-per-minute speed and maximum sheets per stack, or enter a stack override.`);
+    }
     if (!machineSelection.machine && machineSelection.incompatibleMachines.length) {
       warnings.push(`${process.name}: ${requiredWidthMm.toFixed(0)}mm required; ${machineSelection.incompatibleMachines.map((machine) => `${machine.name} max ${numberValue(machine.maxWidthMm, 0).toFixed(0)}mm`).join(", ")}.`);
     }
@@ -1323,7 +1360,11 @@ function productionResourceBreakdownFor(
         unit: "item",
         rate: machineSelection.machineCostPerUnit,
         cost: machineSelection.machineCostPerUnit,
-        note: `${machineSelection.machine.speedValue} ${machineSelection.machine.speedUom.replaceAll("_", " ")} · ${machineSelection.machine.setupMinutes} min setup · ${formatMoney(numberValue(machineSelection.machine.hourlyCost, 0))}/hr`
+        note: guillotineDetails
+          ? guillotineDetails.overrideMinutes > 0
+            ? `${formatUsage(guillotineDetails.overrideMinutes)} min actual-time override · ${formatMoney(numberValue(machineSelection.machine.hourlyCost, 0))}/hr`
+            : `${formatUsage(guillotineDetails.sheets)} sheets ÷ ${formatUsage(guillotineDetails.maxStackSheets)} per stack = ${guillotineDetails.stacks} stack${guillotineDetails.stacks === 1 ? "" : "s"} · ${formatUsage(guillotineDetails.cutsPerStack)} cuts/stack · ${formatUsage(guillotineDetails.cutsPerMinute)} cuts/min · ${formatUsage(guillotineDetails.setupMinutes)} min setup`
+          : `${machineSelection.machine.speedValue} ${machineSelection.machine.speedUom.replaceAll("_", " ")} · ${machineSelection.machine.setupMinutes} min setup · ${formatMoney(numberValue(machineSelection.machine.hourlyCost, 0))}/hr`
       }));
       const processName = process.name.toLowerCase();
       const inkRate = numberValue(machineSelection.machine.inkCostPerSqm, 0);
@@ -1347,8 +1388,7 @@ function productionResourceBreakdownFor(
       return processLabourTokens.some((token) => label.includes(token));
     }) || (explicitLabourRows.length === 1 && steps.length === 1);
     if (!hasExplicitLabourForProcess) {
-      const labour = labourForProcess(resources, [process.name], product.department, null, step.processId);
-      const lineCost = labourLineCost(labour, metrics);
+      const lineCost = labourLineCost(labour, finalStepMetrics);
       if (labour && lineCost > 0) {
         const perUnit = lineCost / quantity;
         rows.push(costBreakdownItem({
@@ -1359,7 +1399,9 @@ function productionResourceBreakdownFor(
           unit: "item",
           rate: perUnit,
           cost: perUnit,
-          note: `${formatMoney(numberValue(labour.hourlyRate, 0))}/hr from Labour settings`
+          note: guillotineDetails
+            ? `${formatUsage(guillotineDetails.chargedMinutes)} min charged${guillotineDetails.overrideMinutes > 0 ? " (staff override)" : " from stack calculation"} · ${formatMoney(numberValue(labour.hourlyRate, 0))}/hr`
+            : `${formatMoney(numberValue(labour.hourlyRate, 0))}/hr from Labour settings`
         }));
       }
     }
@@ -1672,6 +1714,34 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const [unitPrice, setUnitPrice] = useState("0.00");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
   const [standaloneQuantity, setStandaloneQuantity] = useState("1");
+  const guillotineSteps = useMemo(() => {
+    const recipe = recipeForId(costingResources, selectedProduct?.productionRecipeId);
+    if (!recipe || !costingResources) return [];
+    const steps = recipe.processSteps.length
+      ? recipe.processSteps
+      : recipe.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null }));
+    return steps.flatMap((step) => {
+      const process = costingResources.processes.find((item) => item.id === step.processId);
+      if (!process) return [];
+      const labour = labourForProcess(costingResources, [process.name], selectedProduct?.department, step.labourOperationId, step.processId);
+      if (!labour || labour.calculationBasis !== "guillotine_stacks") return [];
+      const machine = step.machineId
+        ? costingResources.machines.find((item) => item.id === step.machineId) ?? null
+        : costingResources.machines.find((item) => item.processIds.includes(step.processId) && item.speedUom === "cuts_per_minute")
+          ?? costingResources.machines.find((item) => item.processIds.includes(step.processId))
+          ?? null;
+      return [{
+        processId: process.id,
+        processName: process.name,
+        labourName: labour.name,
+        machineName: machine?.name ?? "No guillotine linked",
+        cutsPerStack: numberValue(labour.calculationValue, 0),
+        maxStackSheets: numberValue(machine?.maxStackSheets, 0),
+        cutsPerMinute: machine?.speedUom === "cuts_per_minute" ? numberValue(machine.speedValue, 0) : 0,
+        setupMinutes: numberValue(machine?.setupMinutes, 0)
+      }];
+    });
+  }, [costingResources, selectedProduct]);
 
   const selectedProductHasFixedBaseRoll = useMemo(() => {
     if (!selectedProduct) return false;
@@ -2098,6 +2168,38 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
             <small style={{ color: "#667085" }}>This product has no quote questions yet. Add them on the Products page for proper dropdowns.</small>
           </label>
         )}
+
+        {guillotineSteps.map((step) => {
+          const cutsKey = guillotineAnswerKey(step.processId, "cuts_per_stack");
+          const stackKey = guillotineAnswerKey(step.processId, "max_stack_sheets");
+          const overrideKey = guillotineAnswerKey(step.processId, "minutes_override");
+          return (
+            <section key={step.processId} style={{ border: "1px solid #bfdbfe", borderRadius: 15, padding: 14, background: "#eff6ff", display: "grid", gap: 12 }}>
+              <div>
+                <strong style={{ color: "#1e3a8a" }}>Guillotine time · {step.processName}</strong>
+                <p style={{ ...mutedStyle, marginTop: 4 }}>PM calculates stacks from the parent sheets used—not finished business-card quantity. Leave actual time blank to use the estimate.</p>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Cuts per stack</span>
+                  <input type="number" min="0" step="1" value={answers[cutsKey] ?? String(step.cutsPerStack || "")} onChange={(event) => updateAnswer(cutsKey, event.target.value)} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Maximum sheets per stack</span>
+                  <input type="number" min="1" step="1" value={answers[stackKey] ?? String(step.maxStackSheets || "")} onChange={(event) => updateAnswer(stackKey, event.target.value)} style={inputStyle} />
+                </label>
+                <label style={labelStyle}>
+                  <span style={labelTextStyle}>Actual total time override (optional)</span>
+                  <input type="number" min="0" step="0.1" value={answers[overrideKey] ?? ""} placeholder="Use calculated minutes" onChange={(event) => updateAnswer(overrideKey, event.target.value)} style={inputStyle} />
+                </label>
+              </div>
+              <small style={{ color: "#475569" }}>
+                {step.machineName} · {formatUsage(step.cutsPerMinute)} cuts/min · {formatUsage(step.setupMinutes)} min setup · labour rate from {step.labourName}
+              </small>
+              {step.maxStackSheets <= 0 || step.cutsPerMinute <= 0 ? <small style={{ color: "#b42318", fontWeight: 850 }}>Complete the guillotine’s cuts-per-minute speed and maximum stack sheets under Production Setup → Machines.</small> : null}
+            </section>
+          );
+        })}
       </div>
 
       <div style={{ ...quotePanelStyle, background: "#ffffff" }}>

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type MouseEvent as ReactMouseEvent } from "react";
 
 export type CalendarView = "week" | "month" | "agenda";
 export type CalendarEvent = {
@@ -163,7 +163,7 @@ function EventCard({ event, compact, onSelect, onDragStart, onDragEnd }: { event
       <Link
         href={`/jobs/${event.jobId}`}
         draggable={false}
-        onClick={(clickEvent) => clickEvent.stopPropagation()}
+        onClick={(clickEvent: ReactMouseEvent<HTMLAnchorElement>) => clickEvent.stopPropagation()}
         title={`Open ${jobHeading}`}
         aria-label={`Open ${jobHeading}`}
         style={{ position: "absolute", top: compact ? 5 : 7, right: compact ? 5 : 7, width: compact ? 18 : 20, height: compact ? 18 : 20, border: "1px solid rgba(71,84,103,.22)", borderRadius: 7, background: "rgba(255,255,255,.78)", color: tone.fg, display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontSize: compact ? 10 : 11, fontWeight: 950, lineHeight: 1 }}

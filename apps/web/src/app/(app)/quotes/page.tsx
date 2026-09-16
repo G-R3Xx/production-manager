@@ -487,6 +487,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       inkCostPerSqm: row.inkCostPerSqm,
       colourImpressionCost: row.colourImpressionCost,
       monoImpressionCost: row.monoImpressionCost,
+      maxStackSheets: row.maxStackSheets,
       processIds: row.processIds
     })),
     labour: costingLabour.filter((row) => row.active).map((row) => ({

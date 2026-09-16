@@ -17,6 +17,7 @@ function storedCalculationValue(formData: FormData, basis: string): string {
   if (stringValue(formData, "timeMinutes") !== "") {
     // The costing engine stores fixed time as minutes and scalable time as hours per unit.
     // The UI intentionally hides this conversion and always asks the user for minutes.
+    if (basis === "guillotine_stacks") return String(enteredMinutes);
     return basis === "fixed_minutes"
       ? String(enteredMinutes)
       : String(Math.round((enteredMinutes / 60) * 10000) / 10000);

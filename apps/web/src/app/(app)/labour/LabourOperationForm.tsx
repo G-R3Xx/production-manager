@@ -50,11 +50,19 @@ const TEMPLATES: Template[] = [
     minimum: 15
   },
   {
-    label: "Trim / cut items",
-    description: "2 min per item, 5 min minimum",
-    name: "Trim / cut",
-    basis: "per_item_hours",
-    minutes: 2,
+    label: "Guillotine / trim",
+    description: "30 minutes once (manual estimate)",
+    name: "Guillotine / trim",
+    basis: "fixed_minutes",
+    minutes: 30,
+    minimum: 0
+  },
+  {
+    label: "Calculated guillotine",
+    description: "Cuts per stack × required stacks",
+    name: "Calculated guillotine / trim",
+    basis: "guillotine_stacks",
+    minutes: 0,
     minimum: 5
   },
   {
@@ -104,6 +112,13 @@ export function LabourOperationForm({
   const minimumNumber = Math.max(0, Number(minimumMinutes) || 0);
 
   const liveExample = useMemo(() => {
+    if (basis === "guillotine_stacks") {
+      return {
+        headline: `${cleanNumber(minutesNumber, 0)} cuts per stack`,
+        cost: "Calculated on quote",
+        detail: "The quote combines this with parent sheets, the guillotine’s maximum stack size and cuts-per-minute speed. Staff can override the resulting total minutes."
+      };
+    }
     const sampleCalculatedMinutes = basis === "fixed_minutes"
       ? minutesNumber
       : minutesNumber * basisDetails.exampleQuantity;
@@ -254,13 +269,14 @@ export function LabourOperationForm({
                   name="timeMinutes"
                   type="number"
                   min="0"
-                  step="0.1"
+                  step={basis === "guillotine_stacks" ? "1" : "0.1"}
                   value={minutes}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => setMinutes(event.target.value)}
                   className={styles.input}
                 />
-                <span>minutes</span>
+                <span>{basis === "guillotine_stacks" ? "cuts" : "minutes"}</span>
               </div>
+              {basis === "guillotine_stacks" ? <span className={styles.fieldHint}>Set the guillotine itself to “cuts per minute” and enter its maximum sheets per stack under Machines.</span> : null}
             </label>
             <label className={styles.fieldLabel}>
               Minimum charge
@@ -300,4 +316,3 @@ export function LabourOperationForm({
     </form>
   );
 }
-

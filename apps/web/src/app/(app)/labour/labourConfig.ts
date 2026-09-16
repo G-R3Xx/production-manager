@@ -3,7 +3,8 @@ export type LabourBasis =
   | "per_sqm_hours"
   | "per_sheet_hours"
   | "per_linear_metre_hours"
-  | "per_item_hours";
+  | "per_item_hours"
+  | "guillotine_stacks";
 
 export type LabourBasisOption = {
   value: LabourBasis;
@@ -66,13 +67,24 @@ export const LABOUR_BASIS_OPTIONS: LabourBasisOption[] = [
     unitLabel: "per item",
     exampleQuantity: 10,
     exampleQuantityLabel: "10 items"
+  },
+  {
+    value: "guillotine_stacks",
+    label: "Calculated guillotine stacks",
+    shortLabel: "stacked cuts",
+    description: "Calculate actual guillotine time from parent sheets, cuts per stack, machine stack capacity and cuts per minute.",
+    inputLabel: "Cuts required per stack",
+    unitLabel: "cuts per stack",
+    exampleQuantity: 1,
+    exampleQuantityLabel: "each stack"
   }
 ];
 
 export function storedLabourValueToMinutes(basis: string, value: string): number {
   const parsed = Number(value || 0);
   if (!Number.isFinite(parsed)) return 0;
-  return basis === "fixed_minutes" ? parsed : parsed * 60;
+  if (basis === "fixed_minutes" || basis === "guillotine_stacks") return parsed;
+  return parsed * 60;
 }
 
 export function labourBasisLabel(basis: string): string {

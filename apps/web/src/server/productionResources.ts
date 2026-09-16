@@ -32,6 +32,7 @@ export type MachineRecord = {
   inkCostPerSqm: string;
   colourImpressionCost: string;
   monoImpressionCost: string;
+  maxStackSheets: string;
   processIds: string[];
   active: boolean;
 };
@@ -224,6 +225,7 @@ async function loadMachinesForTenant(tenantId: string): Promise<MachineRecord[]>
       m.ink_cost_per_sqm::text AS "inkCostPerSqm",
       COALESCE(m.capabilities_json->>'colourImpressionCost', '0') AS "colourImpressionCost",
       COALESCE(m.capabilities_json->>'monoImpressionCost', '0') AS "monoImpressionCost",
+      COALESCE(m.capabilities_json->>'maxStackSheets', '0') AS "maxStackSheets",
       m.active,
       COALESCE(
         jsonb_agg(mp.process_id::text) FILTER (WHERE mp.process_id IS NOT NULL),
@@ -260,7 +262,11 @@ export async function createMachine(input: MachineInput): Promise<void> {
         ink_cost_per_sqm,
         capabilities_json
       ) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::numeric, $5::numeric, $6, $7::numeric, $8::numeric, $9::numeric,
-        jsonb_build_object('colourImpressionCost', $10::numeric, 'monoImpressionCost', $11::numeric))
+        jsonb_build_object(
+          'colourImpressionCost', $10::numeric,
+          'monoImpressionCost', $11::numeric,
+          'maxStackSheets', $12::numeric
+        ))
     `, [
       input.tenantId,
       input.name,
@@ -272,7 +278,8 @@ export async function createMachine(input: MachineInput): Promise<void> {
       input.setupMinutes,
       input.inkCostPerSqm,
       input.colourImpressionCost,
-      input.monoImpressionCost
+      input.monoImpressionCost,
+      input.maxStackSheets
     ]);
     await client.query("COMMIT");
   } catch (error) {
@@ -299,7 +306,8 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
           ink_cost_per_sqm = $10::numeric,
           capabilities_json = COALESCE(capabilities_json, '{}'::jsonb) || jsonb_build_object(
             'colourImpressionCost', $11::numeric,
-            'monoImpressionCost', $12::numeric
+            'monoImpressionCost', $12::numeric,
+            'maxStackSheets', $13::numeric
           ),
           updated_at = now()
       WHERE tenant_id = $1::uuid AND id = $2::uuid
@@ -315,7 +323,8 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
       input.setupMinutes,
       input.inkCostPerSqm,
       input.colourImpressionCost,
-      input.monoImpressionCost
+      input.monoImpressionCost,
+      input.maxStackSheets
     ]);
     await client.query("COMMIT");
   } catch (error) {
@@ -414,6 +423,7 @@ async function loadProcessSetupResourcesForTenant(tenantId: string): Promise<Pro
             m.ink_cost_per_sqm::text AS "inkCostPerSqm",
             COALESCE(m.capabilities_json->>'colourImpressionCost', '0') AS "colourImpressionCost",
             COALESCE(m.capabilities_json->>'monoImpressionCost', '0') AS "monoImpressionCost",
+            COALESCE(m.capabilities_json->>'maxStackSheets', '0') AS "maxStackSheets",
             COALESCE((
               SELECT jsonb_agg(mp.process_id::text ORDER BY mp.priority, mp.process_id)
               FROM catalog.machine_processes mp
@@ -948,12 +958,19 @@ function labourHoursForCost(
   areaSqm: number,
   sheets: number,
   linearMetres: number,
-  quantity: number
+  quantity: number,
+  machine?: MachineRecord
 ): number {
   if (!labour) return 0;
   const value = Number(labour.calculationValue || 0);
   let hours = 0;
-  if (labour.calculationBasis === "per_sqm_hours") hours = areaSqm * value;
+  if (labour.calculationBasis === "guillotine_stacks") {
+    const maxStackSheets = Number(machine?.maxStackSheets || 0);
+    const cutsPerMinute = machine?.speedUom === "cuts_per_minute" ? Number(machine.speedValue || 0) : 0;
+    const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
+    const runMinutes = cutsPerMinute > 0 ? stacks * value / cutsPerMinute : 0;
+    hours = (Number(machine?.setupMinutes || 0) + runMinutes) / 60;
+  } else if (labour.calculationBasis === "per_sqm_hours") hours = areaSqm * value;
   else if (labour.calculationBasis === "per_sheet_hours") hours = sheets * value;
   else if (labour.calculationBasis === "per_linear_metre_hours") hours = linearMetres * value;
   else if (labour.calculationBasis === "per_item_hours") hours = quantity * value;
@@ -1091,11 +1108,18 @@ export async function previewRecipeCost(
       ? Math.min(materialWidthMm, materialLengthMm)
       : Math.min(Math.max(0, widthMm), Math.max(0, heightMm));
 
-  const machineRunHours = (machine: MachineRecord): number => {
+  const machineRunHours = (machine: MachineRecord, operation?: LabourRecord): number => {
     const speed = Number(machine.speedValue || 0);
     if (speed <= 0) return 0;
     if (machine.speedUom === "linear_metres_per_hour") return Number(base.materialUsage.linearMetres || 0) / speed;
     if (machine.speedUom === "sheets_per_hour") return Number(base.materialUsage.sheets || 0) / speed;
+    if (machine.speedUom === "cuts_per_minute") {
+      const sheets = Number(base.materialUsage.sheets || 0);
+      const maxStackSheets = Number(machine.maxStackSheets || 0);
+      const cutsPerStack = operation?.calculationBasis === "guillotine_stacks" ? Number(operation.calculationValue || 0) : 0;
+      const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
+      return stacks * cutsPerStack / speed / 60;
+    }
     return base.areaSqm / speed;
   };
   const machineLineCost = (machine: MachineRecord): number =>
@@ -1125,7 +1149,7 @@ export async function previewRecipeCost(
       ? labourMap.get(process.labourOperationId)
       : undefined;
 
-    const runHours = selectedMachine ? machineRunHours(selectedMachine) : 0;
+    const runHours = selectedMachine ? machineRunHours(selectedMachine, selectedLabour) : 0;
     const stepMachineCost = selectedMachine
       ? (runHours + Number(selectedMachine.setupMinutes || 0) / 60) * Number(selectedMachine.hourlyCost || 0)
       : 0;
@@ -1139,7 +1163,8 @@ export async function previewRecipeCost(
           base.areaSqm,
           Number(base.materialUsage.sheets || 0),
           Number(base.materialUsage.linearMetres || 0),
-          quantity
+          quantity,
+          selectedMachine
         ) * Number(selectedLabour.hourlyRate || 0)
       : 0;
 
