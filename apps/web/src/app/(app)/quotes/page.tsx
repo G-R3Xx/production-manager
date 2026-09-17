@@ -579,7 +579,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourceContactName = survey?.contactName ?? sourceEnquiry?.contactName ?? "";
   const sourcePhone = survey?.phone ?? sourceEnquiry?.phone ?? "";
   const sourceEmail = sourceEnquiry?.email ?? "";
-  const sourceLinkedCustomerId = survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? selectedQuote?.linkedCustomerId ?? null;
+  // Once a quote exists, its saved client is authoritative. The source enquiry
+  // or survey is only a fallback for legacy quotes and new-quote defaults.
+  const sourceLinkedCustomerId = selectedQuote?.linkedCustomerId ?? survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? null;
 
   const [quoteLines, selectedArtworkApproval, selectedProductionJob] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
