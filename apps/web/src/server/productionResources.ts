@@ -293,48 +293,38 @@ export async function createMachine(input: MachineInput): Promise<{ id: string }
 }
 
 export async function updateMachine(input: MachineInput & { id: string }): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    await client.query(`
-      UPDATE catalog.machines
-      SET name = $3,
-          machine_type = $4,
-          max_width_mm = NULLIF($5, '')::numeric,
-          speed_value = $6::numeric,
-          speed_uom = $7,
-          hourly_cost = $8::numeric,
-          setup_minutes = $9::numeric,
-          ink_cost_per_sqm = $10::numeric,
-          capabilities_json = COALESCE(capabilities_json, '{}'::jsonb) || jsonb_build_object(
-            'colourImpressionCost', $11::numeric,
-            'monoImpressionCost', $12::numeric,
-            'maxStackSheets', $13::numeric
-          ),
-          updated_at = now()
-      WHERE tenant_id = $1::uuid AND id = $2::uuid
-    `, [
-      input.tenantId,
-      input.id,
-      input.name,
-      input.machineType,
-      input.maxWidthMm ?? "",
-      input.speedValue,
-      input.speedUom,
-      input.hourlyCost,
-      input.setupMinutes,
-      input.inkCostPerSqm,
-      input.colourImpressionCost,
-      input.monoImpressionCost,
-      input.maxStackSheets
-    ]);
-    await client.query("COMMIT");
-  } catch (error) {
-    await client.query("ROLLBACK");
-    throw error;
-  } finally {
-    client.release();
-  }
+  await pool.query(`
+    UPDATE catalog.machines
+    SET name = $3,
+        machine_type = $4,
+        max_width_mm = NULLIF($5, '')::numeric,
+        speed_value = $6::numeric,
+        speed_uom = $7,
+        hourly_cost = $8::numeric,
+        setup_minutes = $9::numeric,
+        ink_cost_per_sqm = $10::numeric,
+        capabilities_json = COALESCE(capabilities_json, '{}'::jsonb) || jsonb_build_object(
+          'colourImpressionCost', $11::numeric,
+          'monoImpressionCost', $12::numeric,
+          'maxStackSheets', $13::numeric
+        ),
+        updated_at = now()
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+  `, [
+    input.tenantId,
+    input.id,
+    input.name,
+    input.machineType,
+    input.maxWidthMm ?? "",
+    input.speedValue,
+    input.speedUom,
+    input.hourlyCost,
+    input.setupMinutes,
+    input.inkCostPerSqm,
+    input.colourImpressionCost,
+    input.monoImpressionCost,
+    input.maxStackSheets
+  ]);
 }
 
 export async function setMachineActive(tenantId: string, id: string, active: boolean): Promise<void> {
