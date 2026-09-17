@@ -76,10 +76,21 @@ function quoteClientName(client: QuoteDraftClientOption): string {
   return client.companyName?.trim() || client.displayName;
 }
 
+function normalisedClientName(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLocaleLowerCase("en-AU").replace(/\s+/g, " ");
+}
+
 export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initialValues }: NewQuoteDraftFormProps) {
-  const hasInitialLinkedClient = Boolean(
-    initialValues.linkedCustomerId && clients.some((client) => client.id === initialValues.linkedCustomerId)
-  );
+  const requestedInitialName = normalisedClientName(initialValues.clientName);
+  const exactNameMatches = requestedInitialName
+    ? clients.filter((client) => [client.displayName, client.companyName].some((name) => normalisedClientName(name) === requestedInitialName))
+    : [];
+  const savedInitialClient = clients.find((client) => client.id === initialValues.linkedCustomerId) ?? null;
+  const savedInitialClientMatches = Boolean(savedInitialClient && (
+    !requestedInitialName || [savedInitialClient.displayName, savedInitialClient.companyName].some((name) => normalisedClientName(name) === requestedInitialName)
+  ));
+  const resolvedInitialClient = exactNameMatches.length === 1 ? exactNameMatches[0] : savedInitialClientMatches ? savedInitialClient : null;
+  const hasInitialLinkedClient = Boolean(resolvedInitialClient);
   const initialEntryMode: "existing" | "manual" = hasInitialLinkedClient
     ? "existing"
     : initialValues.clientName
@@ -89,7 +100,7 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
         : "manual";
   const [entryMode, setEntryMode] = useState<"existing" | "manual">(initialEntryMode);
   const [clientSearch, setClientSearch] = useState("");
-  const [selectedClientId, setSelectedClientId] = useState(hasInitialLinkedClient ? initialValues.linkedCustomerId : "");
+  const [selectedClientId, setSelectedClientId] = useState(resolvedInitialClient?.id ?? "");
   const [clientName, setClientName] = useState(initialValues.clientName);
   const [contactName, setContactName] = useState(initialValues.contactName);
   const [phone, setPhone] = useState(initialValues.phone);
@@ -237,9 +248,10 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
           name="clientName"
           value={clientName}
           onChange={(event) => setClientName(event.currentTarget.value)}
+          readOnly={entryMode === "existing"}
           placeholder="Client / business name"
           required
-          style={inputStyle}
+          style={{ ...inputStyle, background: entryMode === "existing" ? "#f8fafc" : "#fff" }}
         />
         <input
           name="contactName"
