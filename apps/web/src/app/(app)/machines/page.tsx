@@ -226,7 +226,7 @@ export default async function MachinesPage() {
                   <div style={{ color: "#64748b", textTransform: "capitalize" }}>{r.machineType}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <MachineEditForm machineId={r.id}>
+                  <MachineEditForm machineId={r.id} tenantId={t.tenantId}>
                     <MachineFields machine={r} />
                   </MachineEditForm>
                   <form action={setMachineActiveAction}>

@@ -292,8 +292,8 @@ export async function createMachine(input: MachineInput): Promise<{ id: string }
   }
 }
 
-export async function updateMachine(input: MachineInput & { id: string }): Promise<void> {
-  await pool.query(`
+export async function updateMachine(input: MachineInput & { id: string; authUserId: string }): Promise<boolean> {
+  const result = await pool.query<{ id: string }>(`
     UPDATE catalog.machines
     SET name = $3,
         machine_type = $4,
@@ -309,7 +309,17 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
           'maxStackSheets', $13::numeric
         ),
         updated_at = now()
-    WHERE tenant_id = $1::uuid AND id = $2::uuid
+    WHERE tenant_id = $1::uuid
+      AND id = $2::uuid
+      AND EXISTS (
+        SELECT 1
+        FROM app.memberships membership
+        JOIN app.user_profiles profile ON profile.id = membership.user_profile_id
+        WHERE membership.tenant_id = $1::uuid
+          AND membership.status = 'active'
+          AND profile.auth_user_id = $14::uuid
+      )
+    RETURNING id::text
   `, [
     input.tenantId,
     input.id,
@@ -323,8 +333,10 @@ export async function updateMachine(input: MachineInput & { id: string }): Promi
     input.inkCostPerSqm,
     input.colourImpressionCost,
     input.monoImpressionCost,
-    input.maxStackSheets
+    input.maxStackSheets,
+    input.authUserId
   ]);
+  return result.rows.length === 1;
 }
 
 export async function setMachineActive(tenantId: string, id: string, active: boolean): Promise<void> {

@@ -1,22 +1,20 @@
 "use client";
 
-import { useActionState, useEffect, useRef, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useActionState, useEffect, useRef, type ReactNode } from "react";
 import { updateMachineInlineAction, type MachineSaveState } from "./actions";
 
 const initialState: MachineSaveState = { status: "idle", message: "", savedAt: 0 };
 
-export function MachineEditForm({ machineId, children }: { machineId: string; children: ReactNode }) {
+export function MachineEditForm({ machineId, tenantId, children }: { machineId: string; tenantId: string; children: ReactNode }) {
   const [state, action, pending] = useActionState(updateMachineInlineAction, initialState);
-  const [refreshing, startRefresh] = useTransition();
   const detailsRef = useRef<HTMLDetailsElement>(null);
-  const router = useRouter();
+  const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
-    if (state.status !== "success" || !state.savedAt) return;
-    if (detailsRef.current) detailsRef.current.open = false;
-    startRefresh(() => router.refresh());
-  }, [router, state.savedAt, state.status]);
+    if (!state.savedAt) return;
+    if (state.status === "error" && detailsRef.current) detailsRef.current.open = true;
+    if (state.status === "success") formRef.current?.removeAttribute("data-production-manager-unsaved");
+  }, [state.savedAt, state.status]);
 
   return <div style={{ display: "grid", gap: 5, justifyItems: "end" }}>
     <details ref={detailsRef}>
@@ -24,8 +22,16 @@ export function MachineEditForm({ machineId, children }: { machineId: string; ch
         {pending ? "Saving…" : "Edit"}
       </summary>
       <div style={{ position: "absolute", zIndex: 20, right: 18, marginTop: 8, width: "min(980px,calc(100vw - 48px))", border: "1px solid #dbe4f0", borderRadius: 16, background: "#fff", padding: 18, boxShadow: "0 20px 60px rgba(15,23,42,.22)" }}>
-        <form action={action} style={{ display: "grid", gap: 12 }}>
+        <form
+          ref={formRef}
+          action={action}
+          onSubmit={() => {
+            if (detailsRef.current) detailsRef.current.open = false;
+          }}
+          style={{ display: "grid", gap: 12 }}
+        >
           <input type="hidden" name="id" value={machineId} />
+          <input type="hidden" name="tenantId" value={tenantId} />
           {children}
           {state.status === "error" ? <div style={{ border: "1px solid #fecaca", borderRadius: 11, padding: 10, background: "#fef2f2", color: "#b42318", fontWeight: 800 }}>{state.message}</div> : null}
           <div style={{ display: "flex", justifyContent: "flex-end" }}>
@@ -36,6 +42,7 @@ export function MachineEditForm({ machineId, children }: { machineId: string; ch
         </form>
       </div>
     </details>
-    {state.status === "success" ? <span style={{ color: "#15803d", fontSize: 11, fontWeight: 900 }}>{refreshing ? "Saved · refreshing" : state.message}</span> : null}
+    {pending ? <span style={{ color: "#2563eb", fontSize: 11, fontWeight: 900 }}>Saving…</span> : null}
+    {!pending && state.status === "success" ? <span style={{ color: "#15803d", fontSize: 11, fontWeight: 900 }}>{state.message}</span> : null}
   </div>;
 }

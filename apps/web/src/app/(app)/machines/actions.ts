@@ -17,13 +17,13 @@ export type MachineSaveState = {
 
 export async function updateMachineInlineAction(_previous: MachineSaveState, formData: FormData): Promise<MachineSaveState> {
   const user = await getRequiredSessionUser();
-  const tenant = await resolveActiveTenantForAuthUserId(user.id);
-  if (!tenant) redirect("/bootstrap");
-  const values = input(formData, tenant.tenantId);
+  const tenantId = s(formData, "tenantId");
+  const values = input(formData, tenantId);
   const id = s(formData, "id");
-  if (!id || !values.name) return { status: "error", message: "Machine name is required.", savedAt: Date.now() };
+  if (!tenantId || !id || !values.name) return { status: "error", message: "Machine name is required.", savedAt: Date.now() };
   try {
-    await updateMachine({ ...values, id });
+    const saved = await updateMachine({ ...values, id, authUserId: user.id });
+    if (!saved) return { status: "error", message: "Machine could not be saved or is no longer available.", savedAt: Date.now() };
     return { status: "success", message: `${values.name} saved`, savedAt: Date.now() };
   } catch (error) {
     return { status: "error", message: error instanceof Error ? error.message : "Machine could not be saved.", savedAt: Date.now() };
