@@ -458,22 +458,23 @@ function quoteLineDefinition(formData: FormData, createEditableOptions: boolean)
 export async function createQuoteDraftAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
   const jobName = String(formData.get("jobName") ?? "").trim();
-  const clientName = String(formData.get("clientName") ?? "").trim();
+  const requestedClientName = String(formData.get("clientName") ?? "").trim();
 
   if (!jobName) {
     redirect("/quotes?error=Job%20name%20is%20required");
   }
 
-  if (!clientName) {
-    redirect("/quotes?error=Client%20name%20is%20required");
-  }
-
   const linkedCustomerId = nullable(formData.get("linkedCustomerId"));
+  let linkedCustomer: Awaited<ReturnType<typeof getCustomerById>> = null;
   if (linkedCustomerId) {
-    const linkedCustomer = await getCustomerById(activeTenant.tenantId, linkedCustomerId);
+    linkedCustomer = await getCustomerById(activeTenant.tenantId, linkedCustomerId);
     if (!linkedCustomer) {
       redirect("/quotes?error=The%20selected%20client%20could%20not%20be%20found");
     }
+  }
+  const clientName = linkedCustomer?.companyName?.trim() || linkedCustomer?.displayName?.trim() || requestedClientName;
+  if (!clientName) {
+    redirect("/quotes?error=Client%20name%20is%20required");
   }
 
   const created = await createQuoteDraftForTenant(activeTenant.tenantId, {
@@ -1257,7 +1258,12 @@ export async function linkQuoteToProductionManagerClientAction(formData: FormDat
   if (!quoteId || !customerId) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("Choose a Production Manager client first.")}`);
   const customer = await getCustomerById(activeTenant.tenantId, customerId);
   if (!customer) redirect(`/quotes?selected=${quoteId}&error=${encodeURIComponent("The selected Production Manager client could not be found.")}`);
-  await updateQuoteLinkedCustomerForTenant(activeTenant.tenantId, quoteId, customer.id);
+  await updateQuoteLinkedCustomerForTenant(
+    activeTenant.tenantId,
+    quoteId,
+    customer.id,
+    customer.companyName?.trim() || customer.displayName
+  );
   await updateQuoteMyobOrderSyncForTenant(activeTenant.tenantId, quoteId, {
     status: "ready_to_sync",
     error: null,

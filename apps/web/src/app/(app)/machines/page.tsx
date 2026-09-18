@@ -2,7 +2,8 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMachinesForTenant } from "@/server/productionResources";
-import { createMachineAction, updateMachineAction, setMachineActiveAction } from "./actions";
+import { createMachineAction, setMachineActiveAction } from "./actions";
+import { MachineEditForm } from "./MachineEditForm";
 import Link from "next/link";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 
@@ -225,52 +226,9 @@ export default async function MachinesPage() {
                   <div style={{ color: "#64748b", textTransform: "capitalize" }}>{r.machineType}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
-                  <details>
-                    <summary
-                      style={{
-                        listStyle: "none",
-                        cursor: "pointer",
-                        border: "1px solid #94a3b8",
-                        borderRadius: 9,
-                        padding: "8px 10px",
-                        fontWeight: 800,
-                      }}
-                    >
-                      Edit
-                    </summary>
-                    <div
-                      style={{
-                        position: "absolute",
-                        zIndex: 20,
-                        right: 18,
-                        marginTop: 8,
-                        width: "min(980px,calc(100vw - 48px))",
-                        ...card,
-                        boxShadow: "0 20px 60px rgba(15,23,42,.22)",
-                      }}
-                    >
-                      <form action={updateMachineAction} style={{ display: "grid", gap: 12 }}>
-                        <input type="hidden" name="id" value={r.id} />
-                        <MachineFields machine={r} />
-                        <div style={{ display: "flex", justifyContent: "flex-end" }}>
-                          <button
-                            style={{
-                              minHeight: 44,
-                              minWidth: 130,
-                              border: 0,
-                              borderRadius: 10,
-                              background: "#2563eb",
-                              color: "#fff",
-                              fontWeight: 900,
-                              padding: "0 18px",
-                            }}
-                          >
-                            Save changes
-                          </button>
-                        </div>
-                      </form>
-                    </div>
-                  </details>
+                  <MachineEditForm machineId={r.id} tenantId={t.tenantId}>
+                    <MachineFields machine={r} />
+                  </MachineEditForm>
                   <form action={setMachineActiveAction}>
                     <input type="hidden" name="id" value={r.id} />
                     <input type="hidden" name="active" value={r.active ? "false" : "true"} />

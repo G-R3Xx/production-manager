@@ -36,6 +36,10 @@ function readParam(params: Record<string, string | string[] | undefined>, key: s
   return value ?? "";
 }
 
+function normalisedClientMatchName(value: string | null | undefined): string {
+  return String(value ?? "").trim().toLocaleLowerCase("en-AU").replace(/\s+/g, " ");
+}
+
 
 type UnknownRecord = Record<string, unknown>;
 type SurveyPhoto = {
@@ -579,9 +583,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const sourceContactName = survey?.contactName ?? sourceEnquiry?.contactName ?? "";
   const sourcePhone = survey?.phone ?? sourceEnquiry?.phone ?? "";
   const sourceEmail = sourceEnquiry?.email ?? "";
-  // Once a quote exists, its saved client is authoritative. The source enquiry
-  // or survey is only a fallback for legacy quotes and new-quote defaults.
-  const sourceLinkedCustomerId = selectedQuote?.linkedCustomerId ?? survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? null;
+  // Once a quote exists, never silently substitute its source enquiry's client.
+  // A missing or mismatched quote link must be corrected explicitly so pricing,
+  // MYOB and production all use the same client.
+  const sourceLinkedCustomerId = selectedQuote
+    ? selectedQuote.linkedCustomerId
+    : survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? null;
 
   const [quoteLines, selectedArtworkApproval, selectedProductionJob] = await Promise.all([
     selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
@@ -593,6 +600,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     : [];
   const selectedQuoteFingerprint = selectedQuote ? quoteActivityFingerprint(selectedQuote, quoteLines) : "";
   const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
+  const quoteClientName = normalisedClientMatchName(selectedQuote?.clientName);
+  const linkedClientMatchesQuote = Boolean(linkedClient && (!quoteClientName || [linkedClient.displayName, linkedClient.companyName]
+    .some((value) => normalisedClientMatchName(value) === quoteClientName)));
+  const quoteClientLinkMismatch = Boolean(selectedQuote && linkedClient && !linkedClientMatchesQuote);
   const importedMyobCustomers = clients.filter((client) => client.isActive && Boolean(client.myobUid) && !client.myobUid.startsWith("manual-"));
   const linkedClientMyobUid = linkedClient
     ? (!linkedClient.myobUid.startsWith("manual-")
@@ -613,12 +624,15 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     : [];
   const suggestedMyobCustomer = suggestedMyobCustomers.length === 1 ? suggestedMyobCustomers[0] : null;
   const quoteClientEmail = String(selectedQuote?.email ?? "").trim().toLowerCase();
-  const quoteClientName = String(selectedQuote?.clientName ?? "").trim().toLowerCase();
-  const suggestedPmClients = !linkedClient ? clients.filter((candidate) => {
+  const exactNamePmClients = quoteClientName ? clients.filter((candidate) => [candidate.companyName, candidate.displayName]
+    .some((value) => normalisedClientMatchName(value) === quoteClientName)) : [];
+  const fallbackPmClients = clients.filter((candidate) => {
     const candidateEmail = String(candidate.email ?? "").trim().toLowerCase();
-    const candidateName = String(candidate.companyName || candidate.displayName || "").trim().toLowerCase();
-    return (quoteClientEmail && candidateEmail === quoteClientEmail) || (quoteClientName && candidateName === quoteClientName);
-  }) : [];
+    return quoteClientEmail && candidateEmail === quoteClientEmail;
+  });
+  const suggestedPmClients = !linkedClient || quoteClientLinkMismatch
+    ? (exactNamePmClients.length ? exactNamePmClients : fallbackPmClients)
+    : [];
   const suggestedPmClient = suggestedPmClients.length === 1 ? suggestedPmClients[0] : null;
 
   const quoteSubtotal = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
@@ -705,7 +719,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           </div>
         </div>
 
-        {(survey || linkedClient) ? (
+        {(survey || linkedClient || selectedQuote) ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
             {survey ? (
               <section style={{ border: `1px solid ${survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe"}`, borderRadius: 18, padding: 12, display: "grid", gap: 8, background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
@@ -727,7 +741,29 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 </div>
               </section>
             ) : null}
-            {linkedClient ? (
+            {selectedQuote && (!linkedClient || quoteClientLinkMismatch) ? (
+              <section style={{ border: "1px solid #fdba74", borderRadius: 18, padding: 12, display: "grid", gap: 10, background: "#fff7ed" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                  <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={50} radius={13} padding={4} />
+                  <div style={{ minWidth: 0 }}>
+                    <strong style={{ display: "block", color: "#9a3412" }}>Client link needs correction</strong>
+                    <span style={{ color: "#9a3412", fontSize: 12, lineHeight: 1.45 }}>{linkedClient ? `This quote says “${selectedQuote.clientName}” but is linked to “${linkedClient.displayName}”.` : `“${selectedQuote.clientName}” is copied onto the quote but is not linked to a saved client.`}</span>
+                  </div>
+                </div>
+                <form action={linkQuoteToProductionManagerClientAction} style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto", gap: 8, alignItems: "end" }}>
+                  <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                  <label style={{ display: "grid", gap: 5, color: "#7c2d12", fontSize: 12, fontWeight: 850 }}>
+                    Correct saved client
+                    <select name="customerId" defaultValue={suggestedPmClient?.id ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
+                      <option value="">Choose Production Manager client…</option>
+                      {clients.filter((candidate) => candidate.isActive).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.companyName && candidate.companyName !== candidate.displayName ? ` — ${candidate.companyName}` : ""}</option>)}
+                    </select>
+                  </label>
+                  <MyobSubmitButton label="Save correct client" pendingLabel="Correcting…" background="#c2410c" />
+                </form>
+                {suggestedPmClient ? <span style={{ color: "#9a3412", fontSize: 12 }}>Suggested exact match: <strong>{suggestedPmClient.displayName}</strong></span> : null}
+              </section>
+            ) : linkedClient ? (
               <section style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gridTemplateColumns: "56px 1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
                 <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={linkedClient.displayName} size={56} radius={14} padding={5} />
                 <div style={{ display: "grid", gap: 4 }}>
@@ -955,7 +991,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   {(() => {
                     const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
                     const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus === "error";
-                    const needsPmClientLink = !linkedClient;
+                    const needsPmClientLink = !linkedClient || quoteClientLinkMismatch;
                     const needsMyobLink = Boolean(linkedClient && !linkedMyobCustomer);
                     const needsAnyClientLink = needsPmClientLink || needsMyobLink;
                     const needsMyobAttention = needsAnyClientLink || selectedQuote.myobOrderStatus === "error";
@@ -974,7 +1010,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {selectedQuote.myobOrderStatus === "synced" && JSON.stringify(selectedQuote.myobOrderPayloadJson ?? {}).includes("/Sale/Order/Service") ? <span style={{ fontSize: 11, color: "#9a3412", fontWeight: 800 }}>Older MYOB Service-layout order</span> : null}
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                            <span style={{ borderRadius: 999, border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, background: "rgba(255,255,255,0.78)", color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{needsPmClientLink ? "PM client link needed" : needsMyobLink ? "MYOB customer link needed" : myobTone.label}</span>
+                            <span style={{ borderRadius: 999, border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, background: "rgba(255,255,255,0.78)", color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{needsPmClientLink ? quoteClientLinkMismatch ? "PM client mismatch" : "PM client link needed" : needsMyobLink ? "MYOB customer link needed" : myobTone.label}</span>
                             {selectedProductionJob ? <Link href={`/production/${selectedProductionJob.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Job workspace →</Link> : null}
                             {canPush && !needsAnyClientLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
@@ -987,20 +1023,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
                         {selectedQuote.myobOrderSyncError && !needsAnyClientLink ? <div style={{ border: "1px solid #fecaca", borderRadius: 12, background: "#fef2f2", color: "#b42318", padding: "9px 11px", fontSize: 12, whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</div> : null}
 
-                        {needsPmClientLink ? (
-                          <form action={linkQuoteToProductionManagerClientAction} style={{ border: "1px solid #fed7aa", borderRadius: 14, background: "#fff7ed", padding: 12, display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
-                            <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                            <label style={{ display: "grid", gap: 6 }}>
-                              <b style={{ fontSize: 13 }}>Link this quote to a Production Manager client</b>
-                              <select name="customerId" defaultValue={suggestedPmClient?.id ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
-                                <option value="">Choose Production Manager client…</option>
-                                {clients.filter((candidate) => candidate.isActive).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.companyName && candidate.companyName !== candidate.displayName ? ` — ${candidate.companyName}` : ""}{candidate.email ? ` · ${candidate.email}` : ""}</option>)}
-                              </select>
-                              {suggestedPmClient ? <span style={{ fontSize: 12 }}>Suggested match: <strong>{suggestedPmClient.displayName}</strong></span> : null}
-                            </label>
-                            <MyobSubmitButton label="Link PM client" pendingLabel="Linking…" background="#475467" />
-                          </form>
-                        ) : null}
+                        {needsPmClientLink ? <div style={{ border: "1px solid #fed7aa", borderRadius: 12, background: "#fff7ed", color: "#9a3412", padding: "9px 11px", fontSize: 12 }}>Correct the saved client in the orange panel at the top of Quote workflow before pricing or sending this quote.</div> : null}
 
                         {needsSalesReferenceSetup ? (
                           <div style={{ border: "1px solid #dfe7f2", borderRadius: 14, background: "#f8fafc", padding: 12, display: "grid", gap: 8 }}>

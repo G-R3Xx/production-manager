@@ -715,17 +715,18 @@ export async function createQuoteDraftForTenant(tenantId: string, input: {
   return result.rows[0];
 }
 
-export async function updateQuoteLinkedCustomerForTenant(tenantId: string, quoteId: string, customerId: string): Promise<void> {
+export async function updateQuoteLinkedCustomerForTenant(tenantId: string, quoteId: string, customerId: string, clientName?: string | null): Promise<void> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
     const quote = await client.query<{ enquiryId: string | null; surveyRequestId: string | null }>(`
       UPDATE sales.quote_drafts
       SET linked_customer_id = $3::uuid,
+          client_name = COALESCE(NULLIF(BTRIM($4::text), ''), client_name),
           updated_at = now()
       WHERE tenant_id = $1::uuid AND id = $2::uuid
       RETURNING enquiry_id as "enquiryId", survey_request_id as "surveyRequestId"
-    `, [tenantId, quoteId, customerId]);
+    `, [tenantId, quoteId, customerId, clientName ?? null]);
     if (!quote.rowCount) throw new Error("The quote could not be found.");
     const source = quote.rows[0];
     if (source?.enquiryId) {

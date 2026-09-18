@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
 import { addQuoteLineAction } from "./actions";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
-import { labourRateForProcess, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
+import { labourCostingDetails, labourForProcess, labourRateForProcess, selectMachineForProcess, type MachineCostMetrics, type QuoteCostingResources } from "./quoteCostingResources";
 
 export type QuoteMaterial = {
   id: string;
@@ -103,6 +103,98 @@ type CostRow = {
   cost: number;
   note?: string;
 };
+
+type AutomaticLabourCost = {
+  name: string;
+  lineMinutes: number;
+  lineCost: number;
+  unitMinutes: number;
+  unitCost: number;
+  hourlyRate: number;
+  calculationBasis: string;
+};
+
+const processAliases = {
+  print: ["direct print", "digital print", "small format print", "print"],
+  laminate: ["laminate", "laminating", "cello", "coating"],
+  eyelets: ["eyelets", "eyelet"],
+  jingwei: ["jewei cut", "jingwei cut", "jewei", "jingwei"],
+  vinyl_cutting: ["vinyl cutting", "cut vinyl", "vinyl cut"],
+  print_vinyl_application: ["mount apply", "mounting application", "mount apply vinyl", "vinyl application"],
+  tape_hem_banner: ["tape hem banner", "banner hem", "hemming", "hem banner"],
+  trim: ["trim cut", "guillotine", "trim", "cut"],
+  fold: ["folding", "fold"],
+  score: ["scoring", "creasing", "score", "crease"],
+  staple: ["saddle stitch", "stapling", "staple", "stitch"],
+  numbering: ["sequential numbering", "numbering", "number"],
+  padding: ["padding", "book padding", "binding", "tape binding"]
+} as const;
+
+const signageFinishingProcessAliases: Record<string, readonly string[]> = {
+  jingwei: processAliases.jingwei,
+  eyelets: processAliases.eyelets,
+  vinyl_cutting: processAliases.vinyl_cutting,
+  print_vinyl_application: processAliases.print_vinyl_application,
+  tape_hem_banner: processAliases.tape_hem_banner
+};
+
+const smallFinishingProcessAliases: Record<string, readonly string[]> = {
+  trim: processAliases.trim,
+  fold: processAliases.fold,
+  score: processAliases.score,
+  staple: processAliases.staple,
+  numbering: processAliases.numbering,
+  padding: processAliases.padding
+};
+
+function automaticLabourForProcess(
+  resources: QuoteCostingResources | undefined,
+  aliases: readonly string[],
+  department: string,
+  metrics: MachineCostMetrics,
+  quoteQuantity: number
+): AutomaticLabourCost | null {
+  const labour = labourForProcess(resources, [...aliases], department);
+  const details = labourCostingDetails(labour, metrics);
+  if (!labour || !details || details.hourlyRate <= 0 || details.lineMinutes <= 0) return null;
+  const safeQuantity = Math.max(1, quoteQuantity);
+  return {
+    name: labour.name,
+    lineMinutes: details.lineMinutes,
+    lineCost: details.lineCost,
+    unitMinutes: details.lineMinutes / safeQuantity,
+    unitCost: details.lineCost / safeQuantity,
+    hourlyRate: details.hourlyRate,
+    calculationBasis: details.calculationBasis
+  };
+}
+
+function automaticLabourNote(costing: AutomaticLabourCost): string {
+  const basis = costing.calculationBasis === "per_sqm_hours"
+    ? "area calculation"
+    : costing.calculationBasis === "per_sheet_hours"
+      ? "sheet calculation"
+      : costing.calculationBasis === "per_linear_metre_hours"
+        ? "linear-metre calculation"
+        : costing.calculationBasis === "per_item_hours"
+          ? "quantity calculation"
+          : costing.calculationBasis === "guillotine_stacks"
+            ? "stack/cut calculation"
+            : "configured time";
+  return `${minutesLabel(costing.lineMinutes)} automatically · ${basis} · ${money(costing.hourlyRate)}/hr from ${costing.name}`;
+}
+
+function automaticLabourRow(label: string, detail: string, costing: AutomaticLabourCost): CostRow {
+  return {
+    label,
+    detail,
+    amount: costing.unitMinutes,
+    unit: "min",
+    rate: costing.hourlyRate / 60,
+    cost: costing.unitCost,
+    note: automaticLabourNote(costing)
+  };
+}
 
 type CustomComponentPart = {
   id: string;
@@ -1491,7 +1583,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       : areaSqm * sideMultiplier,
     sheetsPerLine: flowType === "signage" ? signagePrintSheetUse?.physicalSheets ?? 0 : smallSheetsForMachine,
     linearMetresPerLine: flowType === "signage" ? signagePrintRollUse?.unroundedAmount ?? 0 : smallRollUseForMachine?.unroundedAmount ?? 0,
-    requiredWidthMm: printRequiredWidthMm
+    requiredWidthMm: printRequiredWidthMm,
+    sides: sideMultiplier,
+    a4FacesPerParentSheet: flowType === "small_format" ? 2 : undefined
   };
   const printMachineSelection = (flowType === "signage" ? needsInkStep && printed : isPrintDepartment || flowType === "small_format" ? Boolean(smallPrintColour) : false)
     ? selectMachineForProcess(costingResources, ["direct print", "print"], printMachineMetrics, costingDepartment)
@@ -1500,13 +1594,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const laminateRollUseForMachine = selectedLaminate && width > 0 && height > 0
     ? roundedRollMetresForQuantity(usageWidth, usageHeight, selectedLaminate, Math.max(1, Math.ceil(quantityNumber * sideMultiplier)), effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview)
     : null;
+  const laminateMachineMetrics: MachineCostMetrics = {
+    quantity: quantityNumber,
+    areaSqmPerUnit: areaSqm * sideMultiplier,
+    linearMetresPerLine: laminateRollUseForMachine?.unroundedAmount ?? 0,
+    requiredWidthMm: numberValue((selectedLaminate ?? selectedSmallCoating)?.rollWidthMm, 0) || Math.min(width, height)
+  };
   const laminateMachineSelection = ((flowType === "signage" && selectedLaminate && laminateId !== "none") || ((flowType === "small_format" || isPrintDepartment) && selectedSmallCoating && smallCoatingId !== "none"))
-    ? selectMachineForProcess(costingResources, ["laminate", "laminating", "cello", "coating"], {
-        quantity: quantityNumber,
-        areaSqmPerUnit: areaSqm * sideMultiplier,
-        linearMetresPerLine: laminateRollUseForMachine?.unroundedAmount ?? 0,
-        requiredWidthMm: numberValue((selectedLaminate ?? selectedSmallCoating)?.rollWidthMm, 0) || Math.min(width, height)
-      }, costingDepartment)
+    ? selectMachineForProcess(costingResources, [...processAliases.laminate], laminateMachineMetrics, costingDepartment)
     : null;
 
   const signageParentDimensionsForMachine = selectedMainMaterial && !isRollMaterial(selectedMainMaterial)
@@ -1538,22 +1633,77 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         requiredWidthMm: signageProcessWidthMm
       }, costingDepartment)
     : null;
+  const trimLabour = labourForProcess(costingResources, [...processAliases.trim], costingDepartment);
+  const trimMachineMetrics: MachineCostMetrics = {
+    quantity: quantityNumber,
+    areaSqmPerUnit: areaSqm,
+    sheetsPerLine: smallSheetsForMachine,
+    requiredWidthMm: numberValue(selectedSmallStock?.rollWidthMm, 0)
+      || (smallStockDimensionsForMachine ? Math.min(smallStockDimensionsForMachine.width, smallStockDimensionsForMachine.length) : Math.min(width, height)),
+    guillotineCutsPerStack: numberValue(trimLabour?.calculationValue, 0)
+  };
   const trimMachineSelection = (flowType === "small_format" || isPrintDepartment) && smallFinishings.includes("trim")
-    ? selectMachineForProcess(costingResources, ["trim cut", "trim", "cut"], {
-        quantity: quantityNumber,
-        areaSqmPerUnit: areaSqm,
-        sheetsPerLine: smallSheetsForMachine,
-        requiredWidthMm: numberValue(selectedSmallStock?.rollWidthMm, 0)
-          || (smallStockDimensionsForMachine ? Math.min(smallStockDimensionsForMachine.width, smallStockDimensionsForMachine.length) : Math.min(width, height))
-      }, costingDepartment)
+    ? selectMachineForProcess(costingResources, [...processAliases.trim], trimMachineMetrics, costingDepartment)
     : null;
 
-  const printLabourRate = labourRateForProcess(costingResources, ["direct print", "print"], costingDepartment, labourRate);
-  const laminateLabourRate = labourRateForProcess(costingResources, ["laminate", "laminating", "cello", "coating"], costingDepartment, labourRate);
-  const eyeletLabourRate = labourRateForProcess(costingResources, ["eyelets", "eyelet"], costingDepartment, labourRate);
-  const jingweiLabourRate = labourRateForProcess(costingResources, ["jewei cut", "jingwei cut", "jewei", "jingwei"], costingDepartment, labourRate);
-  const mountLabourRate = labourRateForProcess(costingResources, ["mount apply", "mounting application"], costingDepartment, labourRate);
-  const trimLabourRate = labourRateForProcess(costingResources, ["trim cut", "trim", "cut"], costingDepartment, labourRate);
+  const printLabourRate = labourRateForProcess(costingResources, [...processAliases.print], costingDepartment, labourRate);
+  const laminateLabourRate = labourRateForProcess(costingResources, [...processAliases.laminate], costingDepartment, labourRate);
+  const eyeletLabourRate = labourRateForProcess(costingResources, [...processAliases.eyelets], costingDepartment, labourRate);
+  const jingweiLabourRate = labourRateForProcess(costingResources, [...processAliases.jingwei], costingDepartment, labourRate);
+  const mountLabourRate = labourRateForProcess(costingResources, [...processAliases.print_vinyl_application], costingDepartment, labourRate);
+  const trimLabourRate = labourRateForProcess(costingResources, [...processAliases.trim], costingDepartment, labourRate);
+  const selectedEyeletPreset = eyeletPresets.find((option) => option.label === eyeletPresetLabel);
+  const eyeletsPerItem = selectedEyeletPreset?.qty === 0 ? numberValue(customEyeletQty, 0) : selectedEyeletPreset?.qty ?? 0;
+  const printAutomaticLabour = (flowType === "signage" ? printed : Boolean(smallPrintColour))
+    ? automaticLabourForProcess(costingResources, processAliases.print, costingDepartment, printMachineMetrics, quantityNumber)
+    : null;
+  const laminateAutomaticLabour = ((flowType === "signage" && selectedLaminate && laminateId !== "none") || ((flowType === "small_format" || isPrintDepartment) && selectedSmallCoating && smallCoatingId !== "none"))
+    ? automaticLabourForProcess(costingResources, processAliases.laminate, costingDepartment, laminateMachineMetrics, quantityNumber)
+    : null;
+  const signageFinishingAutomaticLabour = Object.fromEntries(finishings.map((key) => {
+    const aliases = signageFinishingProcessAliases[key];
+    if (!aliases) return [key, null];
+    const metrics: MachineCostMetrics = key === "eyelets"
+      ? {
+          quantity: quantityNumber * Math.max(0, eyeletsPerItem),
+          areaSqmPerUnit: 0,
+          linearMetresPerLine: Math.max(0, 2 * ((width + height) / 1000) * quantityNumber)
+        }
+      : {
+          quantity: quantityNumber,
+          areaSqmPerUnit: areaSqm,
+          sheetsPerLine: signagePrintSheetUse?.physicalSheets ?? quantityNumber,
+          linearMetresPerLine: signagePrintRollUse?.unroundedAmount ?? 0,
+          requiredWidthMm: signageProcessWidthMm
+        };
+    return [key, automaticLabourForProcess(costingResources, aliases, costingDepartment, metrics, quantityNumber)];
+  })) as Record<string, AutomaticLabourCost | null>;
+  const signageFinishingLabourRates = Object.fromEntries(finishingOptions.map((item) => {
+    const aliases = signageFinishingProcessAliases[item.key];
+    return [item.key, aliases ? labourRateForProcess(costingResources, [...aliases], costingDepartment, labourRate) : labourRate];
+  })) as Record<string, number>;
+  const trimAutomaticMetrics: MachineCostMetrics = {
+    ...trimMachineMetrics,
+    guillotineMaxStackSheets: numberValue(trimMachineSelection?.machine?.maxStackSheets, 0),
+    guillotineCutsPerMinute: trimMachineSelection?.machine?.speedUom === "cuts_per_minute" ? numberValue(trimMachineSelection.machine.speedValue, 0) : 0,
+    guillotineSetupMinutes: numberValue(trimMachineSelection?.machine?.setupMinutes, 0)
+  };
+  const smallFinishingAutomaticLabour = Object.fromEntries(smallFinishings.map((key) => {
+    const aliases = smallFinishingProcessAliases[key];
+    if (!aliases) return [key, null];
+    const metrics = key === "trim" ? trimAutomaticMetrics : {
+      quantity: quantityNumber,
+      areaSqmPerUnit: areaSqm,
+      sheetsPerLine: smallSheetsForMachine,
+      linearMetresPerLine: smallRollUseForMachine?.unroundedAmount ?? 0,
+      requiredWidthMm: trimMachineMetrics.requiredWidthMm
+    } satisfies MachineCostMetrics;
+    return [key, automaticLabourForProcess(costingResources, aliases, costingDepartment, metrics, quantityNumber)];
+  })) as Record<string, AutomaticLabourCost | null>;
+  const smallFinishingLabourRates = Object.fromEntries(smallFinishingOptions.map((item) => {
+    const aliases = smallFinishingProcessAliases[item.key];
+    return [item.key, aliases ? labourRateForProcess(costingResources, [...aliases], costingDepartment, labourRate) : labourRate];
+  })) as Record<string, number>;
   const printInkRatePerSqm = printMachineSelection?.machine
     ? (numberValue(printMachineSelection.machine.inkCostPerSqm, 0) > 0 ? numberValue(printMachineSelection.machine.inkCostPerSqm, 0) : inkRatePerSqm)
     : inkRatePerSqm;
@@ -1660,6 +1810,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             cost: amount * rate,
             note: labourChargeNote(minutes, printSetupLabourBasis, printLabourRate)
           });
+        } else if (printAutomaticLabour) {
+          rows.push(automaticLabourRow("Print labour", methodLabel, printAutomaticLabour));
         }
       }
 
@@ -1757,6 +1909,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           const amount = labourMinutesPerUnit(minutes, laminateLabourBasis, quantityNumber);
           const rate = laminateLabourRate / 60;
           rows.push({ label: "Laminate labour", detail: "Apply laminate", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, laminateLabourBasis, laminateLabourRate) });
+        } else if (laminateAutomaticLabour) {
+          rows.push(automaticLabourRow("Laminate labour", "Apply laminate", laminateAutomaticLabour));
         }
       }
 
@@ -1778,8 +1932,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             const amount = basis === "per_item"
               ? qty * eyeletMinutes
               : labourMinutesPerUnit(eyeletMinutes, "line_total", quantityNumber);
-            const rate = eyeletLabourRate / 60;
-            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(eyeletMinutes, basis, eyeletLabourRate, "per eyelet") });
+            const operationRate = signageFinishingLabourRates[item.key] ?? eyeletLabourRate;
+            const rate = operationRate / 60;
+            rows.push({ label: "Eyelet labour", detail: `${eyeletPresetLabel} placement`, amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(eyeletMinutes, basis, operationRate, "per eyelet") });
+          } else if (qty > 0 && signageFinishingAutomaticLabour[item.key]) {
+            rows.push(automaticLabourRow("Eyelet labour", `${eyeletPresetLabel} placement`, signageFinishingAutomaticLabour[item.key]!));
           }
           continue;
         }
@@ -1791,9 +1948,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (minutes > 0) {
           const basis = finishingLabourBasis[item.key] ?? "line_total";
           const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
-          const operationRate = item.key === "jingwei" ? jingweiLabourRate : item.key === "print_vinyl_application" ? mountLabourRate : labourRate;
+          const operationRate = signageFinishingLabourRates[item.key] ?? (item.key === "jingwei" ? jingweiLabourRate : item.key === "print_vinyl_application" ? mountLabourRate : labourRate);
           const rate = operationRate / 60;
           rows.push({ label: item.label, detail: "Factory labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, operationRate) });
+        } else if (signageFinishingAutomaticLabour[item.key]) {
+          rows.push(automaticLabourRow(item.label, "Factory labour", signageFinishingAutomaticLabour[item.key]!));
         }
       }
 
@@ -1864,6 +2023,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         }
       }
 
+      if (smallPrintColour) {
+        const minutes = numberValue(printSetupMinutes, 0);
+        if (minutes > 0) {
+          const amount = labourMinutesPerUnit(minutes, printSetupLabourBasis, quantityNumber);
+          const rate = printLabourRate / 60;
+          rows.push({ label: "Print labour", detail: flowDepartmentProductName(flowType), amount, unit: "min", rate, cost: amount * rate, note: `Manual override · ${labourChargeNote(minutes, printSetupLabourBasis, printLabourRate)}` });
+        } else if (printAutomaticLabour) {
+          rows.push(automaticLabourRow("Print labour", flowDepartmentProductName(flowType), printAutomaticLabour));
+        }
+      }
+
       if (printMachineSelection?.machine && printMachineSelection.machineCostPerUnit > 0) {
         rows.push({ label: "Print machine", detail: printMachineSelection.machine.name, amount: 1, unit: "item", rate: printMachineSelection.machineCostPerUnit, cost: printMachineSelection.machineCostPerUnit, note: `${printMachineSelection.machine.speedValue} ${printMachineSelection.machine.speedUom.replaceAll("_", " ")} · ${money(numberValue(printMachineSelection.machine.hourlyCost, 0))}/hr` });
       }
@@ -1882,6 +2052,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
           rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
         }
+        const minutes = numberValue(laminateMinutes, 0);
+        if (minutes > 0) {
+          const amount = labourMinutesPerUnit(minutes, laminateLabourBasis, quantityNumber);
+          const rate = laminateLabourRate / 60;
+          rows.push({ label: "Coating labour", detail: selectedSmallCoating.name, amount, unit: "min", rate, cost: amount * rate, note: `Manual override · ${labourChargeNote(minutes, laminateLabourBasis, laminateLabourRate)}` });
+        } else if (laminateAutomaticLabour) {
+          rows.push(automaticLabourRow("Coating labour", selectedSmallCoating.name, laminateAutomaticLabour));
+        }
       }
 
       for (const item of smallFinishingOptions) {
@@ -1893,9 +2071,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (minutes > 0) {
           const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
           const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
-          const operationRate = item.key === "trim" ? trimLabourRate : labourRate;
+          const operationRate = smallFinishingLabourRates[item.key] ?? (item.key === "trim" ? trimLabourRate : labourRate);
           const rate = operationRate / 60;
           rows.push({ label: item.label, detail: "Finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, operationRate) });
+        } else if (smallFinishingAutomaticLabour[item.key]) {
+          rows.push(automaticLabourRow(item.label, "Finishing labour", smallFinishingAutomaticLabour[item.key]!));
         }
       }
     }
@@ -1953,6 +2133,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         }
       }
 
+      if (smallPrintColour) {
+        const minutes = numberValue(printSetupMinutes, 0);
+        if (minutes > 0) {
+          const amount = labourMinutesPerUnit(minutes, printSetupLabourBasis, quantityNumber);
+          const rate = printLabourRate / 60;
+          rows.push({ label: "Print labour", detail: "Small-format print", amount, unit: "min", rate, cost: amount * rate, note: `Manual override · ${labourChargeNote(minutes, printSetupLabourBasis, printLabourRate)}` });
+        } else if (printAutomaticLabour) {
+          rows.push(automaticLabourRow("Print labour", "Small-format print", printAutomaticLabour));
+        }
+      }
+
       if (isDuplicateBook && itemArea > 0 && quantityNumber > 0) {
         const setsPerBook = Math.max(1, numberValue(ncrSetsPerBook, 1));
         const copiesPerSet = Math.max(1, ncrCopiesCount || 1);
@@ -1978,6 +2169,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
           rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
         }
+        const minutes = numberValue(laminateMinutes, 0);
+        if (minutes > 0) {
+          const amount = labourMinutesPerUnit(minutes, laminateLabourBasis, quantityNumber);
+          const rate = laminateLabourRate / 60;
+          rows.push({ label: "Coating labour", detail: selectedSmallCoating.name, amount, unit: "min", rate, cost: amount * rate, note: `Manual override · ${labourChargeNote(minutes, laminateLabourBasis, laminateLabourRate)}` });
+        } else if (laminateAutomaticLabour) {
+          rows.push(automaticLabourRow("Coating labour", selectedSmallCoating.name, laminateAutomaticLabour));
+        }
       }
 
       for (const item of smallFinishingOptions) {
@@ -1989,9 +2188,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (minutes > 0) {
           const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
           const amount = labourMinutesPerUnit(minutes, basis, quantityNumber);
-          const operationRate = item.key === "trim" ? trimLabourRate : labourRate;
+          const operationRate = smallFinishingLabourRates[item.key] ?? (item.key === "trim" ? trimLabourRate : labourRate);
           const rate = operationRate / 60;
           rows.push({ label: item.label, detail: "Bindery / finishing labour", amount, unit: "min", rate, cost: amount * rate, note: labourChargeNote(minutes, basis, operationRate) });
+        } else if (smallFinishingAutomaticLabour[item.key]) {
+          rows.push(automaticLabourRow(item.label, "Bindery / finishing labour", smallFinishingAutomaticLabour[item.key]!));
         }
       }
     }
@@ -2069,7 +2270,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, finishings, finishingMinutes, finishingLabourBasis, eyeletPresetLabel, customEyeletQty, eyeletMaterial, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -2618,7 +2819,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (compactStep === "print") {
-      return <div style={compactPanel}><div style={compactGrid}>{!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => { setPrintMethod(event.target.value as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : <div><b>Print method</b><div style={{ marginTop: 6, fontWeight: 900 }}>Roll stock</div></div>}</div>{printed ? <InlineLabourField label="Print setup labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); changed(); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); changed(); }} labourRate={labourRate} quantity={quantityNumber} /> : null}</div>;
+      return <div style={compactPanel}><div style={compactGrid}>{!isRollStockBase ? <label style={{ display: "grid", gap: 6 }}><b>Print method</b><select value={printMethod} onChange={(event) => { setPrintMethod(event.target.value as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); }} style={inputStyle}><option value="">Choose print method</option>{printMethods.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}</select></label> : <div><b>Print method</b><div style={{ marginTop: 6, fontWeight: 900 }}>Roll stock</div></div>}</div>{printed ? <InlineLabourField label="Print labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); changed(); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); changed(); }} labourRate={printLabourRate} quantity={quantityNumber} automatic={printAutomaticLabour} /> : null}</div>;
     }
 
     if (compactStep === "media") {
@@ -2634,14 +2835,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (compactStep === "laminate") {
-      return <div style={compactPanel}><div style={compactGrid}>{backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}</option>)}</select></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label></div>{printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={labourRate} quantity={quantityNumber} /> : null}</div>;
+      return <div style={compactPanel}><div style={compactGrid}>{backingApplicable ? <label style={{ display: "grid", gap: 6 }}><b>Backing</b><select value={backingSelectValue} onChange={(event) => { setBackingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose backing</option><option value="none">No backing</option>{backingGroups.map((group) => <option key={group.key} value={group.representative.id}>{group.label}</option>)}</select></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Laminate</b><select value={laminateId} onChange={(event) => { setLaminateId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose laminate</option><option value="none">No laminate</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label></div>{printed && laminateId && laminateId !== "none" ? <InlineLabourField label="Laminate labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={laminateLabourRate} quantity={quantityNumber} automatic={laminateAutomaticLabour} /> : null}</div>;
     }
 
     if (compactStep === "finishing") {
       return (
         <div style={compactPanel}>
           <div style={checkGrid}>{finishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={finishings.includes(item.key)} onChange={() => { toggleFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div>
-          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setFinishingLabourBasis(value); changed(); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} quantity={quantityNumber} />
+          <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setFinishingLabourBasis(value); changed(); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} labourRatesByKey={signageFinishingLabourRates} automaticByKey={signageFinishingAutomaticLabour} quantity={quantityNumber} />
           {finishings.includes("eyelets") ? <div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Eyelet preset</b><select value={eyeletPresetLabel} onChange={(event) => { setEyeletPresetLabel(event.target.value); changed(); }} style={inputStyle}>{eyeletPresets.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => { setCustomEyeletQty(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label></div> : null}
           {panelStandoffsApplicable ? (
             <div style={{ marginTop: 12, border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", padding: 12, display: "grid", gap: 10 }}>
@@ -2741,15 +2942,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (compactStep === "small_print") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => { setSmallPrintColour(event.target.value as SmallPrintColour); changed(); }} style={inputStyle}><option value="">Choose print</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label></div>;
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Print colour</b><select value={smallPrintColour} onChange={(event) => { setSmallPrintColour(event.target.value as SmallPrintColour); changed(); }} style={inputStyle}><option value="">Choose print</option><option value="mono">Mono</option><option value="cmyk">CMYK</option><option value="special">CMYK + special</option></select></label>{smallPrintColour ? <InlineLabourField label="Print labour" value={printSetupMinutes} basis={printSetupLabourBasis} onChange={(value) => { setPrintSetupMinutes(value); changed(); }} onBasisChange={(basis) => { setPrintSetupLabourBasis(basis); changed(); }} labourRate={printLabourRate} quantity={quantityNumber} automatic={printAutomaticLabour} /> : null}</div>;
     }
 
     if (compactStep === "small_coating") {
-      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Cello / coating</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose coating</option><option value="none">None</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label></div>;
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Cello / coating</b><select value={smallCoatingId} onChange={(event) => { setSmallCoatingId(event.target.value); changed(); }} style={inputStyle}><option value="">Choose coating</option><option value="none">None</option>{laminateMaterials.map((material) => <option key={material.id} value={material.id}>{internalMaterialName(material)}</option>)}</select></label>{smallCoatingId && smallCoatingId !== "none" ? <InlineLabourField label="Coating labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={laminateLabourRate} quantity={quantityNumber} automatic={laminateAutomaticLabour} /> : null}</div>;
     }
 
     if (compactStep === "small_finishing") {
-      return <div style={compactPanel}><div style={checkGrid}>{smallFinishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={smallFinishings.includes(item.key)} onChange={() => { toggleSmallFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); changed(); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} quantity={quantityNumber} /></div>;
+      return <div style={compactPanel}><div style={checkGrid}>{smallFinishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={smallFinishings.includes(item.key)} onChange={() => { toggleSmallFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); changed(); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} labourRatesByKey={smallFinishingLabourRates} automaticByKey={smallFinishingAutomaticLabour} quantity={quantityNumber} /></div>;
     }
 
     if (compactStep === "small_quantity" || compactStep === "review") {
@@ -3081,19 +3282,21 @@ function labourPreviewText(minutes: number, basis: LabourBasis, labourRate: numb
     : `${minutesLabel(minutes)} for the whole line · ${money(totalCost)} labour`;
 }
 
-function InlineLabourField({ label, value, basis, onChange, onBasisChange, labourRate, quantity, perItemLabel = "Per item" }: { label: string; value: string; basis: LabourBasis; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void; labourRate: number; quantity: number; perItemLabel?: string }) {
+function InlineLabourField({ label, value, basis, onChange, onBasisChange, labourRate, quantity, perItemLabel = "Per item", automatic = null }: { label: string; value: string; basis: LabourBasis; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void; labourRate: number; quantity: number; perItemLabel?: string; automatic?: AutomaticLabourCost | null }) {
   const enteredMinutes = numberValue(value, 0);
   return (
     <div style={{ display: "grid", gap: 6 }}>
-      <b>{label} (optional)</b>
+      <b>{label} {automatic ? "override (optional)" : "(optional)"}</b>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 170px", gap: 8 }}>
-        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Minutes, eg 0.5" type="number" min="0" step="0.5" style={inputStyle} />
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={automatic ? "Leave blank to use automatic time" : "Minutes, eg 0.5"} type="number" min="0" step="0.5" style={inputStyle} />
         <select value={basis} onChange={(event) => onBasisChange(event.target.value as LabourBasis)} style={inputStyle}>
           <option value="line_total">Total line item</option>
           <option value="per_item">{perItemLabel}</option>
         </select>
       </div>
-      <small style={{ color: "#64748b" }}>{labourPreviewText(enteredMinutes, basis, labourRate, quantity, perItemLabel.toLowerCase())}</small>
+      {automatic && enteredMinutes <= 0 ? <small style={{ color: "#047857", fontWeight: 800 }}>Automatic: {automaticLabourNote(automatic)}</small> : null}
+      {enteredMinutes > 0 ? <small style={{ color: automatic ? "#9a3412" : "#64748b" }}>{automatic ? "Manual override: " : ""}{labourPreviewText(enteredMinutes, basis, labourRate, quantity, perItemLabel.toLowerCase())}</small> : null}
+      {!automatic && enteredMinutes <= 0 ? <small style={{ color: "#64748b" }}>No linked automatic labour rule. Enter time if labour is required.</small> : null}
     </div>
   );
 }
@@ -3126,7 +3329,7 @@ function InstallLabourField({ value, basis, crewSize, quantity, labourRate, onCh
   );
 }
 
-function SelectedLabourMinutes<T extends { key: string; label: string }>({ options, selected, values, bases, onChange, onBasesChange, defaultBasis, eachLabelFor, labourRate, quantity }: { options: T[]; selected: string[]; values: Record<string, string>; bases: Record<string, LabourBasis>; onChange: (value: Record<string, string>) => void; onBasesChange: (value: Record<string, LabourBasis>) => void; defaultBasis: LabourBasis; eachLabelFor?: string; labourRate: number; quantity: number }) {
+function SelectedLabourMinutes<T extends { key: string; label: string }>({ options, selected, values, bases, onChange, onBasesChange, defaultBasis, eachLabelFor, labourRate, labourRatesByKey = {}, automaticByKey = {}, quantity }: { options: T[]; selected: string[]; values: Record<string, string>; bases: Record<string, LabourBasis>; onChange: (value: Record<string, string>) => void; onBasesChange: (value: Record<string, LabourBasis>) => void; defaultBasis: LabourBasis; eachLabelFor?: string; labourRate: number; labourRatesByKey?: Record<string, number>; automaticByKey?: Record<string, AutomaticLabourCost | null>; quantity: number }) {
   const chosen = options.filter((item) => selected.includes(item.key));
   if (chosen.length === 0) return null;
   return (
@@ -3138,17 +3341,21 @@ function SelectedLabourMinutes<T extends { key: string; label: string }>({ optio
           const basis = bases[item.key] ?? (isEach ? "per_item" : defaultBasis);
           const enteredMinutes = numberValue(values[item.key], 0);
           const perItemLabel = isEach ? "Per eyelet" : "Per item";
+          const operationRate = labourRatesByKey[item.key] ?? labourRate;
+          const automatic = automaticByKey[item.key] ?? null;
           return (
             <div key={item.key} style={{ display: "grid", gap: 6 }}>
-              <b>{item.label} labour</b>
+              <b>{item.label} labour {automatic ? "override (optional)" : ""}</b>
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 155px", gap: 8 }}>
-                <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder="Minutes, eg 0.5" type="number" min="0" step="0.5" style={inputStyle} />
+                <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder={automatic ? "Automatic unless overridden" : "Minutes, eg 0.5"} type="number" min="0" step="0.5" style={inputStyle} />
                 <select value={basis} onChange={(event) => onBasesChange({ ...bases, [item.key]: event.target.value as LabourBasis })} style={inputStyle}>
                   <option value="line_total">Total line item</option>
                   <option value="per_item">{perItemLabel}</option>
                 </select>
               </div>
-              <small style={{ color: "#64748b" }}>{isEach && basis === "per_item" ? `${minutesLabel(enteredMinutes)} per eyelet; multiplied by eyelet count and quote quantity.` : labourPreviewText(enteredMinutes, basis, labourRate, quantity, "per item")}</small>
+              {automatic && enteredMinutes <= 0 ? <small style={{ color: "#047857", fontWeight: 800 }}>Automatic: {automaticLabourNote(automatic)}</small> : null}
+              {enteredMinutes > 0 ? <small style={{ color: automatic ? "#9a3412" : "#64748b" }}>{automatic ? "Manual override: " : ""}{isEach && basis === "per_item" ? `${minutesLabel(enteredMinutes)} per eyelet; multiplied by eyelet count and quote quantity at ${money(operationRate)}/hr.` : labourPreviewText(enteredMinutes, basis, operationRate, quantity, "per item")}</small> : null}
+              {!automatic && enteredMinutes <= 0 ? <small style={{ color: "#64748b" }}>No linked automatic labour rule. Enter time if labour is required.</small> : null}
             </div>
           );
         })}

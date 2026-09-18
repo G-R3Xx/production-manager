@@ -223,7 +223,24 @@ export function labourLineCost(
   labour: QuoteCostingLabour | null,
   metrics: MachineCostMetrics
 ): number {
-  if (!labour) return 0;
+  return labourCostingDetails(labour, metrics)?.lineCost ?? 0;
+}
+
+export type LabourCostingDetails = {
+  lineHours: number;
+  lineMinutes: number;
+  lineCost: number;
+  hourlyRate: number;
+  minimumMinutes: number;
+  calculationBasis: string;
+  calculationValue: number;
+};
+
+export function labourCostingDetails(
+  labour: QuoteCostingLabour | null,
+  metrics: MachineCostMetrics
+): LabourCostingDetails | null {
+  if (!labour) return null;
   const value = Math.max(0, n(labour.calculationValue, 0));
   const quantity = Math.max(1, metrics.quantity || 1);
   const areaLine = Math.max(0, metrics.areaSqmPerUnit) * quantity;
@@ -248,8 +265,18 @@ export function labourLineCost(
   else if (labour.calculationBasis === "per_linear_metre_hours") hours = linearMetres * value;
   else if (labour.calculationBasis === "per_item_hours") hours = quantity * value;
   else hours = value / 60;
-  hours = Math.max(hours, Math.max(0, n(labour.minimumMinutes, 0)) / 60);
-  return hours * Math.max(0, n(labour.hourlyRate, 0));
+  const minimumMinutes = Math.max(0, n(labour.minimumMinutes, 0));
+  const hourlyRate = Math.max(0, n(labour.hourlyRate, 0));
+  hours = Math.max(hours, minimumMinutes / 60);
+  return {
+    lineHours: hours,
+    lineMinutes: hours * 60,
+    lineCost: hours * hourlyRate,
+    hourlyRate,
+    minimumMinutes,
+    calculationBasis: labour.calculationBasis,
+    calculationValue: value
+  };
 }
 
 export function guillotineCostingDetails(labour: QuoteCostingLabour | null, metrics: MachineCostMetrics) {
