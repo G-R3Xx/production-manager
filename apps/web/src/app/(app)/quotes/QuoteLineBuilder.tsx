@@ -475,8 +475,13 @@ function isCustomSizeSelection(field: QuoteQuestion, value: string): boolean {
   const fieldType = normalizedQuestionType(field);
   if (fieldType !== "size_select" && !String(field.key ?? "").toLowerCase().includes("size")) return false;
   const choice = selectedChoice(field, value);
-  const combined = `${value} ${choice?.value ?? ""} ${choice?.label ?? ""}`.trim().toLowerCase();
-  return combined === "custom" || combined.includes("custom size") || combined.includes("custom_size");
+  return [value, choice?.value, choice?.label].some((candidate) => {
+    const normalized = String(candidate ?? "").trim().toLowerCase();
+    return normalized === "custom"
+      || normalized === "__custom"
+      || normalized === "custom_size"
+      || normalized.includes("custom size");
+  });
 }
 
 function customDimensionsForField(field: QuoteQuestion, answers: Record<string, string>): { widthMm: number; heightMm: number } | null {
