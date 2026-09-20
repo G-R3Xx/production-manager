@@ -2,6 +2,7 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 import type { StructuredAddress } from "@/lib/contact-address";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export const MYOB_PRICE_LEVELS = ["Level A", "Level B", "Level C", "Level D", "Level E", "Level F"] as const;
 export type MyobPriceLevel = (typeof MYOB_PRICE_LEVELS)[number];
@@ -51,6 +52,13 @@ let legacyClientPricingPayloadRetired = false;
 
 async function retireLegacyClientPricingPayload(): Promise<void> {
   if (legacyClientPricingPayloadRetired) return;
+  // This is a one-off compatibility cleanup, not work that belongs in a normal
+  // production request. On serverless deployments every cold function instance
+  // would otherwise scan the complete customer table before loading a quote.
+  if (!runtimeSchemaFallbackEnabled()) {
+    legacyClientPricingPayloadRetired = true;
+    return;
+  }
   await pool.query(`
     UPDATE app.customers
     SET payload_json = COALESCE(payload_json, '{}'::jsonb)

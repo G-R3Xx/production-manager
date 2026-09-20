@@ -2,7 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getEnquiryById, listEnquiriesForTenant, listEnquiryCorrespondenceForEnquiry } from "@/server/enquiries";
+import { getEnquiryById, listEnquiryCorrespondenceForEnquiry, listEnquiryLogoSummariesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
@@ -11,7 +11,7 @@ import { getCompanySettingsByTenantId } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
 import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
 import { DeferredQuoteLineEditor } from "./DeferredQuoteLineEditor";
-import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftsForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
+import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftSummariesForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { NewQuoteDraftForm } from "./NewQuoteDraftForm";
 import { MyobSubmitButton } from "./MyobSubmitButton";
@@ -447,15 +447,30 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const myobSetupRequested = readParam(params, "myobSetup") === "1";
 
   const builderDataNeeded = Boolean(selected);
-  const [allQuoteDrafts, materials, enquiry, survey, initialSelectedQuote, companySettings, initialClients, allEnquiries, quoteProducts, salesDefaults, costingSource] = await Promise.all([
-    listQuoteDraftsForTenant(activeTenant.tenantId, { includeDeleted: true }),
+  const [
+    allQuoteDrafts,
+    materials,
+    enquiry,
+    survey,
+    initialSelectedQuote,
+    companySettings,
+    initialClients,
+    enquiryLogoSummaries,
+    quoteProducts,
+    salesDefaults,
+    costingSource,
+    quoteLines,
+    selectedArtworkApproval,
+    selectedProductionJob
+  ] = await Promise.all([
+    listQuoteDraftSummariesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? listMaterialsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
     builderDataNeeded ? getCompanySettingsByTenantId(activeTenant.tenantId) : Promise.resolve(null),
     listCustomersForTenant(activeTenant.tenantId),
-    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
+    listEnquiryLogoSummariesForTenant(activeTenant.tenantId),
     builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([]),
     selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null }),
     builderDataNeeded
@@ -465,7 +480,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           listLabourForTenant(activeTenant.tenantId),
           listRecipesForTenant(activeTenant.tenantId)
         ])
-      : Promise.resolve([[], [], [], []] as const)
+      : Promise.resolve([[], [], [], []] as const),
+    selected ? listQuoteLines(selected) : Promise.resolve([]),
+    selected ? getArtworkApprovalForQuote(activeTenant.tenantId, selected) : Promise.resolve(null),
+    selected ? getProductionJobForQuote(activeTenant.tenantId, selected) : Promise.resolve(null)
   ]);
 
   const selectedQuote = initialSelectedQuote;
@@ -575,9 +593,23 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       return item.department === "plan_printing" || /\b(plan|plans|plot|plotting|drawing|drawings|cad|blueprint|a0|a1|a2|a3|a4|mono|monochrome|colour|color|cmyk|b\s*&?\s*w)\b/.test(text);
     });
   const customerById = new Map(clients.map((client) => [client.id, client]));
-  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
-  const surveySourceEnquiry = survey?.enquiryId ? enquiryById.get(survey.enquiryId) ?? null : null;
-  const selectedQuoteSourceEnquiry = selectedQuote?.enquiryId ? enquiryById.get(selectedQuote.enquiryId) ?? null : null;
+  const enquiryById = new Map(enquiryLogoSummaries.map((item) => [item.id, item]));
+  const sourceEnquiryIds = Array.from(new Set([
+    survey?.enquiryId ?? "",
+    selectedQuote?.enquiryId ?? ""
+  ].filter(Boolean)));
+  const [sourceEnquiries, selectedQuoteEnquiryCorrespondence] = await Promise.all([
+    Promise.all(sourceEnquiryIds.map((enquiryId) => {
+      if (enquiry?.id === enquiryId) return Promise.resolve(enquiry);
+      return getEnquiryById(activeTenant.tenantId, enquiryId);
+    })),
+    selectedQuote?.enquiryId
+      ? listEnquiryCorrespondenceForEnquiry(activeTenant.tenantId, selectedQuote.enquiryId, 12)
+      : Promise.resolve([])
+  ]);
+  const sourceEnquiryById = new Map(sourceEnquiries.filter(Boolean).map((item) => [item!.id, item!]));
+  const surveySourceEnquiry = survey?.enquiryId ? sourceEnquiryById.get(survey.enquiryId) ?? null : null;
+  const selectedQuoteSourceEnquiry = selectedQuote?.enquiryId ? sourceEnquiryById.get(selectedQuote.enquiryId) ?? null : null;
   const sourceEnquiry = enquiry ?? surveySourceEnquiry ?? selectedQuoteSourceEnquiry;
   const sourceClientName = survey?.clientName ?? sourceEnquiry?.clientName ?? "";
   const sourceContactName = survey?.contactName ?? sourceEnquiry?.contactName ?? "";
@@ -590,14 +622,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     ? selectedQuote.linkedCustomerId
     : survey?.linkedCustomerId ?? sourceEnquiry?.linkedCustomerId ?? null;
 
-  const [quoteLines, selectedArtworkApproval, selectedProductionJob] = await Promise.all([
-    selectedQuote ? listQuoteLines(selectedQuote.id) : Promise.resolve([]),
-    selectedQuote ? getArtworkApprovalForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null),
-    selectedQuote ? getProductionJobForQuote(activeTenant.tenantId, selectedQuote.id) : Promise.resolve(null)
-  ]);
-  const selectedQuoteEnquiryCorrespondence = selectedQuoteSourceEnquiry
-    ? await listEnquiryCorrespondenceForEnquiry(activeTenant.tenantId, selectedQuoteSourceEnquiry.id, 12)
-    : [];
   const selectedQuoteFingerprint = selectedQuote ? quoteActivityFingerprint(selectedQuote, quoteLines) : "";
   const linkedClient = sourceLinkedCustomerId ? customerById.get(sourceLinkedCustomerId) ?? null : null;
   const quoteClientName = normalisedClientMatchName(selectedQuote?.clientName);

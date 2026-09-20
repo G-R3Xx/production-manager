@@ -87,6 +87,19 @@ export async function listEnquiriesForTenant(tenantId: string, options?: { inclu
   return result.rows;
 }
 
+export async function listEnquiryLogoSummariesForTenant(
+  tenantId: string
+): Promise<Array<Pick<EnquiryRecord, "id" | "clientLogoUrl">>> {
+  const result = await pool.query<Array<Pick<EnquiryRecord, "id" | "clientLogoUrl">>[number]>(`
+    SELECT
+      id,
+      client_logo_url as "clientLogoUrl"
+    FROM app.enquiries
+    WHERE tenant_id = $1::uuid
+  `, [tenantId]);
+  return result.rows;
+}
+
 
 export async function reconcileEnquiryWorkflowStatusesForTenant(tenantId: string): Promise<void> {
   if (!process.env.DATABASE_URL) return;

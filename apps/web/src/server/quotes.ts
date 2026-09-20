@@ -46,6 +46,12 @@ export type QuoteDraftRecord = {
   updatedAt: string;
 };
 
+export type QuoteDraftSummaryRecord = Pick<QuoteDraftRecord,
+  "id" | "tenantId" | "enquiryId" | "linkedCustomerId" | "clientName" |
+  "jobName" | "contactName" | "phone" | "status" | "discountPercent" |
+  "createdAt" | "updatedAt"
+>;
+
 export type QuoteLineRecord = {
   id: string;
   quoteId: string;
@@ -531,6 +537,34 @@ export async function listQuoteDraftsForTenant(tenantId: string, options?: { inc
       AND ($3::boolean OR COALESCE(notes,'') NOT LIKE 'WooCommerce order %')
     ORDER BY created_at DESC
   `,[tenantId, Boolean(options?.includeDeleted), Boolean(options?.includeWebsiteOrders)]);
+  return result.rows;
+}
+
+export async function listQuoteDraftSummariesForTenant(
+  tenantId: string,
+  options?: { includeDeleted?: boolean; includeWebsiteOrders?: boolean }
+): Promise<QuoteDraftSummaryRecord[]> {
+  await ensureQuoteLifecycleColumns();
+  const result = await pool.query<QuoteDraftSummaryRecord>(`
+    SELECT
+      id,
+      tenant_id as "tenantId",
+      enquiry_id as "enquiryId",
+      linked_customer_id as "linkedCustomerId",
+      client_name as "clientName",
+      job_name as "jobName",
+      contact_name as "contactName",
+      phone,
+      status,
+      discount_percent::text as "discountPercent",
+      created_at as "createdAt",
+      updated_at as "updatedAt"
+    FROM sales.quote_drafts
+    WHERE tenant_id = $1::uuid
+      AND ($2::boolean OR status <> 'deleted')
+      AND ($3::boolean OR COALESCE(notes,'') NOT LIKE 'WooCommerce order %')
+    ORDER BY created_at DESC
+  `, [tenantId, Boolean(options?.includeDeleted), Boolean(options?.includeWebsiteOrders)]);
   return result.rows;
 }
 
