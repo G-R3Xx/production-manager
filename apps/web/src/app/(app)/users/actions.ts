@@ -9,7 +9,8 @@ import { updateTenantUserMembershipByAdmin } from "@/server/users";
 const updateStaffSchema = z.object({
   membershipId: z.string().uuid("Missing staff member."),
   tenantRole: z.enum(["owner", "manager", "staff", "sales", "installer", "accounts"]),
-  membershipStatus: z.enum(["active", "invited", "disabled"])
+  membershipStatus: z.enum(["active", "invited", "disabled"]),
+  quoteLabourRate: z.string().optional().or(z.literal(""))
 });
 
 export async function updateStaffMemberAction(formData: FormData): Promise<void> {
@@ -23,7 +24,8 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
   const parsed = updateStaffSchema.safeParse({
     membershipId: String(formData.get("membershipId") || ""),
     tenantRole: String(formData.get("tenantRole") || "staff"),
-    membershipStatus: String(formData.get("membershipStatus") || "active")
+    membershipStatus: String(formData.get("membershipStatus") || "active"),
+    quoteLabourRate: String(formData.get("quoteLabourRate") || "")
   });
 
   if (!parsed.success) {
@@ -38,7 +40,8 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
       requesterUserProfileId: activeTenant.userProfileId,
       requesterTenantRole: activeTenant.tenantRole,
       tenantRole: parsed.data.tenantRole,
-      membershipStatus: parsed.data.membershipStatus
+      membershipStatus: parsed.data.membershipStatus,
+      quoteLabourRate: parsed.data.quoteLabourRate
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update staff member.";

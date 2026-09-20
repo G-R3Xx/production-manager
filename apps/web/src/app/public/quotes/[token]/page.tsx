@@ -10,6 +10,7 @@ import { PublicStatusAutoRefresh } from "@/components/PublicStatusAutoRefresh";
 import { PrintQuoteButton } from "./PrintQuoteButton";
 import { QuoteLineResponseControls } from "./QuoteLineResponseControls";
 import { QuoteLiveTotals } from "./QuoteLiveTotals";
+import { acceptQuoteAction } from "./actions";
 
 function quoteSnapshotRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
@@ -468,8 +469,8 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                     {clientLine.detail ? <span style={{ color: "#667085", fontSize: 13 }}>{clientLine.detail}</span> : null}
                   </div>
                   <div className="quote-line-price" style={{ textAlign: "right", display: "grid", justifyItems: "end", gap: 4, minWidth: 0 }}>
-                    <strong>{formatMoney(parseMoney(line.lineTotal))}</strong>
-                    <span style={{ color: "#667085", fontSize: 13, whiteSpace: "nowrap" }}>Qty {line.quantity} · {formatMoney(parseMoney(line.unitPrice))} ea</span>
+                    <strong>{formatMoney(parseMoney(line.lineTotal))} <span style={{ color: "#667085", fontSize: 11 }}>ex GST</span></strong>
+                    <span style={{ color: "#667085", fontSize: 13, whiteSpace: "nowrap" }}>Qty {line.quantity} · {formatMoney(parseMoney(line.unitPrice))} ea ex GST</span>
                   </div>
                   <QuoteLineResponseControls
                     token={token}
@@ -499,7 +500,17 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
           ) : responseStatus === "changes requested" ? (
             <p style={{ margin: 0, color: "#9a3412" }}>Changes have been requested on one or more items. Tender Edge can see the affected line and the change note.</p>
           ) : (
-            <p style={{ margin: 0, color: "#667085" }}>Use Approve, Request changes or Cancel beside each quote line. The quote is accepted once every remaining item has been approved or cancelled.</p>
+            <>
+              <p style={{ margin: 0, color: "#667085" }}>Use Approve, Request changes or Cancel beside each quote line, or approve every active item in one step.</p>
+              <form action={acceptQuoteAction} style={{ display: "grid", gap: 8, maxWidth: 420 }}>
+                <input type="hidden" name="token" value={token} />
+                <label style={{ display: "grid", gap: 5, color: "#475467", fontSize: 12, fontWeight: 800 }}>
+                  Approval note (optional)
+                  <textarea name="notes" rows={2} placeholder="Add a purchase order or approval note" style={{ resize: "vertical", border: "1px solid #cbd5e1", borderRadius: 11, padding: 10, font: "inherit" }} />
+                </label>
+                <button type="submit" style={{ minHeight: 46, border: "none", borderRadius: 12, background: "#067647", color: "#fff", fontWeight: 950, cursor: "pointer", padding: "0 18px" }}>Approve all active items</button>
+              </form>
+            </>
           )}
           {quote.clientResponseNotes ? <p style={{ margin: 0, color: "#667085", whiteSpace: "pre-wrap" }}>Quote note: {quote.clientResponseNotes}</p> : null}
         </section>

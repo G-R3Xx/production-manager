@@ -7,7 +7,7 @@ import { getSurveyRequestById } from "@/server/surveys";
 import { listMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
-import { getCompanySettingsByTenantId } from "@/server/company";
+import { getCompanySettingsByTenantId, profitMultiplierForJobValue } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
 import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
 import { DeferredQuoteLineEditor } from "./DeferredQuoteLineEditor";
@@ -23,6 +23,7 @@ import { EnquiryCorrespondencePreview } from "../enquiries/EnquiryCorrespondence
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalModalForm";
 import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
+import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
 import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, listRecipesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
 
@@ -194,6 +195,28 @@ function quoteLineMarkupInfo(configurationSnapshot: unknown, standardMarkup: num
     standard,
     pricingSource: textValue(pricing?.pricingSource)
   };
+}
+
+function quoteLineProfitInfo(configurationSnapshot: unknown, standardProfitMultiplier: number): { percent: number; standardPercent: number; pricingSource: string } {
+  const snapshot = recordValue(configurationSnapshot);
+  const pricing = recordValue(snapshot?.pricingSnapshot);
+  const standardPercent = Math.max(0, (standardProfitMultiplier - 1) * 100);
+  const multiplier = Math.max(0, numberFromUnknown(pricing?.profitMultiplier) || standardProfitMultiplier);
+  return { percent: Math.max(0, (multiplier - 1) * 100), standardPercent, pricingSource: textValue(pricing?.pricingSource) };
+}
+
+function quoteLineValueBeforeProfit(line: { quantity: string; unitPrice: string; configurationSnapshot: unknown }): number {
+  const snapshot = recordValue(line.configurationSnapshot);
+  const pricing = recordValue(snapshot?.pricingSnapshot);
+  if (textValue(pricing?.pricingSource) === "myob_item_matrix") return 0;
+  const qty = Math.max(0, numberFromUnknown(line.quantity));
+  const rawCost = Math.max(0, numberFromUnknown(pricing?.rawCost));
+  const markup = Math.max(0, numberFromUnknown(pricing?.markupMultiplier));
+  if (rawCost > 0 && markup > 0) return rawCost * markup * qty;
+  const profit = Math.max(0.0001, numberFromUnknown(pricing?.profitMultiplier) || 1);
+  const level = Math.max(0.0001, numberFromUnknown(pricing?.priceLevelFactor) || 1);
+  const discount = Math.max(0.0001, 1 - Math.max(0, numberFromUnknown(pricing?.manualQuoteDiscountPercent)) / 100);
+  return Math.max(0, numberFromUnknown(line.unitPrice) * qty / (profit * level * discount));
 }
 
 function staffUsage(value: number): string {
@@ -660,6 +683,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const suggestedPmClient = suggestedPmClients.length === 1 ? suggestedPmClients[0] : null;
 
   const quoteSubtotal = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + parseMoney(line.lineTotal), 0);
+  const quoteValueBeforeProfit = quoteLines.reduce((sum, line) => line.clientResponseStatus === "cancelled" ? sum : sum + quoteLineValueBeforeProfit(line), 0);
+  const defaultQuoteProfitMultiplier = profitMultiplierForJobValue(companySettings?.profitTiers, quoteValueBeforeProfit, Math.max(0.0001, numberFromUnknown(companySettings?.globalProfitMultiplier) || 1.2));
   const activeQuoteLines = quoteLines.filter((line) => line.clientResponseStatus !== "cancelled");
   const quoteIsPriced = activeQuoteLines.length > 0 && activeQuoteLines.every((line) => parseMoney(line.unitPrice) > 0 && !surveyLineNeedsConfiguration(line.configurationSnapshot));
   const quoteResponseLabel = selectedQuote?.acceptedAt
@@ -950,11 +975,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Quote: <strong>{selectedQuote.quoteNumber ?? "Draft"}</strong></span>
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}><strong>{quoteLines.length}</strong> line item{quoteLines.length === 1 ? "" : "s"}</span>
-                    <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Total: <strong>{formatMoney(quoteSubtotal)}</strong></span>
+                    <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Subtotal ex GST: <strong>{formatMoney(quoteSubtotal)}</strong></span>
+                    {companySettings?.profitTiers?.length ? <span style={{ border: "1px solid #ddd6fe", borderRadius: 999, padding: "7px 11px", background: "#f5f3ff", color: "#6d28d9", fontSize: 12 }}>Job profit tier: <strong>{((defaultQuoteProfitMultiplier - 1) * 100).toFixed(2).replace(/\.00$/, "")}%</strong> <span style={{ color: "#7c3aed" }}>at {formatMoney(quoteValueBeforeProfit)} before profit</span></span> : null}
                     <span style={{ border: "1px solid #bfdbfe", borderRadius: 999, padding: "7px 11px", background: "#eff6ff", color: "#1d4ed8", fontSize: 12 }}>Price level: <strong>{linkedClientPriceLevelName}</strong>{linkedClientPriceLevelName !== linkedClientPriceLevel ? ` (${linkedClientPriceLevel})` : ""}</span>
                     {Number(selectedQuote.discountPercent || 0) > 0 ? <span style={{ border: "1px solid #fed7aa", borderRadius: 999, padding: "7px 11px", background: "#fff7ed", color: "#c2410c", fontSize: 12 }}>Manual quote discount: <strong>{selectedQuote.discountPercent}%</strong></span> : null}
                     <span style={{ border: "1px solid #e4e7ec", borderRadius: 999, padding: "7px 11px", background: "#fff", fontSize: 12 }}>Client: <strong>{selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</strong></span>
-                    <span style={{ border: `1px solid ${selectedQuote.emailStatus === "sent" ? "#86efac" : selectedQuote.emailStatus === "failed" ? "#fecaca" : "#e4e7ec"}`, borderRadius: 999, padding: "7px 11px", background: selectedQuote.emailStatus === "sent" ? "#f0fdf4" : selectedQuote.emailStatus === "failed" ? "#fef2f2" : "#fff", color: selectedQuote.emailStatus === "sent" ? "#067647" : selectedQuote.emailStatus === "failed" ? "#b42318" : "#344054", fontSize: 12 }}>Email: <strong>{selectedQuote.emailStatus === "sent" ? `Sent${selectedQuote.emailSentAt ? ` ${formatDateTime(selectedQuote.emailSentAt)}` : ""}` : selectedQuote.emailStatus === "pending" ? "Sending" : selectedQuote.emailStatus === "failed" ? "Failed" : "Not sent"}</strong></span>
+                    <span style={{ border: `1px solid ${selectedQuote.emailStatus === "sent" ? "#86efac" : selectedQuote.emailStatus === "failed" ? "#fecaca" : "#e4e7ec"}`, borderRadius: 999, padding: "7px 11px", background: selectedQuote.emailStatus === "sent" ? "#f0fdf4" : selectedQuote.emailStatus === "failed" ? "#fef2f2" : "#fff", color: selectedQuote.emailStatus === "sent" ? "#067647" : selectedQuote.emailStatus === "failed" ? "#b42318" : "#344054", fontSize: 12 }}>Email: <strong>{selectedQuote.emailStatus === "sent" ? `Sent${selectedQuote.emailTo ? ` to ${selectedQuote.emailTo}` : ""}${selectedQuote.emailSentAt ? ` · ${formatDateTime(selectedQuote.emailSentAt)}` : ""}` : selectedQuote.emailStatus === "pending" ? "Sending" : selectedQuote.emailStatus === "failed" ? "Failed" : "Not sent"}</strong></span>
                   </div>
 
                   <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
@@ -1012,6 +1038,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     </div>
                   </div>
                   {selectedQuote.emailStatus === "failed" && selectedQuote.emailLastError ? <div style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#b42318", borderRadius: 14, padding: "10px 12px", fontSize: 13 }}><strong>Quote email:</strong> {selectedQuote.emailLastError}</div> : null}
+                  {selectedQuote.emailHistory?.length ? (
+                    <details style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 10 }}>
+                      <summary style={{ cursor: "pointer", fontWeight: 900, color: "#1d4ed8" }}>Quote email history ({selectedQuote.emailHistory.length})</summary>
+                      <div style={{ marginTop: 9, display: "grid", gap: 6 }}>
+                        {[...selectedQuote.emailHistory].reverse().map((entry, index) => <div key={`${entry.sentAt}-${entry.recipient}-${index}`} style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", borderTop: index ? "1px solid #dbeafe" : 0, paddingTop: index ? 6 : 0, fontSize: 12 }}><span><strong>{entry.status === "sent" ? "Sent" : "Failed"}</strong> to {entry.recipient || "unknown address"}{entry.error ? ` — ${entry.error}` : ""}</span><span style={{ color: "#667085" }}>{formatDateTime(entry.sentAt)}</span></div>)}
+                      </div>
+                    </details>
+                  ) : null}
                   {(() => {
                     const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
                     const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus === "error";
@@ -1135,7 +1169,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",
-                          profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                          profitMultiplier: String(defaultQuoteProfitMultiplier),
                           labourRate: companySettings?.quoteLabourRate ?? "66",
                           inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
                           inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",
@@ -1165,6 +1199,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   const surveyReference = surveyLineReference(line.configurationSnapshot);
                   const surveyNeedsConfig = surveyLineNeedsConfiguration(line.configurationSnapshot);
                   const markupInfo = quoteLineMarkupInfo(line.configurationSnapshot, standardQuoteMarkup, standardAccessEquipmentQuoteMarkup);
+                  const profitInfo = quoteLineProfitInfo(line.configurationSnapshot, defaultQuoteProfitMultiplier);
                   return (
                     <details
                       key={line.id}
@@ -1240,6 +1275,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 disabledReason={markupInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null}
                               />
                             ) : null}
+                            {canOverrideQuoteMarkup ? (
+                              <QuoteLineProfitEditor quoteId={selectedQuote.id} lineId={line.id} profitPercent={profitInfo.percent} standardProfitPercent={profitInfo.standardPercent} disabledReason={profitInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null} />
+                            ) : null}
                             <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
                           </div>
                         </div>
@@ -1279,7 +1317,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                             accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",
-                            profitMultiplier: companySettings?.globalProfitMultiplier ?? "1.2",
+                            profitMultiplier: String(defaultQuoteProfitMultiplier),
                             labourRate: companySettings?.quoteLabourRate ?? "66",
                             inkRatePerSqm: companySettings?.quoteInkRatePerSqm ?? "10",
                             inkBillingIncrementSqm: companySettings?.quoteInkBillingIncrementSqm ?? "0.5",

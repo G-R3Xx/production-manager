@@ -344,9 +344,9 @@ function buildPageContent(input:{
     y-=4;
     out+=lineRgbOp(354,y,innerRight,y,0.65,PDF_COLOURS.line);
     y-=20;
-    out+=textRgbOp("Subtotal",376,y,9.1,false,PDF_COLOURS.body); out+=textRgbOp(money(subtotal),innerRight-78,y,10,true,PDF_COLOURS.ink); y-=19;
-    out+=textRgbOp("GST",376,y,9.1,false,PDF_COLOURS.body); out+=textRgbOp(money(gst),innerRight-78,y,10,true,PDF_COLOURS.ink); y-=23;
-    out+=textRgbOp("Total",376,y,13,false,PDF_COLOURS.ink); out+=textRgbOp(money(total),innerRight-88,y,15,true,PDF_COLOURS.ink);
+    out+=textRgbOp("Subtotal (ex GST)",348,y,9.1,false,PDF_COLOURS.body); out+=textRgbOp(money(subtotal),innerRight-78,y,10,true,PDF_COLOURS.ink); y-=19;
+    out+=textRgbOp("GST (10%)",348,y,9.1,false,PDF_COLOURS.body); out+=textRgbOp(money(gst),innerRight-78,y,10,true,PDF_COLOURS.ink); y-=23;
+    out+=textRgbOp("Total (inc GST)",348,y,13,false,PDF_COLOURS.ink); out+=textRgbOp(money(total),innerRight-88,y,15,true,PDF_COLOURS.ink);
 
     // Notes and offline approval sit directly beneath the main quote card, like
     // the separate Notes/response cards on the online quote page.

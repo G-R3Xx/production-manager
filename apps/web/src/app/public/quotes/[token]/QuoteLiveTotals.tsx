@@ -26,9 +26,9 @@ export function QuoteLiveTotals({ subtotal, gst, total }: { subtotal: number; gs
 
   return (
     <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 14, display: "grid", justifyContent: "end", gap: 6 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10 }}><span>Subtotal</span><strong style={{ textAlign: "right" }}>{formatMoney(values.subtotal)}</strong></div>
-      <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10 }}><span>GST</span><strong style={{ textAlign: "right" }}>{formatMoney(values.gst)}</strong></div>
-      <div style={{ display: "grid", gridTemplateColumns: "160px 140px", gap: 10, fontSize: 22 }}><span>Total</span><strong style={{ textAlign: "right" }}>{formatMoney(values.total)}</strong></div>
+      <div style={{ display: "grid", gridTemplateColumns: "180px 140px", gap: 10 }}><span>Subtotal (ex GST)</span><strong style={{ textAlign: "right" }}>{formatMoney(values.subtotal)}</strong></div>
+      <div style={{ display: "grid", gridTemplateColumns: "180px 140px", gap: 10 }}><span>GST (10%)</span><strong style={{ textAlign: "right" }}>{formatMoney(values.gst)}</strong></div>
+      <div style={{ display: "grid", gridTemplateColumns: "180px 140px", gap: 10, fontSize: 22 }}><span>Total (inc GST)</span><strong style={{ textAlign: "right" }}>{formatMoney(values.total)}</strong></div>
     </div>
   );
 }

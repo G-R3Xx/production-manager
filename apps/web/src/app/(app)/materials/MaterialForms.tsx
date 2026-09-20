@@ -25,6 +25,7 @@ type MaterialFormRecord = {
   purchaseUom: string | null;
   stockQuantity: string | null;
   purchaseCost: string | null;
+  wastagePercent: string | null;
   widthMm: string | null;
   lengthMm: string | null;
   rollWidthMm: string | null;
@@ -196,7 +197,7 @@ function defaultPurchaseUomFor(kind: MaterialKind): string {
       return "roll";
     case "paper_stock":
     case "card_stock":
-      return "ream";
+      return "1000 sheets";
     case "sheet_media":
       return "sheet";
     case "binding":
@@ -328,13 +329,13 @@ function SheetFields({ material, kind }: { material?: MaterialFormRecord; kind: 
       </div>
       <div style={gridStyle}>
         <Field label={isPaperOrCard ? "Bought as" : "Bought as"} helper={isPaperOrCard ? "How the supplier sells it: ream, pack, sheet or box." : "How the supplier sells it: sheet, pack or pallet."}>
-          <UnitSelect name="purchaseUom" defaultValue={material?.purchaseUom ?? defaultPurchaseUomFor(kind)} options={isPaperOrCard ? ["ream", "pack", "box", "sheet"] : ["sheet", "pack", "pallet"]} />
+          <UnitSelect name="purchaseUom" defaultValue={material?.purchaseUom ?? defaultPurchaseUomFor(kind)} options={isPaperOrCard ? ["1000 sheets", "ream", "pack", "box", "sheet"] : ["sheet", "pack", "pallet"]} />
         </Field>
         <Field label={isPaperOrCard ? "Used / sold as" : "Used as"} helper="How product recipes consume this material.">
           <UnitSelect name="stockUom" defaultValue={material?.stockUom ?? defaultStockUomFor(kind)} options={["sheet", "sqm", "each"]} />
         </Field>
         <Field label={isPaperOrCard ? "Stock qty / sheets per ream" : "Sheets in stock"} helper={isPaperOrCard ? "Use stock count or sheets per ream/pack if you cost by ream." : "Current sheet count. Use 0 if you do not track stock yet."}>
-          <input name="stockQuantity" defaultValue={material?.stockQuantity ?? "0"} placeholder={isPaperOrCard ? "eg 500" : "eg 12"} style={inputStyle} />
+          <input name="stockQuantity" defaultValue={material?.stockQuantity ?? (isPaperOrCard ? "1000" : "0")} placeholder={isPaperOrCard ? "Standard: 1000" : "eg 12"} style={inputStyle} />
         </Field>
         <Field label={isPaperOrCard ? "Purchase cost" : "Cost per sheet"} helper={isPaperOrCard ? "Cost for the selected Bought as unit, eg cost per ream/pack/sheet." : "Supplier cost for one sheet."}>
           <input name="purchaseCost" defaultValue={material?.purchaseCost ?? "0"} placeholder={isPaperOrCard ? "eg 38.50" : "eg 80"} style={inputStyle} />
@@ -449,6 +450,9 @@ function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: Sup
       <GroupHint group={group} />
       <TypeHint kind={kind} />
       <ParameterFields kind={kind} material={material} />
+      <Field label="Wastage allowance %" helper="Added to the real material usage before markup and profit. Example: vinyl stock at 20% wastage charges 1.2 × the calculated stock cost.">
+        <input name="wastagePercent" defaultValue={material?.wastagePercent ?? "0"} type="number" min="0" max="500" step="0.01" inputMode="decimal" placeholder="eg 20" style={inputStyle} />
+      </Field>
       <Field label="Notes">
         <textarea
           name="notes"

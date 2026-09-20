@@ -214,6 +214,35 @@ function recalculateLineForMarkup(input: {
   };
 }
 
+function recalculateLineForProfit(input: {
+  snapshot: Record<string, unknown>;
+  currentUnitPrice: string;
+  profitMultiplier: number;
+  company: Awaited<ReturnType<typeof getCompanySettingsByTenantId>>;
+}): { snapshot: Record<string, unknown>; unitPrice: string } {
+  const pricing = recordValue(input.snapshot.pricingSnapshot) ?? {};
+  if (String(pricing.pricingSource ?? "") === "myob_item_matrix") return { snapshot: input.snapshot, unitPrice: input.currentUnitPrice };
+  const markup = Math.max(0.0001, numberValue(pricing.markupMultiplier as string | number | undefined, standardMarkupForSnapshot(input.snapshot, input.company)));
+  const oldProfit = Math.max(0.0001, numberValue(pricing.profitMultiplier as string | number | undefined, numberValue(input.company?.globalProfitMultiplier, 1.2)));
+  const priceLevelFactor = Math.max(0, numberValue(pricing.priceLevelFactor as string | number | undefined, 1));
+  const discountPercent = Math.min(100, Math.max(0, numberValue(pricing.manualQuoteDiscountPercent as string | number | undefined, 0)));
+  const discountMultiplier = Math.max(0, 1 - discountPercent / 100);
+  const currentPrice = Math.max(0, numberValue(input.currentUnitPrice, 0));
+  const oldPricingMultiplier = markup * oldProfit * priceLevelFactor * discountMultiplier;
+  let rawCost = Math.max(0, numberValue(pricing.rawCost as string | number | undefined, 0));
+  if (rawCost <= 0 && currentPrice > 0 && oldPricingMultiplier > 0) rawCost = currentPrice / oldPricingMultiplier;
+  const newUnitPrice = rawCost > 0 ? rawCost * markup * input.profitMultiplier * priceLevelFactor * discountMultiplier : currentPrice;
+  return {
+    unitPrice: newUnitPrice.toFixed(2),
+    snapshot: {
+      ...input.snapshot,
+      unitPriceOverridden: false,
+      manualUnitPrice: newUnitPrice.toFixed(2),
+      pricingSnapshot: { ...pricing, markupMultiplier: markup, profitMultiplier: input.profitMultiplier, rawCost, autoUnitPrice: newUnitPrice, priceLevelFactor, manualQuoteDiscountPercent: discountPercent, pricingSource: "pm_calculated" }
+    }
+  };
+}
+
 function normaliseProductDepartment(value: string): string {
   const department = value.trim().toLowerCase();
   if (department === "install") return "installation";
@@ -728,6 +757,26 @@ export async function updateQuoteLineMarkupAction(formData: FormData): Promise<v
 
   revalidatePath("/quotes");
   redirect(`/quotes?selected=${quoteId}&focusLine=${lineId}&message=Line%20markup%20updated#quote-line-${lineId}`);
+}
+
+export async function updateQuoteLineProfitAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const lineId = String(formData.get("lineId") ?? "").trim();
+  const requestedPercent = numberValue(formData.get("profitPercent"), NaN);
+  if (!quoteId || !lineId) redirect("/quotes?error=Select%20a%20quote%20line%20first");
+  if (!canOverrideQuoteMarkup(String(activeTenant.tenantRole).toLowerCase())) redirect(`/quotes?selected=${quoteId}&error=Only%20Managers%20and%20Owners%20can%20override%20quote%20profit`);
+  if (!Number.isFinite(requestedPercent) || requestedPercent < 0 || requestedPercent > 1000) redirect(`/quotes?selected=${quoteId}&error=Profit%20must%20be%20between%200%20and%201000%25`);
+
+  const [line, company] = await Promise.all([getQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId), getCompanySettingsByTenantId(activeTenant.tenantId)]);
+  if (!line) redirect(`/quotes?selected=${quoteId}&error=The%20quote%20line%20could%20not%20be%20found`);
+  const snapshot = recordValue(line.configurationSnapshot) ?? {};
+  const pricing = recordValue(snapshot.pricingSnapshot) ?? {};
+  if (String(pricing.pricingSource ?? "") === "myob_item_matrix") redirect(`/quotes?selected=${quoteId}&error=This%20line%20uses%20MYOB%20matrix%20pricing%20so%20profit%20is%20not%20applied`);
+  const recalculated = recalculateLineForProfit({ snapshot, currentUnitPrice: line.unitPrice, profitMultiplier: 1 + requestedPercent / 100, company });
+  await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId, { productName: line.productName, optionSummary: line.optionSummary, quantity: line.quantity, unitPrice: recalculated.unitPrice, notes: line.notes, configurationSnapshot: recalculated.snapshot });
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&focusLine=${lineId}&message=Line%20profit%20updated#quote-line-${lineId}`);
 }
 
 export async function deleteQuoteLineAction(formData: FormData): Promise<void> {

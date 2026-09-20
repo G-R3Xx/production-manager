@@ -31,6 +31,7 @@ export type QuoteDraftRecord = {
   emailSentAt: string | null;
   emailMessageId: string | null;
   emailLastError: string | null;
+  emailHistory: Array<{ recipient: string; status: string; sentAt: string; messageId?: string | null; error?: string | null }>;
   viewedAt: string | null;
   acceptedAt: string | null;
   declinedAt: string | null;
@@ -252,7 +253,7 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
 
   quoteLifecycleSchemaPromise = (async () => {
   if (await relationHasColumns("sales.quote_drafts", [
-    "quote_number", "public_token", "job_name", "sent_at", "email_status", "client_purchase_order_number",
+    "quote_number", "public_token", "job_name", "sent_at", "email_status", "email_history_json", "client_purchase_order_number",
     "myob_order_uid", "myob_order_number", "myob_order_status", "myob_order_payload_json"
   ])) {
     quoteLifecycleSchemaReady = true;
@@ -269,6 +270,7 @@ async function ensureQuoteLifecycleColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS email_sent_at timestamptz,
       ADD COLUMN IF NOT EXISTS email_message_id text,
       ADD COLUMN IF NOT EXISTS email_last_error text,
+      ADD COLUMN IF NOT EXISTS email_history_json jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS viewed_at timestamptz,
       ADD COLUMN IF NOT EXISTS accepted_at timestamptz,
       ADD COLUMN IF NOT EXISTS declined_at timestamptz,
@@ -511,6 +513,7 @@ function quoteSelectSql(): string {
       email_sent_at as "emailSentAt",
       email_message_id as "emailMessageId",
       email_last_error as "emailLastError",
+      COALESCE(email_history_json, '[]'::jsonb) as "emailHistory",
       viewed_at as "viewedAt",
       accepted_at as "acceptedAt",
       declined_at as "declinedAt",
@@ -1002,6 +1005,7 @@ export async function markQuoteEmailSentForTenant(tenantId: string, quoteId: str
         email_sent_at = now(),
         email_message_id = $4::text,
         email_last_error = NULL,
+        email_history_json = COALESCE(email_history_json, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recipient',$3::text,'status','sent','sentAt',now(),'messageId',$4::text)),
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, quoteId, nullableText(input.recipient), input.messageId ?? null]);
@@ -1014,6 +1018,7 @@ export async function markQuoteEmailFailedForTenant(tenantId: string, quoteId: s
     SET email_status = 'failed',
         email_to = COALESCE($3::varchar, email_to),
         email_last_error = $4::text,
+        email_history_json = COALESCE(email_history_json, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recipient',COALESCE($3::text,email_to,''),'status','failed','sentAt',now(),'error',$4::text)),
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [tenantId, quoteId, nullableText(input.recipient), nullableText(input.error)]);

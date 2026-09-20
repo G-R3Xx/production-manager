@@ -339,6 +339,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
               purchaseUom: material.purchaseUom,
               stockQuantity: material.stockQuantity,
               purchaseCost: material.purchaseCost,
+              wastagePercent: material.wastagePercent,
               widthMm: material.widthMm,
               lengthMm: material.lengthMm,
               rollWidthMm: material.rollWidthMm,

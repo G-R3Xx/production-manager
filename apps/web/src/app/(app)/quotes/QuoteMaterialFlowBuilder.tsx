@@ -21,6 +21,7 @@ export type QuoteMaterial = {
   purchaseUom?: string | null;
   stockQuantity?: string | null;
   purchaseCost?: string | null;
+  wastagePercent?: string | null;
   widthMm?: string | null;
   lengthMm?: string | null;
   rollWidthMm?: string | null;
@@ -296,7 +297,7 @@ const smallFinishingOptions = [
 const serviceTypes: Array<{ key: Exclude<ServiceType, "">; label: string; icon: string; description: string }> = [
   { key: "pickup", label: "Pickup", icon: "↗", description: "Client collects the job. Usually no charge unless you add notes or a manual price." },
   { key: "delivery", label: "Delivery", icon: "▣", description: "Add a delivery charge as its own quote line." },
-  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, minutes and fixing consumables." },
+  { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, hours and standard fixing consumables." },
   { key: "access_equipment", label: "Access equipment", icon: "▦", description: "Hire equipment charged by day, with quote pricing applied automatically." }
 ];
 
@@ -307,8 +308,26 @@ const fixingOptions = [
   { key: "tape", label: "VHB / double-sided tape", icon: "═", unit: "lm", placeholderQty: "eg 3", placeholderRate: "eg 2.5" },
   { key: "screws", label: "Screws / anchors", icon: "•", unit: "each", placeholderQty: "eg 12", placeholderRate: "eg 0.25" },
   { key: "screws_custom", label: "Screws / special fixings", icon: "✦", unit: "each", placeholderQty: "eg 4", placeholderRate: "eg 1" },
+  { key: "cable_ties", label: "Cable ties", icon: "≈", unit: "each", placeholderQty: "eg 10", placeholderRate: "auto" },
   { key: "other", label: "Other consumables", icon: "+", unit: "allowance", placeholderQty: "eg 1", placeholderRate: "eg 15" }
 ];
+
+const fixingMaterialTerms: Record<string, string[]> = {
+  silicone: ["silicone", "silicon"],
+  tape: ["vhb", "double sided tape", "double-sided tape"],
+  screws: ["screw", "anchor", "fixing"],
+  screws_custom: ["screw", "anchor", "fixing"],
+  cable_ties: ["cable tie", "cable ties", "zip tie"]
+};
+
+function standardFixingMaterial(materials: QuoteMaterial[], key: string): QuoteMaterial | undefined {
+  const terms = fixingMaterialTerms[key] ?? [];
+  if (!terms.length) return undefined;
+  return materials.find((material) => {
+    const text = `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""}`.toLowerCase();
+    return terms.some((term) => text.includes(term));
+  });
+}
 
 function createBlankComponentPart(): CustomComponentPart {
   return {
@@ -720,35 +739,41 @@ function sheetUsageForQuoteLine(
 }
 
 function sheetUnitRate(material: QuoteMaterial): { rate: number; note?: string } {
-  const purchaseCost = numberValue(material.purchaseCost, 0);
+  const wastePercent = Math.max(0, numberValue(material.wastagePercent, 0));
+  const purchaseCost = numberValue(material.purchaseCost, 0) * (1 + wastePercent / 100);
+  const wasteNote = wastePercent > 0 ? `${usage(wastePercent)}% stock wastage included` : undefined;
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
   const stockUom = String(material.stockUom ?? "").toLowerCase();
   const stockQty = numberValue(material.stockQuantity, 0);
-  if ((purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box")) && stockQty > 0 && (stockUom.includes("sheet") || stockUom.includes("each"))) {
-    return { rate: purchaseCost / stockQty, note: `${usage(stockQty)} sheets per ${purchaseUom}` };
+  if ((purchaseUom.includes("1000") || purchaseUom.includes("thousand") || purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box")) && stockQty > 0 && (stockUom.includes("sheet") || stockUom.includes("each"))) {
+    return { rate: purchaseCost / stockQty, note: [`${usage(stockQty)} sheets per ${purchaseUom}`, wasteNote].filter(Boolean).join(" · ") };
   }
-  return { rate: purchaseCost, note: purchaseUom && !purchaseUom.includes("sheet") ? `check ${purchaseUom} quantity` : undefined };
+  return { rate: purchaseCost, note: [purchaseUom && !purchaseUom.includes("sheet") ? `check ${purchaseUom} quantity` : undefined, wasteNote].filter(Boolean).join(" · ") || undefined };
 }
 
 function rollRate(material: QuoteMaterial): { rate: number; note?: string } {
-  const purchaseCost = numberValue(material.purchaseCost, 0);
+  const wastePercent = Math.max(0, numberValue(material.wastagePercent, 0));
+  const purchaseCost = numberValue(material.purchaseCost, 0) * (1 + wastePercent / 100);
+  const wasteNote = wastePercent > 0 ? `${usage(wastePercent)}% stock wastage included` : undefined;
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
   const stockUom = String(material.stockUom ?? "").toLowerCase();
   const stockQty = numberValue(material.stockQuantity, 0);
-  if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom)) return { rate: purchaseCost };
-  if (purchaseUom.includes("roll") && stockQty > 0) return { rate: purchaseCost / stockQty, note: `${usage(stockQty)}lm saved roll length` };
-  if (stockQty > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) return { rate: purchaseCost / stockQty, note: `${usage(stockQty)}lm stock length` };
-  return { rate: purchaseCost, note: "check roll length" };
+  if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom)) return { rate: purchaseCost, note: wasteNote };
+  if (purchaseUom.includes("roll") && stockQty > 0) return { rate: purchaseCost / stockQty, note: [`${usage(stockQty)}lm saved roll length`, wasteNote].filter(Boolean).join(" · ") };
+  if (stockQty > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) return { rate: purchaseCost / stockQty, note: [`${usage(stockQty)}lm stock length`, wasteNote].filter(Boolean).join(" · ") };
+  return { rate: purchaseCost, note: ["check roll length", wasteNote].filter(Boolean).join(" · ") };
 }
 
 function eachRate(material: QuoteMaterial): { rate: number; note?: string } {
-  const purchaseCost = numberValue(material.purchaseCost, 0);
+  const wastePercent = Math.max(0, numberValue(material.wastagePercent, 0));
+  const purchaseCost = numberValue(material.purchaseCost, 0) * (1 + wastePercent / 100);
+  const wasteNote = wastePercent > 0 ? `${usage(wastePercent)}% wastage included` : undefined;
   const stockQty = numberValue(material.stockQuantity, 0);
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
   if ((purchaseUom.includes("box") || purchaseUom.includes("pack") || purchaseUom.includes("bag")) && stockQty > 0) {
-    return { rate: purchaseCost / stockQty, note: `${usage(stockQty)} per ${purchaseUom}` };
+    return { rate: purchaseCost / stockQty, note: [`${usage(stockQty)} per ${purchaseUom}`, wasteNote].filter(Boolean).join(" · ") };
   }
-  return { rate: purchaseCost };
+  return { rate: purchaseCost, note: wasteNote };
 }
 
 type RollBillingRule = { increment: number; label: string };
@@ -1038,6 +1063,7 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
     purchaseUom: material.purchaseUom ?? null,
     stockQuantity: material.stockQuantity ?? null,
     purchaseCost: material.purchaseCost ?? null,
+    wastagePercent: material.wastagePercent ?? null,
     widthMm: material.widthMm ?? null,
     lengthMm: material.lengthMm ?? null,
     rollWidthMm: material.rollWidthMm ?? null,
@@ -1314,6 +1340,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const [serviceFixings, setServiceFixings] = useState<string[]>(snapshotStringArray(initialSnapshot, "serviceFixings"));
   const [serviceFixingQty, setServiceFixingQty] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingQty"));
   const [serviceFixingRate, setServiceFixingRate] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "serviceFixingRate"));
+  const [otherConsumableTitle, setOtherConsumableTitle] = useState(snapshotString(initialSnapshot, "otherConsumableTitle"));
 
   const [componentName, setComponentName] = useState(snapshotString(initialSnapshot, "componentName"));
   const [componentDescription, setComponentDescription] = useState(snapshotString(initialSnapshot, "componentDescription"));
@@ -1479,6 +1506,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const eyeletMaterial = materialPool.find((material) => materialText(material).includes("eyelet"));
   const standoffMaterials = useMemo(() => materialPool.filter(isStandoffMaterial), [materialPool]);
   const selectedStandoffMaterial = standoffMaterials.find((material) => material.id === standoffMaterialId);
+  const standardFixingMaterials = useMemo(() => Object.fromEntries(fixingOptions.map((item) => [item.key, standardFixingMaterial(materialPool, item.key)])) as Record<string, QuoteMaterial | undefined>, [materialPool]);
+  const resolvedServiceFixingRate = (key: string): number => {
+    const manual = numberValue(serviceFixingRate[key], 0);
+    if (manual > 0) return manual;
+    const material = standardFixingMaterials[key];
+    return material ? eachRate(material).rate : 0;
+  };
+  const serviceFixingLabel = (key: string, fallback: string): string => key === "other" && otherConsumableTitle.trim() ? otherConsumableTitle.trim() : fallback;
 
   const selectedBase = baseTypes.find((item) => item.key === baseType);
   const selectedSmallType = smallFormatTypes.find((item) => item.key === smallType);
@@ -2221,8 +2256,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         for (const item of fixingOptions) {
           if (!serviceFixings.includes(item.key)) continue;
           const qty = numberValue(serviceFixingQty[item.key], 0);
-          const rate = numberValue(serviceFixingRate[item.key], 0);
-          if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable total", amount: qty / Math.max(1, quantityNumber), unit: item.unit, rate, cost: (qty * rate) / Math.max(1, quantityNumber), note: `${usage(qty)} ${item.unit} total for the quote line` });
+          const rate = resolvedServiceFixingRate(item.key);
+          if (qty > 0 && rate > 0) rows.push({ label: serviceFixingLabel(item.key, item.label), detail: "Install fixing / consumable total", amount: qty / Math.max(1, quantityNumber), unit: item.unit, rate, cost: (qty * rate) / Math.max(1, quantityNumber), note: `${usage(qty)} ${item.unit} total for the quote line` });
         }
       }
 
@@ -2270,7 +2305,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, standardFixingMaterials, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, materialPool, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -2323,13 +2358,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       for (const item of fixingOptions) {
         if (!serviceFixings.includes(item.key)) continue;
         const qty = numberValue(serviceFixingQty[item.key], 0);
-        const rate = numberValue(serviceFixingRate[item.key], 0);
-        if (qty > 0 && rate > 0) rows.push({ label: item.label, detail: "Install fixing / consumable total", amount: qty / dispatchLineQuantity, unit: item.unit, rate, cost: (qty * rate) / dispatchLineQuantity, note: `${usage(qty)} ${item.unit} total for the quote line` });
+        const rate = resolvedServiceFixingRate(item.key);
+        if (qty > 0 && rate > 0) rows.push({ label: serviceFixingLabel(item.key, item.label), detail: "Install fixing / consumable total", amount: qty / dispatchLineQuantity, unit: item.unit, rate, cost: (qty * rate) / dispatchLineQuantity, note: `${usage(qty)} ${item.unit} total for the quote line` });
       }
     }
 
     return rows;
-  }, [serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, labourRate, dispatchLineQuantity]);
+  }, [serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, standardFixingMaterials, otherConsumableTitle, labourRate, dispatchLineQuantity]);
   const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
   const dispatchUnitPrice = dispatchRawCost * standardPricingMultiplier;
   const dispatchLineTotal = dispatchUnitPrice * dispatchLineQuantity;
@@ -2344,14 +2379,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         ? "allowances"
         : item.unit;
     const unitText = pluralUnit === "lm" ? `${usage(qty)}lm` : `${usage(qty)} ${pluralUnit}`;
-    return `${item.label} — ${unitText}`;
+    return `${serviceFixingLabel(item.key, item.label)} — ${unitText}`;
   }).filter(Boolean).join(", ");
   const dispatchSummary = serviceType === "pickup"
     ? "Pickup"
     : serviceType === "delivery"
       ? `Delivery${deliveryCharge ? ` · allowance ${money(numberValue(deliveryCharge, 0))}` : ""}`
       : serviceType === "install"
-        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${minutesLabel(installMinutes)} ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, fixingAllowanceSummary ? `Fixings allowance: ${fixingAllowanceSummary}` : null].filter(Boolean).join(" · ")
+        ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${usage(numberValue(installMinutes, 0) / 60)} hr ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, fixingAllowanceSummary ? `Fixings allowance: ${fixingAllowanceSummary}` : null].filter(Boolean).join(" · ")
         : "";
   const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
   const accessEquipmentDaysNumber = Math.max(1, numberValue(accessEquipmentDays, 1));
@@ -2453,7 +2488,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       serviceType === "install" ? "Install only — client-supplied signage" : serviceType === "access_equipment" ? accessEquipmentSummary : serviceLabel,
       serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
-      serviceType === "install" && installMinutes ? `${minutesLabel(installMinutes)} install ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null,
+      serviceType === "install" && installMinutes ? `${usage(numberValue(installMinutes, 0) / 60)} hr install ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null,
       serviceType === "install" && travelCharge ? `Travel / call-out charge ${money(numberValue(travelCharge, 0))} total` : null,
       serviceType === "install" && fixingAllowanceSummary ? `Fixings allowance: ${fixingAllowanceSummary}` : null
     ].filter(Boolean).join(" · ")
@@ -2612,6 +2647,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     serviceFixings,
     serviceFixingQty,
     serviceFixingRate,
+    otherConsumableTitle,
     componentName,
     componentDescription,
     componentParts,
@@ -2692,6 +2728,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     serviceFixings,
     serviceFixingQty,
     serviceFixingRate,
+    otherConsumableTitle,
     quantity: String(dispatchLineQuantity),
     unitPriceOverridden: false,
     manualUnitPrice: dispatchUnitPrice.toFixed(2),
@@ -3055,7 +3092,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           {fixingOptions.map((item) => {
             const selected = serviceFixings.includes(item.key);
             const qty = numberValue(serviceFixingQty[item.key], 0);
-            const rate = numberValue(serviceFixingRate[item.key], 0);
+            const rate = resolvedServiceFixingRate(item.key);
+            const standardMaterial = standardFixingMaterials[item.key];
             return (
               <div key={item.key} style={{ border: "1px solid #dbeafe", borderRadius: 12, padding: 10, display: "grid", gap: 8 }}>
                 <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}>
@@ -3064,13 +3102,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
                 </label>
                 {selected ? (
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 8 }}>
+                    {item.key === "other" ? (
+                      <label style={{ display: "grid", gap: 5 }}>
+                        <span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Consumable title</span>
+                        <input value={otherConsumableTitle} onChange={(event) => { setOtherConsumableTitle(event.target.value); changed(); }} placeholder="eg Rags, cleaner" style={inputStyle} />
+                      </label>
+                    ) : null}
                     <label style={{ display: "grid", gap: 5 }}>
                       <span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Allowed qty ({item.unit})</span>
                       <input value={serviceFixingQty[item.key] ?? ""} onChange={(event) => { setServiceFixingQty({ ...serviceFixingQty, [item.key]: event.target.value }); changed(); }} placeholder={item.placeholderQty} type="number" min="0" step="0.01" style={inputStyle} />
                     </label>
                     <label style={{ display: "grid", gap: 5 }}>
                       <span style={{ fontSize: 12, fontWeight: 800, color: "#475467" }}>Cost / {item.unit} ($)</span>
-                      <input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); changed(); }} placeholder={item.placeholderRate} type="number" min="0" step="0.01" style={inputStyle} />
+                      <input value={serviceFixingRate[item.key] ?? ""} onChange={(event) => { setServiceFixingRate({ ...serviceFixingRate, [item.key]: event.target.value }); changed(); }} placeholder={standardMaterial ? `Auto ${money(rate)}` : item.placeholderRate} type="number" min="0" step="0.01" style={inputStyle} />
+                      <small style={{ color: standardMaterial ? "#047857" : "#64748b" }}>{standardMaterial ? `Standard: ${standardMaterial.name} at ${money(rate)}/${item.unit}. Enter a rate only to override it.` : "Add this item to Materials to supply its standard unit cost, or enter an override here."}</small>
                     </label>
                     <div style={{ display: "grid", alignContent: "end", minHeight: 42, fontSize: 12, color: "#475467", fontWeight: 800 }}>Allowance cost: {money(qty * rate)}</div>
                   </div>
@@ -3303,6 +3348,7 @@ function InlineLabourField({ label, value, basis, onChange, onBasisChange, labou
 
 function InstallLabourField({ value, basis, crewSize, quantity, labourRate, onChange, onBasisChange }: { value: string; basis: LabourBasis; crewSize: string; quantity: number; labourRate: number; onChange: (value: string) => void; onBasisChange: (basis: LabourBasis) => void }) {
   const minutes = numberValue(value, 0);
+  const hours = minutes > 0 ? minutes / 60 : 0;
   const crew = Math.max(1, numberValue(crewSize, 1));
   const safeQuantity = Math.max(1, quantity);
   const totalSiteMinutes = basis === "per_item" ? minutes * safeQuantity : minutes;
@@ -3311,14 +3357,14 @@ function InstallLabourField({ value, basis, crewSize, quantity, labourRate, onCh
   const preview = minutes <= 0
     ? "Enter the installation time, then choose whether it covers the complete line or each quoted item."
     : basis === "per_item"
-      ? `${minutesLabel(minutes)} per item × qty ${usage(safeQuantity)} × ${usage(crew)} installer${crew === 1 ? "" : "s"} = ${minutesLabel(personMinutes)} person-time · ${money(labourCost)} labour`
-      : `${minutesLabel(minutes)} for the complete line × ${usage(crew)} installer${crew === 1 ? "" : "s"} = ${minutesLabel(personMinutes)} person-time · ${money(labourCost)} labour`;
+      ? `${usage(hours)} hr per item × qty ${usage(safeQuantity)} × ${usage(crew)} installer${crew === 1 ? "" : "s"} = ${usage(personMinutes / 60)} person-hours · ${money(labourCost)} labour`
+      : `${usage(hours)} hr for the complete line × ${usage(crew)} installer${crew === 1 ? "" : "s"} = ${usage(personMinutes / 60)} person-hours · ${money(labourCost)} labour`;
 
   return (
     <div style={{ display: "grid", gap: 6 }}>
       <b>Install labour time</b>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 170px", gap: 8 }}>
-        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder="Minutes, eg 60" type="number" min="0" step="0.5" style={inputStyle} />
+        <input value={minutes > 0 ? String(Math.round(hours * 100) / 100) : ""} onChange={(event) => onChange(event.target.value === "" ? "" : String(numberValue(event.target.value, 0) * 60))} placeholder="Hours, eg 1.5" type="number" min="0" step="0.25" style={inputStyle} />
         <select value={basis} onChange={(event) => onBasisChange(event.target.value as LabourBasis)} style={inputStyle}>
           <option value="line_total">Total line item</option>
           <option value="per_item">Per item</option>

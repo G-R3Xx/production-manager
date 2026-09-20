@@ -9,6 +9,13 @@ export type QuoteSizePreset = {
   height: string;
 };
 
+export type ProfitTier = {
+  upTo: number | null;
+  profitPercent: number;
+};
+
+export const defaultProfitTiers: ProfitTier[] = [];
+
 export const PM_MYOB_PRICE_LEVELS = ["Level A", "Level B", "Level C", "Level D", "Level E", "Level F"] as const;
 export type PmMyobPriceLevel = (typeof PM_MYOB_PRICE_LEVELS)[number];
 export type MyobPriceLevelFactorMap = Record<PmMyobPriceLevel, string>;
@@ -54,6 +61,7 @@ export type CompanySettingsRecord = {
   globalMarkupMultiplier: string;
   accessEquipmentMarkupMultiplier: string;
   globalProfitMultiplier: string;
+  profitTiers: ProfitTier[];
   quoteLabourRate: string;
   quoteInkRatePerSqm: string;
   quoteInkBillingIncrementSqm: string;
@@ -98,6 +106,29 @@ function normaliseSizePresetArray(value: unknown, fallback: QuoteSizePreset[]): 
   return cleaned.length > 0 ? cleaned : fallback;
 }
 
+export function normaliseProfitTiers(value: unknown): ProfitTier[] {
+  if (!Array.isArray(value)) return defaultProfitTiers;
+  const cleaned = value.flatMap((item): ProfitTier[] => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) return [];
+    const row = item as Record<string, unknown>;
+    const rawUpTo = row.upTo == null || String(row.upTo).trim() === "" ? null : Number(row.upTo);
+    const profitPercent = Number(row.profitPercent);
+    if ((rawUpTo !== null && (!Number.isFinite(rawUpTo) || rawUpTo <= 0)) || !Number.isFinite(profitPercent) || profitPercent < 0) return [];
+    return [{ upTo: rawUpTo, profitPercent }];
+  });
+  return cleaned
+    .sort((a, b) => (a.upTo ?? Number.POSITIVE_INFINITY) - (b.upTo ?? Number.POSITIVE_INFINITY))
+    .filter((tier, index, tiers) => tier.upTo !== null || index === tiers.length - 1);
+}
+
+export function profitMultiplierForJobValue(tiers: ProfitTier[] | null | undefined, jobValueBeforeProfit: number, fallbackMultiplier: number): number {
+  const cleaned = normaliseProfitTiers(tiers);
+  if (!cleaned.length) return Math.max(0, fallbackMultiplier);
+  const value = Math.max(0, Number.isFinite(jobValueBeforeProfit) ? jobValueBeforeProfit : 0);
+  const match = cleaned.find((tier) => tier.upTo === null || value <= tier.upTo) ?? cleaned[cleaned.length - 1];
+  return 1 + Math.max(0, match?.profitPercent ?? 0) / 100;
+}
+
 let pricingSettingsSchemaReady = false;
 let pricingSettingsSchemaPromise: Promise<void> | null = null;
 
@@ -107,6 +138,7 @@ async function ensurePricingSettingsColumns(): Promise<void> {
   pricingSettingsSchemaPromise = (async () => {
     if (await relationHasColumns("app.tenant_settings", [
       "global_markup_multiplier", "access_equipment_markup_multiplier", "global_profit_multiplier",
+      "profit_tiers_json",
       "quote_labour_rate", "quote_ink_rate_per_sqm", "quote_ink_billing_increment_sqm",
       "quote_mono_rate_per_sqm", "myob_price_level_factors_json", "company_logo_url",
       "company_logo_storage_path", "quote_signage_size_presets_json", "quote_small_size_presets_json"
@@ -120,6 +152,7 @@ async function ensurePricingSettingsColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS global_markup_multiplier numeric(8,4) NOT NULL DEFAULT 1.5,
       ADD COLUMN IF NOT EXISTS access_equipment_markup_multiplier numeric(8,4),
       ADD COLUMN IF NOT EXISTS global_profit_multiplier numeric(8,4) NOT NULL DEFAULT 1.2,
+      ADD COLUMN IF NOT EXISTS profit_tiers_json jsonb NOT NULL DEFAULT '[]'::jsonb,
       ADD COLUMN IF NOT EXISTS quote_labour_rate numeric(10,2) NOT NULL DEFAULT 66,
       ADD COLUMN IF NOT EXISTS quote_ink_rate_per_sqm numeric(10,2) NOT NULL DEFAULT 10,
       ADD COLUMN IF NOT EXISTS quote_ink_billing_increment_sqm numeric(6,4) NOT NULL DEFAULT 0.5,
@@ -163,6 +196,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
         COALESCE(ts.global_markup_multiplier, 1.5)::text AS "globalMarkupMultiplier",
         COALESCE(ts.access_equipment_markup_multiplier, ts.global_markup_multiplier, 1.5)::text AS "accessEquipmentMarkupMultiplier",
         COALESCE(ts.global_profit_multiplier, 1.2)::text AS "globalProfitMultiplier",
+        COALESCE(ts.profit_tiers_json, '[]'::jsonb) AS "profitTiers",
         COALESCE(ts.quote_labour_rate, 66)::text AS "quoteLabourRate",
         COALESCE(ts.quote_ink_rate_per_sqm, 10)::text AS "quoteInkRatePerSqm",
         COALESCE(ts.quote_ink_billing_increment_sqm, 0.5)::text AS "quoteInkBillingIncrementSqm",
@@ -186,6 +220,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
 
   return {
     ...row,
+    profitTiers: normaliseProfitTiers(row.profitTiers),
     myobPriceLevelFactors: normaliseMyobPriceLevelFactors(row.myobPriceLevelFactors),
     quoteSignageSizePresets: normaliseSizePresetArray(row.quoteSignageSizePresets, defaultSignageSizePresets),
     quoteSmallSizePresets: normaliseSizePresetArray(row.quoteSmallSizePresets, defaultSmallSizePresets)
@@ -218,6 +253,7 @@ export async function updateCompanySettingsByTenantId(
         global_markup_multiplier,
         access_equipment_markup_multiplier,
         global_profit_multiplier,
+        profit_tiers_json,
         quote_labour_rate,
         quote_ink_rate_per_sqm,
         quote_ink_billing_increment_sqm,
@@ -229,7 +265,7 @@ export async function updateCompanySettingsByTenantId(
         proof_terms,
         job_terms
       )
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$18::jsonb,$19::jsonb,$20::jsonb,$21,$22,$23)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::numeric,$12::numeric,$13::numeric,$14::jsonb,$15::numeric,$16::numeric,$17::numeric,$18::numeric,$19::jsonb,$20::jsonb,$21::jsonb,$22,$23,$24)
       ON CONFLICT (tenant_id)
       DO UPDATE SET
         company_legal_name = EXCLUDED.company_legal_name,
@@ -244,6 +280,7 @@ export async function updateCompanySettingsByTenantId(
         global_markup_multiplier = EXCLUDED.global_markup_multiplier,
         access_equipment_markup_multiplier = EXCLUDED.access_equipment_markup_multiplier,
         global_profit_multiplier = EXCLUDED.global_profit_multiplier,
+        profit_tiers_json = EXCLUDED.profit_tiers_json,
         quote_labour_rate = EXCLUDED.quote_labour_rate,
         quote_ink_rate_per_sqm = EXCLUDED.quote_ink_rate_per_sqm,
         quote_ink_billing_increment_sqm = EXCLUDED.quote_ink_billing_increment_sqm,
@@ -270,6 +307,7 @@ export async function updateCompanySettingsByTenantId(
       input.globalMarkupMultiplier || "1.5",
       input.accessEquipmentMarkupMultiplier || input.globalMarkupMultiplier || "1.5",
       input.globalProfitMultiplier || "1.2",
+      JSON.stringify(normaliseProfitTiers(input.profitTiers)),
       input.quoteLabourRate || "66",
       input.quoteInkRatePerSqm || "10",
       input.quoteInkBillingIncrementSqm ?? "0.5",

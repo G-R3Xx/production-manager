@@ -48,6 +48,7 @@ export type SnapshotMaterial = {
   purchaseUom?: string | null;
   stockQuantity?: string | null;
   purchaseCost?: string | null;
+  wastagePercent?: string | null;
   widthMm?: string | null;
   lengthMm?: string | null;
   rollWidthMm?: string | null;
@@ -138,6 +139,7 @@ export type QuickQuoteSnapshot = {
   serviceFixings?: string[];
   serviceFixingQty?: Record<string, string>;
   serviceFixingRate?: Record<string, string>;
+  otherConsumableTitle?: string;
   componentName?: string;
   componentDescription?: string;
   componentParts?: Array<Record<string, string>>;
@@ -255,6 +257,7 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
     purchaseUom: stringValue(value.purchaseUom) || null,
     stockQuantity: stringValue(value.stockQuantity) || null,
     purchaseCost: stringValue(value.purchaseCost) || null,
+    wastagePercent: stringValue(value.wastagePercent) || null,
     widthMm: stringValue(value.widthMm) || null,
     lengthMm: stringValue(value.lengthMm) || null,
     rollWidthMm: stringValue(value.rollWidthMm) || null,

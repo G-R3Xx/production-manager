@@ -1012,6 +1012,7 @@ export async function previewRecipeCost(
         stock_uom: string | null;
         stock_quantity: string | null;
         purchase_cost: string;
+        wastage_percent: string;
       }>(`
         SELECT
           type::text,
@@ -1023,7 +1024,8 @@ export async function previewRecipeCost(
           purchase_uom,
           stock_uom,
           stock_quantity::text,
-          COALESCE((cost_json ->> 'purchaseCost')::numeric, purchase_cost, 0)::text AS purchase_cost
+          COALESCE((cost_json ->> 'purchaseCost')::numeric, purchase_cost, 0)::text AS purchase_cost,
+          COALESCE((cost_json ->> 'wastagePercent')::numeric, 0)::text AS wastage_percent
         FROM catalog.materials
         WHERE tenant_id = $1::uuid AND id = $2::uuid
       `, [tenantId, recipe.materialId])
@@ -1053,7 +1055,7 @@ export async function previewRecipeCost(
     finishedWidthMm: widthMm,
     finishedHeightMm: heightMm,
     quantity,
-    wastePercent: Number(recipe.wastePercent),
+    wastePercent: Number(recipe.wastePercent) + Number(material?.wastage_percent || 0),
     markupMultiplier: 1,
     profitMultiplier: 1,
     material: material

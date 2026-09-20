@@ -117,6 +117,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Google / email</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Role</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Status</th>
+                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Labour $/hr</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Joined</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Action</th>
                 </tr>
@@ -171,6 +172,10 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>
                           {staffStatusLabel(row.membershipStatus)}
                         </div>
+                      </td>
+                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
+                        <input form={`staff-${row.membershipId}`} name="quoteLabourRate" defaultValue={row.quoteLabourRate ?? ""} disabled={!canEdit} type="number" min="0" step="0.01" placeholder="Global rate" style={{ width: 110, minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 10px", fontWeight: 800 }} />
+                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>Blank uses company rate.</div>
                       </td>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", color: "#475467", fontSize: 13, verticalAlign: "top", lineHeight: 1.45 }}>
                         <div>{formatDate(row.membershipCreatedAt)}</div>

@@ -79,6 +79,7 @@ export const memberships = appSchema.table("memberships", {
     .references(() => userProfiles.id, { onDelete: "cascade" }),
   tenantRole: tenantRoleEnum("tenant_role").notNull(),
   status: membershipStatusEnum("status").notNull().default("active"),
+  quoteLabourRate: numeric("quote_labour_rate", { precision: 10, scale: 2 }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
@@ -99,6 +100,7 @@ export const tenantSettings = appSchema.table("tenant_settings", {
   globalMarkupMultiplier: numeric("global_markup_multiplier", { precision: 8, scale: 4 }).notNull().default("1.5"),
   accessEquipmentMarkupMultiplier: numeric("access_equipment_markup_multiplier", { precision: 8, scale: 4 }),
   globalProfitMultiplier: numeric("global_profit_multiplier", { precision: 8, scale: 4 }).notNull().default("1.2"),
+  profitTiersJson: jsonb("profit_tiers_json").notNull().default([]),
   quoteInkBillingIncrementSqm: numeric("quote_ink_billing_increment_sqm", { precision: 6, scale: 4 }).notNull().default("0.5"),
   myobPriceLevelFactorsJson: jsonb("myob_price_level_factors_json").notNull().default({ "Level A": "1", "Level B": "1", "Level C": "1", "Level D": "1", "Level E": "1", "Level F": "1" }),
   myobPurchaseExpenseAccountUid: varchar("myob_purchase_expense_account_uid", { length: 255 }),

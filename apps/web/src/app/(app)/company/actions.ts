@@ -182,6 +182,15 @@ export async function saveCompanySettingsAction(formData: FormData): Promise<voi
 
   const chosenLogoUrl = uploadedLogo.companyLogoUrl ?? nullable(parsed.data.companyLogoUrl);
   const chosenLogoStoragePath = uploadedLogo.companyLogoStoragePath ?? (chosenLogoUrl ? nullable(parsed.data.companyLogoStoragePath) : null);
+  const profitTiers = Array.from({ length: 6 }, (_, index) => {
+    const upToText = String(formData.get(`profitTierUpTo${index}`) ?? "").replace(/[$,]/g, "").trim();
+    const percentText = String(formData.get(`profitTierPercent${index}`) ?? "").replace(/[% ,]/g, "").trim();
+    if (!percentText) return null;
+    const profitPercent = Number(percentText);
+    const upTo = upToText ? Number(upToText) : null;
+    if (!Number.isFinite(profitPercent) || profitPercent < 0 || (upTo !== null && (!Number.isFinite(upTo) || upTo <= 0))) return null;
+    return { upTo, profitPercent };
+  }).filter((row): row is { upTo: number | null; profitPercent: number } => Boolean(row));
 
   await updateCompanySettingsByTenantId(activeTenant.tenantId, {
     companyLegalName: nullable(parsed.data.companyLegalName),
@@ -196,6 +205,7 @@ export async function saveCompanySettingsAction(formData: FormData): Promise<voi
     globalMarkupMultiplier: normalNumber(parsed.data.globalMarkupMultiplier, "1.5"),
     accessEquipmentMarkupMultiplier: normalNumber(parsed.data.accessEquipmentMarkupMultiplier, normalNumber(parsed.data.globalMarkupMultiplier, "1.5")),
     globalProfitMultiplier: normalNumber(parsed.data.globalProfitMultiplier, "1.2"),
+    profitTiers,
     quoteLabourRate: normalNumber(parsed.data.quoteLabourRate, "66"),
     quoteInkRatePerSqm: normalNumber(parsed.data.quoteInkRatePerSqm, "10"),
     quoteInkBillingIncrementSqm: String(Math.max(0, Number(parsed.data.quoteInkBillingIncrementSqm || "0.5") || 0)),

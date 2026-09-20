@@ -100,6 +100,7 @@ export type QuoteMaterial = {
   purchaseUom?: string | null;
   stockQuantity?: string | null;
   purchaseCost?: string | null;
+  wastagePercent?: string | null;
   widthMm?: string | null;
   lengthMm?: string | null;
   rollWidthMm?: string | null;
@@ -816,47 +817,50 @@ function normalizedRuleTypeFor(component: QuoteComponent, material: QuoteMateria
 }
 
 function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "each"): { rate: number; unit: string; note?: string } {
-  const purchaseCost = numberValue(material.purchaseCost, 0);
+  const wastePercent = Math.max(0, numberValue(material.wastagePercent, 0));
+  const purchaseCost = numberValue(material.purchaseCost, 0) * (1 + wastePercent / 100);
+  const wasteNote = wastePercent > 0 ? `${formatUsage(wastePercent)}% stock wastage included` : undefined;
   const purchaseUom = String(material.purchaseUom ?? "").toLowerCase();
   const stockUom = String(material.stockUom ?? "").toLowerCase();
   const stockQuantity = numberValue(material.stockQuantity, 0);
   const rollWidthM = numberValue(material.rollWidthMm, 0) / 1000;
 
   if (basis === "sheet") {
-    return { rate: purchaseCost, unit: "sheet" };
+    const packaged = purchaseUom.includes("1000") || purchaseUom.includes("thousand") || purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box");
+    return { rate: packaged && stockQuantity > 0 ? purchaseCost / stockQuantity : purchaseCost, unit: "sheet", note: packaged && stockQuantity > 0 ? [`${formatUsage(stockQuantity)} sheets per ${purchaseUom}`, wasteNote].filter(Boolean).join(" · ") : wasteNote };
   }
 
   if (basis === "lm") {
     if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom)) {
-      return { rate: purchaseCost, unit: "lm" };
+      return { rate: purchaseCost, unit: "lm", note: wasteNote };
     }
     if (purchaseUom.includes("roll") && stockQuantity > 0 && materialLooksLikeRoll(material)) {
       const note = ["lm", "m", "metre", "meter"].includes(stockUom)
         ? `using ${formatUsage(stockQuantity)} lm per roll from material stock quantity`
         : `using ${formatUsage(stockQuantity)} as the saved roll length`;
-      return { rate: purchaseCost / stockQuantity, unit: "lm", note };
+      return { rate: purchaseCost / stockQuantity, unit: "lm", note: [note, wasteNote].filter(Boolean).join(" · ") };
     }
     if (materialLooksLikeRoll(material) && stockQuantity > 0 && ["lm", "m", "metre", "meter"].includes(stockUom)) {
-      return { rate: purchaseCost / stockQuantity, unit: "lm", note: `roll stock detected; using ${formatUsage(stockQuantity)} lm from material stock quantity` };
+      return { rate: purchaseCost / stockQuantity, unit: "lm", note: [`roll stock detected; using ${formatUsage(stockQuantity)} lm from material stock quantity`, wasteNote].filter(Boolean).join(" · ") };
     }
-    return { rate: purchaseCost, unit: "lm", note: "set material purchase unit to lm, or set purchase unit to roll + stock quantity as roll length" };
+    return { rate: purchaseCost, unit: "lm", note: ["set material purchase unit to lm, or set purchase unit to roll + stock quantity as roll length", wasteNote].filter(Boolean).join(" · ") };
   }
 
   if (basis === "sqm") {
     const area = sheetAreaSqm(material);
     if (["sqm", "m2", "m²", "square metre", "square meter"].includes(purchaseUom)) {
-      return { rate: purchaseCost, unit: "sqm" };
+      return { rate: purchaseCost, unit: "sqm", note: wasteNote };
     }
     if (purchaseUom.includes("sheet") && area > 0) {
-      return { rate: purchaseCost / area, unit: "sqm", note: `derived from ${formatUsage(area)} sqm sheet` };
+      return { rate: purchaseCost / area, unit: "sqm", note: [`derived from ${formatUsage(area)} sqm sheet`, wasteNote].filter(Boolean).join(" · ") };
     }
     if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom) && rollWidthM > 0) {
-      return { rate: purchaseCost / rollWidthM, unit: "sqm", note: `derived from ${numberValue(material.rollWidthMm)} mm roll width` };
+      return { rate: purchaseCost / rollWidthM, unit: "sqm", note: [`derived from ${numberValue(material.rollWidthMm)} mm roll width`, wasteNote].filter(Boolean).join(" · ") };
     }
     if (purchaseUom.includes("roll") && rollWidthM > 0 && stockQuantity > 0 && materialLooksLikeRoll(material)) {
-      return { rate: purchaseCost / (rollWidthM * stockQuantity), unit: "sqm", note: `using ${formatUsage(stockQuantity)} as the saved roll length` };
+      return { rate: purchaseCost / (rollWidthM * stockQuantity), unit: "sqm", note: [`using ${formatUsage(stockQuantity)} as the saved roll length`, wasteNote].filter(Boolean).join(" · ") };
     }
-    return { rate: purchaseCost, unit: "sqm", note: "set material purchase cost per sqm for exact area pricing" };
+    return { rate: purchaseCost, unit: "sqm", note: ["set material purchase cost per sqm for exact area pricing", wasteNote].filter(Boolean).join(" · ") };
   }
 
   const packagedPurchaseUnits = ["box", "pack", "bag", "carton", "bundle"];
@@ -864,11 +868,11 @@ function costRateFor(material: QuoteMaterial, basis: "sheet" | "lm" | "sqm" | "e
     return {
       rate: purchaseCost / stockQuantity,
       unit: "each",
-      note: `${formatUsage(stockQuantity)} each per ${purchaseUom}`
+      note: [`${formatUsage(stockQuantity)} each per ${purchaseUom}`, wasteNote].filter(Boolean).join(" · ")
     };
   }
 
-  return { rate: purchaseCost, unit: "each" };
+  return { rate: purchaseCost, unit: "each", note: wasteNote };
 }
 
 function rollBillingIncrement(material: QuoteMaterial): { increment: number; label: string } {

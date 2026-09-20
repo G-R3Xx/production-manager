@@ -214,6 +214,27 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
             </label>
           </div>
 
+          <div style={{ border: "1px solid #bfdbfe", borderRadius: 16, padding: 14, background: "#fff", display: "grid", gap: 10 }}>
+            <div>
+              <strong style={{ display: "block", color: "#1d4ed8" }}>Profit by job value</strong>
+              <p style={{ margin: "4px 0 0", color: "#475467", fontSize: 13, lineHeight: 1.5 }}>
+                Optional. PM chooses the profit percentage from the projected quote value before profit, so the calculation is not circular. Leave every row blank to use the global profit multiplier.
+              </p>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(140px, 1fr) minmax(140px, 1fr)", gap: 8, alignItems: "end" }}>
+              <strong style={{ color: "#475467", fontSize: 12 }}>Job value up to (ex GST)</strong>
+              <strong style={{ color: "#475467", fontSize: 12 }}>Profit %</strong>
+              {Array.from({ length: 6 }, (_, index) => {
+                const tier = settings?.profitTiers?.[index];
+                return [
+                  <input key={`up-${index}`} name={`profitTierUpTo${index}`} defaultValue={tier?.upTo ?? ""} placeholder={index === 5 ? "Blank = above" : "eg 500"} type="number" min="0.01" step="0.01" style={{ minHeight: 42, borderRadius: 10, border: "1px solid #93c5fd", padding: "0 11px" }} />,
+                  <input key={`profit-${index}`} name={`profitTierPercent${index}`} defaultValue={tier?.profitPercent ?? ""} placeholder="eg 30" type="number" min="0" step="0.01" style={{ minHeight: 42, borderRadius: 10, border: "1px solid #93c5fd", padding: "0 11px" }} />
+                ];
+              })}
+            </div>
+            <small style={{ color: "#475467" }}>Example: up to $500 → 35%, up to $2,000 → 28%, blank upper limit → 20%.</small>
+          </div>
+
           <div style={{ border: "1px solid #bae6fd", borderRadius: 16, padding: 14, background: "#f8fcff", display: "grid", gap: 12 }}>
             <div>
               <strong style={{ display: "block", color: "#075985" }}>MYOB price levels → Production Manager calculated work</strong>
