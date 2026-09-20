@@ -86,7 +86,7 @@ export function CurrentInfoBar() {
       });
       if (!response.ok) return;
       const snapshot = await response.json() as WeatherSnapshot;
-      if (snapshot.ok) setWeather(snapshot);
+      setWeather(snapshot);
     } catch {
       // Weather is optional convenience information; the app should never be interrupted by it.
     }
@@ -146,7 +146,7 @@ export function CurrentInfoBar() {
         <span aria-hidden="true" style={{ fontSize: 18, lineHeight: 1 }}>{currentCondition.icon}</span>
         <span style={eyebrowStyle}>Now</span>
         <strong style={{ fontSize: 13, whiteSpace: "nowrap" }}>{rounded(weather?.current?.temperatureC)}°</strong>
-        <span style={{ color: "#475569", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{weather ? currentCondition.label : "Loading weather…"}</span>
+        <span style={{ color: "#475569", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{weather?.ok ? currentCondition.label : weather ? "Unavailable" : "Loading weather…"}</span>
         {weather?.location ? <span style={{ marginLeft: "auto", color: "#94a3b8", fontSize: 10, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{weather.location.split(",")[0]}</span> : null}
       </div>
 

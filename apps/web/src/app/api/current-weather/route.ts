@@ -105,18 +105,25 @@ export async function GET() {
   try {
     const user = await getRequiredSessionUser();
     const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
-    const settings = activeTenant ? await getCompanySettingsByTenantId(activeTenant.tenantId) : null;
+    let settings: Awaited<ReturnType<typeof getCompanySettingsByTenantId>> = null;
+    if (activeTenant) {
+      try {
+        settings = await getCompanySettingsByTenantId(activeTenant.tenantId);
+      } catch (error) {
+        console.warn("Weather location could not read company settings; using Canberra.", error);
+      }
+    }
     const requestedPlace = inferLocality(settings?.address);
 
     let location = await geocode(requestedPlace);
     if (!location && requestedPlace.toLowerCase() !== "canberra") location = await geocode("Canberra");
     if (!location || typeof location.latitude !== "number" || typeof location.longitude !== "number") {
-      return NextResponse.json({ ok: false }, { status: 502, headers: { "Cache-Control": "private, no-store" } });
+      return NextResponse.json({ ok: false, timezone: "Australia/Sydney" }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
 
     const data = await forecast(location.latitude, location.longitude);
     if (!data?.daily?.time?.length) {
-      return NextResponse.json({ ok: false }, { status: 502, headers: { "Cache-Control": "private, no-store" } });
+      return NextResponse.json({ ok: false, timezone: data?.timezone || location.timezone || "Australia/Sydney" }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
 
     const daily = [0, 1].map((index) => ({
@@ -141,7 +148,8 @@ export async function GET() {
     }, {
       headers: { "Cache-Control": "private, max-age=300" },
     });
-  } catch {
-    return NextResponse.json({ ok: false }, { status: 500, headers: { "Cache-Control": "private, no-store" } });
+  } catch (error) {
+    console.warn("Optional weather lookup failed.", error);
+    return NextResponse.json({ ok: false, timezone: "Australia/Sydney" }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
   }
 }

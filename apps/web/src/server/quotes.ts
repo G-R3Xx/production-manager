@@ -513,7 +513,7 @@ function quoteSelectSql(): string {
       email_sent_at as "emailSentAt",
       email_message_id as "emailMessageId",
       email_last_error as "emailLastError",
-      COALESCE(email_history_json, '[]'::jsonb) as "emailHistory",
+      COALESCE(to_jsonb(quote_drafts) -> 'email_history_json', '[]'::jsonb) as "emailHistory",
       viewed_at as "viewedAt",
       accepted_at as "acceptedAt",
       declined_at as "declinedAt",
@@ -528,6 +528,10 @@ function quoteSelectSql(): string {
       created_at as "createdAt",
       updated_at as "updatedAt"
   `;
+}
+
+function isUndefinedColumnError(error: unknown): boolean {
+  return Boolean(error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "42703");
 }
 
 export async function listQuoteDraftsForTenant(tenantId: string, options?: { includeDeleted?: boolean; includeWebsiteOrders?: boolean }): Promise<QuoteDraftRecord[]> {
@@ -998,30 +1002,50 @@ export async function markQuoteEmailPendingForTenant(tenantId: string, quoteId: 
 
 export async function markQuoteEmailSentForTenant(tenantId: string, quoteId: string, input: { recipient: string; messageId?: string | null }): Promise<void> {
   await ensureQuoteLifecycleColumns();
-  await pool.query(`
-    UPDATE sales.quote_drafts
-    SET email_status = 'sent',
-        email_to = $3::varchar,
-        email_sent_at = now(),
-        email_message_id = $4::text,
-        email_last_error = NULL,
-        email_history_json = COALESCE(email_history_json, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recipient',$3::text,'status','sent','sentAt',now(),'messageId',$4::text)),
-        updated_at = now()
-    WHERE tenant_id = $1::uuid AND id = $2::uuid
-  `, [tenantId, quoteId, nullableText(input.recipient), input.messageId ?? null]);
+  const values = [tenantId, quoteId, nullableText(input.recipient), input.messageId ?? null];
+  try {
+    await pool.query(`
+      UPDATE sales.quote_drafts
+      SET email_status = 'sent',
+          email_to = $3::varchar,
+          email_sent_at = now(),
+          email_message_id = $4::text,
+          email_last_error = NULL,
+          email_history_json = COALESCE(email_history_json, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recipient',$3::text,'status','sent','sentAt',now(),'messageId',$4::text)),
+          updated_at = now()
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+    `, values);
+  } catch (error) {
+    if (!isUndefinedColumnError(error)) throw error;
+    await pool.query(`
+      UPDATE sales.quote_drafts
+      SET email_status='sent',email_to=$3::varchar,email_sent_at=now(),email_message_id=$4::text,email_last_error=NULL,updated_at=now()
+      WHERE tenant_id=$1::uuid AND id=$2::uuid
+    `, values);
+  }
 }
 
 export async function markQuoteEmailFailedForTenant(tenantId: string, quoteId: string, input: { recipient?: string | null; error: string }): Promise<void> {
   await ensureQuoteLifecycleColumns();
-  await pool.query(`
-    UPDATE sales.quote_drafts
-    SET email_status = 'failed',
-        email_to = COALESCE($3::varchar, email_to),
-        email_last_error = $4::text,
-        email_history_json = COALESCE(email_history_json, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recipient',COALESCE($3::text,email_to,''),'status','failed','sentAt',now(),'error',$4::text)),
-        updated_at = now()
-    WHERE tenant_id = $1::uuid AND id = $2::uuid
-  `, [tenantId, quoteId, nullableText(input.recipient), nullableText(input.error)]);
+  const values = [tenantId, quoteId, nullableText(input.recipient), nullableText(input.error)];
+  try {
+    await pool.query(`
+      UPDATE sales.quote_drafts
+      SET email_status = 'failed',
+          email_to = COALESCE($3::varchar, email_to),
+          email_last_error = $4::text,
+          email_history_json = COALESCE(email_history_json, '[]'::jsonb) || jsonb_build_array(jsonb_build_object('recipient',COALESCE($3::text,email_to,''),'status','failed','sentAt',now(),'error',$4::text)),
+          updated_at = now()
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+    `, values);
+  } catch (error) {
+    if (!isUndefinedColumnError(error)) throw error;
+    await pool.query(`
+      UPDATE sales.quote_drafts
+      SET email_status='failed',email_to=COALESCE($3::varchar,email_to),email_last_error=$4::text,updated_at=now()
+      WHERE tenant_id=$1::uuid AND id=$2::uuid
+    `, values);
+  }
 }
 
 export async function setQuoteDraftStatusForTenant(tenantId: string, quoteId: string, status: string): Promise<void> {

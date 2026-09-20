@@ -78,19 +78,14 @@ export function staffStatusLabel(status: string): string {
   return status === "invited" ? "Pending" : status.slice(0, 1).toUpperCase() + status.slice(1);
 }
 
-export async function listUsersForTenant(tenantId: string): Promise<TenantUserRecord[]> {
-  if (!process.env.DATABASE_URL) {
-    return [];
-  }
-
-  await ensureStaffPricingColumn();
-  const result = await pool.query<TenantUserRecord>(
+async function queryUsersForTenant(tenantId: string) {
+  return pool.query<TenantUserRecord>(
     `
       SELECT
         m.id AS "membershipId",
         m.tenant_role::text AS "tenantRole",
         m.status::text AS "membershipStatus",
-        m.quote_labour_rate::text AS "quoteLabourRate",
+        (to_jsonb(m) ->> 'quote_labour_rate') AS "quoteLabourRate",
         up.id AS "userProfileId",
         up.auth_user_id AS "authUserId",
         up.full_name AS "fullName",
@@ -119,6 +114,15 @@ export async function listUsersForTenant(tenantId: string): Promise<TenantUserRe
     `,
     [tenantId]
   );
+}
+
+export async function listUsersForTenant(tenantId: string): Promise<TenantUserRecord[]> {
+  if (!process.env.DATABASE_URL) {
+    return [];
+  }
+
+  await ensureStaffPricingColumn();
+  const result = await queryUsersForTenant(tenantId);
 
   return result.rows.map((row) => ({
     ...row,

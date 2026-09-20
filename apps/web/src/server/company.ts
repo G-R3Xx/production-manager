@@ -196,7 +196,7 @@ export async function getCompanySettingsByTenantId(tenantId: string): Promise<Co
         COALESCE(ts.global_markup_multiplier, 1.5)::text AS "globalMarkupMultiplier",
         COALESCE(ts.access_equipment_markup_multiplier, ts.global_markup_multiplier, 1.5)::text AS "accessEquipmentMarkupMultiplier",
         COALESCE(ts.global_profit_multiplier, 1.2)::text AS "globalProfitMultiplier",
-        COALESCE(ts.profit_tiers_json, '[]'::jsonb) AS "profitTiers",
+        COALESCE(to_jsonb(ts) -> 'profit_tiers_json', '[]'::jsonb) AS "profitTiers",
         COALESCE(ts.quote_labour_rate, 66)::text AS "quoteLabourRate",
         COALESCE(ts.quote_ink_rate_per_sqm, 10)::text AS "quoteInkRatePerSqm",
         COALESCE(ts.quote_ink_billing_increment_sqm, 0.5)::text AS "quoteInkBillingIncrementSqm",
