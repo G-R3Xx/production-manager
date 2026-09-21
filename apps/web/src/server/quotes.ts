@@ -618,8 +618,10 @@ export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<strin
 }
 
 export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]> {
-  await ensureQuoteLineConfigurationColumn();
-  await ensureQuoteLineClientResponseColumns();
+  await Promise.all([
+    ensureQuoteLineConfigurationColumn(),
+    ensureQuoteLineClientResponseColumns()
+  ]);
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       id,
@@ -837,8 +839,10 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
   notes?: string | null;
   configurationSnapshot?: Record<string, unknown> | null;
 }): Promise<void> {
-  await ensureQuoteLineConfigurationColumn();
-  await ensureQuoteLineClientResponseColumns();
+  await Promise.all([
+    ensureQuoteLineConfigurationColumn(),
+    ensureQuoteLineClientResponseColumns()
+  ]);
   await pool.query(`
     UPDATE sales.quote_lines ql
     SET product_name = $4::varchar,
@@ -872,8 +876,10 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
 }
 
 export async function getQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<QuoteLineRecord | null> {
-  await ensureQuoteLineConfigurationColumn();
-  await ensureQuoteLineClientResponseColumns();
+  await Promise.all([
+    ensureQuoteLineConfigurationColumn(),
+    ensureQuoteLineClientResponseColumns()
+  ]);
   const result = await pool.query<QuoteLineRecord>(`
     SELECT
       ql.id,

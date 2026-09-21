@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById, listEnquiryCorrespondenceForEnquiry, listEnquiryLogoSummariesForTenant } from "@/server/enquiries";
@@ -30,6 +31,61 @@ import type { QuoteCostingResources } from "./quoteCostingResources";
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+// Quote-line saves should not force every low-volatility reference table to be
+// fetched from Postgres again. These caches are deliberately short-lived: they
+// keep the quote workspace responsive while still reflecting admin changes
+// quickly. Quote drafts/lines remain uncached below.
+const cachedQuoteMaterials = unstable_cache(
+  (tenantId: string) => listMaterialsForTenant(tenantId),
+  ["quotes-materials"],
+  { revalidate: 30 }
+);
+const cachedQuoteProducts = unstable_cache(
+  (tenantId: string) => listQuoteProductsForTenant(tenantId),
+  ["quotes-products"],
+  { revalidate: 30 }
+);
+const cachedQuoteCustomers = unstable_cache(
+  (tenantId: string) => listCustomersForTenant(tenantId),
+  ["quotes-customers"],
+  { revalidate: 30 }
+);
+const cachedQuoteLogos = unstable_cache(
+  (tenantId: string) => listEnquiryLogoSummariesForTenant(tenantId),
+  ["quotes-enquiry-logos"],
+  { revalidate: 30 }
+);
+const cachedQuoteCompanySettings = unstable_cache(
+  (tenantId: string) => getCompanySettingsByTenantId(tenantId),
+  ["quotes-company-settings"],
+  { revalidate: 30 }
+);
+const cachedQuoteSalesDefaults = unstable_cache(
+  (tenantId: string) => getMyobSalesDefaults(tenantId),
+  ["quotes-myob-sales-defaults"],
+  { revalidate: 30 }
+);
+const cachedQuoteCostingResources = unstable_cache(
+  (tenantId: string) => Promise.all([
+    listProcessesForTenant(tenantId),
+    listMachinesForTenant(tenantId),
+    listLabourForTenant(tenantId),
+    listRecipesForTenant(tenantId)
+  ]),
+  ["quotes-costing-resources"],
+  { revalidate: 30 }
+);
+const cachedQuoteArtworkApproval = unstable_cache(
+  (tenantId: string, quoteId: string) => getArtworkApprovalForQuote(tenantId, quoteId),
+  ["quotes-artwork-approval"],
+  { revalidate: 10 }
+);
+const cachedQuoteProductionJob = unstable_cache(
+  (tenantId: string, quoteId: string) => getProductionJobForQuote(tenantId, quoteId),
+  ["quotes-production-job"],
+  { revalidate: 10 }
+);
 
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
   const value = params[key];
@@ -487,26 +543,21 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selectedProductionJob
   ] = await Promise.all([
     listQuoteDraftSummariesForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    builderDataNeeded ? listMaterialsForTenant(activeTenant.tenantId) : Promise.resolve([]),
+    builderDataNeeded ? cachedQuoteMaterials(activeTenant.tenantId) : Promise.resolve([]),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
     fromSurvey ? getSurveyRequestById(activeTenant.tenantId, fromSurvey) : Promise.resolve(null),
     selected ? getQuoteDraftById(activeTenant.tenantId, selected) : Promise.resolve(null),
-    builderDataNeeded ? getCompanySettingsByTenantId(activeTenant.tenantId) : Promise.resolve(null),
-    listCustomersForTenant(activeTenant.tenantId),
-    listEnquiryLogoSummariesForTenant(activeTenant.tenantId),
-    builderDataNeeded ? listQuoteProductsForTenant(activeTenant.tenantId) : Promise.resolve([]),
-    selected ? getMyobSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null }),
+    builderDataNeeded ? cachedQuoteCompanySettings(activeTenant.tenantId) : Promise.resolve(null),
+    cachedQuoteCustomers(activeTenant.tenantId),
+    cachedQuoteLogos(activeTenant.tenantId),
+    builderDataNeeded ? cachedQuoteProducts(activeTenant.tenantId) : Promise.resolve([]),
+    selected ? cachedQuoteSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null }),
     builderDataNeeded
-      ? Promise.all([
-          listProcessesForTenant(activeTenant.tenantId),
-          listMachinesForTenant(activeTenant.tenantId),
-          listLabourForTenant(activeTenant.tenantId),
-          listRecipesForTenant(activeTenant.tenantId)
-        ])
+      ? cachedQuoteCostingResources(activeTenant.tenantId)
       : Promise.resolve([[], [], [], []] as const),
     selected ? listQuoteLines(selected) : Promise.resolve([]),
-    selected ? getArtworkApprovalForQuote(activeTenant.tenantId, selected) : Promise.resolve(null),
-    selected ? getProductionJobForQuote(activeTenant.tenantId, selected) : Promise.resolve(null)
+    selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
+    selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null)
   ]);
 
   const selectedQuote = initialSelectedQuote;
