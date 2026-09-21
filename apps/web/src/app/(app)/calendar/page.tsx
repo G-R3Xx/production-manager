@@ -92,12 +92,13 @@ export default async function CalendarPage({ searchParams }: PageProps) {
         title: `${JOB_PROCESS_META[processKey].label} process`,
         status: passed ? "completed" : "pending",
         priority: job.priority,
-        dueDate: assignment?.dueDate ?? (processKey === currentProcess ? job.dueDate : null),
+        dueDate: assignment?.dueDate ?? job.dueDate,
         assigneeProfileIds: assignment?.assigneeProfileIds ?? (processKey === currentProcess && job.ownerProfileId ? [job.ownerProfileId] : []),
         notes: assignment?.notes ?? null,
         currentStage: job.currentStage,
-        assignmentSource: null,
+        assignmentSource: assignment?.assignmentSource ?? null,
         assignmentProcessKey: null,
+        assignmentDefaultKey: assignment?.assignmentDefaultKey ?? null,
       });
     }
   }
@@ -127,6 +128,7 @@ export default async function CalendarPage({ searchParams }: PageProps) {
       currentStage: job.currentStage,
       assignmentSource: step.assignmentSource,
       assignmentProcessKey: processKey,
+      assignmentDefaultKey: step.assignmentDefaultKey,
     });
   }
 
@@ -153,6 +155,7 @@ export default async function CalendarPage({ searchParams }: PageProps) {
       currentStage: job.currentStage,
       assignmentSource: null,
       assignmentProcessKey: null,
+      assignmentDefaultKey: null,
     });
   }
 

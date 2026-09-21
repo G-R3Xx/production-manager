@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAuthenticatedAppUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { updateJobProcessAssignmentForTenant } from "@/server/jobs";
+import { resetJobProcessAssignmentToDefaultsForTenant, updateJobProcessAssignmentForTenant } from "@/server/jobs";
 import { syncProductionStepAssignmentsFromJobProcessForTenant } from "@/server/production";
 
 export const dynamic = "force-dynamic";
@@ -12,7 +12,7 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!tenant) return NextResponse.json({ error: "Active workspace not found." }, { status: 401 });
   const { id, processKey } = await context.params;
-  let body: { assigneeProfileIds?: unknown; dueDate?: unknown; notes?: unknown } = {};
+  let body: { assigneeProfileIds?: unknown; dueDate?: unknown; notes?: unknown; inherit?: unknown } = {};
   try {
     body = await request.json();
   } catch {
@@ -26,17 +26,28 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const notes = typeof body.notes === "string" ? body.notes : null;
 
   try {
-    const assignment = await updateJobProcessAssignmentForTenant(tenant.tenantId, {
-      jobId: id,
-      processKey,
-      assigneeProfileIds,
-      dueDate,
-      notes,
-    });
+    const assignment = body.inherit === true
+      ? await resetJobProcessAssignmentToDefaultsForTenant(tenant.tenantId, { jobId: id, processKey })
+      : await updateJobProcessAssignmentForTenant(tenant.tenantId, {
+          jobId: id,
+          processKey,
+          assigneeProfileIds,
+          dueDate,
+          notes,
+        });
     if (processKey === "production" || processKey === "dispatch") {
       await syncProductionStepAssignmentsFromJobProcessForTenant(tenant.tenantId, id);
     }
-    return NextResponse.json({ ok: true, assignment }, { headers: { "Cache-Control": "no-store" } });
+    return NextResponse.json({
+      ok: true,
+      assignment: assignment ?? {
+        processKey,
+        assigneeProfileIds: [],
+        dueDate: null,
+        assignmentSource: "inherited",
+        assignmentDefaultKey: null,
+      },
+    }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Process assignment could not be saved.";
     const status = message.includes("not found") ? 404 : 400;

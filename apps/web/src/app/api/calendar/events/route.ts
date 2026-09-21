@@ -68,6 +68,7 @@ export async function PATCH(request: Request) {
         assigneeProfileIds: step.assigneeProfileIds,
         assignmentSource: step.assignmentSource,
         assignmentProcessKey: step.assignmentProcessKey,
+        assignmentDefaultKey: step.assignmentDefaultKey,
       }, { headers: { "Cache-Control": "no-store" } });
     }
 

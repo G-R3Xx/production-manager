@@ -47,3 +47,5 @@ pnpm db:studio
 - `044_artwork_page_responses.sql` — adds independent client decisions and notes to each artwork proof page, with a compatibility backfill for already-approved proof sets.
 
 - `045_job_process_staff_assignments.sql` — adds multi-staff ownership and due dates for each job process, plus inherited or overridden production-step assignments.
+
+- `050_default_task_assignments.sql` — adds company-wide default staff routing for artwork, signage print/manufacture, small format, installation and dispatch, plus the default-rule key inherited by production steps.

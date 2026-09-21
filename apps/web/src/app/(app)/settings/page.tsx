@@ -7,6 +7,7 @@ const groups = [
   { title: "Workspace", items: [
     { href: "/company", title: "Company", body: "Company details, logo and correspondence settings.", icon: "▣" },
     { href: "/users", title: "Staff & roles", body: "Users, access levels and team membership.", icon: "♙" },
+    { href: "/settings/task-assignments", title: "Task assignment defaults", body: "Pre-assign artwork, printing, manufacture, small format, install and dispatch work to the normal staff.", icon: "✓" },
     { href: "/suppliers", title: "Suppliers", body: "Supplier records used by materials and purchasing.", icon: "◫" }
   ]},
   { title: "Production setup", items: [

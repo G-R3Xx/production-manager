@@ -3,11 +3,21 @@
 import { useEffect, useRef, useState } from "react";
 
 type StaffOption = { id: string; name: string };
+
+const defaultLabels: Record<string, string> = {
+  artwork: "Artwork / prepress default",
+  signage_print: "Signage printing default",
+  signage_manufacture: "Signage manufacture default",
+  small_format: "Small format default",
+  installation: "Installation default",
+  dispatch: "Pickup / delivery default",
+};
 type Assignment = {
   assigneeProfileIds: string[];
   dueDate: string | null;
   assignmentSource: string;
   assignmentProcessKey: string;
+  assignmentDefaultKey: string | null;
 };
 
 export function ProductionStepAssignmentEditor({ stepId, initial, staff }: { stepId: string; initial: Assignment; staff: StaffOption[] }) {
@@ -61,7 +71,7 @@ export function ProductionStepAssignmentEditor({ stepId, initial, staff }: { ste
       setAssignment(next);
       setDraftIds(next.assigneeProfileIds ?? []);
       setDueDate(next.dueDate ?? "");
-      setMessage(inherit ? "Process defaults restored ✓" : "Override saved ✓");
+      setMessage(inherit ? "Company / job defaults restored ✓" : "Override saved ✓");
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Step assignment could not be saved.");
     } finally {
@@ -72,7 +82,7 @@ export function ProductionStepAssignmentEditor({ stepId, initial, staff }: { ste
   return (
     <details style={{ borderTop: "1px solid #eef2f6", paddingTop: 7 }}>
       <summary style={{ cursor: "pointer", color: "#475467", fontSize: 11, fontWeight: 850 }}>
-        {assignment.assignmentSource === "manual" ? "Staff override" : `Inherited from ${assignment.assignmentProcessKey === "dispatch" ? "Dispatch" : "Production"}`}
+        {assignment.assignmentSource === "manual" ? "Staff override" : `Inherited from ${defaultLabels[assignment.assignmentDefaultKey ?? ""] || (assignment.assignmentProcessKey === "dispatch" ? "Dispatch" : "Production")}`}
         {names.length ? ` · ${names.join(", ")}` : " · Unassigned"}
         {assignment.dueDate ? ` · Due ${assignment.dueDate}` : ""}
       </summary>
@@ -88,7 +98,7 @@ export function ProductionStepAssignmentEditor({ stepId, initial, staff }: { ste
             <input type="date" value={dueDate} onChange={(event) => { setDueDate(event.target.value); setMessage(""); }} style={{ minHeight: 36, border: "1px solid #cbd5e1", borderRadius: 9, padding: "0 8px", background: "#fff" }} />
           </label>
           <button type="button" disabled={busy} onClick={() => persist(false)} style={{ minHeight: 36, border: 0, borderRadius: 9, background: "#0f172a", color: "#fff", padding: "0 11px", fontWeight: 900, cursor: busy ? "wait" : "pointer" }}>{busy ? "Saving…" : "Save step override"}</button>
-          <button type="button" disabled={busy || assignment.assignmentSource !== "manual"} onClick={() => persist(true)} style={{ minHeight: 36, border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", color: assignment.assignmentSource === "manual" ? "#344054" : "#98a2b3", padding: "0 11px", fontWeight: 900, cursor: assignment.assignmentSource === "manual" ? "pointer" : "default" }}>Use process defaults</button>
+          <button type="button" disabled={busy || assignment.assignmentSource !== "manual"} onClick={() => persist(true)} style={{ minHeight: 36, border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", color: assignment.assignmentSource === "manual" ? "#344054" : "#98a2b3", padding: "0 11px", fontWeight: 900, cursor: assignment.assignmentSource === "manual" ? "pointer" : "default" }}>Use inherited defaults</button>
           {message ? <span style={{ color: "#067647", fontSize: 11, fontWeight: 850 }}>{message}</span> : null}
           {error ? <span style={{ color: "#b42318", fontSize: 11, fontWeight: 850 }}>{error}</span> : null}
         </div>

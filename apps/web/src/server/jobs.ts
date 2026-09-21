@@ -13,10 +13,12 @@ import {
   type QuoteDraftRecord,
   type ArtworkApprovalRecord,
 } from "@/server/quotes";
+import { ensureTaskAssignmentDefaultSchema } from "@/server/task-assignment-defaults";
 import {
   getProductionJobById,
   listProductionJobsForTenant,
   listProductionJobStepSummariesForTenant,
+  syncProductionStepAssignmentsFromJobProcessForTenant,
   type ProductionJobRecord,
   type ProductionJobStepSummary,
 } from "@/server/production";
@@ -120,6 +122,8 @@ export type JobProcessAssignmentRecord = {
   assigneeProfileIds: string[];
   dueDate: string | null;
   notes: string | null;
+  assignmentSource: "inherited" | "manual" | string;
+  assignmentDefaultKey: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -174,7 +178,7 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
     const tablesReady = await relationsExist(["app.jobs", "app.job_process_assignments", "app.job_tasks"]);
     const columnsReady = tablesReady && await Promise.all([
       relationHasColumns("app.jobs", ["production_job_id", "current_stage", "dispatch_type", "invoice_status"]),
-      relationHasColumns("app.job_process_assignments", ["assignee_profile_ids", "due_date"]),
+      relationHasColumns("app.job_process_assignments", ["assignee_profile_ids", "due_date", "assignment_source", "assignment_default_key"]),
       relationHasColumns("app.job_tasks", ["assignee_profile_ids", "process_key", "system_key"])
     ]).then((checks) => checks.every(Boolean));
     if (columnsReady) {
@@ -238,6 +242,8 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
         assignee_profile_ids uuid[] NOT NULL DEFAULT '{}'::uuid[],
         due_date date,
         notes text,
+        assignment_source varchar(24) NOT NULL DEFAULT 'manual',
+        assignment_default_key varchar(60),
         created_at timestamptz NOT NULL DEFAULT now(),
         updated_at timestamptz NOT NULL DEFAULT now(),
         CONSTRAINT job_process_assignments_process_key_chk CHECK (
@@ -245,6 +251,8 @@ export async function ensureJobWorkspaceSchema(): Promise<void> {
         )
       )
     `);
+    await pool.query(`ALTER TABLE app.job_process_assignments ADD COLUMN IF NOT EXISTS assignment_source varchar(24) NOT NULL DEFAULT 'manual'`);
+    await pool.query(`ALTER TABLE app.job_process_assignments ADD COLUMN IF NOT EXISTS assignment_default_key varchar(60)`);
     await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS job_process_assignments_job_process_uidx ON app.job_process_assignments (job_id, process_key)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS job_process_assignments_tenant_due_idx ON app.job_process_assignments (tenant_id, due_date, process_key)`);
     await pool.query(`CREATE INDEX IF NOT EXISTS job_process_assignments_tenant_job_idx ON app.job_process_assignments (tenant_id, job_id, process_key)`);
@@ -651,6 +659,10 @@ async function performWorkflowJobSynchronisation(tenantId: string): Promise<JobR
         await pool.query(`UPDATE app.jobs SET current_href=$3, updated_at=GREATEST(updated_at, now()) WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, job.id, job.currentHref]);
       }
       syncedJobs.push(job);
+      await syncInheritedJobProcessDefaultsForTenant(tenantId, job.id);
+      if (job.productionJobId) {
+        await syncProductionStepAssignmentsFromJobProcessForTenant(tenantId, job.id);
+      }
       await upsertSystemStageTask(job, dueDate);
     }
   }
@@ -920,9 +932,49 @@ function processAssignmentSelectSql(): string {
     COALESCE(assignee_profile_ids, '{}'::uuid[]) as "assigneeProfileIds",
     due_date::text as "dueDate",
     notes,
+    assignment_source as "assignmentSource",
+    assignment_default_key as "assignmentDefaultKey",
     created_at::text as "createdAt",
     updated_at::text as "updatedAt"
   `;
+}
+
+export async function syncInheritedJobProcessDefaultsForTenant(tenantId: string, jobId?: string | null): Promise<void> {
+  await ensureJobWorkspaceSchema();
+  await ensureTaskAssignmentDefaultSchema();
+  await pool.query(`
+    INSERT INTO app.job_process_assignments AS assignment (
+      tenant_id, job_id, process_key, assignee_profile_ids, due_date, notes, assignment_source, assignment_default_key, created_at, updated_at
+    )
+    SELECT
+      job.tenant_id,
+      job.id,
+      'artwork',
+      defaults.assignee_profile_ids,
+      NULL,
+      NULL,
+      'inherited',
+      'artwork',
+      now(),
+      now()
+    FROM app.jobs job
+    INNER JOIN app.task_assignment_defaults defaults
+      ON defaults.tenant_id = job.tenant_id
+     AND defaults.assignment_key = 'artwork'
+    WHERE job.tenant_id = $1::uuid
+      AND (NULLIF($2::text,'') IS NULL OR job.id = NULLIF($2::text,'')::uuid)
+    ON CONFLICT (job_id, process_key)
+    DO UPDATE SET
+      assignee_profile_ids = EXCLUDED.assignee_profile_ids,
+      assignment_default_key = EXCLUDED.assignment_default_key,
+      updated_at = CASE
+        WHEN assignment.assignee_profile_ids IS DISTINCT FROM EXCLUDED.assignee_profile_ids
+          OR assignment.assignment_default_key IS DISTINCT FROM EXCLUDED.assignment_default_key
+        THEN now()
+        ELSE assignment.updated_at
+      END
+    WHERE assignment.assignment_source = 'inherited'
+  `, [tenantId, jobId ?? ""]);
 }
 
 export async function listJobProcessAssignmentsForTenant(
@@ -930,6 +982,7 @@ export async function listJobProcessAssignmentsForTenant(
   input?: { jobId?: string; month?: string },
 ): Promise<JobProcessAssignmentRecord[]> {
   await ensureJobWorkspaceSchema();
+  await syncInheritedJobProcessDefaultsForTenant(tenantId, input?.jobId ?? null);
   const params: unknown[] = [tenantId];
   const conditions = ["tenant_id = $1::uuid"];
   if (input?.jobId) {
@@ -982,9 +1035,9 @@ export async function updateJobProcessAssignmentForTenant(tenantId: string, inpu
 
   const result = await pool.query<JobProcessAssignmentRecord>(`
     INSERT INTO app.job_process_assignments AS assignment (
-      tenant_id, job_id, process_key, assignee_profile_ids, due_date, notes, created_at, updated_at
+      tenant_id, job_id, process_key, assignee_profile_ids, due_date, notes, assignment_source, assignment_default_key, created_at, updated_at
     )
-    SELECT $1::uuid, job.id, $3, $4::uuid[], NULLIF($5::text,'')::date, NULLIF($6::text,''), now(), now()
+    SELECT $1::uuid, job.id, $3, $4::uuid[], NULLIF($5::text,'')::date, NULLIF($6::text,''), 'manual', NULL, now(), now()
     FROM app.jobs job
     WHERE job.tenant_id = $1::uuid AND job.id = $2::uuid
     ON CONFLICT (job_id, process_key)
@@ -992,6 +1045,8 @@ export async function updateJobProcessAssignmentForTenant(tenantId: string, inpu
       assignee_profile_ids = EXCLUDED.assignee_profile_ids,
       due_date = EXCLUDED.due_date,
       notes = EXCLUDED.notes,
+      assignment_source = 'manual',
+      assignment_default_key = NULL,
       updated_at = now()
     RETURNING ${processAssignmentSelectSql()}
   `, [tenantId, input.jobId, processKey, requestedIds, input.dueDate ?? null, input.notes ?? null]);
@@ -1011,6 +1066,35 @@ export async function updateJobProcessAssignmentForTenant(tenantId: string, inpu
   `, [tenantId, input.jobId, processKey, requestedIds, input.dueDate ?? null]);
 
   return assignment;
+}
+
+export async function resetJobProcessAssignmentToDefaultsForTenant(tenantId: string, input: {
+  jobId: string;
+  processKey: string;
+}): Promise<JobProcessAssignmentRecord | null> {
+  await ensureJobWorkspaceSchema();
+  const processKey = input.processKey.trim().toLowerCase();
+  if (!isJobProcessKey(processKey)) throw new Error("Choose a valid job process.");
+
+  const exists = await pool.query<{ id: string }>(`
+    SELECT id FROM app.jobs WHERE tenant_id = $1::uuid AND id = $2::uuid LIMIT 1
+  `, [tenantId, input.jobId]);
+  if (!exists.rows[0]) throw new Error("Job not found in this workspace.");
+
+  await pool.query(`
+    DELETE FROM app.job_process_assignments
+    WHERE tenant_id = $1::uuid AND job_id = $2::uuid AND process_key = $3
+  `, [tenantId, input.jobId, processKey]);
+
+  await syncInheritedJobProcessDefaultsForTenant(tenantId, input.jobId);
+
+  const result = await pool.query<JobProcessAssignmentRecord>(`
+    SELECT ${processAssignmentSelectSql()}
+    FROM app.job_process_assignments
+    WHERE tenant_id = $1::uuid AND job_id = $2::uuid AND process_key = $3
+    LIMIT 1
+  `, [tenantId, input.jobId, processKey]);
+  return result.rows[0] ?? null;
 }
 
 export async function listJobTasksForTenant(tenantId: string, input?: { jobId?: string; month?: string }): Promise<JobTaskRecord[]> {

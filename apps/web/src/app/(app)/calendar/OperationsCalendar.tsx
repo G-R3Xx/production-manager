@@ -24,6 +24,7 @@ export type CalendarEvent = {
   currentStage: string;
   assignmentSource: string | null;
   assignmentProcessKey: string | null;
+  assignmentDefaultKey: string | null;
 };
 
 export type CalendarStaff = { id: string; name: string; shortName: string };
@@ -61,6 +62,15 @@ const jobTypeOptions = [
   ["mixed", "Mixed"],
   ["other", "Other"],
 ] as const;
+
+const assignmentDefaultLabels: Record<string, string> = {
+  artwork: "Artwork / prepress",
+  signage_print: "Signage printing",
+  signage_manufacture: "Signage manufacture",
+  small_format: "Small format",
+  installation: "Installation",
+  dispatch: "Pickup / delivery",
+};
 
 const processLabels: Record<string, string> = {
   enquiry: "Enquiry",
@@ -262,11 +272,12 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
         assigneeProfileIds: result.assigneeProfileIds ?? [],
         assignmentSource: result.assignmentSource ?? item.assignmentSource,
         assignmentProcessKey: result.assignmentProcessKey ?? item.assignmentProcessKey,
+        assignmentDefaultKey: result.assignmentDefaultKey ?? item.assignmentDefaultKey,
         processKey: result.assignmentProcessKey ?? item.processKey,
       } : item));
       setDraftDate(result.dueDate ?? "");
       setDraftStaff(result.assigneeProfileIds ?? []);
-      setNotice(inherit ? `${event.title} now uses process defaults` : `${event.title} updated`);
+      setNotice(inherit ? `${event.title} now uses inherited company / job defaults` : `${event.title} updated`);
     } catch (cause) {
       setEvents(previous);
       setError(cause instanceof Error ? cause.message : "Calendar item could not be saved.");
@@ -461,12 +472,12 @@ export function OperationsCalendar({ initialEvents, staff, todayKey, initialDate
           <div style={{ display: "grid", gap: 18 }}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}><div><p style={{ margin: 0, color: toneForEvent(selected).solid, fontSize: 11, fontWeight: 950, textTransform: "uppercase" }}>{eventKindLabel(selected)}</p><h2 style={{ margin: "4px 0 0", fontSize: 25 }}>{selected.title}</h2></div><button type="button" onClick={() => setSelectedId(null)} style={{ width: 38, height: 38, borderRadius: 11, border: "1px solid #d0d5dd", background: "#fff", fontSize: 20, cursor: "pointer" }}>×</button></div>
             <section style={{ border: "1px solid #e4e7ec", borderRadius: 15, background: "#f8fafc", padding: 13 }}><strong style={{ display: "block", fontSize: 16 }}>{selected.jobNumber} · {selected.jobTitle}</strong><span style={{ display: "block", marginTop: 4, color: "#667085", fontSize: 12 }}>{selected.clientName}</span><span style={{ display: "inline-block", marginTop: 8, borderRadius: 999, background: "#fff", border: "1px solid #d0d5dd", padding: "4px 8px", color: "#475467", fontSize: 10, fontWeight: 900 }}>{selected.jobType.replaceAll("_", " ")}</span></section>
-            {selected.kind === "production_step" ? <section style={{ border: `1px solid ${selected.assignmentSource === "manual" ? "#bfdbfe" : "#a5f3fc"}`, borderRadius: 13, background: selected.assignmentSource === "manual" ? "#eff6ff" : "#ecfeff", color: selected.assignmentSource === "manual" ? "#1d4ed8" : "#0e7490", padding: 12, fontSize: 12 }}><strong style={{ display: "block" }}>{selected.assignmentSource === "manual" ? "This procedure has its own schedule" : `Inherited from ${selected.assignmentProcessKey === "dispatch" ? "Pickup / delivery / install" : "Production"}`}</strong><span style={{ display: "block", marginTop: 3 }}>{selected.assignmentSource === "manual" ? "Change it here, or restore the main process defaults below." : "Changing the date or staff here creates an override for this procedure only."}</span></section> : null}
+            {selected.kind === "production_step" ? <section style={{ border: `1px solid ${selected.assignmentSource === "manual" ? "#bfdbfe" : "#a5f3fc"}`, borderRadius: 13, background: selected.assignmentSource === "manual" ? "#eff6ff" : "#ecfeff", color: selected.assignmentSource === "manual" ? "#1d4ed8" : "#0e7490", padding: 12, fontSize: 12 }}><strong style={{ display: "block" }}>{selected.assignmentSource === "manual" ? "This procedure has its own schedule" : `Inherited from ${assignmentDefaultLabels[selected.assignmentDefaultKey ?? ""] || (selected.assignmentProcessKey === "dispatch" ? "Pickup / delivery / install" : "Production")}`}</strong><span style={{ display: "block", marginTop: 3 }}>{selected.assignmentSource === "manual" ? "Change it here, or restore the inherited company / job defaults below." : "Changing the date or staff here creates an override for this procedure only."}</span></section> : null}
             <label style={labelStyle}>Due date<input type="date" value={draftDate} onChange={(event) => setDraftDate(event.target.value)} style={controlStyle} /></label>
             <fieldset style={{ border: "1px solid #dbe4f0", borderRadius: 15, padding: 12 }}><legend style={{ color: "#344054", fontSize: 11, fontWeight: 950, textTransform: "uppercase" }}>Assigned staff</legend><div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>{staff.map((person) => { const active = draftStaff.includes(person.id); return <button key={person.id} type="button" onClick={() => setDraftStaff((current) => active ? current.filter((id) => id !== person.id) : [...current, person.id])} style={filterChip(active, "#155eef", "#eff6ff", "#bfdbfe")}>{active ? "✓ " : "+ "}{person.name}</button>; })}{!staff.length ? <span style={{ color: "#b42318", fontSize: 12 }}>No active staff are available.</span> : null}</div></fieldset>
             {selected.notes ? <section style={{ border: "1px solid #e4e7ec", borderRadius: 13, padding: 12 }}><strong style={{ display: "block", fontSize: 11, color: "#667085", textTransform: "uppercase" }}>Notes</strong><p style={{ margin: "5px 0 0", whiteSpace: "pre-wrap", color: "#344054", fontSize: 13 }}>{selected.notes}</p></section> : null}
             {error ? <div style={{ border: "1px solid #fda29b", borderRadius: 12, background: "#fff5f4", color: "#b42318", padding: 10, fontSize: 12, fontWeight: 800 }}>{error}</div> : null}
-            <div style={{ display: "grid", gap: 8 }}><button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, draftDate || null, draftStaff)} style={{ minHeight: 46, border: 0, borderRadius: 12, background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer" }}>{savingId === selected.id ? "Saving…" : selected.kind === "production_step" ? "Save procedure schedule" : "Save schedule"}</button>{draftDate ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, null, draftStaff)} style={{ minHeight: 42, border: "1px solid #fed7aa", borderRadius: 12, background: "#fff", color: "#c2410c", fontWeight: 900, cursor: "pointer" }}>Move back to unscheduled</button> : null}{selected.kind === "production_step" && selected.assignmentSource === "manual" ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, selected.dueDate, selected.assigneeProfileIds, true)} style={{ minHeight: 42, border: "1px solid #a5f3fc", borderRadius: 12, background: "#fff", color: "#0e7490", fontWeight: 900, cursor: "pointer" }}>Use {selected.assignmentProcessKey === "dispatch" ? "dispatch" : "Production"} defaults</button> : null}<Link href={`/jobs/${selected.jobId}`} style={{ minHeight: 44, border: "1px solid #cfd9e8", borderRadius: 12, background: "#fff", color: "#155eef", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontWeight: 950 }}>Open complete job →</Link></div>
+            <div style={{ display: "grid", gap: 8 }}><button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, draftDate || null, draftStaff)} style={{ minHeight: 46, border: 0, borderRadius: 12, background: "#0f172a", color: "#fff", fontWeight: 950, cursor: "pointer" }}>{savingId === selected.id ? "Saving…" : selected.kind === "production_step" ? "Save procedure schedule" : "Save schedule"}</button>{draftDate ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, null, draftStaff)} style={{ minHeight: 42, border: "1px solid #fed7aa", borderRadius: 12, background: "#fff", color: "#c2410c", fontWeight: 900, cursor: "pointer" }}>Move back to unscheduled</button> : null}{selected.kind === "production_step" && selected.assignmentSource === "manual" ? <button type="button" disabled={savingId === selected.id} onClick={() => void saveSchedule(selected, selected.dueDate, selected.assigneeProfileIds, true)} style={{ minHeight: 42, border: "1px solid #a5f3fc", borderRadius: 12, background: "#fff", color: "#0e7490", fontWeight: 900, cursor: "pointer" }}>Use inherited defaults</button> : null}<Link href={`/jobs/${selected.jobId}`} style={{ minHeight: 44, border: "1px solid #cfd9e8", borderRadius: 12, background: "#fff", color: "#155eef", display: "flex", alignItems: "center", justifyContent: "center", textDecoration: "none", fontWeight: 950 }}>Open complete job →</Link></div>
           </div>
         </aside>
       </> : null}

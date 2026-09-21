@@ -2,6 +2,7 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
+import { ensureTaskAssignmentDefaultSchema } from "@/server/task-assignment-defaults";
 
 export type ProductionJobRecord = {
   id: string;
@@ -75,6 +76,7 @@ export type ProductionStepRecord = {
   dueDate: string | null;
   assignmentSource: "inherited" | "manual" | string;
   assignmentProcessKey: "production" | "dispatch" | string;
+  assignmentDefaultKey: string | null;
   sortOrder: number;
   createdAt: string;
   updatedAt: string;
@@ -102,6 +104,7 @@ export type ProductionCalendarStepRecord = {
   dueDate: string | null;
   assignmentSource: "inherited" | "manual" | string;
   assignmentProcessKey: "production" | "dispatch" | string;
+  assignmentDefaultKey: string | null;
   sortOrder: number;
 };
 
@@ -553,7 +556,7 @@ export async function ensureProductionTables(): Promise<void> {
     const columnsReady = tablesReady && await Promise.all([
       relationHasColumns("production.production_jobs", ["dispatch_type", "source_type", "external_order_id", "linked_customer_id", "payload_json"]),
       relationHasColumns("production.production_items", ["source_quote_line_id", "production_type", "print_ready_url", "payload_json"]),
-      relationHasColumns("production.production_steps", ["assignee_profile_ids", "due_date", "assignment_source", "assignment_process_key"])
+      relationHasColumns("production.production_steps", ["assignee_profile_ids", "due_date", "assignment_source", "assignment_process_key", "assignment_default_key"])
     ]).then((checks) => checks.every(Boolean));
     if (columnsReady) {
       productionSchemaReady = true;
@@ -698,6 +701,7 @@ export async function ensureProductionTables(): Promise<void> {
       due_date date,
       assignment_source varchar(24) NOT NULL DEFAULT 'inherited',
       assignment_process_key varchar(40) NOT NULL DEFAULT 'production',
+      assignment_default_key varchar(60),
       sort_order integer NOT NULL DEFAULT 0,
       payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
       created_at timestamptz NOT NULL DEFAULT now(),
@@ -715,6 +719,7 @@ export async function ensureProductionTables(): Promise<void> {
       ADD COLUMN IF NOT EXISTS due_date date,
       ADD COLUMN IF NOT EXISTS assignment_source varchar(24) NOT NULL DEFAULT 'inherited',
       ADD COLUMN IF NOT EXISTS assignment_process_key varchar(40) NOT NULL DEFAULT 'production',
+      ADD COLUMN IF NOT EXISTS assignment_default_key varchar(60),
       ADD COLUMN IF NOT EXISTS payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
   `);
 
@@ -904,11 +909,34 @@ async function syncInheritedProductionStepAssignments(input: {
       to_regclass('app.job_process_assignments')::text as "assignmentsTable"
   `);
   if (!schema.rows[0]?.jobsTable || !schema.rows[0]?.assignmentsTable) return;
+  await ensureTaskAssignmentDefaultSchema();
 
   await pool.query(`
     WITH step_defaults AS (
       SELECT
         step.id,
+        production_job.tenant_id,
+        workflow_job.id AS workflow_job_id,
+        workflow_job.due_date AS workflow_due_date,
+        CASE
+          WHEN (
+              lower(COALESCE(production_job.dispatch_type, '')) = 'install'
+              AND lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(ready|install|handoff|dispatch)'
+            )
+            OR (
+              lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(ready for install|site install)'
+              AND lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) !~ '(pickup|delivery)'
+            ) THEN 'installation'
+          WHEN lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(ready|delivery|deliver|pickup|collect|dispatch)'
+            THEN 'dispatch'
+          WHEN lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(artwork|print.ready)'
+            THEN 'artwork'
+          WHEN COALESCE(item.production_type, '') IN ('small_format','plan_printing','poster_printing')
+            THEN 'small_format'
+          WHEN lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(rip|setup|print)'
+            THEN 'signage_print'
+          ELSE 'signage_manufacture'
+        END AS default_key,
         CASE
           WHEN lower(COALESCE(step.step_type, '') || ' ' || COALESCE(step.label, '')) ~ '(ready|install|delivery|deliver|pickup|collect|dispatch)'
             THEN 'dispatch'
@@ -919,6 +947,7 @@ async function syncInheritedProductionStepAssignments(input: {
       INNER JOIN app.jobs workflow_job
         ON workflow_job.tenant_id = production_job.tenant_id
        AND workflow_job.production_job_id = production_job.id
+      LEFT JOIN production.production_items item ON item.id = step.item_id
       WHERE step.assignment_source = 'inherited'
         AND (NULLIF($1::text, '') IS NULL OR production_job.id = NULLIF($1::text, '')::uuid)
         AND (NULLIF($2::text, '') IS NULL OR production_job.tenant_id = NULLIF($2::text, '')::uuid)
@@ -927,24 +956,28 @@ async function syncInheritedProductionStepAssignments(input: {
       SELECT
         defaults.id,
         defaults.process_key,
-        COALESCE(assignment.assignee_profile_ids, '{}'::uuid[]) AS assignee_profile_ids,
-        assignment.due_date
+        defaults.default_key,
+        CASE
+          WHEN assignment.id IS NOT NULL THEN assignment.assignee_profile_ids
+          ELSE COALESCE(company_default.assignee_profile_ids, '{}'::uuid[])
+        END AS assignee_profile_ids,
+        COALESCE(assignment.due_date, defaults.workflow_due_date) AS due_date
       FROM step_defaults defaults
-      LEFT JOIN production.production_steps step ON step.id = defaults.id
-      LEFT JOIN production.production_jobs production_job ON production_job.id = step.job_id
-      LEFT JOIN app.jobs workflow_job
-        ON workflow_job.tenant_id = production_job.tenant_id
-       AND workflow_job.production_job_id = production_job.id
       LEFT JOIN app.job_process_assignments assignment
-        ON assignment.job_id = workflow_job.id
+        ON assignment.job_id = defaults.workflow_job_id
        AND assignment.process_key = defaults.process_key
+      LEFT JOIN app.task_assignment_defaults company_default
+        ON company_default.tenant_id = defaults.tenant_id
+       AND company_default.assignment_key = defaults.default_key
     )
     UPDATE production.production_steps step
     SET assignment_process_key = defaults.process_key,
+        assignment_default_key = defaults.default_key,
         assignee_profile_ids = defaults.assignee_profile_ids,
         due_date = defaults.due_date,
         updated_at = CASE
           WHEN step.assignment_process_key IS DISTINCT FROM defaults.process_key
+            OR step.assignment_default_key IS DISTINCT FROM defaults.default_key
             OR step.assignee_profile_ids IS DISTINCT FROM defaults.assignee_profile_ids
             OR step.due_date IS DISTINCT FROM defaults.due_date
           THEN now()
@@ -1032,6 +1065,7 @@ export async function listProductionCalendarStepsForTenant(tenantId: string): Pr
       step.due_date::text as "dueDate",
       step.assignment_source as "assignmentSource",
       step.assignment_process_key as "assignmentProcessKey",
+      step.assignment_default_key as "assignmentDefaultKey",
       step.sort_order as "sortOrder"
     FROM production.production_steps step
     INNER JOIN production.production_jobs production_job ON production_job.id = step.job_id
@@ -1065,6 +1099,7 @@ export async function listProductionStepsForJob(jobId: string): Promise<Producti
       due_date::text as "dueDate",
       assignment_source as "assignmentSource",
       assignment_process_key as "assignmentProcessKey",
+      assignment_default_key as "assignmentDefaultKey",
       sort_order as "sortOrder",
       created_at as "createdAt",
       updated_at as "updatedAt"
@@ -1139,6 +1174,7 @@ export async function updateProductionStepAssignmentForTenant(tenantId: string, 
       step.due_date::text as "dueDate",
       step.assignment_source as "assignmentSource",
       step.assignment_process_key as "assignmentProcessKey",
+      step.assignment_default_key as "assignmentDefaultKey",
       step.sort_order as "sortOrder",
       step.created_at as "createdAt",
       step.updated_at as "updatedAt"

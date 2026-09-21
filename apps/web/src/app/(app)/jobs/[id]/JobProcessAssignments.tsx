@@ -17,6 +17,8 @@ type Assignment = {
   processKey: ProcessKey;
   assigneeProfileIds: string[];
   dueDate: string | null;
+  assignmentSource?: string | null;
+  assignmentDefaultKey?: string | null;
 };
 type StaffOption = { id: string; name: string; role: string };
 type Draft = { assigneeProfileIds: string[]; dueDate: string };
@@ -36,8 +38,13 @@ export function JobProcessAssignments({
     const saved = assignments.find((assignment) => assignment.processKey === process.key);
     return [process.key, { assigneeProfileIds: saved?.assigneeProfileIds ?? [], dueDate: saved?.dueDate ?? "" }];
   })) as Record<ProcessKey, Draft>, [assignments]);
+  const initialSources = useMemo(() => Object.fromEntries(processes.map((process) => {
+    const assignment = assignments.find((item) => item.processKey === process.key);
+    return [process.key, assignment?.assignmentSource ?? null];
+  })) as Record<ProcessKey, string | null>, [assignments]);
   const [drafts, setDrafts] = useState<Record<ProcessKey, Draft>>(initial);
   const [saved, setSaved] = useState<Record<ProcessKey, Draft>>(initial);
+  const [sources, setSources] = useState<Record<ProcessKey, string | null>>(initialSources);
   const [state, setState] = useState<Partial<Record<ProcessKey, "saving" | "saved" | "error">>>({});
   const [errors, setErrors] = useState<Partial<Record<ProcessKey, string>>>({});
   const draftsRef = useRef(drafts);
@@ -56,7 +63,8 @@ export function JobProcessAssignments({
     }
     setDrafts(mergedDrafts);
     setSaved(initial);
-  }, [initial]);
+    setSources(initialSources);
+  }, [initial, initialSources]);
 
   function updateDraft(processKey: ProcessKey, next: Partial<Draft>) {
     setDrafts((current) => ({ ...current, [processKey]: { ...current[processKey], ...next } }));
@@ -87,10 +95,36 @@ export function JobProcessAssignments({
       };
       setDrafts((current) => ({ ...current, [processKey]: next }));
       setSaved((current) => ({ ...current, [processKey]: next }));
+      setSources((current) => ({ ...current, [processKey]: result.assignment.assignmentSource ?? "manual" }));
       setState((current) => ({ ...current, [processKey]: "saved" }));
     } catch (error) {
       setState((current) => ({ ...current, [processKey]: "error" }));
       setErrors((current) => ({ ...current, [processKey]: error instanceof Error ? error.message : "Assignment could not be saved." }));
+    }
+  }
+
+  async function restoreDefaults(processKey: ProcessKey) {
+    setState((current) => ({ ...current, [processKey]: "saving" }));
+    setErrors((current) => ({ ...current, [processKey]: "" }));
+    try {
+      const response = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/process-assignments/${processKey}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ inherit: true }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.ok) throw new Error(result.error || "Defaults could not be restored.");
+      const next = {
+        assigneeProfileIds: result.assignment.assigneeProfileIds ?? [],
+        dueDate: result.assignment.dueDate ?? "",
+      };
+      setDrafts((current) => ({ ...current, [processKey]: next }));
+      setSaved((current) => ({ ...current, [processKey]: next }));
+      setSources((current) => ({ ...current, [processKey]: result.assignment.assignmentSource ?? "inherited" }));
+      setState((current) => ({ ...current, [processKey]: "saved" }));
+    } catch (error) {
+      setState((current) => ({ ...current, [processKey]: "error" }));
+      setErrors((current) => ({ ...current, [processKey]: error instanceof Error ? error.message : "Defaults could not be restored." }));
     }
   }
 
@@ -100,7 +134,7 @@ export function JobProcessAssignments({
         <div>
           <p style={{ margin: 0, color: "#4f46e5", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Process ownership</p>
           <h2 style={{ margin: "4px 0 3px" }}>Assign the right people at every stage</h2>
-          <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Choose multiple staff and an optional due date. Production procedure steps inherit the Production or Dispatch team unless individually overridden.</p>
+          <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Choose multiple staff and an optional due date for this job. Production procedures use the company task defaults until you set a job-level Production or Dispatch override; individual procedures can still be overridden separately.</p>
         </div>
         <span style={{ borderRadius: 999, padding: "6px 10px", color: "#155eef", background: "#eff6ff", border: "1px solid #bfdbfe", fontSize: 12, fontWeight: 900 }}>Saves without reloading</span>
       </div>
@@ -118,6 +152,7 @@ export function JobProcessAssignments({
                 <div style={{ display: "flex", gap: 7, alignItems: "center", flexWrap: "wrap" }}>
                   <strong>{process.label}</strong>
                   <span style={{ borderRadius: 999, padding: "3px 7px", background: isCurrent ? "#155eef" : phase === "Passed" ? "#ecfdf3" : "#f2f4f7", color: isCurrent ? "#fff" : phase === "Passed" ? "#067647" : "#667085", fontSize: 10, fontWeight: 950 }}>{phase}</span>
+                  {(process.key === "artwork" || process.key === "production" || process.key === "dispatch") ? <span style={{ borderRadius: 999, padding: "3px 7px", background: sources[process.key] === "manual" ? "#fff7ed" : "#ecfeff", color: sources[process.key] === "manual" ? "#c2410c" : "#0e7490", fontSize: 10, fontWeight: 950 }}>{sources[process.key] === "manual" ? "Job override" : "Company defaults"}</span> : null}
                 </div>
                 <span style={{ display: "block", marginTop: 3, color: "#667085", fontSize: 11 }}>{process.description}</span>
               </div>
@@ -133,6 +168,7 @@ export function JobProcessAssignments({
               </label>
               <div style={{ display: "grid", gap: 4, justifyItems: "stretch", minWidth: 96 }}>
                 <button type="button" disabled={!dirty || status === "saving"} onClick={() => save(process.key)} style={{ minHeight: 38, border: 0, borderRadius: 10, background: dirty ? "#0f172a" : "#eef2f6", color: dirty ? "#fff" : "#98a2b3", fontWeight: 900, cursor: dirty ? "pointer" : "default", padding: "0 12px" }}>{status === "saving" ? "Saving…" : dirty ? "Save" : status === "saved" ? "Saved ✓" : "Saved"}</button>
+                {sources[process.key] === "manual" && (process.key === "artwork" || process.key === "production" || process.key === "dispatch") ? <button type="button" disabled={status === "saving"} onClick={() => restoreDefaults(process.key)} style={{ minHeight: 32, border: "1px solid #a5f3fc", borderRadius: 9, background: "#fff", color: "#0e7490", fontSize: 10, fontWeight: 900, cursor: "pointer", padding: "0 9px" }}>Use company defaults</button> : null}
                 {status === "error" ? <span style={{ color: "#b42318", fontSize: 10, maxWidth: 180 }}>{errors[process.key]}</span> : null}
               </div>
             </div>

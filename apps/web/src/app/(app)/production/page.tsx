@@ -1047,7 +1047,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                               <div style={{ gridColumn: "1 / -1" }}>
                                 <ProductionStepAssignmentEditor
                                   stepId={step.id}
-                                  initial={{ assigneeProfileIds: step.assigneeProfileIds, dueDate: step.dueDate, assignmentSource: step.assignmentSource, assignmentProcessKey: step.assignmentProcessKey }}
+                                  initial={{ assigneeProfileIds: step.assigneeProfileIds, dueDate: step.dueDate, assignmentSource: step.assignmentSource, assignmentProcessKey: step.assignmentProcessKey, assignmentDefaultKey: step.assignmentDefaultKey }}
                                   staff={productionStaff.map((person) => ({ id: person.userProfileId, name: person.shortName || person.fullName }))}
                                 />
                               </div>
