@@ -18,6 +18,7 @@ type MaterialManagerSource = {
   stockQuantity: string;
   purchaseCost: string;
   wastagePercent: string;
+  showAsInstallationOption: boolean;
   widthMm: string | null;
   lengthMm: string | null;
   rollWidthMm: string | null;
@@ -46,6 +47,7 @@ type GridRow = {
   stockQuantity: string;
   purchaseCost: string;
   wastagePercent: string;
+  showAsInstallationOption: boolean;
   widthMm: string;
   lengthMm: string;
   rollWidthMm: string;
@@ -185,6 +187,7 @@ function rowsFromMaterials(materials: MaterialManagerSource[]): GridRow[] {
     stockQuantity: String(material.stockQuantity ?? ""),
     purchaseCost: String(material.purchaseCost ?? ""),
     wastagePercent: String(material.wastagePercent ?? "0"),
+    showAsInstallationOption: material.showAsInstallationOption === true,
     widthMm: material.widthMm ?? "",
     lengthMm: material.lengthMm ?? "",
     rollWidthMm: material.rollWidthMm ?? "",
@@ -214,10 +217,10 @@ function unitCost(row: GridRow): number {
   const cost = Number(String(row.purchaseCost).replace(/,/g, ""));
   const qty = Number(String(row.stockQuantity).replace(/,/g, ""));
   if (!Number.isFinite(cost)) return 0;
-  const purchase = row.purchaseUom.toLowerCase();
-  const stock = row.stockUom.toLowerCase();
-  const divided = purchase.includes("1000") || purchase.includes("thousand") || purchase.includes("ream") || purchase.includes("pack") || purchase.includes("box") || purchase.includes("bag") || (purchase.includes("roll") && ["m", "lm", "metre", "meter", "linear metre", "linear meter"].includes(stock));
-  return divided && Number.isFinite(qty) && qty > 0 ? cost / qty : cost;
+  const purchase = row.purchaseUom.trim().toLowerCase();
+  const stock = row.stockUom.trim().toLowerCase();
+  const shouldDivide = Boolean(purchase && stock && purchase !== stock);
+  return shouldDivide && Number.isFinite(qty) && qty > 0 ? cost / qty : cost;
 }
 
 function sectionForType(group: GroupKey, type: string): string {
@@ -328,7 +331,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     const key = `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setRows((current) => [...current, {
       key, id: null, action: "ADD", materialGroup: group, materialType, name: "", customerFacingName: "", supplierName: "", sku: "",
-      purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
+      purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
       priceCheckedAt: todayLocal(), active: true, savedState: "active"
     }]);
     setSection(currentSection.key);
@@ -375,6 +378,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       stockQuantity: row.stockQuantity,
       purchaseCost: row.purchaseCost,
       wastagePercent: row.wastagePercent,
+      showAsInstallationOption: row.showAsInstallationOption,
       widthMm: row.widthMm || null,
       lengthMm: row.lengthMm || null,
       rollWidthMm: row.rollWidthMm || null,
@@ -456,10 +460,10 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       </div>
 
       <div style={{ overflowX: "auto", maxHeight: 620, overflowY: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1780, fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1880, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
-              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label) => <th key={label || "controls"} style={{ padding: "9px 8px", borderBottom: "1px solid #e4e7ec", whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</th>)}
+              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label) => <th key={label || "controls"} style={{ padding: "9px 8px", borderBottom: "1px solid #e4e7ec", whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -482,6 +486,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 110 }}><input inputMode="decimal" value={row.stockQuantity} onChange={(event) => updateRow(row.key, "stockQuantity", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 120 }}><input inputMode="decimal" value={row.purchaseCost} onPaste={(event) => { if (pasteCosts(row.key, event.clipboardData.getData("text"))) event.preventDefault(); }} onChange={(event) => updateRow(row.key, "purchaseCost", event.target.value)} style={{ ...cellInputStyle, textAlign: "right", fontWeight: 800, borderColor: changed ? "#fdb022" : "#e4e7ec" }} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 90 }}><input inputMode="decimal" value={row.wastagePercent} onChange={(event) => updateRow(row.key, "wastagePercent", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "center" }}><input type="checkbox" checked={row.showAsInstallationOption} onChange={(event) => updateRow(row.key, "showAsInstallationOption", event.target.checked)} title="Show this material as a selectable item on Install quote lines" /></td>
                 <td style={{ padding: "5px 10px", borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "right", fontWeight: 850, color: "#0f766e", whiteSpace: "nowrap" }}>{money.format(unitCost(row))}</td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 135 }}><input type="date" value={row.priceCheckedAt} onChange={(event) => updateRow(row.key, "priceCheckedAt", event.target.value)} style={cellInputStyle} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 88 }}><input inputMode="decimal" value={row.widthMm} onChange={(event) => updateRow(row.key, "widthMm", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>

@@ -19,6 +19,7 @@ export type MaterialRecord = {
   rollBillingIncrementMetres: string | null;
   reversePrintable: boolean;
   usedForBacking: boolean;
+  showAsInstallationOption: boolean;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -57,6 +58,7 @@ export type CreateMaterialInput = {
   rollBillingIncrementMetres: string | null;
   reversePrintable: boolean;
   usedForBacking: boolean;
+  showAsInstallationOption: boolean;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -189,6 +191,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
       COALESCE(m.reverse_printable, false) AS "reversePrintable",
       COALESCE(m.used_for_backing, false) AS "usedForBacking",
+      COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
       m.stock_uom AS "stockUom",
       m.purchase_uom AS "purchaseUom",
       m.stock_quantity::text AS "stockQuantity",
@@ -299,7 +302,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
       $15::varchar,
       $16::numeric,
       $17::numeric,
-      jsonb_build_object('purchaseCost',$17::numeric,'wastagePercent',$18::numeric),
+      jsonb_build_object('purchaseCost',$17::numeric,'wastagePercent',$18::numeric,'showAsInstallationOption',$24::boolean),
       $19::numeric,
       $20::numeric,
       $21::numeric,
@@ -333,7 +336,8 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
     input.lengthMm,
     input.rollWidthMm,
     input.gsm,
-    input.notes
+    input.notes,
+    input.showAsInstallationOption
   ]);
   return result.rows[0];
 }
@@ -360,7 +364,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       purchase_uom = $16::varchar,
       stock_quantity = $17::numeric,
       purchase_cost = $18::numeric,
-      cost_json = COALESCE(cost_json, '{}'::jsonb) || jsonb_build_object('purchaseCost', $18::numeric, 'wastagePercent', $19::numeric),
+      cost_json = COALESCE(cost_json, '{}'::jsonb) || jsonb_build_object('purchaseCost', $18::numeric, 'wastagePercent', $19::numeric, 'showAsInstallationOption', $25::boolean),
       width_mm = $20::numeric,
       length_mm = $21::numeric,
       roll_width_mm = $22::numeric,
@@ -393,7 +397,8 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     input.lengthMm,
     input.rollWidthMm,
     input.gsm,
-    input.notes
+    input.notes,
+    input.showAsInstallationOption
   ]);
 }
 
@@ -442,6 +447,7 @@ export type MaterialPriceManagerChange = {
   stockQuantity: string;
   purchaseCost: string;
   wastagePercent: string;
+  showAsInstallationOption: boolean;
   widthMm: string | null;
   lengthMm: string | null;
   rollWidthMm: string | null;
@@ -545,6 +551,7 @@ export async function saveMaterialPriceManagerChanges(
       const stockQuantity = cleanMaterialManagerNumber(rawChange.stockQuantity) ?? "0";
       const purchaseCost = cleanMaterialManagerNumber(rawChange.purchaseCost) ?? "0";
       const wastagePercent = String(Math.max(0, Number(cleanMaterialManagerNumber(rawChange.wastagePercent) ?? "0") || 0));
+      const showAsInstallationOption = rawChange.showAsInstallationOption === true;
       const widthMm = cleanMaterialManagerNumber(rawChange.widthMm, true);
       const lengthMm = cleanMaterialManagerNumber(rawChange.lengthMm, true);
       const rollWidthMm = cleanMaterialManagerNumber(rawChange.rollWidthMm, true);
@@ -562,11 +569,11 @@ export async function saveMaterialPriceManagerChanges(
           ) VALUES (
             $1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,
             null,null,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,null,
-            jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'priceManagerSource','in-app') || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END,
+            jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'priceManagerSource','in-app') || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END,
             true,now(),now()
           )
           RETURNING id
-        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt]);
+        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption]);
         const id = created.rows[0]?.id;
         if (!id) throw new Error(`Could not add material '${name}'.`);
         createdIds.push(id);
@@ -591,12 +598,12 @@ export async function saveMaterialPriceManagerChanges(
             roll_width_mm=$17::numeric,
             gsm=$18::numeric,
             cost_json=(COALESCE(cost_json,'{}'::jsonb)-'priceCheckedAt')
-              || jsonb_build_object('purchaseCost',$13::numeric,'wastagePercent',$14::numeric,'priceManagerSource','in-app')
+              || jsonb_build_object('purchaseCost',$13::numeric,'wastagePercent',$14::numeric,'showAsInstallationOption',$20::boolean,'priceManagerSource','in-app')
               || CASE WHEN $19::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$19::text) END,
             updated_at=now()
         WHERE tenant_id=$1::uuid AND id=$2::uuid
         RETURNING id
-      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt]);
+      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption]);
       if (!result.rows[0]?.id) throw new Error(`Material '${name}' no longer exists.`);
       updatedIds.push(rawChange.id);
 

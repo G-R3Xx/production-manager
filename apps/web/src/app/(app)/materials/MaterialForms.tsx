@@ -21,6 +21,7 @@ type MaterialFormRecord = {
   rollBillingIncrementMetres: string | null;
   reversePrintable: boolean;
   usedForBacking: boolean;
+  showAsInstallationOption: boolean;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -270,9 +271,10 @@ function TypeHint({ kind }: { kind: MaterialKind }) {
 }
 
 function UnitSelect({ name, defaultValue, options }: { name: string; defaultValue: string; options: string[] }) {
+  const values = options.includes(defaultValue) || !defaultValue ? options : [defaultValue, ...options];
   return (
     <select name={name} defaultValue={defaultValue} style={inputStyle}>
-      {options.map((option) => <option key={option} value={option}>{option}</option>)}
+      {values.map((option) => <option key={option} value={option}>{option}</option>)}
     </select>
   );
 }
@@ -400,13 +402,13 @@ function EachFields({ material, kind }: { material?: MaterialFormRecord; kind: M
   const isBinding = kind === "binding";
   return (
     <div style={gridStyle}>
-      <Field label="Bought as" helper={isBinding ? "Roll, box, pack or each depending on binding/tape." : "How the supplier sells it: box, pack or each."}>
-        <UnitSelect name="purchaseUom" defaultValue={material?.purchaseUom ?? defaultPurchaseUomFor(kind)} options={isBinding ? ["roll", "box", "pack", "each"] : ["box", "pack", "bag", "each"]} />
+      <Field label="Bought as" helper={isBinding ? "Roll, box, pack or each depending on binding/tape." : "How the supplier sells it: box, pack, bag, carton, tube, bottle, roll or each."}>
+        <UnitSelect name="purchaseUom" defaultValue={material?.purchaseUom ?? defaultPurchaseUomFor(kind)} options={isBinding ? ["roll", "box", "pack", "bag", "each"] : ["box", "pack", "bag", "carton", "tube", "bottle", "roll", "each"]} />
       </Field>
       <Field label="Used / sold as" helper="How product recipes consume this item.">
-        <UnitSelect name="stockUom" defaultValue={material?.stockUom ?? defaultStockUomFor(kind)} options={["each", "pack", "box", "lm"]} />
+        <UnitSelect name="stockUom" defaultValue={material?.stockUom ?? defaultStockUomFor(kind)} options={["each", "tube", "bottle", "lm", "pack", "box", "bag", "roll"]} />
       </Field>
-      <Field label="Units per pack / stock qty" helper="When bought as a pack/box and used as each, enter the number inside the pack. Example: $17 per pack of 4 becomes $4.25 each. Use 1 when priced individually.">
+      <Field label="Units per pack / stock qty" helper="When the purchase unit contains multiple stock units, enter how many are inside. Example: $180 per box of 12 tubes becomes $15 per tube. Use 1 when priced individually.">
         <input name="stockQuantity" defaultValue={material?.stockQuantity ?? "0"} placeholder="eg 100, 500 or 1" style={inputStyle} />
       </Field>
       <Field label="Purchase cost" helper="Cost for the selected Bought as unit.">
@@ -452,6 +454,12 @@ function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: Sup
       <ParameterFields kind={kind} material={material} />
       <Field label="Wastage allowance %" helper="Added to the real material usage before markup and profit. Example: vinyl stock at 20% wastage charges 1.2 × the calculated stock cost.">
         <input name="wastagePercent" defaultValue={material?.wastagePercent ?? "0"} type="number" min="0" max="500" step="0.01" inputMode="decimal" placeholder="eg 20" style={inputStyle} />
+      </Field>
+      <Field label="Installation option" helper="Enable this when installers should be able to select this saved material on an Install quote line. PM uses its normal pack/roll quantity, purchase cost and wastage to calculate the unit cost.">
+        <label style={{ minHeight: 46, border: "1px solid #cbd5e1", borderRadius: 11, padding: "0 12px", display: "flex", alignItems: "center", gap: 10, background: "#fff", fontWeight: 800 }}>
+          <input type="checkbox" name="showAsInstallationOption" defaultChecked={material?.showAsInstallationOption === true} />
+          Show as installation option
+        </label>
       </Field>
       <Field label="Notes">
         <textarea

@@ -122,9 +122,8 @@ function materialGroup(material: MaterialRecord): string {
 function calculatedUnitCost(material: MaterialRecord): number {
   const purchaseCost = Math.max(0, Number(material.purchaseCost || 0));
   const stockQuantity = Math.max(0, Number(material.stockQuantity || 0));
-  const purchaseUom = text(material.purchaseUom).toLowerCase(); const stockUom = text(material.stockUom).toLowerCase();
-  if ((purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box") || purchaseUom.includes("bag")) && stockQuantity > 0) return purchaseCost / stockQuantity;
-  if (purchaseUom.includes("roll") && stockQuantity > 0 && ["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(stockUom)) return purchaseCost / stockQuantity;
+  const purchaseUom = text(material.purchaseUom).trim().toLowerCase(); const stockUom = text(material.stockUom).trim().toLowerCase();
+  if (purchaseUom && stockUom && purchaseUom !== stockUom && stockQuantity > 0) return purchaseCost / stockQuantity;
   return purchaseCost;
 }
 function priceCheckedAt(material: MaterialRecord): string { const value = text(material.costJson?.priceCheckedAt); return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ""; }

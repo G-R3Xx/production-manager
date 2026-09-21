@@ -42,6 +42,7 @@ export type SnapshotMaterial = {
   rollBillingIncrementMetres?: string | null;
   reversePrintable?: boolean;
   usedForBacking?: boolean;
+  showAsInstallationOption?: boolean;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -159,6 +160,7 @@ export type QuickQuoteSnapshot = {
     eyelet?: SnapshotMaterial | null;
     standoff?: SnapshotMaterial | null;
     componentParts?: SnapshotMaterial[];
+    installation?: SnapshotMaterial[];
   };
   pricingSnapshot?: {
     markupMultiplier?: number;
@@ -251,6 +253,7 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
     rollBillingIncrementMetres: stringValue(value.rollBillingIncrementMetres) || null,
     reversePrintable: value.reversePrintable === true || stringValue(value.reversePrintable).trim().toLowerCase() === "true",
     usedForBacking: value.usedForBacking === true || stringValue(value.usedForBacking).trim().toLowerCase() === "true",
+    showAsInstallationOption: value.showAsInstallationOption === true || stringValue(value.showAsInstallationOption).trim().toLowerCase() === "true",
     supplierName: stringValue(value.supplierName) || null,
     sku: stringValue(value.sku) || null,
     stockUom: stringValue(value.stockUom) || null,
@@ -283,6 +286,9 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
   const componentMaterials = Array.isArray(materialData.componentParts)
     ? materialData.componentParts.map(snapshotMaterial).filter((item): item is SnapshotMaterial => Boolean(item))
     : [];
+  const installationMaterials = Array.isArray(materialData.installation)
+    ? materialData.installation.map(snapshotMaterial).filter((item): item is SnapshotMaterial => Boolean(item))
+    : [];
 
   return {
     ...(sourceValue as QuickQuoteSnapshot),
@@ -314,7 +320,8 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
       smallCoating: snapshotMaterial(materialData.smallCoating),
       eyelet: snapshotMaterial(materialData.eyelet),
       standoff: snapshotMaterial(materialData.standoff),
-      componentParts: componentMaterials
+      componentParts: componentMaterials,
+      installation: installationMaterials
     }
   };
 }
@@ -330,7 +337,8 @@ export function materialsFromSnapshot(snapshot: QuickQuoteSnapshot | null | unde
     snapshot.materialSnapshots.smallCoating,
     snapshot.materialSnapshots.eyelet,
     snapshot.materialSnapshots.standoff,
-    ...(snapshot.materialSnapshots.componentParts ?? [])
+    ...(snapshot.materialSnapshots.componentParts ?? []),
+    ...(snapshot.materialSnapshots.installation ?? [])
   ].filter((item): item is SnapshotMaterial => Boolean(item?.id && item?.name));
   const seen = new Set<string>();
   return values.filter((item) => {
