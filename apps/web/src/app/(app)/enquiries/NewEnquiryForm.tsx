@@ -4,6 +4,7 @@ import { DragEvent, useRef, useState } from "react";
 import { createEnquiryAction } from "./actions";
 import { buildCorrespondencePreviewForFile, type CorrespondencePreviewFields } from "./emailPreview";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 type ClientOption = {
   id: string;
@@ -114,6 +115,10 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
   const inputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
+  const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
+  const savedClientLogoUrl = typeof selectedClient?.payloadJson?.logoUrl === "string"
+    ? selectedClient.payloadJson.logoUrl.trim()
+    : "";
   const [clientName, setClientName] = useState("");
   const [contactName, setContactName] = useState("");
   const [phone, setPhone] = useState("");
@@ -256,11 +261,22 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
           <option key={client.id} value={client.id}>{client.displayName}</option>
         ))}
       </select>
+      {selectedClient ? (
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <ClientLogoBadge logoUrl={savedClientLogoUrl} name={selectedClient.displayName} size={isTablet ? 64 : 52} />
+          <div style={{ display: "grid", gap: 3 }}>
+            <strong>{selectedClient.displayName}</strong>
+            <span style={{ color: "#64748b", fontSize: 12 }}>
+              {savedClientLogoUrl ? "Saved client logo" : "No saved client logo"}
+            </span>
+          </div>
+        </div>
+      ) : null}
       <input name="clientName" value={clientName} onChange={(event) => setClientName(event.currentTarget.value)} placeholder="Client / business name (or choose existing above)" required={isTablet} style={fieldStyle} />
       {!isTablet ? (
         <section style={{ border: "1px dashed #c7d7fe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 8 }}>
           <strong style={{ fontSize: 13 }}>Client logo (optional)</strong>
-          <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>Add a logo for a new/unlinked client. Existing linked clients already use their saved client logo.</span>
+          <span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.4 }}>{savedClientLogoUrl ? "The saved client logo will be used unless you add a replacement for this enquiry below." : "Add an optional logo for this enquiry."}</span>
           <input type="file" name="clientLogoFile" accept="image/*" style={{ ...fieldStyle, minHeight: 38, paddingTop: 8, background: "#fff" }} />
           <input name="clientLogoUrl" placeholder="or paste client logo URL" style={{ ...fieldStyle, background: "#fff" }} />
         </section>

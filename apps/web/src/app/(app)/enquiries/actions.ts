@@ -105,7 +105,11 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     siteAddress: nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress : null),
     requestSummary,
     clientPurchaseOrderNumber: nullable(formData.get("clientPurchaseOrderNumber")),
-    clientLogoUrl: pastedClientLogoUrl,
+    clientLogoUrl: pastedClientLogoUrl || customerLogoUrl(linkedCustomer) || null,
+    clientLogoStoragePath: !pastedClientLogoUrl && customerLogoUrl(linkedCustomer)
+      && typeof linkedCustomer?.payloadJson.logoStoragePath === "string"
+      ? linkedCustomer.payloadJson.logoStoragePath
+      : null,
     notes: nullable(formData.get("notes")),
     linkedCustomerId: linkedCustomer?.id ?? null
   });
