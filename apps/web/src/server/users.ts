@@ -49,7 +49,7 @@ export const MEMBERSHIP_STATUS_OPTIONS: { value: MembershipStatusValue; label: s
 
 export const QUOTE_ENTRY_LAYOUT_OPTIONS: { value: QuoteEntryLayout; label: string; description: string }[] = [
   { value: "list", label: "List", description: "Current work-down-the-page quote line builder." },
-  { value: "catalogue", label: "Visual catalogue", description: "Searchable product cards with images and a popup quote builder." }
+  { value: "catalogue", label: "Visual catalogue", description: "Searchable product cards with images and a guided step-by-step quote wizard." }
 ];
 
 const ADMIN_ROLES = new Set<TenantRoleValue>(["owner", "manager"]);
@@ -84,6 +84,22 @@ function normaliseMembershipStatus(value: string): MembershipStatusValue {
 function normaliseQuoteEntryLayout(value: string | null | undefined): QuoteEntryLayout {
   const cleaned = String(value ?? "list").trim().toLowerCase() as QuoteEntryLayout;
   return VALID_QUOTE_ENTRY_LAYOUTS.has(cleaned) ? cleaned : "list";
+}
+
+async function quoteEntryLayoutColumnExists(): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return false;
+  const result = await pool.query<{ exists: boolean }>(
+    `
+      SELECT EXISTS (
+        SELECT 1
+        FROM information_schema.columns
+        WHERE table_schema = 'app'
+          AND table_name = 'memberships'
+          AND column_name = 'quote_entry_layout'
+      ) AS exists
+    `
+  );
+  return Boolean(result.rows[0]?.exists);
 }
 
 export function canManageStaff(tenantRole: string | null | undefined): boolean {
@@ -205,6 +221,9 @@ export async function updateTenantUserMembershipByAdmin(input: {
   const nextRole = normaliseTenantRole(input.tenantRole);
   const nextStatus = normaliseMembershipStatus(input.membershipStatus);
   const nextQuoteEntryLayout = normaliseQuoteEntryLayout(input.quoteEntryLayout);
+  if (!(await quoteEntryLayoutColumnExists())) {
+    throw new Error("Quote layout database migration is required. Run infra/sql/051_quote_entry_layout.sql in the Supabase SQL Editor, then try again.");
+  }
   const requestedRate = String(input.quoteLabourRate ?? "").replace(/[$,]/g, "").trim();
   const quoteLabourRate = requestedRate === "" ? null : Number(requestedRate);
   if (quoteLabourRate !== null && (!Number.isFinite(quoteLabourRate) || quoteLabourRate < 0 || quoteLabourRate > 10000)) {

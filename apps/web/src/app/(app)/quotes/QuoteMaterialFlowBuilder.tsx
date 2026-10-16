@@ -80,6 +80,7 @@ type QuoteMaterialFlowBuilderProps = {
   editingLine?: EditableQuoteLine | null;
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
+  presentation?: "full" | "wizard";
 };
 
 type FlowType = QuickQuoteFlowType;
@@ -1300,8 +1301,9 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources, presentation = "full" }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
+  const [wizardIndex, setWizardIndex] = useState(0);
   const standardMarkupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const standardAccessEquipmentMarkupMultiplier = multiplierValue(pricingSettings?.accessEquipmentMarkupMultiplier, standardMarkupMultiplier);
   const initialStandardMarkupMultiplier = initialSnapshot?.flowType === "service" && initialSnapshot?.serviceType === "access_equipment"
@@ -3232,6 +3234,81 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     return <div style={compactPanel}><span style={{ color: "#64748b" }}>This component is stored in the structured quote snapshot and can be updated here.</span></div>;
   }
 
+
+  function renderWizardStep(step: QuickQuoteStep) {
+    const tileGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 } as const;
+    const tile = (selected: boolean) => ({
+      minHeight: 148,
+      borderRadius: 18,
+      border: selected ? "3px solid #2563eb" : "1px solid #cbd5e1",
+      background: selected ? "linear-gradient(145deg,#eff6ff,#ffffff)" : "#fff",
+      boxShadow: selected ? "0 10px 28px rgba(37,99,235,.16)" : "0 7px 20px rgba(15,23,42,.06)",
+      padding: 16,
+      display: "grid",
+      alignContent: "center",
+      justifyItems: "center",
+      textAlign: "center" as const,
+      gap: 8,
+      cursor: "pointer"
+    });
+    const icon = (value: string) => <span aria-hidden="true" style={{ fontSize: 36, lineHeight: 1 }}>{value}</span>;
+    const advance = () => setWizardIndex((current) => current + 1);
+    const changed = () => setUnitPriceOverridden(false);
+
+    if (step === "flow") {
+      const choices: Array<[FlowType, string, string, string]> = [
+        ["signage", "Large format / signage", "Panels, vinyl, banners and fabricated signage", "▰"],
+        ["small_format", "Small format / print", "Cards, flyers, brochures and booklets", "▤"],
+        ["plan_printing", "Plan printing", "Plan sets and wide-format documents", "⌗"],
+        ["poster_printing", "Poster printing", "Posters and print-only sheet work", "▣"],
+        ["service", "Pickup / delivery / install", "Service-only quote line", "⌂"],
+        ["component", "Custom component / assembly", "Built-up or custom manufactured item", "⚙"]
+      ];
+      return <div style={tileGrid}>{choices.map(([value,label,note,glyph]) => <button key={value} type="button" onClick={() => { setFlowType(value); changed(); setWizardIndex(1); }} style={tile(flowType === value)}>{icon(glyph)}<strong style={{ fontSize: 16 }}>{label}</strong><span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{note}</span></button>)}</div>;
+    }
+
+    if (step === "base") {
+      const glyphs: Record<string,string> = { acrylic:"◇", acm:"▱", corflute:"▥", pvc:"▰", banner:"〰", other_sheet:"□" };
+      return <div style={tileGrid}>{baseTypes.map((item) => <button key={item.key} type="button" onClick={() => { setBaseType(item.key as BaseType); setThickness(""); setColour(""); setMediaId(""); changed(); advance(); }} style={tile(baseType === item.key)}>{icon(glyphs[item.key] ?? "□")}<strong style={{ fontSize: 17 }}>{item.label}</strong><span style={{ color: "#64748b", fontSize: 12 }}>Choose {item.label.toLowerCase()} as the base product</span></button>)}</div>;
+    }
+
+    if (step === "thickness" || step === "colour") {
+      return <div style={tileGrid}>{baseMaterials.map((material) => {
+        const selected = selectedMainMaterial?.id === material.id;
+        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); advance(); }} style={tile(selected)}>{icon("▧")}<strong style={{ fontSize: 15 }}>{internalMaterialName(material)}</strong><span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{materialCardMeta(material)}</span></button>;
+      })}</div>;
+    }
+
+    if (step === "artwork") {
+      return <div style={tileGrid}>
+        <button type="button" onClick={() => { setArtworkChoice("client_supplied"); changed(); advance(); }} style={tile(artworkChoice === "client_supplied")}>{icon("✓")}<strong>Print-ready artwork supplied</strong><span style={{ color: "#64748b", fontSize: 12 }}>No artwork/setup allowance</span></button>
+        <button type="button" onClick={() => { setArtworkChoice("required"); changed(); }} style={tile(artworkChoice === "required")}>{icon("✎")}<strong>Artwork / setup required</strong><span style={{ color: "#64748b", fontSize: 12 }}>Add artwork time before continuing</span></button>
+        {artworkChoice === "required" ? <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, maxWidth: 360 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label> : null}
+      </div>;
+    }
+
+    if (step === "print" && !isRollStockBase) {
+      return <div style={tileGrid}>{printMethods.map((item) => <button key={item.key} type="button" onClick={() => { setPrintMethod(item.key as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(printMethod === item.key)}>{icon(item.key === "no_print" ? "∅" : item.key === "direct_print" ? "▦" : item.key === "roll_stock" ? "◫" : "✂")}<strong style={{ fontSize: 16 }}>{item.label}</strong></button>)}</div>;
+    }
+
+    if (step === "media") {
+      return <div style={tileGrid}>{rollMedia.map((material) => <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(mediaId === material.id)}>{icon("◫")}<strong style={{ fontSize: 15 }}>{internalMaterialName(material)}</strong><span style={{ color: "#64748b", fontSize: 12 }}>{materialCardMeta(material)}</span></button>)}</div>;
+    }
+
+    if (step === "ink") {
+      return <div style={tileGrid}>{availableInkChoices.map((item) => <button key={item.key} type="button" onClick={() => { setInk(item.key as InkChoice); changed(); advance(); }} style={tile(ink === item.key)}>{icon(item.key === "none" ? "∅" : "●")}<strong style={{ fontSize: 16 }}>{item.label}</strong></button>)}</div>;
+    }
+
+    if (step === "sides" && !canChooseReversePrint) {
+      return <div style={tileGrid}>
+        <button type="button" onClick={() => { setSides("single"); changed(); advance(); }} style={tile(sides === "single")}>{icon("▱")}<strong>Single sided</strong></button>
+        <button type="button" onClick={() => { setSides("double"); changed(); advance(); }} style={tile(sides === "double")}>{icon("▰")}<strong>Double sided</strong></button>
+      </div>;
+    }
+
+    return renderCompactStep(step);
+  }
+
   const handleBuilderKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
     const target = event.target as HTMLElement | null;
     const tagName = target?.tagName?.toLowerCase();
@@ -3334,8 +3411,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ borderRadius: 14, background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 14px" }}>
-            <strong style={{ color: "#1d4ed8" }}>Configure the complete quote line</strong>
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>Make every required selection below. Nothing is submitted until you press Save Quote Line. Live auto-refresh is paused while this editor is open so your unsaved selections are protected.</div>
+            <strong style={{ color: "#1d4ed8" }}>{presentation === "wizard" ? "Guided quote builder" : "Configure the complete quote line"}</strong>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{presentation === "wizard" ? "Choose one option at a time. Simple selections advance automatically; screens with extra details use Continue." : "Make every required selection below. Nothing is submitted until you press Save Quote Line. Live auto-refresh is paused while this editor is open so your unsaved selections are protected."}</div>
           </div>
           {machineCompatibilityIssues.length ? (
             <div style={{ borderRadius: 14, background: "#fff1f2", border: "1px solid #fecdd3", padding: "12px 14px", color: "#9f1239", display: "grid", gap: 4 }}>
@@ -3344,7 +3421,23 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
               <span style={{ fontSize: 12 }}>Change the stock/orientation, or update the machine Max width in Production Setup → Resources → Machines before saving this line.</span>
             </div>
           ) : null}
-          {allSignageSteps.map((step, index) => (
+          {presentation === "wizard" ? (() => {
+            const safeWizardIndex = Math.min(Math.max(0, wizardIndex), Math.max(0, allSignageSteps.length - 1));
+            const step = allSignageSteps[safeWizardIndex];
+            const stepComplete = step === "flow" ? Boolean(flowType) : step === "base" ? Boolean(baseType) : step === "thickness" || step === "colour" ? Boolean(selectedMainMaterial) : step === "size" || step === "small_size" ? width > 0 && height > 0 : step === "artwork" ? Boolean(artworkChoice) : step === "print" ? Boolean(resolvedPrintMethod) : step === "media" ? Boolean(mediaId) : step === "ink" ? Boolean(ink) : step === "sides" || step === "small_sides" ? Boolean(sides && (!canChooseReversePrint || !printed || printDirection)) : step === "laminate" ? Boolean((!backingApplicable || backingId) && (!printed || laminateId)) : step === "dispatch" ? dispatchComplete : true;
+            const atLast = safeWizardIndex === allSignageSteps.length - 1;
+            return <div style={{ display: "grid", gap: 16 }}>
+              <div style={{ display: "grid", gap: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}><span style={{ color: "#2563eb", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Step {safeWizardIndex + 1} of {allSignageSteps.length}</span><span style={{ color: "#64748b", fontSize: 12, fontWeight: 850 }}>{Math.round(((safeWizardIndex + 1) / allSignageSteps.length) * 100)}%</span></div>
+                <div style={{ height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}><div style={{ height: "100%", width: `${((safeWizardIndex + 1) / allSignageSteps.length) * 100}%`, background: "linear-gradient(90deg,#2563eb,#7c3aed)", borderRadius: 999 }} /></div>
+              </div>
+              <section style={{ minHeight: 330, display: "grid", alignContent: "start", gap: 14 }}><div><div style={{ color: "#64748b", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Build quote line</div><h2 style={{ margin: "3px 0 0", color: "#0f172a", fontSize: 26 }}>{allStepLabels[step] ?? step.replaceAll("_", " ")}</h2></div>{renderWizardStep(step)}</section>
+              <div style={{ position: "sticky", bottom: 0, zIndex: 3, margin: "0 -18px -18px", padding: "12px 18px", borderTop: "1px solid #e2e8f0", background: "rgba(255,255,255,.97)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+                <button type="button" disabled={safeWizardIndex === 0} onClick={() => setWizardIndex((current) => Math.max(0, current - 1))} style={{ ...ghostButton, minHeight: 42, opacity: safeWizardIndex === 0 ? .4 : 1 }}>← Back</button>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: "#0f172a" }}>{money(unitPrice)} each</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 42, opacity: canSave ? 1 : .45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Add quote line" : "Complete required fields"}</button>}</div>
+              </div>
+            </div>;
+          })() : allSignageSteps.map((step, index) => (
             <section key={step} style={{ display: "grid", gap: 7 }}>
               <strong style={{ color: "#344054", fontSize: 12, textTransform: "uppercase", letterSpacing: ".04em" }}>{index + 1}. {allStepLabels[step] ?? step.replaceAll("_", " ")}</strong>
               {renderCompactStep(step)}
@@ -3352,7 +3445,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           ))}
         </div>
 
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
+        <div style={{ display: presentation === "wizard" ? "none" : "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap", borderTop: "1px solid #e2e8f0", paddingTop: 10 }}>
           <div style={{ display: "grid", gap: 2 }}>
             <span style={{ fontSize: 11, color: "#64748b", fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em" }}>Updated price</span>
             <strong>{money(unitPrice)} each · {money(lineTotal)} line total</strong>

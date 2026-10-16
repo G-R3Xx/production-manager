@@ -121,7 +121,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Labour $/hr</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Quote layout</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Joined</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Action</th>
+                  <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb", position: "sticky", right: 0, zIndex: 3, background: "#f8fafc", boxShadow: "-10px 0 18px -16px rgba(15, 23, 42, 0.55)", width: 82, minWidth: 82 }}>Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -199,7 +199,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <div>{formatDate(row.membershipCreatedAt)}</div>
                         <div style={{ marginTop: 4, color: "#94a3b8" }}>Updated {formatDate(row.membershipUpdatedAt)}</div>
                       </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
+                      <td style={{ padding: 12, borderBottom: "1px solid #e5e7eb", verticalAlign: "top", position: "sticky", right: 0, zIndex: 2, background: isDisabled ? "#f8fafc" : "#ffffff", boxShadow: "-10px 0 18px -16px rgba(15, 23, 42, 0.55)", width: 82, minWidth: 82 }}>
                         <button
                           type="submit"
                           form={`staff-${row.membershipId}`}

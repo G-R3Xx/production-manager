@@ -253,6 +253,7 @@ export function VisualQuoteCatalogue({
                     canOverrideMarkup={canOverrideMarkup}
                     pricingSettings={pricingSettings}
                     costingResources={costingResources}
+                    presentation="wizard"
                   />
                 )}
               </Suspense>
