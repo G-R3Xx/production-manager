@@ -6,6 +6,7 @@ import {
   getTenantStaffSummary,
   listUsersForTenant,
   MEMBERSHIP_STATUS_OPTIONS,
+  QUOTE_ENTRY_LAYOUT_OPTIONS,
   staffStatusLabel,
   TENANT_ROLE_OPTIONS
 } from "@/server/users";
@@ -110,7 +111,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           <div style={{ padding: 24, color: "#475467" }}>No users found for this workspace yet.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
               <thead>
                 <tr style={{ background: "#f8fafc", textAlign: "left" }}>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Staff member</th>
@@ -118,6 +119,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Role</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Status</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Labour $/hr</th>
+                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Quote layout</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Joined</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Action</th>
                 </tr>
@@ -176,6 +178,22 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
                         <input form={`staff-${row.membershipId}`} name="quoteLabourRate" defaultValue={row.quoteLabourRate ?? ""} disabled={!canEdit} type="number" min="0" step="0.01" placeholder="Global rate" style={{ width: 110, minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 10px", fontWeight: 800 }} />
                         <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>Blank uses company rate.</div>
+                      </td>
+                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
+                        <select
+                          form={`staff-${row.membershipId}`}
+                          name="quoteEntryLayout"
+                          defaultValue={row.quoteEntryLayout ?? "list"}
+                          disabled={!canEdit}
+                          style={{ minHeight: 42, minWidth: 160, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 12px", fontWeight: 800 }}
+                        >
+                          {QUOTE_ENTRY_LAYOUT_OPTIONS.map((option) => (
+                            <option key={option.value} value={option.value}>{option.label}</option>
+                          ))}
+                        </select>
+                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12, maxWidth: 190 }}>
+                          {QUOTE_ENTRY_LAYOUT_OPTIONS.find((option) => option.value === row.quoteEntryLayout)?.description ?? QUOTE_ENTRY_LAYOUT_OPTIONS[0]?.description}
+                        </div>
                       </td>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", color: "#475467", fontSize: 13, verticalAlign: "top", lineHeight: 1.45 }}>
                         <div>{formatDate(row.membershipCreatedAt)}</div>

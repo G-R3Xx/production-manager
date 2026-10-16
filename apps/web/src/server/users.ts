@@ -5,12 +5,14 @@ import { relationHasColumns } from "@/server/schema-readiness";
 
 export type TenantRoleValue = "owner" | "manager" | "staff" | "sales" | "installer" | "accounts";
 export type MembershipStatusValue = "active" | "invited" | "disabled";
+export type QuoteEntryLayout = "list" | "catalogue";
 
 export type TenantUserRecord = {
   membershipId: string;
   tenantRole: TenantRoleValue;
   membershipStatus: MembershipStatusValue;
   quoteLabourRate: string | null;
+  quoteEntryLayout: QuoteEntryLayout;
   userProfileId: string;
   authUserId: string;
   fullName: string;
@@ -45,15 +47,24 @@ export const MEMBERSHIP_STATUS_OPTIONS: { value: MembershipStatusValue; label: s
   { value: "disabled", label: "Disabled", description: "Cannot access this workspace." }
 ];
 
+export const QUOTE_ENTRY_LAYOUT_OPTIONS: { value: QuoteEntryLayout; label: string; description: string }[] = [
+  { value: "list", label: "List", description: "Current work-down-the-page quote line builder." },
+  { value: "catalogue", label: "Visual catalogue", description: "Searchable product cards with images and a popup quote builder." }
+];
+
 const ADMIN_ROLES = new Set<TenantRoleValue>(["owner", "manager"]);
 const VALID_TENANT_ROLES = new Set<TenantRoleValue>(TENANT_ROLE_OPTIONS.map((option) => option.value));
 const VALID_MEMBERSHIP_STATUSES = new Set<MembershipStatusValue>(MEMBERSHIP_STATUS_OPTIONS.map((option) => option.value));
+const VALID_QUOTE_ENTRY_LAYOUTS = new Set<QuoteEntryLayout>(QUOTE_ENTRY_LAYOUT_OPTIONS.map((option) => option.value));
 
 let staffPricingSchemaReady = false;
 async function ensureStaffPricingColumn(): Promise<void> {
   if (!process.env.DATABASE_URL || staffPricingSchemaReady) return;
   if (!(await relationHasColumns("app.memberships", ["quote_labour_rate"]))) {
     await pool.query(`ALTER TABLE app.memberships ADD COLUMN IF NOT EXISTS quote_labour_rate numeric(10,2)`);
+  }
+  if (!(await relationHasColumns("app.memberships", ["quote_entry_layout"]))) {
+    await pool.query(`ALTER TABLE app.memberships ADD COLUMN IF NOT EXISTS quote_entry_layout varchar(20) NOT NULL DEFAULT 'list'`);
   }
   staffPricingSchemaReady = true;
 }
@@ -68,6 +79,11 @@ function normaliseMembershipStatus(value: string): MembershipStatusValue {
   const cleaned = value.trim().toLowerCase() as MembershipStatusValue;
   if (!VALID_MEMBERSHIP_STATUSES.has(cleaned)) throw new Error("Please choose a valid staff status.");
   return cleaned;
+}
+
+function normaliseQuoteEntryLayout(value: string | null | undefined): QuoteEntryLayout {
+  const cleaned = String(value ?? "list").trim().toLowerCase() as QuoteEntryLayout;
+  return VALID_QUOTE_ENTRY_LAYOUTS.has(cleaned) ? cleaned : "list";
 }
 
 export function canManageStaff(tenantRole: string | null | undefined): boolean {
@@ -86,6 +102,7 @@ async function queryUsersForTenant(tenantId: string) {
         m.tenant_role::text AS "tenantRole",
         m.status::text AS "membershipStatus",
         (to_jsonb(m) ->> 'quote_labour_rate') AS "quoteLabourRate",
+        COALESCE(NULLIF(to_jsonb(m) ->> 'quote_entry_layout', ''), 'list') AS "quoteEntryLayout",
         up.id AS "userProfileId",
         up.auth_user_id AS "authUserId",
         up.full_name AS "fullName",
@@ -127,8 +144,25 @@ export async function listUsersForTenant(tenantId: string): Promise<TenantUserRe
   return result.rows.map((row) => ({
     ...row,
     tenantRole: normaliseTenantRole(row.tenantRole),
-    membershipStatus: normaliseMembershipStatus(row.membershipStatus)
+    membershipStatus: normaliseMembershipStatus(row.membershipStatus),
+    quoteEntryLayout: normaliseQuoteEntryLayout(row.quoteEntryLayout)
   }));
+}
+
+export async function getQuoteEntryLayoutForUser(tenantId: string, userProfileId: string): Promise<QuoteEntryLayout> {
+  if (!process.env.DATABASE_URL) return "list";
+  await ensureStaffPricingColumn();
+  const result = await pool.query<{ quoteEntryLayout: string | null }>(
+    `
+      SELECT COALESCE(NULLIF(to_jsonb(m) ->> 'quote_entry_layout', ''), 'list') AS "quoteEntryLayout"
+      FROM app.memberships m
+      WHERE m.tenant_id = $1
+        AND m.user_profile_id = $2
+      LIMIT 1
+    `,
+    [tenantId, userProfileId]
+  );
+  return normaliseQuoteEntryLayout(result.rows[0]?.quoteEntryLayout);
 }
 
 export async function getTenantStaffSummary(tenantId: string): Promise<TenantStaffSummary> {
@@ -161,6 +195,7 @@ export async function updateTenantUserMembershipByAdmin(input: {
   tenantRole: string;
   membershipStatus: string;
   quoteLabourRate?: string | null;
+  quoteEntryLayout?: string | null;
 }): Promise<void> {
   if (!process.env.DATABASE_URL) return;
 
@@ -169,6 +204,7 @@ export async function updateTenantUserMembershipByAdmin(input: {
   const requesterRole = normaliseTenantRole(input.requesterTenantRole);
   const nextRole = normaliseTenantRole(input.tenantRole);
   const nextStatus = normaliseMembershipStatus(input.membershipStatus);
+  const nextQuoteEntryLayout = normaliseQuoteEntryLayout(input.quoteEntryLayout);
   const requestedRate = String(input.quoteLabourRate ?? "").replace(/[$,]/g, "").trim();
   const quoteLabourRate = requestedRate === "" ? null : Number(requestedRate);
   if (quoteLabourRate !== null && (!Number.isFinite(quoteLabourRate) || quoteLabourRate < 0 || quoteLabourRate > 10000)) {
@@ -270,11 +306,12 @@ export async function updateTenantUserMembershipByAdmin(input: {
         SET tenant_role = $2::tenant_role,
             status = $3::membership_status,
             quote_labour_rate = $5::numeric,
+            quote_entry_layout = $6,
             updated_at = NOW()
         WHERE id = $1
           AND tenant_id = $4
       `,
-      [input.membershipId, nextRole, nextStatus, input.tenantId, quoteLabourRate]
+      [input.membershipId, nextRole, nextStatus, input.tenantId, quoteLabourRate, nextQuoteEntryLayout]
     );
 
     await client.query("COMMIT");

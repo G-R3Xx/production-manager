@@ -7,6 +7,7 @@ import type { QuoteCostingResources } from "./quoteCostingResources";
 
 const QuoteLineBuilder = lazy(() => import("./QuoteLineBuilder").then((module) => ({ default: module.QuoteLineBuilder })));
 const QuoteMaterialFlowBuilder = lazy(() => import("./QuoteMaterialFlowBuilder").then((module) => ({ default: module.QuoteMaterialFlowBuilder })));
+const VisualQuoteCatalogue = lazy(() => import("./VisualQuoteCatalogue").then((module) => ({ default: module.VisualQuoteCatalogue })));
 
 type StartMode = "saved" | "quick";
 
@@ -18,6 +19,7 @@ type QuoteLineStartBuilderProps = {
   pricingSettings?: PricingSettings;
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
+  quoteEntryLayout?: "list" | "catalogue";
 };
 
 const optionButton = (active: boolean) => ({
@@ -41,8 +43,25 @@ export function QuoteLineStartBuilder({
   pricingSettings,
   canOverrideMarkup = false,
   costingResources,
+  quoteEntryLayout = "list",
 }: QuoteLineStartBuilderProps) {
   const [mode, setMode] = useState<StartMode>("saved");
+
+  if (quoteEntryLayout === "catalogue") {
+    return (
+      <Suspense fallback={<div style={{ minHeight: 150, display: "grid", placeItems: "center", color: "#64748b", fontSize: 13, fontWeight: 800 }}>Loading visual catalogue…</div>}>
+        <VisualQuoteCatalogue
+          quoteId={quoteId}
+          products={products}
+          materials={materials}
+          myobMatrixItems={myobMatrixItems}
+          pricingSettings={pricingSettings}
+          canOverrideMarkup={canOverrideMarkup}
+          costingResources={costingResources}
+        />
+      </Suspense>
+    );
+  }
 
   return (
     <div style={{ display: "grid", gap: 14 }}>

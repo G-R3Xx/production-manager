@@ -134,6 +134,7 @@ export type QuoteProduct = {
   id: string;
   name: string;
   sku?: string | null;
+  imageUrl?: string | null;
   department?: string | null;
   productFamily?: string | null;
   myobUid?: string | null;
@@ -172,6 +173,8 @@ type QuoteLineBuilderProps = {
   materials: QuoteMaterial[];
   pricingSettings?: PricingSettings;
   costingResources?: QuoteCostingResources;
+  initialProductId?: string | null;
+  hideProductPicker?: boolean;
 };
 
 const inputStyle = {
@@ -1691,7 +1694,7 @@ function productDepartment(product: QuoteProduct): SavedProductDepartment | null
   return null;
 }
 
-export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings, costingResources }: QuoteLineBuilderProps) {
+export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings, costingResources, initialProductId = null, hideProductPicker = false }: QuoteLineBuilderProps) {
   const eligibleProducts = useMemo(
     () => products.filter((product) => productDepartment(product) !== null),
     [products]
@@ -1704,8 +1707,11 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     () => eligibleProducts.filter((product) => productDepartment(product) === "small_format").length,
     [eligibleProducts]
   );
-  const initialDepartment: SavedProductDepartment = signageCount > 0 ? "signage" : "small_format";
-  const initialProduct = eligibleProducts.find((product) => productDepartment(product) === initialDepartment) ?? eligibleProducts[0];
+  const requestedInitialProduct = initialProductId ? eligibleProducts.find((product) => product.id === initialProductId) : undefined;
+  const initialDepartment: SavedProductDepartment = requestedInitialProduct
+    ? productDepartment(requestedInitialProduct) ?? (signageCount > 0 ? "signage" : "small_format")
+    : signageCount > 0 ? "signage" : "small_format";
+  const initialProduct = requestedInitialProduct ?? eligibleProducts.find((product) => productDepartment(product) === initialDepartment) ?? eligibleProducts[0];
   const [departmentFilter, setDepartmentFilter] = useState<SavedProductDepartment>(initialDepartment);
   const filteredProducts = useMemo(
     () => eligibleProducts.filter((product) => productDepartment(product) === departmentFilter),
@@ -1963,7 +1969,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
       })} />
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
 
-      <section style={{ display: "grid", gap: 9 }}>
+      {!hideProductPicker ? <section style={{ display: "grid", gap: 9 }}>
         <span style={labelTextStyle}>1. Pick saved product</span>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           <button
@@ -2014,7 +2020,15 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
             No {departmentFilter === "signage" ? "Signage" : "Small format"} saved products have been created yet.
           </div>
         )}
-      </section>
+      </section> : selectedProduct ? (
+        <section style={{ border: "1px solid #dbeafe", background: "#eff6ff", borderRadius: 14, padding: 12, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.06em", color: "#2563eb" }}>Saved product</div>
+            <strong style={{ fontSize: 17, color: "#0f172a" }}>{selectedProduct.name}</strong>
+            {selectedProduct.sku ? <div style={{ marginTop: 3, color: "#64748b", fontSize: 12 }}>{selectedProduct.sku}</div> : null}
+          </div>
+        </section>
+      ) : null}
 
       <div style={quotePanelStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>

@@ -13,6 +13,7 @@ type Props = {
   pricingSettings?: PricingSettings;
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
+  quoteEntryLayout?: "list" | "catalogue";
 };
 
 export function DeferredQuoteLineStartBuilder(props: Props) {

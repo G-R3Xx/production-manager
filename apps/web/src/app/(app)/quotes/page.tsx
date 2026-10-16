@@ -27,6 +27,7 @@ import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
 import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
 import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, listRecipesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
+import { getQuoteEntryLayoutForUser } from "@/server/users";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -540,7 +541,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     costingSource,
     quoteLines,
     selectedArtworkApproval,
-    selectedProductionJob
+    selectedProductionJob,
+    quoteEntryLayout
   ] = await Promise.all([
     listQuoteDraftSummariesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? cachedQuoteMaterials(activeTenant.tenantId) : Promise.resolve([]),
@@ -557,7 +559,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       : Promise.resolve([[], [], [], []] as const),
     selected ? listQuoteLines(selected) : Promise.resolve([]),
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
-    selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null)
+    selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
+    builderDataNeeded ? getQuoteEntryLayoutForUser(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve("list" as const)
   ]);
 
   const selectedQuote = initialSelectedQuote;
@@ -630,6 +633,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
         id: product.id,
         name: product.name,
         sku: product.sku,
+        imageUrl: product.websiteImageUrl,
         department: product.department,
         productFamily: product.productFamily,
         myobUid: product.myobUid,
@@ -1217,6 +1221,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         myobMatrixItems={myobMatrixItems}
                         canOverrideMarkup={canOverrideQuoteMarkup}
                         costingResources={quoteCostingResources}
+                        quoteEntryLayout={quoteEntryLayout}
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",

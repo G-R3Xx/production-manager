@@ -50,7 +50,7 @@ export type ProductSummaryRecord = Pick<
 
 export type QuoteProductRecord = Pick<
   ProductRecord,
-  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId" | "myobUid" | "productionRecipeId"
+  "id" | "sku" | "name" | "department" | "productFamily" | "status" | "defaultTemplateId" | "myobUid" | "productionRecipeId" | "websiteImageUrl"
 > & {
   definitionJson: Record<string, unknown>;
   payloadJson: Record<string, unknown>;
@@ -190,6 +190,8 @@ export async function listProductSummariesForTenant(
 export async function listQuoteProductsForTenant(tenantId: string): Promise<QuoteProductRecord[]> {
   if (!process.env.DATABASE_URL) return [];
 
+  await ensureWordPressProductPublishingSchema();
+
   const result = await pool.query<QuoteProductRecord>(
     `
       SELECT
@@ -202,6 +204,7 @@ export async function listQuoteProductsForTenant(tenantId: string): Promise<Quot
         p.default_template_id AS "defaultTemplateId",
         p.myob_uid AS "myobUid",
         p.production_recipe_id::text AS "productionRecipeId",
+        p.website_image_url AS "websiteImageUrl",
         COALESCE(ct.definition_json, '{}'::jsonb) AS "definitionJson",
         COALESCE(p.payload_json, '{}'::jsonb) AS "payloadJson"
       FROM catalog.products p

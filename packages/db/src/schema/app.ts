@@ -80,6 +80,7 @@ export const memberships = appSchema.table("memberships", {
   tenantRole: tenantRoleEnum("tenant_role").notNull(),
   status: membershipStatusEnum("status").notNull().default("active"),
   quoteLabourRate: numeric("quote_labour_rate", { precision: 10, scale: 2 }),
+  quoteEntryLayout: varchar("quote_entry_layout", { length: 20 }).notNull().default("list"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()
 });
