@@ -970,13 +970,58 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
                   </form>
 
+                  <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
+
+                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0, padding: "2px 0 4px" }}>
+                    {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Open client quote</a> : null}
+                    {selectedQuote.status !== "deleted" ? (
+                      <div style={{ flex: "0 0 auto" }}>
+                        <EmailRecipientModalForm
+                          action={emailQuoteAction}
+                          hiddenFields={{ quoteId: selectedQuote.id }}
+                          defaultEmail={selectedQuote.email}
+                          variant="quote"
+                          alreadySent={selectedQuote.emailStatus === "sent"}
+                          modalTitle={selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}
+                          modalDescription="Confirm or change the email address before Production Manager sends the online quote link and downloadable PDF copy."
+                          submitLabel={selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send link + PDF"}
+                        />
+                      </div>
+                    ) : null}
+                    {selectedQuote.status !== "accepted" && selectedQuote.status !== "deleted" ? (
+                      <div style={{ flex: "0 0 auto" }}>
+                        <ManualQuoteApprovalModalForm
+                          action={markQuoteAcceptedManuallyAction}
+                          quoteId={selectedQuote.id}
+                          clientName={selectedQuote.clientName}
+                        />
+                      </div>
+                    ) : null}
+                    {selectedQuote.status !== "deleted" ? (
+                      <form action={markQuoteSentAction} style={{ flex: "0 0 auto" }}>
+                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                        <button type="submit" style={buttonStyle}>{selectedQuote.sentAt ? "Mark sent again" : "Mark quote sent"}</button>
+                      </form>
+                    ) : null}
+                    {selectedQuote.status === "deleted" ? (
+                      <form action={restoreQuoteDraftAction} style={{ flex: "0 0 auto" }}>
+                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                        <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore quote</button>
+                      </form>
+                    ) : (
+                      <form action={deleteQuoteDraftAction} style={{ flex: "0 0 auto", marginLeft: "auto" }}>
+                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                        <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete quote</button>
+                      </form>
+                    )}
+                  </div>
+
                   <details style={{ border: "1px solid #e4e7ec", borderRadius: 14, background: "#f8fafc", overflow: "hidden" }}>
-                    <summary style={{ listStyle: "none", cursor: "pointer", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-                      <span style={{ fontWeight: 950, color: "#344054" }}>Quote details & client actions</span>
-                      <span style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>{quoteLines.length} line{quoteLines.length === 1 ? "" : "s"} · {formatMoney(quoteSubtotal)} ex GST · {selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</span>
+                    <summary style={{ cursor: "pointer", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 950, color: "#344054" }}>More quote details & admin</span>
+                      <span style={{ color: "#155eef", fontSize: 12, fontWeight: 900 }}>Expand ▾</span>
                     </summary>
                     <div style={{ borderTop: "1px solid #e4e7ec", padding: 12, display: "grid", gap: 12 }}>
-                  <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
                   {selectedQuoteSourceEnquiry ? (
                     <section
                       style={{ border: "1px solid #bfdbfe", borderRadius: 16, background: "#f8fbff", overflow: "hidden", minWidth: 0, maxWidth: "100%", boxSizing: "border-box" }}
@@ -1045,55 +1090,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <span style={{ border: `1px solid ${selectedQuote.emailStatus === "sent" ? "#86efac" : selectedQuote.emailStatus === "failed" ? "#fecaca" : "#e4e7ec"}`, borderRadius: 999, padding: "7px 11px", background: selectedQuote.emailStatus === "sent" ? "#f0fdf4" : selectedQuote.emailStatus === "failed" ? "#fef2f2" : "#fff", color: selectedQuote.emailStatus === "sent" ? "#067647" : selectedQuote.emailStatus === "failed" ? "#b42318" : "#344054", fontSize: 12 }}>Email: <strong>{selectedQuote.emailStatus === "sent" ? `Sent${selectedQuote.emailTo ? ` to ${selectedQuote.emailTo}` : ""}${selectedQuote.emailSentAt ? ` · ${formatDateTime(selectedQuote.emailSentAt)}` : ""}` : selectedQuote.emailStatus === "pending" ? "Sending" : selectedQuote.emailStatus === "failed" ? "Failed" : "Not sent"}</strong></span>
                   </div>
 
-                  <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
-                    <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-                      <strong>Client actions</strong>
-                      <p style={{ margin: 0, color: "#667085", fontSize: 13, lineHeight: 1.45, maxWidth: 880 }}>Open the client view, send the quote by email, or record an approval. The public URL is managed automatically.</p>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-                      {selectedQuote.status !== "deleted" ? (
-                        <form action={markQuoteSentAction} style={{ flex: "0 0 auto" }}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <button type="submit" style={buttonStyle}>{selectedQuote.sentAt ? "Mark sent again" : "Mark quote sent"}</button>
-                        </form>
-                      ) : null}
-                      {selectedQuote.status === "deleted" ? (
-                        <form action={restoreQuoteDraftAction} style={{ flex: "0 0 auto" }}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore quote</button>
-                        </form>
-                      ) : (
-                        <form action={deleteQuoteDraftAction} style={{ flex: "0 0 auto" }}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete quote</button>
-                        </form>
-                      )}
-                      {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Open client quote</a> : null}
-                      {selectedQuote.status !== "deleted" ? (
-                        <div style={{ flex: "0 0 auto" }}>
-                          <EmailRecipientModalForm
-                            action={emailQuoteAction}
-                            hiddenFields={{ quoteId: selectedQuote.id }}
-                            defaultEmail={selectedQuote.email}
-                            variant="quote"
-                            alreadySent={selectedQuote.emailStatus === "sent"}
-                            modalTitle={selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}
-                            modalDescription="Confirm or change the email address before Production Manager sends the online quote link and downloadable PDF copy."
-                            submitLabel={selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send link + PDF"}
-                          />
-                        </div>
-                      ) : null}
-                      {selectedQuote.status !== "accepted" && selectedQuote.status !== "deleted" ? (
-                        <div style={{ flex: "0 0 auto" }}>
-                          <ManualQuoteApprovalModalForm
-                            action={markQuoteAcceptedManuallyAction}
-                            quoteId={selectedQuote.id}
-                            clientName={selectedQuote.clientName}
-                          />
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
                   {selectedQuote.emailStatus === "failed" && selectedQuote.emailLastError ? <div style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#b42318", borderRadius: 14, padding: "10px 12px", fontSize: 13 }}><strong>Quote email:</strong> {selectedQuote.emailLastError}</div> : null}
                   {selectedQuote.emailHistory?.length ? (
                     <details style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 10 }}>
