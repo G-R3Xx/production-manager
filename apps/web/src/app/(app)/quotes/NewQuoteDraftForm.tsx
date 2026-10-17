@@ -23,8 +23,6 @@ type InitialQuoteDraftValues = {
   contactName: string;
   phone: string;
   email: string;
-  discountPercent: string;
-  notes: string;
 };
 
 type NewQuoteDraftFormProps = {
@@ -35,23 +33,12 @@ type NewQuoteDraftFormProps = {
 };
 
 const inputStyle = {
-  minHeight: 44,
-  borderRadius: 14,
+  minHeight: 38,
+  borderRadius: 12,
   border: "1px solid #cfd9e8",
-  padding: "0 14px",
+  padding: "0 12px",
   width: "100%",
   boxSizing: "border-box",
-  background: "#fff"
-} as const;
-
-const textareaStyle = {
-  minHeight: 80,
-  borderRadius: 14,
-  border: "1px solid #cfd9e8",
-  padding: "12px 14px",
-  width: "100%",
-  boxSizing: "border-box",
-  fontFamily: "inherit",
   background: "#fff"
 } as const;
 
@@ -105,7 +92,6 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
   const [contactName, setContactName] = useState(initialValues.contactName);
   const [phone, setPhone] = useState(initialValues.phone);
   const [email, setEmail] = useState(initialValues.email);
-  const [discountPercent, setDiscountPercent] = useState(initialValues.discountPercent);
 
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
   const filteredClients = useMemo(() => {
@@ -128,7 +114,6 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
       setContactName("");
       setPhone("");
       setEmail("");
-      setDiscountPercent("0");
       return;
     }
 
@@ -146,13 +131,13 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
   }
 
   return (
-    <form action={createQuoteDraftAction} style={{ display: "grid", gap: 12, marginTop: 12 }}>
+    <form action={createQuoteDraftAction} style={{ display: "grid", gap: 9, marginTop: 4 }}>
       <input type="hidden" name="enquiryId" value={enquiryId} />
       <input type="hidden" name="surveyRequestId" value={surveyRequestId} />
       <input type="hidden" name="linkedCustomerId" value={entryMode === "existing" ? selectedClientId : ""} />
 
-      <label style={{ display: "grid", gap: 6 }}>
-        <span style={{ fontWeight: 900, color: "#101828" }}>Job name / quote title</span>
+      <label style={{ display: "grid", gap: 4 }}>
+        <span style={{ fontWeight: 900, color: "#101828", fontSize: 13 }}>Job name / quote title</span>
         <input
           name="jobName"
           defaultValue={initialValues.jobName}
@@ -161,7 +146,6 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
           maxLength={255}
           style={inputStyle}
         />
-        <small style={{ color: "#667085" }}>Shown to the customer at the top of the quote and carried into Artwork / Production.</small>
       </label>
 
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -171,7 +155,7 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
           aria-pressed={entryMode === "existing"}
           disabled={clients.length === 0}
           style={{
-            minHeight: 40,
+            minHeight: 36,
             borderRadius: 12,
             border: entryMode === "existing" ? "2px solid #155eef" : "1px solid #cfd9e8",
             background: entryMode === "existing" ? "#eff6ff" : "#fff",
@@ -189,7 +173,7 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
           onClick={() => chooseMode("manual")}
           aria-pressed={entryMode === "manual"}
           style={{
-            minHeight: 40,
+            minHeight: 36,
             borderRadius: 12,
             border: entryMode === "manual" ? "2px solid #155eef" : "1px solid #cfd9e8",
             background: entryMode === "manual" ? "#eff6ff" : "#fff",
@@ -262,23 +246,10 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
         />
         <input name="phone" value={phone} onChange={(event) => setPhone(event.currentTarget.value)} placeholder="Phone" style={inputStyle} />
         <input name="email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="Email" type="email" style={inputStyle} />
-        <label style={{ display: "grid", gap: 4 }}>
-          <input
-            name="discountPercent"
-            value={discountPercent}
-            onChange={(event) => setDiscountPercent(event.currentTarget.value)}
-            placeholder="Manual quote discount %"
-            type="number"
-            min="0"
-            max="100"
-            step="0.01"
-            style={inputStyle}
-          />
-          <small style={{ color: "#667085" }}>Optional one-off discount for this quote only. Customer pricing comes from the MYOB price level.</small>
-        </label>
       </div>
-      <textarea name="notes" defaultValue={initialValues.notes} placeholder="Quote notes" style={textareaStyle} />
-      <button type="submit" style={{ ...buttonStyle, width: "fit-content" }}>Create draft quote</button>
+      <input type="hidden" name="discountPercent" value="0" />
+      <input type="hidden" name="notes" value="" />
+      <button type="submit" style={{ ...buttonStyle, width: "fit-content", minHeight: 40 }}>Create draft quote</button>
     </form>
   );
 }

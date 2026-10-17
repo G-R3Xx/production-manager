@@ -776,12 +776,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const standardQuoteMarkup = Math.max(0.0001, numberFromUnknown(companySettings?.globalMarkupMultiplier) || 1.5);
   const standardAccessEquipmentQuoteMarkup = Math.max(0.0001, numberFromUnknown(companySettings?.accessEquipmentMarkupMultiplier) || standardQuoteMarkup);
   const surveyPhotos = extractSurveyPhotos(survey?.installSchedulerPayload);
-  const defaultQuoteNotes = buildSurveyQuoteNotes({
-    enquirySummary: sourceEnquiry?.requestSummary ?? null,
-    surveyNotes: survey?.notes ?? null,
-    surveyDetails: survey?.surveyDetails ?? null,
-    photos: surveyPhotos
-  });
   const draftClientOptions = clients
     .filter((client) => client.isActive || client.id === sourceLinkedCustomerId)
     .map((client) => ({
@@ -806,7 +800,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
         <style>{`
-          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1.72fr) minmax(340px,.78fr); gap:18px; align-items:start; }
+          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1.78fr) minmax(360px,.72fr); gap:18px; align-items:start; }
           @media (max-width: 1050px) { .quote-entry-split { grid-template-columns:1fr; } }
         `}</style>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
@@ -823,10 +817,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
         <div className="quote-entry-split" style={filter === "deleted" ? { gridTemplateColumns: "1fr" } : undefined}>
           {filter !== "deleted" ? (
-            <section style={{ border: "2px solid #bfdbfe", borderRadius: 20, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 16, display: "grid", gap: 10 }}>
-              <div>
-                <h2 style={{ margin: 0, fontSize: 20 }}>Create new quote</h2>
-                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Choose the client, give the job a name, then create the draft and start adding quote lines.</p>
+            <section style={{ border: "2px solid #bfdbfe", borderRadius: 18, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 12, display: "grid", gap: 6 }}>
+              <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
+                <h2 style={{ margin: 0, fontSize: 18 }}>Create new quote</h2>
+                <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>Choose a client and job name, then start quoting.</p>
               </div>
               <NewQuoteDraftForm
                 clients={draftClientOptions}
@@ -838,9 +832,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   clientName: initialDraftClientName,
                   contactName: initialDraftContactName,
                   phone: sourcePhone || linkedClient?.phone || "",
-                  email: sourceEmail || linkedClient?.email || "",
-                  discountPercent: "0",
-                  notes: defaultQuoteNotes
+                  email: sourceEmail || linkedClient?.email || ""
                 }}
               />
             </section>
@@ -853,13 +845,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 <p style={{ margin: "3px 0 0", color: "#667085", fontSize: 12 }}>{filter === "deleted" ? "Select a quote to review or restore it." : "Select an existing quote to continue working on it."}</p>
               </div>
             </div>
-            <div style={{ display: "grid", gap: 8, maxHeight: 570, overflowY: "auto", paddingRight: 3 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 570, overflowY: "auto", paddingRight: 4, alignItems: "stretch" }}>
               {quoteDrafts.map((quote) => {
                 const active = selectedQuote?.id === quote.id;
                 const quoteSourceEnquiry = quote.enquiryId ? enquiryById.get(quote.enquiryId) : null;
                 const quoteLogoUrl = quoteSourceEnquiry?.clientLogoUrl || customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
                 return (
-                  <Link prefetch={false} key={quote.id} href={`/quotes?selected=${quote.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ width: "100%", minWidth: 0, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 16, padding: 11, display: "grid", gap: 7, background: active ? "#eff6ff" : "#fff", overflow: "hidden", boxSizing: "border-box" }}>
+                  <Link prefetch={false} key={quote.id} href={`/quotes?selected=${quote.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ width: "100%", minWidth: 0, minHeight: 72, flex: "0 0 auto", textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 14, padding: "10px 11px", display: "grid", gridTemplateRows: "auto auto", gap: 6, background: active ? "#eff6ff" : "#fff", overflow: "hidden", boxSizing: "border-box" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", minWidth: 0 }}>
                       <div style={{ display: "flex", gap: 9, minWidth: 0, flex: "1 1 auto", alignItems: "center", overflow: "hidden" }}>
                         <ClientLogoBadge logoUrl={quoteLogoUrl} name={quote.clientName} size={38} radius={10} padding={4} />
