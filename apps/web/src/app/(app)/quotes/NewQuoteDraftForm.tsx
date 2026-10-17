@@ -106,6 +106,10 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
     });
   }, [clientSearch, clients, selectedClientId]);
 
+  const visibleClientMatches = clientSearch.trim()
+    ? filteredClients.filter((client) => client.id !== selectedClientId).slice(0, 6)
+    : [];
+
   function applySelectedClient(nextClientId: string) {
     setSelectedClientId(nextClientId);
     const client = clients.find((item) => item.id === nextClientId) ?? null;
@@ -121,6 +125,7 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
     setContactName(contactNameForClient(client));
     setPhone(client.phone || "");
     setEmail(client.email || "");
+    setClientSearch("");
   }
 
   function chooseMode(mode: "existing" | "manual") {
@@ -206,6 +211,43 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
               ))}
             </select>
           </div>
+
+          {clientSearch.trim() ? (
+            <div style={{ display: "grid", gap: 6, maxHeight: 228, overflowY: "auto", paddingRight: 2 }}>
+              {visibleClientMatches.map((client) => {
+                const resultContact = [client.firstName, client.lastName].filter(Boolean).join(" ").trim();
+                return (
+                  <button
+                    key={client.id}
+                    type="button"
+                    onClick={() => applySelectedClient(client.id)}
+                    style={{
+                      width: "100%",
+                      minHeight: 52,
+                      borderRadius: 12,
+                      border: "1px solid #d7e0ee",
+                      background: "#fff",
+                      padding: "7px 10px",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 9,
+                      textAlign: "left",
+                      cursor: "pointer"
+                    }}
+                  >
+                    <ClientLogoBadge logoUrl={client.logoUrl} name={client.displayName} size={34} radius={9} padding={3} />
+                    <span style={{ minWidth: 0 }}>
+                      <strong style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{client.displayName}</strong>
+                      <span style={{ display: "block", color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {[resultContact, client.phone, client.email].filter(Boolean).join(" · ")}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+              {visibleClientMatches.length === 0 ? <span style={{ color: "#667085", fontSize: 12, padding: "4px 2px" }}>No clients match that search.</span> : null}
+            </div>
+          ) : null}
 
           {selectedClient ? (
             <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>

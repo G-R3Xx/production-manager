@@ -1,4 +1,4 @@
-# Production Manager V26.10.17.08
+# Production Manager V26.10.17.09
 
 ## Changes
 - Open quote search now filters automatically while typing with a short debounce.

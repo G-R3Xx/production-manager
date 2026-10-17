@@ -627,8 +627,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const normalizedQuoteSearch = quoteSearch.toLowerCase();
   const visibleQuoteDrafts = normalizedQuoteSearch
     ? quoteDrafts.filter((quote) => [quote.jobName, quote.clientName, quote.contactName, quote.phone]
-        .some((value) => String(value ?? "").toLowerCase().includes(normalizedQuoteSearch))).slice(0, 20)
-    : quoteDrafts.slice(0, 3);
+        .some((value) => String(value ?? "").toLowerCase().includes(normalizedQuoteSearch)))
+    : quoteDrafts;
 
   const activeMaterials = materials.filter((material) => material.active);
   const savedQuoteProducts = quoteProducts
@@ -807,7 +807,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
         <style>{`
-          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1.78fr) minmax(360px,.72fr); gap:18px; align-items:start; }
+          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:start; }
           @media (max-width: 1050px) { .quote-entry-split { grid-template-columns:1fr; } }
         `}</style>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
@@ -850,7 +850,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               <div>
                 <h2 style={{ margin: 0, fontSize: 18 }}>{filter === "deleted" ? "Deleted quotes" : "Open quote"}</h2>
                 <p style={{ margin: "3px 0 0", color: "#667085", fontSize: 12 }}>
-                  {filter === "deleted" ? "Search deleted quotes to review or restore them." : quoteSearch ? `Showing matches for “${quoteSearch}”.` : "Showing the 3 most recent quotes. Search to find older quotes."}
+                  {filter === "deleted" ? "Search deleted quotes to review or restore them." : quoteSearch ? `Showing matches for “${quoteSearch}”.` : "All open quotes are available below. Scroll or search to find one."}
                 </p>
               </div>
               <QuoteSearchInput initialValue={quoteSearch} />
