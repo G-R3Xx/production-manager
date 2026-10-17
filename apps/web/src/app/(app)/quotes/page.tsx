@@ -804,24 +804,45 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
-      <section style={{ ...cardStyle(), display: "grid", gap: 8, background: "linear-gradient(135deg, #ffffff 0%, #f7fbff 54%, #eef6ff 100%)" }}>
-        <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote entry</p>
-        <h1 style={{ margin: 0, fontSize: 38, letterSpacing: "-0.04em" }}>Quick, clear quote entry</h1>
-        <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Build quote items in one clean layout: choose the product, material, size, artwork, finishing and pickup / delivery / install without stepping through a manual.</p>
-      </section>
-
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
-            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted quotes" : "Quote workflow"}</h2>
-            <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Create or switch quotes here; use the quick builder below to add lines fast.</p>
+            <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote entry</p>
+            <h1 style={{ margin: "2px 0 0", fontSize: 30, letterSpacing: "-0.035em" }}>{filter === "deleted" ? "Deleted quotes" : "Quotes"}</h1>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <Link href="/quotes" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</Link>
-            <Link href="/quotes?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</Link>
-            <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
+            <Link href="/quotes" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "0 12px", background: filter === "deleted" ? "transparent" : "#eff6ff", border: filter === "deleted" ? "1px solid #d0d5dd" : "1px solid #bfdbfe", color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</Link>
+            <Link href="/quotes?filter=deleted" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "0 12px", background: filter === "deleted" ? "#eff6ff" : "transparent", border: filter === "deleted" ? "1px solid #bfdbfe" : "1px solid #d0d5dd", color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</Link>
+            <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "9px 12px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
           </div>
         </div>
+
+        {filter !== "deleted" ? (
+          <section style={{ border: "2px solid #bfdbfe", borderRadius: 20, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 16, display: "grid", gap: 10 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 20 }}>Create new quote</h2>
+                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Choose the client, give the job a name, then start adding quote lines.</p>
+              </div>
+              <span style={{ borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", padding: "6px 10px", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.06em" }}>Start here</span>
+            </div>
+          <NewQuoteDraftForm
+            clients={draftClientOptions}
+            enquiryId={sourceEnquiry?.id ?? survey?.enquiryId ?? ""}
+            surveyRequestId={survey?.id ?? ""}
+            initialValues={{
+              jobName: "",
+              linkedCustomerId: sourceLinkedCustomerId ?? "",
+              clientName: initialDraftClientName,
+              contactName: initialDraftContactName,
+              phone: sourcePhone || linkedClient?.phone || "",
+              email: sourceEmail || linkedClient?.email || "",
+              discountPercent: "0",
+              notes: defaultQuoteNotes
+            }}
+          />
+          </section>
+        ) : null}
 
         {(survey || linkedClient || selectedQuote) ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
@@ -879,25 +900,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           </div>
         ) : null}
 
-        <details open={!selectedQuote} style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#f8fbff", padding: 12 }}>
-          <summary style={{ cursor: "pointer", fontWeight: 950, color: "#155eef" }}>New draft quote</summary>
-          <NewQuoteDraftForm
-            clients={draftClientOptions}
-            enquiryId={sourceEnquiry?.id ?? survey?.enquiryId ?? ""}
-            surveyRequestId={survey?.id ?? ""}
-            initialValues={{
-              jobName: "",
-              linkedCustomerId: sourceLinkedCustomerId ?? "",
-              clientName: initialDraftClientName,
-              contactName: initialDraftContactName,
-              phone: sourcePhone || linkedClient?.phone || "",
-              email: sourceEmail || linkedClient?.email || "",
-              discountPercent: "0",
-              notes: defaultQuoteNotes
-            }}
-          />
-        </details>
 
+
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end", marginTop: 2 }}>
+          <div>
+            <h2 style={{ margin: 0, fontSize: 18 }}>{filter === "deleted" ? "Deleted quotes" : "Open an existing quote"}</h2>
+            <p style={{ margin: "3px 0 0", color: "#667085", fontSize: 12 }}>{filter === "deleted" ? "Select a deleted quote to review or restore it." : "Recent quotes are shown below. Select one to continue working on it."}</p>
+          </div>
+        </div>
         <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
           {quoteDrafts.map((quote) => {
             const active = selectedQuote?.id === quote.id;
