@@ -3244,6 +3244,27 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     const teal = "#0891b2";
     const purple = "#7c3aed";
 
+    const approvedWizardAssets: Record<string, string> = {
+      signage: "/quote-wizard/flow-signage.png",
+      small_format: "/quote-wizard/flow-small-format.png",
+      plan_printing: "/quote-wizard/flow-plan-printing.png",
+      poster_printing: "/quote-wizard/flow-poster-printing.png",
+      service: "/quote-wizard/flow-service.png",
+      component: "/quote-wizard/flow-component.png",
+      acrylic: "/quote-wizard/base-acrylic.png",
+      acm: "/quote-wizard/base-acm.png",
+      corflute: "/quote-wizard/base-corflute.png",
+      pvc: "/quote-wizard/base-pvc.png",
+      banner: "/quote-wizard/base-banner.png",
+      other_sheet: "/quote-wizard/base-other-sheet.png",
+      artwork_supplied: "/quote-wizard/artwork-supplied.png",
+      artwork_required: "/quote-wizard/artwork-required.png"
+    };
+    const approvedAsset = approvedWizardAssets[kind];
+    if (approvedAsset) {
+      return <img src={approvedAsset} alt="" aria-hidden="true" style={{ width: "100%", height: "100%", display: "block", objectFit: "contain", objectPosition: "center", background: "#f8fafc" }} />;
+    }
+
     if (kind === "signage") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="30" y="17" width="180" height="66" rx="5" fill={blue}/><path d="M30 60 L82 17 H121 L70 83 H30Z" fill="#38bdf8" opacity=".8"/><path d="M120 17 L177 83 H210V58L170 17Z" fill={purple} opacity=".75"/><rect x="55" y="88" width="8" height="24" rx="2" fill={dark}/><rect x="177" y="88" width="8" height="24" rx="2" fill={dark}/><rect x="45" y="108" width="150" height="6" rx="3" fill="#94a3b8"/><text x="120" y="50" textAnchor="middle" fontSize="16" fontWeight="800" fill="white">SIGNS</text><text x="120" y="69" textAnchor="middle" fontSize="9" fontWeight="700" fill="white">MAKE AN IMPACT</text></svg>;
     if (kind === "small_format") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><g transform="translate(45 22) rotate(-7 75 40)"><rect x="8" y="18" width="145" height="68" rx="6" fill="#cbd5e1"/><rect x="4" y="10" width="145" height="68" rx="6" fill="#fff" stroke={line}/><rect width="145" height="68" rx="6" fill="#fff" stroke={line}/><rect width="145" height="15" rx="6" fill={purple}/><path d="M0 38 L55 0 H88 L28 68 H0Z" fill="#ec4899" opacity=".9"/><text x="95" y="38" textAnchor="middle" fontSize="8" fontWeight="800" fill={dark}>PRINT</text><text x="95" y="49" textAnchor="middle" fontSize="7" fill="#64748b">BUSINESS CARDS</text></g></svg>;
     if (kind === "plan_printing") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><g stroke="#64748b" strokeWidth="2" fill="#fff"><ellipse cx="70" cy="77" rx="34" ry="16"/><rect x="70" y="61" width="105" height="32"/><ellipse cx="175" cy="77" rx="34" ry="16"/><ellipse cx="95" cy="51" rx="28" ry="13"/><rect x="95" y="38" width="75" height="26"/><ellipse cx="170" cy="51" rx="28" ry="13"/></g><path d="M83 72h74M93 82h54M110 47h45" stroke={blue} strokeWidth="2" opacity=".7"/></svg>;
