@@ -108,7 +108,7 @@ export function CurrentInfoBar() {
     };
   }, [refreshWeather]);
 
-  const timeZone = weather?.timezone || "Australia/Sydney";
+  const timeZone = "Australia/Sydney";
   const formatted = useMemo(() => {
     const date = new Intl.DateTimeFormat("en-AU", {
       weekday: "short",

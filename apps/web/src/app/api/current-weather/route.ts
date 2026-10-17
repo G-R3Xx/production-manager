@@ -86,7 +86,7 @@ async function forecast(latitude: number, longitude: number): Promise<ForecastRe
     longitude: String(longitude),
     current: "temperature_2m,apparent_temperature,weather_code",
     daily: "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum",
-    timezone: "auto",
+    timezone: "Australia/Sydney",
     forecast_days: "2",
   });
   const response = await fetch(`https://api.open-meteo.com/v1/forecast?${params.toString()}`, {
