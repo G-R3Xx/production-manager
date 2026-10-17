@@ -3296,7 +3296,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       poster_printing: "/quote-wizard/flow-poster-printing.png",
       service: "/quote-wizard/flow-service.png",
       component: "/quote-wizard/flow-component.png",
-      acrylic: "/quote-wizard/material-acrylic-white.webp",
+      acrylic: "/quote-wizard/material-acrylic-clear.webp",
+      acrylic_clear: "/quote-wizard/material-acrylic-clear.webp",
       acrylic_white: "/quote-wizard/material-acrylic-white.webp",
       acrylic_black: "/quote-wizard/material-acrylic-black.webp",
       acm: "/quote-wizard/material-acm-silver.webp",
@@ -3393,6 +3394,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
       if (base === "acrylic") {
         if (has("black")) kind = "acrylic_black";
+        else if (has("clear")) kind = "acrylic_clear";
         else if (has("white") || has("opal")) kind = "acrylic_white";
       } else if (base === "acm") {
         if (has("black")) kind = "acm_black";
@@ -3424,7 +3426,6 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         {tint ? <span aria-hidden="true" style={{ position: "absolute", inset: 0, background: tint, opacity: 0.42, mixBlendMode: "multiply", pointerEvents: "none" }} /> : null}
       </div>;
     };
-    const advance = () => setWizardIndex((current) => current + 1);
     const changed = () => setUnitPriceOverridden(false);
 
     if (step === "flow") {
@@ -3438,14 +3439,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       ];
       return <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>{choices.map(([value,label,kind]) => {
         const selected = flowType === value;
-        return <button key={value} type="button" onClick={() => { setFlowType(value); changed(); setWizardIndex(1); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(kind)}<strong style={{ fontSize: 15, lineHeight: 1.2, textAlign: "center" }}>{label}</strong></button>;
+        return <button key={value} type="button" onClick={() => { setFlowType(value); changed(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(kind)}<strong style={{ fontSize: 15, lineHeight: 1.2, textAlign: "center" }}>{label}</strong></button>;
       })}</div>;
     }
 
     if (step === "base") {
       return <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>{baseTypes.map((item) => {
         const selected = baseType === item.key;
-        return <button key={item.key} type="button" onClick={() => { setBaseType(item.key as BaseType); setThickness(""); setColour(""); setMediaId(""); changed(); advance(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(item.key)}<strong style={{ fontSize: 16, lineHeight: 1.2, textAlign: "center" }}>{item.label}</strong></button>;
+        return <button key={item.key} type="button" onClick={() => { setBaseType(item.key as BaseType); setThickness(""); setColour(""); setMediaId(""); changed(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(item.key)}<strong style={{ fontSize: 16, lineHeight: 1.2, textAlign: "center" }}>{item.label}</strong></button>;
       })}</div>;
     }
 
@@ -3454,13 +3455,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const selected = selectedMainMaterial?.id === material.id;
         const dimensions = bestSheetDimensions(material);
         const dimensionLabel = dimensions ? `${dimensionMm(dimensions.width)} × ${dimensionMm(dimensions.length)}` : material.rollWidthMm ? `${material.rollWidthMm}mm roll` : "";
-        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, baseType || "other_sheet")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{material.name}</strong>{dimensionLabel ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{dimensionLabel}</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, baseType || "other_sheet")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{material.name}</strong>{dimensionLabel ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{dimensionLabel}</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
       })}</div>;
     }
 
     if (step === "artwork") {
       return <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 }}>
-        <button type="button" onClick={() => { setArtworkChoice("client_supplied"); changed(); advance(); }} style={artworkTile(artworkChoice === "client_supplied")}>{selectedMark(artworkChoice === "client_supplied")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_supplied")}</div><strong style={{ fontSize: 16 }}>Print-ready artwork supplied</strong><span style={{ color: "#64748b", fontSize: 12 }}>No artwork/setup allowance</span></button>
+        <button type="button" onClick={() => { setArtworkChoice("client_supplied"); changed(); }} style={artworkTile(artworkChoice === "client_supplied")}>{selectedMark(artworkChoice === "client_supplied")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_supplied")}</div><strong style={{ fontSize: 16 }}>Print-ready artwork supplied</strong><span style={{ color: "#64748b", fontSize: 12 }}>No artwork/setup allowance</span></button>
         <button type="button" onClick={() => { setArtworkChoice("required"); changed(); }} style={artworkTile(artworkChoice === "required")}>{selectedMark(artworkChoice === "required")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_required")}</div><strong style={{ fontSize: 16 }}>Artwork / setup required</strong><span style={{ color: "#64748b", fontSize: 12 }}>Add artwork time before continuing</span></button>
         {artworkChoice === "required" ? <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, maxWidth: 360 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label> : null}
       </div>;
@@ -3470,28 +3471,28 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       return <div style={tileGrid}>{printMethods.map((item) => {
         const selected = printMethod === item.key;
         const kind = item.key === "no_print" ? "no_print" : item.key === "direct_print" ? "direct_print" : item.key === "roll_stock" ? "roll_stock" : "cut_vinyl";
-        return <button key={item.key} type="button" onClick={() => { setPrintMethod(item.key as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(kind)}<strong style={{ fontSize: 15, textAlign: "center" }}>{item.label}</strong></button>;
+        return <button key={item.key} type="button" onClick={() => { setPrintMethod(item.key as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(kind)}<strong style={{ fontSize: 15, textAlign: "center" }}>{item.label}</strong></button>;
       })}</div>;
     }
 
     if (step === "media") {
       return <div style={photoGrid}>{rollMedia.map((material) => {
         const selected = mediaId === material.id;
-        return <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15 }}>{material.name}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+        return <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15 }}>{material.name}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
       })}</div>;
     }
 
     if (step === "ink") {
       return <div style={tileGrid}>{availableInkChoices.map((item) => {
         const selected = ink === item.key;
-        return <button key={item.key} type="button" onClick={() => { setInk(item.key as InkChoice); changed(); advance(); }} style={{ ...artworkTile(selected), minHeight: 160 }}>{selectedMark(selected)}<div aria-hidden="true" style={{ display: "flex", gap: 7, alignItems: "center", justifyContent: "center", minHeight: 60 }}>{item.key === "none" ? <span style={{ fontSize: 46, color: "#94a3b8" }}>∅</span> : <><span style={{ width: 34, height: 34, borderRadius: 999, background: "#06b6d4" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#ec4899" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#facc15" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#111827" }}/></>}</div><strong style={{ fontSize: 16 }}>{item.label}</strong></button>;
+        return <button key={item.key} type="button" onClick={() => { setInk(item.key as InkChoice); changed(); }} style={{ ...artworkTile(selected), minHeight: 160 }}>{selectedMark(selected)}<div aria-hidden="true" style={{ display: "flex", gap: 7, alignItems: "center", justifyContent: "center", minHeight: 60 }}>{item.key === "none" ? <span style={{ fontSize: 46, color: "#94a3b8" }}>∅</span> : <><span style={{ width: 34, height: 34, borderRadius: 999, background: "#06b6d4" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#ec4899" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#facc15" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#111827" }}/></>}</div><strong style={{ fontSize: 16 }}>{item.label}</strong></button>;
       })}</div>;
     }
 
     if (step === "sides" && !canChooseReversePrint) {
       return <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 }}>
-        <button type="button" onClick={() => { setSides("single"); changed(); advance(); }} style={artworkTile(sides === "single")}>{selectedMark(sides === "single")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("single")}</div><strong>Single sided</strong></button>
-        <button type="button" onClick={() => { setSides("double"); changed(); advance(); }} style={artworkTile(sides === "double")}>{selectedMark(sides === "double")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("double")}</div><strong>Double sided</strong></button>
+        <button type="button" onClick={() => { setSides("single"); changed(); }} style={artworkTile(sides === "single")}>{selectedMark(sides === "single")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("single")}</div><strong>Single sided</strong></button>
+        <button type="button" onClick={() => { setSides("double"); changed(); }} style={artworkTile(sides === "double")}>{selectedMark(sides === "double")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("double")}</div><strong>Double sided</strong></button>
       </div>;
     }
 
@@ -3601,7 +3602,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ borderRadius: 14, background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 14px" }}>
             <strong style={{ color: "#1d4ed8" }}>{presentation === "wizard" ? "Guided quote builder" : "Configure the complete quote line"}</strong>
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{presentation === "wizard" ? "Choose one option at a time. Simple selections advance automatically; screens with extra details use Continue." : "Make every required selection below. Nothing is submitted until you press Save Quote Line. Live auto-refresh is paused while this editor is open so your unsaved selections are protected."}</div>
+            <div style={{ color: "#64748b", fontSize: 12, marginTop: 3 }}>{presentation === "wizard" ? "Choose one option at a time, then press Continue to confirm and move to the next step." : "Make every required selection below. Nothing is submitted until you press Save Quote Line. Live auto-refresh is paused while this editor is open so your unsaved selections are protected."}</div>
           </div>
           {machineCompatibilityIssues.length ? (
             <div style={{ borderRadius: 14, background: "#fff1f2", border: "1px solid #fecdd3", padding: "12px 14px", color: "#9f1239", display: "grid", gap: 4 }}>
