@@ -807,7 +807,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
         <style>{`
-          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:start; }
+          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:18px; align-items:stretch; }
+          .quote-entry-panel { height:100%; box-sizing:border-box; }
           @media (max-width: 1050px) { .quote-entry-split { grid-template-columns:1fr; } }
         `}</style>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
@@ -824,7 +825,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
         <div className="quote-entry-split" style={filter === "deleted" ? { gridTemplateColumns: "1fr" } : undefined}>
           {filter !== "deleted" ? (
-            <section style={{ border: "2px solid #bfdbfe", borderRadius: 18, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 12, display: "grid", gap: 6 }}>
+            <section className="quote-entry-panel" style={{ border: "2px solid #bfdbfe", borderRadius: 18, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 12, display: "grid", gap: 6 }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 10, flexWrap: "wrap" }}>
                 <h2 style={{ margin: 0, fontSize: 18 }}>Create new quote</h2>
                 <p style={{ margin: 0, color: "#667085", fontSize: 12 }}>Choose a client and job name, then start quoting.</p>
@@ -845,7 +846,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             </section>
           ) : null}
 
-          <section style={{ border: "1px solid #dfe7f2", borderRadius: 20, background: "#fbfdff", padding: 14, display: "grid", gap: 10, minWidth: 0 }}>
+          <section className="quote-entry-panel" style={{ border: "1px solid #dfe7f2", borderRadius: 20, background: "#fbfdff", padding: 14, display: "grid", gap: 10, minWidth: 0 }}>
             <div style={{ display: "grid", gap: 8 }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 18 }}>{filter === "deleted" ? "Deleted quotes" : "Open quote"}</h2>
