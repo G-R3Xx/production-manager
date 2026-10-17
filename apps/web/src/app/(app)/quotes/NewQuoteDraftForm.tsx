@@ -269,7 +269,7 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
         </section>
       )}
 
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 10 }}>
         <input
           name="clientName"
           value={clientName}
@@ -287,11 +287,22 @@ export function NewQuoteDraftForm({ clients, enquiryId, surveyRequestId, initial
           style={inputStyle}
         />
         <input name="phone" value={phone} onChange={(event) => setPhone(event.currentTarget.value)} placeholder="Phone" style={inputStyle} />
-        <input name="email" value={email} onChange={(event) => setEmail(event.currentTarget.value)} placeholder="Email" type="email" style={inputStyle} />
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <input
+          name="email"
+          value={email}
+          onChange={(event) => setEmail(event.currentTarget.value)}
+          placeholder="Email"
+          type="email"
+          style={{ ...inputStyle, flex: "1 1 auto", minWidth: 0 }}
+        />
+        <button type="submit" style={{ ...buttonStyle, width: "fit-content", minHeight: 40, marginLeft: "auto", flex: "0 0 auto" }}>
+          Create draft quote
+        </button>
       </div>
       <input type="hidden" name="discountPercent" value="0" />
       <input type="hidden" name="notes" value="" />
-      <button type="submit" style={{ ...buttonStyle, width: "fit-content", minHeight: 40 }}>Create draft quote</button>
     </form>
   );
 }
