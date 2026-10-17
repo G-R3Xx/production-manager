@@ -3251,11 +3251,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       poster_printing: "/quote-wizard/flow-poster-printing.png",
       service: "/quote-wizard/flow-service.png",
       component: "/quote-wizard/flow-component.png",
-      acrylic: "/quote-wizard/base-acrylic.png",
-      acm: "/quote-wizard/base-acm.png",
-      corflute: "/quote-wizard/base-corflute.png",
-      pvc: "/quote-wizard/base-pvc.png",
-      banner: "/quote-wizard/base-banner.png",
+      acrylic: "/quote-wizard/material-acrylic-white.webp",
+      acrylic_white: "/quote-wizard/material-acrylic-white.webp",
+      acrylic_black: "/quote-wizard/material-acrylic-black.webp",
+      acm: "/quote-wizard/material-acm-silver.webp",
+      acm_silver: "/quote-wizard/material-acm-silver.webp",
+      acm_black: "/quote-wizard/material-acm-black.webp",
+      corflute: "/quote-wizard/material-corflute-white.webp",
+      corflute_white: "/quote-wizard/material-corflute-white.webp",
+      corflute_black: "/quote-wizard/material-corflute-black.webp",
+      pvc: "/quote-wizard/material-pvc-white.webp",
+      pvc_white: "/quote-wizard/material-pvc-white.webp",
+      pvc_black: "/quote-wizard/material-pvc-black.webp",
+      banner: "/quote-wizard/material-vinyl-white.webp",
+      banner_white: "/quote-wizard/material-vinyl-white.webp",
+      banner_black: "/quote-wizard/material-vinyl-black.webp",
       other_sheet: "/quote-wizard/base-other-sheet.png",
       artwork_supplied: "/quote-wizard/artwork-supplied.png",
       artwork_required: "/quote-wizard/artwork-required.png"
@@ -3329,6 +3339,46 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     });
     const selectedMark = (selected: boolean) => selected ? <span aria-hidden="true" style={{ position: "absolute", top: 10, right: 10, width: 28, height: 28, borderRadius: 999, background: "#2563eb", color: "#fff", display: "grid", placeItems: "center", fontSize: 17, fontWeight: 950, boxShadow: "0 4px 12px rgba(37,99,235,.28)", zIndex: 2 }}>✓</span> : null;
     const visual = (kind: string) => <div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}>{wizardIllustration(kind)}</div>;
+    const materialVisual = (material: QuoteMaterial, fallbackKind: BaseType | "other_sheet") => {
+      const text = `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""} ${material.materialGroup ?? ""}`.toLowerCase();
+      const has = (value: string) => text.includes(value);
+      const base = fallbackKind === "other_sheet" ? "other_sheet" : fallbackKind;
+      let kind: string = base;
+      let tint: string | null = null;
+
+      if (base === "acrylic") {
+        if (has("black")) kind = "acrylic_black";
+        else if (has("white") || has("opal")) kind = "acrylic_white";
+      } else if (base === "acm") {
+        if (has("black")) kind = "acm_black";
+        else if (has("silver") || has("brushed") || has("aluminium") || has("aluminum")) kind = "acm_silver";
+      } else if (base === "corflute") {
+        if (has("black")) kind = "corflute_black";
+        else if (has("white")) kind = "corflute_white";
+      } else if (base === "pvc") {
+        if (has("black")) kind = "pvc_black";
+        else if (has("white")) kind = "pvc_white";
+      } else if (base === "banner") {
+        if (has("black")) kind = "banner_black";
+        else if (has("white")) kind = "banner_white";
+      }
+
+      const namedColours: Array<[string, string]> = [
+        ["red", "#dc2626"], ["blue", "#2563eb"], ["navy", "#1e3a8a"], ["green", "#16a34a"],
+        ["yellow", "#eab308"], ["orange", "#ea580c"], ["purple", "#7c3aed"], ["violet", "#7c3aed"],
+        ["pink", "#ec4899"], ["magenta", "#d946ef"], ["cyan", "#06b6d4"], ["teal", "#0d9488"],
+        ["grey", "#64748b"], ["gray", "#64748b"], ["gold", "#ca8a04"], ["brown", "#92400e"], ["cream", "#f5e6c8"]
+      ];
+      if (!["acrylic_black", "acrylic_white", "acm_black", "acm_silver", "corflute_black", "corflute_white", "pvc_black", "pvc_white", "banner_black", "banner_white"].includes(kind)) {
+        const match = namedColours.find(([name]) => has(name));
+        if (match && base !== "other_sheet") tint = match[1];
+      }
+
+      return <div style={{ position: "relative", borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}>
+        {wizardIllustration(kind)}
+        {tint ? <span aria-hidden="true" style={{ position: "absolute", inset: 0, background: tint, opacity: 0.42, mixBlendMode: "multiply", pointerEvents: "none" }} /> : null}
+      </div>;
+    };
     const advance = () => setWizardIndex((current) => current + 1);
     const changed = () => setUnitPriceOverridden(false);
 
@@ -3359,7 +3409,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const selected = selectedMainMaterial?.id === material.id;
         const dimensions = bestSheetDimensions(material);
         const dimensionLabel = dimensions ? `${dimensionMm(dimensions.width)} × ${dimensionMm(dimensions.length)}` : material.rollWidthMm ? `${material.rollWidthMm}mm roll` : "";
-        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{visual(baseType || "other_sheet")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{material.name}</strong>{dimensionLabel ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{dimensionLabel}</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, baseType || "other_sheet")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{material.name}</strong>{dimensionLabel ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{dimensionLabel}</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
       })}</div>;
     }
 
@@ -3382,7 +3432,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     if (step === "media") {
       return <div style={photoGrid}>{rollMedia.map((material) => {
         const selected = mediaId === material.id;
-        return <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{visual("banner")}<div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15 }}>{material.name}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+        return <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15 }}>{material.name}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
       })}</div>;
     }
 
