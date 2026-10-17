@@ -590,14 +590,23 @@ function isPrintRollMaterial(material: QuoteMaterial): boolean {
   return isRollMaterial(material) && !isLaminateMaterial(material);
 }
 
-function materialMatchesBase(material: QuoteMaterial, baseType: BaseType): boolean {
+function materialMatchesSpecificBase(material: QuoteMaterial, baseType: Exclude<BaseType, "other_sheet">): boolean {
   const text = materialText(material);
   if (baseType === "acrylic") return text.includes("acrylic") || text.includes("perspex") || text.includes("pmma");
   if (baseType === "acm") return text.includes("acm") || text.includes("aluminium composite") || text.includes("aluminum composite");
   if (baseType === "corflute") return text.includes("corflute") || text.includes("correx") || text.includes("corrugated");
   if (baseType === "pvc") return text.includes("pvc") || text.includes("foamboard") || text.includes("foam board") || text.includes("foam");
-  if (baseType === "banner") return text.includes("banner") || (isRollMaterial(material) && !isLaminateMaterial(material));
-  return isSheetMaterial(material);
+  return text.includes("banner") || (isRollMaterial(material) && !isLaminateMaterial(material));
+}
+
+function materialMatchesBase(material: QuoteMaterial, baseType: BaseType): boolean {
+  if (baseType !== "other_sheet") return materialMatchesSpecificBase(material, baseType);
+  if (!isSheetMaterial(material)) return false;
+
+  // "Other sheet" is deliberately the fallback bucket only. Anything that has
+  // its own visual category must never be duplicated here.
+  const dedicatedBases: Array<Exclude<BaseType, "other_sheet">> = ["acrylic", "acm", "corflute", "pvc", "banner"];
+  return !dedicatedBases.some((category) => materialMatchesSpecificBase(material, category));
 }
 
 function thicknessFor(material: QuoteMaterial): string {
@@ -622,6 +631,39 @@ function colourFor(material: QuoteMaterial): string {
   if (text.includes("yellow")) return "Yellow";
   if (text.includes("pink")) return "Pink";
   return "Standard";
+}
+
+function thicknessSortValue(material: QuoteMaterial): number {
+  const text = `${material.name} ${material.gsm ?? ""}`;
+  const mm = text.match(/(\d+(?:\.\d+)?)\s*mm/i);
+  if (mm) return Number(mm[1]);
+  const gsm = text.match(/(\d+(?:\.\d+)?)\s*gsm/i);
+  if (gsm) return 10000 + Number(gsm[1]);
+  return Number.POSITIVE_INFINITY;
+}
+
+const MATERIAL_COLOUR_ORDER = [
+  "Black", "Clear", "White", "Opal", "Red", "Blue", "Green", "Yellow", "Pink", "Standard"
+] as const;
+
+function colourSortValue(material: QuoteMaterial): number {
+  const colour = colourFor(material);
+  const index = MATERIAL_COLOUR_ORDER.indexOf(colour as (typeof MATERIAL_COLOUR_ORDER)[number]);
+  return index >= 0 ? index : MATERIAL_COLOUR_ORDER.length;
+}
+
+function compareSubstrateMaterials(a: QuoteMaterial, b: QuoteMaterial): number {
+  const thicknessDifference = thicknessSortValue(a) - thicknessSortValue(b);
+  if (Number.isFinite(thicknessDifference) && thicknessDifference !== 0) return thicknessDifference;
+  if (!Number.isFinite(thicknessSortValue(a)) && Number.isFinite(thicknessSortValue(b))) return 1;
+  if (Number.isFinite(thicknessSortValue(a)) && !Number.isFinite(thicknessSortValue(b))) return -1;
+
+  const colourDifference = colourSortValue(a) - colourSortValue(b);
+  if (colourDifference !== 0) return colourDifference;
+
+  const colourNameDifference = colourFor(a).localeCompare(colourFor(b), undefined, { sensitivity: "base" });
+  if (colourNameDifference !== 0) return colourNameDifference;
+  return materialText(a).localeCompare(materialText(b), undefined, { numeric: true, sensitivity: "base" });
 }
 
 function uniq(values: string[]): string[] {
@@ -1507,7 +1549,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
   const baseMaterials = useMemo(() => {
     if (!baseType) return [];
-    return materialPool.filter((material) => isSignageStock(material) && materialMatchesBase(material, baseType));
+    return materialPool
+      .filter((material) => isSignageStock(material) && materialMatchesBase(material, baseType))
+      .slice()
+      .sort(compareSubstrateMaterials);
   }, [materialPool, baseType]);
 
   const thicknessOptions = useMemo(() => uniq(baseMaterials.map(thicknessFor)), [baseMaterials]);
