@@ -805,6 +805,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
 
       <section style={{ ...cardStyle(), display: "grid", gap: 14 }}>
+        <style>{`
+          .quote-entry-split { display:grid; grid-template-columns:minmax(0,1.72fr) minmax(340px,.78fr); gap:18px; align-items:start; }
+          @media (max-width: 1050px) { .quote-entry-split { grid-template-columns:1fr; } }
+        `}</style>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
           <div style={{ minWidth: 260 }}>
             <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.1em", textTransform: "uppercase", color: "#2563eb" }}>Quote entry</p>
@@ -817,116 +821,62 @@ export default async function QuotesPage({ searchParams }: PageProps) {
           </div>
         </div>
 
-        {filter !== "deleted" ? (
-          <section style={{ border: "2px solid #bfdbfe", borderRadius: 20, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 16, display: "grid", gap: 10 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div className="quote-entry-split" style={filter === "deleted" ? { gridTemplateColumns: "1fr" } : undefined}>
+          {filter !== "deleted" ? (
+            <section style={{ border: "2px solid #bfdbfe", borderRadius: 20, background: "linear-gradient(135deg, #f8fbff 0%, #ffffff 70%)", padding: 16, display: "grid", gap: 10 }}>
               <div>
                 <h2 style={{ margin: 0, fontSize: 20 }}>Create new quote</h2>
-                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Choose the client, give the job a name, then start adding quote lines.</p>
+                <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Choose the client, give the job a name, then create the draft and start adding quote lines.</p>
               </div>
-              <span style={{ borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", padding: "6px 10px", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.06em" }}>Start here</span>
+              <NewQuoteDraftForm
+                clients={draftClientOptions}
+                enquiryId={sourceEnquiry?.id ?? survey?.enquiryId ?? ""}
+                surveyRequestId={survey?.id ?? ""}
+                initialValues={{
+                  jobName: "",
+                  linkedCustomerId: sourceLinkedCustomerId ?? "",
+                  clientName: initialDraftClientName,
+                  contactName: initialDraftContactName,
+                  phone: sourcePhone || linkedClient?.phone || "",
+                  email: sourceEmail || linkedClient?.email || "",
+                  discountPercent: "0",
+                  notes: defaultQuoteNotes
+                }}
+              />
+            </section>
+          ) : null}
+
+          <section style={{ border: "1px solid #dfe7f2", borderRadius: 20, background: "#fbfdff", padding: 14, display: "grid", gap: 10, minWidth: 0 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+              <div>
+                <h2 style={{ margin: 0, fontSize: 18 }}>{filter === "deleted" ? "Deleted quotes" : "Open quote"}</h2>
+                <p style={{ margin: "3px 0 0", color: "#667085", fontSize: 12 }}>{filter === "deleted" ? "Select a quote to review or restore it." : "Select an existing quote to continue working on it."}</p>
+              </div>
             </div>
-          <NewQuoteDraftForm
-            clients={draftClientOptions}
-            enquiryId={sourceEnquiry?.id ?? survey?.enquiryId ?? ""}
-            surveyRequestId={survey?.id ?? ""}
-            initialValues={{
-              jobName: "",
-              linkedCustomerId: sourceLinkedCustomerId ?? "",
-              clientName: initialDraftClientName,
-              contactName: initialDraftContactName,
-              phone: sourcePhone || linkedClient?.phone || "",
-              email: sourceEmail || linkedClient?.email || "",
-              discountPercent: "0",
-              notes: defaultQuoteNotes
-            }}
-          />
-          </section>
-        ) : null}
-
-        {(survey || linkedClient || selectedQuote) ? (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))", gap: 10 }}>
-            {survey ? (
-              <section style={{ border: `1px solid ${survey.installSchedulerSyncStatus === "completed" ? "#abefc6" : "#c7d7fe"}`, borderRadius: 18, padding: 12, display: "grid", gap: 8, background: survey.installSchedulerSyncStatus === "completed" ? "#f6fef9" : "#f8fbff" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "start", gap: 12 }}>
-                  <div style={{ display: "flex", gap: 10, alignItems: "center", minWidth: 0 }}>
-                    <ClientLogoBadge logoUrl={sourceLogoUrl} name={survey.clientName} size={46} radius={12} padding={4} />
-                    <div style={{ display: "grid", gap: 3, minWidth: 0 }}>
-                      <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#155eef" }}>Survey source</p>
-                      <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{survey.clientName}</strong>
+            <div style={{ display: "grid", gap: 8, maxHeight: 570, overflowY: "auto", paddingRight: 3 }}>
+              {quoteDrafts.map((quote) => {
+                const active = selectedQuote?.id === quote.id;
+                const quoteSourceEnquiry = quote.enquiryId ? enquiryById.get(quote.enquiryId) : null;
+                const quoteLogoUrl = quoteSourceEnquiry?.clientLogoUrl || customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
+                return (
+                  <Link prefetch={false} key={quote.id} href={`/quotes?selected=${quote.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ width: "100%", minWidth: 0, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 16, padding: 11, display: "grid", gap: 7, background: active ? "#eff6ff" : "#fff", overflow: "hidden", boxSizing: "border-box" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", minWidth: 0 }}>
+                      <div style={{ display: "flex", gap: 9, minWidth: 0, flex: "1 1 auto", alignItems: "center", overflow: "hidden" }}>
+                        <ClientLogoBadge logoUrl={quoteLogoUrl} name={quote.clientName} size={38} radius={10} padding={4} />
+                        <div style={{ minWidth: 0 }}>
+                          <strong title={quote.jobName || quote.clientName} style={{ display: "block", minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.jobName || quote.clientName}</strong>
+                          <span title={quote.clientName} style={{ display: "block", color: "#667085", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.clientName}</span>
+                        </div>
+                      </div>
+                      <span style={{ flex: "0 0 auto", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 8px", fontSize: 10, fontWeight: 900 }}>{quote.status}</span>
                     </div>
-                  </div>
-                  <span style={{ borderRadius: 999, background: survey.installSchedulerSyncStatus === "completed" ? "#dcfae6" : "#eef2ff", color: survey.installSchedulerSyncStatus === "completed" ? "#067647" : "#4338ca", padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{surveyStatusLabel(survey.status, survey.installSchedulerSyncStatus)}</span>
-                </div>
-                <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>{survey.siteAddress || "No site address recorded"}</p>
-                {sourceEnquiry?.clientPurchaseOrderNumber ? <p style={{ margin: 0, color: "#475467", fontSize: 13 }}>PO: <strong>{sourceEnquiry.clientPurchaseOrderNumber}</strong></p> : null}
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  {surveyPhotos.length ? <span style={{ borderRadius: 999, background: "#fff7ed", color: "#c2410c", padding: "4px 9px", fontSize: 12, fontWeight: 850 }}>{surveyPhotos.length} photo{surveyPhotos.length === 1 ? "" : "s"} copied to notes</span> : null}
-                  <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 34, display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: 10, border: "1px solid #cbd5e1", color: "#111827", fontSize: 13, fontWeight: 900, padding: "0 10px" }}>Open survey</Link>
-                </div>
-              </section>
-            ) : null}
-            {selectedQuote && (!linkedClient || quoteClientLinkMismatch) ? (
-              <section style={{ border: "1px solid #fdba74", borderRadius: 18, padding: 12, display: "grid", gap: 10, background: "#fff7ed" }}>
-                <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                  <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={50} radius={13} padding={4} />
-                  <div style={{ minWidth: 0 }}>
-                    <strong style={{ display: "block", color: "#9a3412" }}>Client link needs correction</strong>
-                    <span style={{ color: "#9a3412", fontSize: 12, lineHeight: 1.45 }}>{linkedClient ? `This quote says “${selectedQuote.clientName}” but is linked to “${linkedClient.displayName}”.` : `“${selectedQuote.clientName}” is copied onto the quote but is not linked to a saved client.`}</span>
-                  </div>
-                </div>
-                <form action={linkQuoteToProductionManagerClientAction} style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto", gap: 8, alignItems: "end" }}>
-                  <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                  <label style={{ display: "grid", gap: 5, color: "#7c2d12", fontSize: 12, fontWeight: 850 }}>
-                    Correct saved client
-                    <select name="customerId" defaultValue={suggestedPmClient?.id ?? ""} required style={{ ...inputStyle, minWidth: 0 }}>
-                      <option value="">Choose Production Manager client…</option>
-                      {clients.filter((candidate) => candidate.isActive).map((candidate) => <option key={candidate.id} value={candidate.id}>{candidate.displayName}{candidate.companyName && candidate.companyName !== candidate.displayName ? ` — ${candidate.companyName}` : ""}</option>)}
-                    </select>
-                  </label>
-                  <MyobSubmitButton label="Save correct client" pendingLabel="Correcting…" background="#c2410c" />
-                </form>
-                {suggestedPmClient ? <span style={{ color: "#9a3412", fontSize: 12 }}>Suggested exact match: <strong>{suggestedPmClient.displayName}</strong></span> : null}
-              </section>
-            ) : linkedClient ? (
-              <section style={{ border: "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gridTemplateColumns: "56px 1fr", gap: 12, alignItems: "center", background: "#fbfdff" }}>
-                <ClientLogoBadge logoUrl={linkedClientLogoUrl} name={linkedClient.displayName} size={56} radius={14} padding={5} />
-                <div style={{ display: "grid", gap: 4 }}>
-                  <strong>{linkedClient.displayName}</strong>
-                  <span style={{ color: "#667085", fontSize: 13 }}>MYOB price level: <strong>{linkedClientPriceLevelName}</strong> ({linkedClientPriceLevel}) · PM calculated work ×{Number(linkedClientPriceFactor || 1).toFixed(2)}</span>
-                </div>
-              </section>
-            ) : null}
-          </div>
-        ) : null}
-
-
-
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "end", marginTop: 2 }}>
-          <div>
-            <h2 style={{ margin: 0, fontSize: 18 }}>{filter === "deleted" ? "Deleted quotes" : "Open an existing quote"}</h2>
-            <p style={{ margin: "3px 0 0", color: "#667085", fontSize: 12 }}>{filter === "deleted" ? "Select a deleted quote to review or restore it." : "Recent quotes are shown below. Select one to continue working on it."}</p>
-          </div>
-        </div>
-        <div style={{ display: "flex", gap: 10, overflowX: "auto", paddingBottom: 4 }}>
-          {quoteDrafts.map((quote) => {
-            const active = selectedQuote?.id === quote.id;
-            const quoteSourceEnquiry = quote.enquiryId ? enquiryById.get(quote.enquiryId) : null;
-            const quoteLogoUrl = quoteSourceEnquiry?.clientLogoUrl || customerLogoUrl(quote.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
-            return (
-              <Link prefetch={false} key={quote.id} href={`/quotes?selected=${quote.id}`} style={{ flex: "0 0 300px", width: 300, minWidth: 0, maxWidth: 300, textDecoration: "none", color: "inherit", border: active ? "2px solid #155eef" : "1px solid #dfe7f2", borderRadius: 18, padding: 12, display: "grid", gap: 8, background: active ? "#eff6ff" : "#fbfdff", overflow: "hidden" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", minWidth: 0 }}>
-                  <div style={{ display: "flex", gap: 10, minWidth: 0, flex: "1 1 auto", alignItems: "center", overflow: "hidden" }}>
-                    <ClientLogoBadge logoUrl={quoteLogoUrl} name={quote.clientName} size={42} radius={12} padding={4} />
-                    <strong title={quote.clientName} style={{ display: "block", minWidth: 0, maxWidth: "100%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{quote.clientName}</strong>
-                  </div>
-                  <span style={{ flex: "0 0 auto", borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>{quote.status}</span>
-                </div>
-                <div style={{ color: "#667085", fontSize: 13, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.jobName, quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Manual discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
-              </Link>
-            );
-          })}
-          {quoteDrafts.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No draft quotes yet.</p> : null}
+                    <div style={{ color: "#667085", fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{[quote.contactName, quote.phone, quote.discountPercent !== "0" ? `Manual discount ${quote.discountPercent}%` : null].filter(Boolean).join(" · ")}</div>
+                  </Link>
+                );
+              })}
+              {quoteDrafts.length === 0 ? <p style={{ margin: 0, color: "#667085", padding: 8 }}>No quotes here yet.</p> : null}
+            </div>
+          </section>
         </div>
       </section>
 
