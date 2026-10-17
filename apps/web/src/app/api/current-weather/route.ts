@@ -118,12 +118,12 @@ export async function GET() {
     let location = await geocode(requestedPlace);
     if (!location && requestedPlace.toLowerCase() !== "canberra") location = await geocode("Canberra");
     if (!location || typeof location.latitude !== "number" || typeof location.longitude !== "number") {
-      return NextResponse.json({ ok: false, timezone: "Australia/Sydney" }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+      return NextResponse.json({ ok: false, timezone: "Australia/Sydney", serverTime: new Date().toISOString() }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
 
     const data = await forecast(location.latitude, location.longitude);
     if (!data?.daily?.time?.length) {
-      return NextResponse.json({ ok: false, timezone: data?.timezone || location.timezone || "Australia/Sydney" }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+      return NextResponse.json({ ok: false, timezone: data?.timezone || location.timezone || "Australia/Sydney", serverTime: new Date().toISOString() }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
 
     const daily = [0, 1].map((index) => ({
@@ -139,6 +139,7 @@ export async function GET() {
       ok: true,
       location: [location.name, location.admin1].filter(Boolean).join(", "),
       timezone: data.timezone || location.timezone || "Australia/Sydney",
+      serverTime: new Date().toISOString(),
       current: {
         temperatureC: typeof data.current?.temperature_2m === "number" ? data.current.temperature_2m : null,
         apparentC: typeof data.current?.apparent_temperature === "number" ? data.current.apparent_temperature : null,
@@ -150,6 +151,6 @@ export async function GET() {
     });
   } catch (error) {
     console.warn("Optional weather lookup failed.", error);
-    return NextResponse.json({ ok: false, timezone: "Australia/Sydney" }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+    return NextResponse.json({ ok: false, timezone: "Australia/Sydney", serverTime: new Date().toISOString() }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
   }
 }

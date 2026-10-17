@@ -15,6 +15,7 @@ type WeatherSnapshot = {
   ok: boolean;
   location?: string;
   timezone?: string;
+  serverTime?: string;
   current?: {
     temperatureC: number | null;
     apparentC: number | null;
@@ -75,6 +76,7 @@ const eyebrowStyle = {
 } as const;
 
 export function CurrentInfoBar() {
+  const [clockOffsetMs, setClockOffsetMs] = useState(0);
   const [now, setNow] = useState(() => new Date());
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
 
@@ -87,15 +89,24 @@ export function CurrentInfoBar() {
       if (!response.ok) return;
       const snapshot = await response.json() as WeatherSnapshot;
       setWeather(snapshot);
+      const serverTimestamp = snapshot.serverTime || response.headers.get("date") || "";
+      const serverMs = Date.parse(serverTimestamp);
+      if (Number.isFinite(serverMs)) {
+        const offset = serverMs - Date.now();
+        setClockOffsetMs(offset);
+        setNow(new Date(Date.now() + offset));
+      }
     } catch {
       // Weather is optional convenience information; the app should never be interrupted by it.
     }
   }, []);
 
   useEffect(() => {
-    const clock = window.setInterval(() => setNow(new Date()), 30_000);
+    const updateClock = () => setNow(new Date(Date.now() + clockOffsetMs));
+    updateClock();
+    const clock = window.setInterval(updateClock, 30_000);
     return () => window.clearInterval(clock);
-  }, []);
+  }, [clockOffsetMs]);
 
   useEffect(() => {
     void refreshWeather();

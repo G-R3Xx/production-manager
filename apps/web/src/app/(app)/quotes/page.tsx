@@ -28,6 +28,7 @@ import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
 import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, listRecipesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
 import { getQuoteEntryLayoutForUser } from "@/server/users";
+import { QuoteSearchInput } from "./QuoteSearchInput";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -852,14 +853,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   {filter === "deleted" ? "Search deleted quotes to review or restore them." : quoteSearch ? `Showing matches for “${quoteSearch}”.` : "Showing the 3 most recent quotes. Search to find older quotes."}
                 </p>
               </div>
-              <form action="/quotes" method="get" style={{ display: "flex", gap: 7, alignItems: "center" }}>
-                {filter === "deleted" ? <input type="hidden" name="filter" value="deleted" /> : null}
-                <input name="q" defaultValue={quoteSearch} placeholder="Search quotes…" aria-label="Search quotes" style={{ ...inputStyle, minHeight: 38, height: 38, borderRadius: 12, padding: "0 11px", fontSize: 13 }} />
-                <button type="submit" style={{ ...buttonStyle, minHeight: 38, height: 38, borderRadius: 12, padding: "0 12px", fontSize: 12 }}>Search</button>
-                {quoteSearch ? <Link href={filter === "deleted" ? "/quotes?filter=deleted" : "/quotes"} style={{ minHeight: 38, display: "inline-flex", alignItems: "center", padding: "0 8px", color: "#475467", fontSize: 12, fontWeight: 800, textDecoration: "none" }}>Clear</Link> : null}
-              </form>
+              <QuoteSearchInput initialValue={quoteSearch} />
             </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, overflow: "visible", paddingRight: 0, alignItems: "stretch" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8, maxHeight: 252, overflowY: "auto", overflowX: "hidden", paddingRight: 4, alignItems: "stretch", scrollbarGutter: "stable" }}>
               {visibleQuoteDrafts.map((quote) => {
                 const active = selectedQuote?.id === quote.id;
                 const quoteSourceEnquiry = quote.enquiryId ? enquiryById.get(quote.enquiryId) : null;
