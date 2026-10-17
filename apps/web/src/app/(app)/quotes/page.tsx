@@ -929,8 +929,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <div style={{ display: "flex", gap: 14, alignItems: "center", minWidth: 0 }}>
                     <ClientLogoBadge logoUrl={selectedQuoteLogoUrl} name={selectedQuote.clientName} size={58} radius={16} padding={5} />
                     <div style={{ minWidth: 0 }}>
-                      <h2 style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>Selected quote: {selectedQuote.jobName || selectedQuote.clientName}</h2>
-                      <p style={{ margin: "6px 0 0", color: "#667085" }}>Client: <strong>{selectedQuote.clientName}</strong> · Add line items by building from your material library.</p>
+                      <h2 style={{ margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{selectedQuote.jobName || selectedQuote.clientName}</h2>
+                      <p style={{ margin: "6px 0 0", color: "#667085" }}>Client: <strong>{selectedQuote.clientName}</strong> · {quoteLines.length} quote line{quoteLines.length === 1 ? "" : "s"} · {formatMoney(quoteSubtotal)} ex GST</p>
                     </div>
                   </div>
                   {requestedChangeLines.length ? (
@@ -952,7 +952,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   {(() => { const tone = quoteStatusTone(selectedQuote.status); return <span style={{ border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedQuote.status.replace(/_/g, " ")}</span>; })()}
                 </div>
 
-                <section style={{ border: "1px solid #d9e2ef", borderRadius: 22, background: "linear-gradient(135deg,#ffffff,#f8fbff)", padding: 16, display: "grid", gap: 14 }}>
+                <section style={{ border: "1px solid #d9e2ef", borderRadius: 18, background: "#fff", padding: 14, display: "grid", gap: 12, order: 2 }}>
                   <form action={updateQuoteJobNameAction} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end" }}>
                     <input type="hidden" name="quoteId" value={selectedQuote.id} />
                     <label style={{ display: "grid", gap: 6 }}>
@@ -969,6 +969,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <button type="submit" style={{ ...buttonStyle, minWidth: 132 }}>Save job name</button>
                     <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
                   </form>
+
+                  <details style={{ border: "1px solid #e4e7ec", borderRadius: 14, background: "#f8fafc", overflow: "hidden" }}>
+                    <summary style={{ listStyle: "none", cursor: "pointer", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+                      <span style={{ fontWeight: 950, color: "#344054" }}>Quote details & client actions</span>
+                      <span style={{ color: "#667085", fontSize: 12, fontWeight: 800 }}>{quoteLines.length} line{quoteLines.length === 1 ? "" : "s"} · {formatMoney(quoteSubtotal)} ex GST · {selectedQuote.acceptedAt ? "Accepted" : selectedQuote.changesRequestedAt ? "Changes requested" : selectedQuote.declinedAt ? "Declined" : selectedQuote.viewedAt ? "Viewed" : selectedQuote.sentAt ? "Sent" : "Not sent"}</span>
+                    </summary>
+                    <div style={{ borderTop: "1px solid #e4e7ec", padding: 12, display: "grid", gap: 12 }}>
                   <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
                   {selectedQuoteSourceEnquiry ? (
                     <section
@@ -1040,15 +1047,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
                   <div style={{ display: "grid", gap: 10, minWidth: 0 }}>
                     <div style={{ display: "grid", gap: 4, minWidth: 0 }}>
-                      <strong>Client-facing quote link</strong>
-                      <p style={{ margin: 0, color: "#667085", fontSize: 13, lineHeight: 1.45, maxWidth: 880 }}>Send client link + PDF emails both the online approval link and a downloadable PDF copy, then marks the quote as sent automatically.</p>
+                      <strong>Client actions</strong>
+                      <p style={{ margin: 0, color: "#667085", fontSize: 13, lineHeight: 1.45, maxWidth: 880 }}>Open the client view, send the quote by email, or record an approval. The public URL is managed automatically.</p>
                     </div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0 }}>
-                      <input
-                        readOnly
-                        value={quotePublicUrl || "Mark quote as sent to generate/confirm the link"}
-                        style={{ ...inputStyle, fontSize: 13, flex: "1 1 360px", width: "auto", minWidth: 240 }}
-                      />
                       {selectedQuote.status !== "deleted" ? (
                         <form action={markQuoteSentAction} style={{ flex: "0 0 auto" }}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
@@ -1203,14 +1205,16 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     );
                   })()}
 
+                    </div>
+                  </details>
                   {selectedQuote.clientResponseNotes ? <div style={{ border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412", borderRadius: 16, padding: 12 }}><strong>Client notes:</strong><br />{selectedQuote.clientResponseNotes}</div> : null}
                 </section>
               </div>
 
               {selectedQuote.status !== "deleted" ? (
-                <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 2 }}>
-                  <details data-production-manager-auto-refresh-protected="true" style={{ border: "1px solid #b9cdfc", borderRadius: 18, background: "#fff", overflow: "hidden" }}>
-                    <summary style={{ listStyle: "none", cursor: "pointer", padding: "14px 16px", background: "linear-gradient(135deg,#eff6ff,#f8fbff)", color: "#155eef", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}><span>＋ Add quote line</span><span style={{ fontSize: 12, color: "#475467" }}>Open line editor</span></summary>
+                <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 0 }}>
+                  <details data-production-manager-auto-refresh-protected="true" style={{ border: "2px solid #155eef", borderRadius: 18, background: "#fff", overflow: "hidden", boxShadow: "0 8px 24px rgba(21,94,239,0.10)" }}>
+                    <summary style={{ listStyle: "none", cursor: "pointer", padding: "18px 20px", background: "linear-gradient(135deg,#155eef,#2563eb)", color: "#fff", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}><span style={{ fontSize: 18 }}>＋ Create quote line</span><span style={{ fontSize: 12, color: "#dbeafe", fontWeight: 800 }}>Choose a product, configure it and add pricing</span></summary>
                     <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
                       {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
                       <DeferredQuoteLineStartBuilder
@@ -1245,10 +1249,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 <section style={{ border: "1px solid #fecaca", borderRadius: 18, padding: 16, background: "#fff5f4", color: "#b42318", fontWeight: 800 }}>This quote is deleted. Restore it before editing or sending.</section>
               )}
 
-              <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 1 }}>
+              <div id="saved-lines" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 1, border: "1px solid #e4e7ec", borderRadius: 18, padding: 14, background: "#fff" }}>
                 <div style={{ display: "grid", gap: 4 }}>
-                  <h4 style={{ margin: 0 }}>Current quote lines <span style={{ color: "#667085", fontWeight: 750 }}>({quoteLines.length})</span></h4>
-                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Lines stay collapsed until you open one. Survey-created and manually added lines use the same one-page field layout.{canOverrideQuoteMarkup ? " Managers and Owners can adjust the markup multiplier beside any PM-calculated line; the standard still comes from Settings." : ""}</p>
+                  <h3 style={{ margin: 0 }}>Quote lines <span style={{ color: "#667085", fontWeight: 750 }}>({quoteLines.length})</span></h3>
+                  <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Open a line to review or edit it.{canOverrideQuoteMarkup ? " Managers and Owners can adjust markup on PM-calculated lines." : ""}</p>
                 </div>
                 {quoteLines.map((line) => {
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
@@ -1399,7 +1403,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No saved quote lines yet. Build a line above, then save it to the quote.</p> : null}
               </div>
 
-              <section style={{ border: "1px solid #e9d5ff", borderRadius: 22, padding: 16, background: "linear-gradient(135deg,#ffffff,#faf5ff)", display: "grid", gap: 12, order: 3 }}>
+              <details style={{ border: "1px solid #e9d5ff", borderRadius: 18, background: "#fff", order: 3, overflow: "hidden" }}>
+                <summary style={{ listStyle: "none", cursor: "pointer", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontWeight: 950, color: "#6d28d9" }}>Artwork approval</span>
+                  <span style={{ fontSize: 12, color: "#667085" }}>{selectedArtworkApproval ? selectedArtworkApproval.status.replace(/_/g, " ") : "Not created"}</span>
+                </summary>
+                <div style={{ borderTop: "1px solid #f3e8ff", padding: 14, display: "grid", gap: 12 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start", flexWrap: "wrap" }}>
                   <div style={{ display: "grid", gap: 4 }}>
                     <p style={{ margin: 0, fontSize: 12, fontWeight: 950, letterSpacing: "0.08em", textTransform: "uppercase", color: "#7c3aed" }}>Artwork approval</p>
@@ -1420,7 +1429,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <Link href={`/artwork-approvals?quote=${selectedQuote.id}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Go to Artwork Approvals</Link>
                   {selectedProductionJob ? <a href={`/job-sheets/${selectedProductionJob.id}`} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Print job sheet</a> : selectedQuote.status === "accepted" ? <span style={{ minHeight: 44, borderRadius: 14, border: "1px solid #e4e7ec", background: "#f8fafc", color: "#667085", fontWeight: 850, display: "inline-flex", alignItems: "center", padding: "0 14px", fontSize: 12 }}>Job sheet available after approved artwork creates Production</span> : null}
                 </div>
-              </section>
+                </div>
+              </details>
             </div>
           ) : (
             <div style={{ border: "1px dashed #cbd5e1", borderRadius: 22, padding: 30, display: "grid", placeItems: "center", textAlign: "center", gap: 8, minHeight: 320 }}>
