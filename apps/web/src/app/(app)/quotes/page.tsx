@@ -399,6 +399,32 @@ function staffLineSummary(optionSummary: string | null, configurationSnapshot: u
   return [...parts, ...usageParts].join(" · ") || null;
 }
 
+type StaffLineSummaryItem = { label: string; value: string };
+
+function staffLineSummaryItems(summary: string | null, productName: string): StaffLineSummaryItem[] {
+  const product = productName.trim().toLowerCase();
+  return String(summary ?? "")
+    .split(" · ")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part) => part.toLowerCase() !== product)
+    .map((part) => {
+      const separator = part.indexOf(":");
+      if (separator > 0 && separator < 40) {
+        return { label: part.slice(0, separator).trim(), value: part.slice(separator + 1).trim() };
+      }
+
+      const lower = part.toLowerCase();
+      if (lower === "artwork supplied") return { label: "Artwork", value: "Supplied" };
+      if (lower === "artwork required") return { label: "Artwork", value: "Required" };
+      if (lower.includes("direct print")) return { label: "Print", value: part };
+      if (lower.includes("single sided") || lower.includes("double sided")) return { label: "Sides", value: part };
+      if (lower.includes("jingwei")) return { label: "Cutting", value: part };
+      if (lower === "pickup" || lower.startsWith("delivery") || lower.startsWith("install")) return { label: "Dispatch", value: part };
+      return { label: "Detail", value: part };
+    });
+}
+
 function surveyStatusLabel(status: string | null | undefined, syncStatus: string | null | undefined): string {
   if (syncStatus === "completed" || status === "completed") return "Survey completed · ready to quote";
   if (syncStatus === "created") return "Sent to Install Scheduler · awaiting completion";
@@ -1218,6 +1244,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   const surveyNeedsConfig = surveyLineNeedsConfiguration(line.configurationSnapshot);
                   const markupInfo = quoteLineMarkupInfo(line.configurationSnapshot, standardQuoteMarkup, standardAccessEquipmentQuoteMarkup);
                   const profitInfo = quoteLineProfitInfo(line.configurationSnapshot, defaultQuoteProfitMultiplier);
+                  const lineSummary = staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity);
+                  const lineSummaryItems = staffLineSummaryItems(lineSummary, line.productName);
                   return (
                     <details
                       key={line.id}
@@ -1253,7 +1281,30 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 </span>
                               ) : null}
                             </div>
-                            <div style={{ color: "#667085", fontSize: 13 }}>{staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity)}</div>
+                            {lineSummaryItems.length ? (
+                              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
+                                {lineSummaryItems.map((item, index) => (
+                                  <div
+                                    key={`${item.label}-${index}`}
+                                    style={{
+                                      display: "grid",
+                                      gap: 2,
+                                      minWidth: 128,
+                                      maxWidth: 310,
+                                      padding: "7px 10px",
+                                      border: "1px solid #dce5f1",
+                                      borderRadius: 10,
+                                      background: item.label === "Stock" || item.label === "Print media" || item.label === "Cut vinyl" || item.label === "Ink" || item.label === "Laminate" || item.label === "Backing"
+                                        ? "#f5f9ff"
+                                        : "#ffffff"
+                                    }}
+                                  >
+                                    <span style={{ color: "#667085", fontSize: 9, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.1 }}>{item.label}</span>
+                                    <span style={{ color: "#344054", fontSize: 12, fontWeight: 720, lineHeight: 1.3 }}>{item.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : null}
                             {line.clientResponseNotes ? <div style={{ color: line.clientResponseStatus === "changes_requested" ? "#9a3412" : "#667085", fontSize: 12 }}><strong>Client line note:</strong> {line.clientResponseNotes}</div> : null}
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-start" }}>
