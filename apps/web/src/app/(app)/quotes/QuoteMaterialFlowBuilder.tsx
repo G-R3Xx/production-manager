@@ -3235,15 +3235,70 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   }
 
 
+  function wizardIllustration(kind: string) {
+    const common = { width: "100%", height: "100%", display: "block" } as const;
+    const bg = "#f8fafc";
+    const line = "#cbd5e1";
+    const dark = "#0f172a";
+    const blue = "#2563eb";
+    const teal = "#0891b2";
+    const purple = "#7c3aed";
+
+    if (kind === "signage") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="30" y="17" width="180" height="66" rx="5" fill={blue}/><path d="M30 60 L82 17 H121 L70 83 H30Z" fill="#38bdf8" opacity=".8"/><path d="M120 17 L177 83 H210V58L170 17Z" fill={purple} opacity=".75"/><rect x="55" y="88" width="8" height="24" rx="2" fill={dark}/><rect x="177" y="88" width="8" height="24" rx="2" fill={dark}/><rect x="45" y="108" width="150" height="6" rx="3" fill="#94a3b8"/><text x="120" y="50" textAnchor="middle" fontSize="16" fontWeight="800" fill="white">SIGNS</text><text x="120" y="69" textAnchor="middle" fontSize="9" fontWeight="700" fill="white">MAKE AN IMPACT</text></svg>;
+    if (kind === "small_format") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><g transform="translate(45 22) rotate(-7 75 40)"><rect x="8" y="18" width="145" height="68" rx="6" fill="#cbd5e1"/><rect x="4" y="10" width="145" height="68" rx="6" fill="#fff" stroke={line}/><rect width="145" height="68" rx="6" fill="#fff" stroke={line}/><rect width="145" height="15" rx="6" fill={purple}/><path d="M0 38 L55 0 H88 L28 68 H0Z" fill="#ec4899" opacity=".9"/><text x="95" y="38" textAnchor="middle" fontSize="8" fontWeight="800" fill={dark}>PRINT</text><text x="95" y="49" textAnchor="middle" fontSize="7" fill="#64748b">BUSINESS CARDS</text></g></svg>;
+    if (kind === "plan_printing") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><g stroke="#64748b" strokeWidth="2" fill="#fff"><ellipse cx="70" cy="77" rx="34" ry="16"/><rect x="70" y="61" width="105" height="32"/><ellipse cx="175" cy="77" rx="34" ry="16"/><ellipse cx="95" cy="51" rx="28" ry="13"/><rect x="95" y="38" width="75" height="26"/><ellipse cx="170" cy="51" rx="28" ry="13"/></g><path d="M83 72h74M93 82h54M110 47h45" stroke={blue} strokeWidth="2" opacity=".7"/></svg>;
+    if (kind === "poster_printing") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M74 14h92l18 98H56z" fill="#1e293b"/><rect x="68" y="24" width="104" height="67" rx="3" fill={purple}/><path d="M68 65l36-41h28L92 91H68z" fill="#06b6d4" opacity=".8"/><text x="120" y="55" textAnchor="middle" fontSize="14" fontWeight="900" fill="white">EVENT</text><text x="120" y="72" textAnchor="middle" fontSize="11" fontWeight="700" fill="white">TODAY</text></svg>;
+    if (kind === "service") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M35 40h118l35 25h17v31H35z" fill="#f8fafc" stroke="#94a3b8" strokeWidth="2"/><path d="M153 40v30h52l-35-30z" fill="#dbeafe"/><path d="M55 54h74v12H55z" fill={dark}/><path d="M55 70h94v8H55z" fill={blue}/><path d="M80 78h88v9H80z" fill={teal}/><circle cx="73" cy="98" r="13" fill={dark}/><circle cx="178" cy="98" r="13" fill={dark}/><circle cx="73" cy="98" r="5" fill="#cbd5e1"/><circle cx="178" cy="98" r="5" fill="#cbd5e1"/><text x="92" y="63" textAnchor="middle" fontSize="8" fontWeight="900" fill="white">SIGNS</text></svg>;
+    if (kind === "component") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><g transform="translate(35 28)"><path d="M0 18L32 0h145l-31 18z" fill="#e2e8f0" stroke="#94a3b8"/><path d="M0 18v52h146V18z" fill="#cbd5e1" stroke="#94a3b8"/><path d="M27 18v35h22V18M74 18v52M103 18v30h18V18" fill="none" stroke="#64748b" strokeWidth="4"/><path d="M146 18l31-18v50l-31 20z" fill="#94a3b8"/></g></svg>;
+
+    if (kind === "acrylic") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M48 78L83 31h116l-35 47z" fill="#e0f2fe" stroke="#7dd3fc" strokeWidth="2" opacity=".75"/><path d="M48 78l8 10h116l-8-10z" fill="#bae6fd" opacity=".9"/><path d="M83 31l8 10h116l-8-10z" fill="#f0f9ff" opacity=".9"/></svg>;
+    if (kind === "acm") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M45 70L82 28h120l-37 42z" fill="#e5e7eb" stroke="#94a3b8"/><path d="M45 70l8 14h120l-8-14z" fill="#111827"/><path d="M53 84l5 8h120l-5-8z" fill="#d1d5db"/><path d="M82 28l6 9h120l-6-9z" fill="#f8fafc"/></svg>;
+    if (kind === "corflute") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M42 70L80 28h126l-38 42z" fill="#fff" stroke={line}/><path d="M42 70l8 24h126l-8-24z" fill="#f8fafc" stroke={line}/>{Array.from({length:14}).map((_,i)=><path key={i} d={`M${52+i*9} 72v20`} stroke="#94a3b8" strokeWidth="2"/>)}<path d="M80 28l7 8h126l-7-8z" fill="#fff" stroke="#e2e8f0"/></svg>;
+    if (kind === "pvc") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M43 66L82 29h126l-39 37z" fill="#fff" stroke="#e2e8f0"/><path d="M43 66l10 27h126l-10-27z" fill="#f1f5f9" stroke="#dbe3ee"/><circle cx="63" cy="78" r="2" fill="#cbd5e1"/><circle cx="83" cy="86" r="2" fill="#cbd5e1"/><circle cx="110" cy="77" r="2" fill="#cbd5e1"/></svg>;
+    if (kind === "banner") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><ellipse cx="126" cy="62" rx="65" ry="33" fill="#e2e8f0" stroke="#94a3b8"/><ellipse cx="126" cy="62" rx="27" ry="33" fill="#cbd5e1"/><ellipse cx="126" cy="62" rx="15" ry="22" fill="#b45309"/><path d="M61 62c0-18 29-33 65-33h55c-36 0-65 15-65 33s29 33 65 33h-55c-36 0-65-15-65-33z" fill="#f8fafc" opacity=".95"/></svg>;
+    if (kind === "other_sheet") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M42 76L78 36h124l-36 40z" fill="#fef3c7" stroke="#d6b66b"/><path d="M47 83L83 43h124l-36 40z" fill="#e2e8f0" stroke="#94a3b8"/><path d="M52 90L88 50h124l-36 40z" fill="#334155" stroke="#1e293b"/></svg>;
+
+    if (kind === "artwork_supplied") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><path d="M73 18h62l26 25v58H73z" fill="#eff6ff" stroke="#60a5fa" strokeWidth="2"/><path d="M135 18v25h26" fill="#dbeafe" stroke="#60a5fa" strokeWidth="2"/><path d="M91 57h48M91 69h41M91 81h35" stroke="#60a5fa" strokeWidth="4" strokeLinecap="round"/><circle cx="165" cy="82" r="27" fill="#22c55e"/><path d="M151 82l9 9 18-21" fill="none" stroke="white" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round"/></svg>;
+    if (kind === "artwork_required") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="49" y="25" width="120" height="72" rx="8" fill="#cbd5e1"/><rect x="58" y="34" width="102" height="51" rx="4" fill="#eff6ff"/><path d="M58 76l25-20 19 14 14-10 44 25H58z" fill="#60a5fa"/><path d="M102 97h15v11H88h45" stroke="#64748b" strokeWidth="5" strokeLinecap="round"/><g transform="translate(153 41) rotate(42)"><rect width="18" height="58" rx="6" fill="#facc15"/><path d="M0 10h18" stroke="#0f172a" strokeWidth="5"/><path d="M0 52l9 13 9-13" fill="#f1c27d"/><path d="M6 60l3 5 3-5" fill="#0f172a"/></g></svg>;
+
+    if (kind === "direct_print") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="44" y="47" width="152" height="40" rx="8" fill="#334155"/><rect x="62" y="24" width="116" height="38" rx="4" fill="#fff" stroke={line}/><path d="M80 31h80v5H80z" fill={blue}/><path d="M75 80h90v25H75z" fill="#f8fafc" stroke={line}/><circle cx="177" cy="66" r="5" fill="#22c55e"/></svg>;
+    if (kind === "roll_stock") return wizardIllustration("banner");
+    if (kind === "cut_vinyl") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><circle cx="99" cy="60" r="33" fill="#e2e8f0" stroke="#94a3b8"/><circle cx="99" cy="60" r="14" fill="#64748b"/><path d="M121 31h66v58h-66" fill="#fff" stroke={line}/><path d="M139 45l30 30M169 45l-30 30" stroke={purple} strokeWidth="5"/></svg>;
+    if (kind === "no_print") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><circle cx="120" cy="60" r="38" fill="#fff" stroke="#94a3b8" strokeWidth="3"/><path d="M93 33l54 54" stroke="#ef4444" strokeWidth="7" strokeLinecap="round"/></svg>;
+
+    if (kind === "single") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="56" y="29" width="128" height="72" rx="6" fill="#fff" stroke="#94a3b8" strokeWidth="2"/><rect x="67" y="40" width="106" height="50" rx="4" fill="#dbeafe"/><path d="M77 80l26-24 20 16 15-11 30 29H77z" fill="#60a5fa"/></svg>;
+    if (kind === "double") return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="45" y="36" width="120" height="66" rx="6" fill="#fff" stroke="#94a3b8"/><rect x="75" y="18" width="120" height="66" rx="6" fill="#eff6ff" stroke={blue} strokeWidth="2"/><path d="M92 68l21-19 17 14 14-10 34 31H92z" fill="#60a5fa"/></svg>;
+
+    return <svg viewBox="0 0 240 120" aria-hidden="true" style={common}><rect width="240" height="120" rx="14" fill={bg}/><rect x="55" y="26" width="130" height="68" rx="8" fill="#fff" stroke={line}/><path d="M76 47h88M76 60h70M76 73h82" stroke="#94a3b8" strokeWidth="4" strokeLinecap="round"/></svg>;
+  }
+
   function renderWizardStep(step: QuickQuoteStep) {
     const tileGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 } as const;
-    const tile = (selected: boolean) => ({
-      minHeight: 148,
-      borderRadius: 18,
-      border: selected ? "3px solid #2563eb" : "1px solid #cbd5e1",
-      background: selected ? "linear-gradient(145deg,#eff6ff,#ffffff)" : "#fff",
-      boxShadow: selected ? "0 10px 28px rgba(37,99,235,.16)" : "0 7px 20px rgba(15,23,42,.06)",
-      padding: 16,
+    const photoGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 } as const;
+    const tile = (selected: boolean, compact = false) => ({
+      position: "relative" as const,
+      minHeight: compact ? 178 : 210,
+      borderRadius: 16,
+      border: selected ? "2px solid #2563eb" : "1px solid #d7e0ea",
+      background: selected ? "linear-gradient(180deg,#f6faff 0%,#ffffff 100%)" : "#fff",
+      boxShadow: selected ? "0 10px 26px rgba(37,99,235,.14)" : "0 7px 18px rgba(15,23,42,.05)",
+      padding: 10,
+      display: "grid",
+      gridTemplateRows: "minmax(108px, 1fr) auto",
+      alignItems: "stretch",
+      textAlign: "left" as const,
+      gap: 10,
+      cursor: "pointer",
+      overflow: "hidden"
+    });
+    const artworkTile = (selected: boolean) => ({
+      position: "relative" as const,
+      minHeight: 210,
+      borderRadius: 16,
+      border: selected ? "2px solid #2563eb" : "1px solid #d7e0ea",
+      background: selected ? "linear-gradient(180deg,#f6faff 0%,#ffffff 100%)" : "#fff",
+      boxShadow: selected ? "0 10px 26px rgba(37,99,235,.14)" : "0 7px 18px rgba(15,23,42,.05)",
+      padding: 14,
       display: "grid",
       alignContent: "center",
       justifyItems: "center",
@@ -3251,58 +3306,76 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       gap: 8,
       cursor: "pointer"
     });
-    const icon = (value: string) => <span aria-hidden="true" style={{ fontSize: 36, lineHeight: 1 }}>{value}</span>;
+    const selectedMark = (selected: boolean) => selected ? <span aria-hidden="true" style={{ position: "absolute", top: 10, right: 10, width: 28, height: 28, borderRadius: 999, background: "#2563eb", color: "#fff", display: "grid", placeItems: "center", fontSize: 17, fontWeight: 950, boxShadow: "0 4px 12px rgba(37,99,235,.28)", zIndex: 2 }}>✓</span> : null;
+    const visual = (kind: string) => <div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}>{wizardIllustration(kind)}</div>;
     const advance = () => setWizardIndex((current) => current + 1);
     const changed = () => setUnitPriceOverridden(false);
 
     if (step === "flow") {
-      const choices: Array<[FlowType, string, string, string]> = [
-        ["signage", "Large format / signage", "Panels, vinyl, banners and fabricated signage", "▰"],
-        ["small_format", "Small format / print", "Cards, flyers, brochures and booklets", "▤"],
-        ["plan_printing", "Plan printing", "Plan sets and wide-format documents", "⌗"],
-        ["poster_printing", "Poster printing", "Posters and print-only sheet work", "▣"],
-        ["service", "Pickup / delivery / install", "Service-only quote line", "⌂"],
-        ["component", "Custom component / assembly", "Built-up or custom manufactured item", "⚙"]
+      const choices: Array<[FlowType, string, string]> = [
+        ["signage", "Large format / signage", "signage"],
+        ["small_format", "Small format / print", "small_format"],
+        ["plan_printing", "Plan printing", "plan_printing"],
+        ["poster_printing", "Poster printing", "poster_printing"],
+        ["service", "Pickup / delivery / install", "service"],
+        ["component", "Custom component / assembly", "component"]
       ];
-      return <div style={tileGrid}>{choices.map(([value,label,note,glyph]) => <button key={value} type="button" onClick={() => { setFlowType(value); changed(); setWizardIndex(1); }} style={tile(flowType === value)}>{icon(glyph)}<strong style={{ fontSize: 16 }}>{label}</strong><span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{note}</span></button>)}</div>;
+      return <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>{choices.map(([value,label,kind]) => {
+        const selected = flowType === value;
+        return <button key={value} type="button" onClick={() => { setFlowType(value); changed(); setWizardIndex(1); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(kind)}<strong style={{ fontSize: 15, lineHeight: 1.2, textAlign: "center" }}>{label}</strong></button>;
+      })}</div>;
     }
 
     if (step === "base") {
-      const glyphs: Record<string,string> = { acrylic:"◇", acm:"▱", corflute:"▥", pvc:"▰", banner:"〰", other_sheet:"□" };
-      return <div style={tileGrid}>{baseTypes.map((item) => <button key={item.key} type="button" onClick={() => { setBaseType(item.key as BaseType); setThickness(""); setColour(""); setMediaId(""); changed(); advance(); }} style={tile(baseType === item.key)}>{icon(glyphs[item.key] ?? "□")}<strong style={{ fontSize: 17 }}>{item.label}</strong><span style={{ color: "#64748b", fontSize: 12 }}>Choose {item.label.toLowerCase()} as the base product</span></button>)}</div>;
+      return <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>{baseTypes.map((item) => {
+        const selected = baseType === item.key;
+        return <button key={item.key} type="button" onClick={() => { setBaseType(item.key as BaseType); setThickness(""); setColour(""); setMediaId(""); changed(); advance(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(item.key)}<strong style={{ fontSize: 16, lineHeight: 1.2, textAlign: "center" }}>{item.label}</strong></button>;
+      })}</div>;
     }
 
     if (step === "thickness" || step === "colour") {
-      return <div style={tileGrid}>{baseMaterials.map((material) => {
+      return <div style={photoGrid}>{baseMaterials.map((material) => {
         const selected = selectedMainMaterial?.id === material.id;
-        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); advance(); }} style={tile(selected)}>{icon("▧")}<strong style={{ fontSize: 15 }}>{internalMaterialName(material)}</strong><span style={{ color: "#64748b", fontSize: 12, lineHeight: 1.35 }}>{materialCardMeta(material)}</span></button>;
+        const dimensions = bestSheetDimensions(material);
+        const dimensionLabel = dimensions ? `${dimensionMm(dimensions.width)} × ${dimensionMm(dimensions.length)}` : material.rollWidthMm ? `${material.rollWidthMm}mm roll` : "";
+        return <button key={material.id} type="button" onClick={() => { if (baseType === "banner") setMediaId(material.id); else { setThickness(thicknessFor(material)); setColour(colourFor(material)); } changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{visual(baseType || "other_sheet")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{material.name}</strong>{dimensionLabel ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{dimensionLabel}</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
       })}</div>;
     }
 
     if (step === "artwork") {
-      return <div style={tileGrid}>
-        <button type="button" onClick={() => { setArtworkChoice("client_supplied"); changed(); advance(); }} style={tile(artworkChoice === "client_supplied")}>{icon("✓")}<strong>Print-ready artwork supplied</strong><span style={{ color: "#64748b", fontSize: 12 }}>No artwork/setup allowance</span></button>
-        <button type="button" onClick={() => { setArtworkChoice("required"); changed(); }} style={tile(artworkChoice === "required")}>{icon("✎")}<strong>Artwork / setup required</strong><span style={{ color: "#64748b", fontSize: 12 }}>Add artwork time before continuing</span></button>
+      return <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 }}>
+        <button type="button" onClick={() => { setArtworkChoice("client_supplied"); changed(); advance(); }} style={artworkTile(artworkChoice === "client_supplied")}>{selectedMark(artworkChoice === "client_supplied")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_supplied")}</div><strong style={{ fontSize: 16 }}>Print-ready artwork supplied</strong><span style={{ color: "#64748b", fontSize: 12 }}>No artwork/setup allowance</span></button>
+        <button type="button" onClick={() => { setArtworkChoice("required"); changed(); }} style={artworkTile(artworkChoice === "required")}>{selectedMark(artworkChoice === "required")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_required")}</div><strong style={{ fontSize: 16 }}>Artwork / setup required</strong><span style={{ color: "#64748b", fontSize: 12 }}>Add artwork time before continuing</span></button>
         {artworkChoice === "required" ? <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, maxWidth: 360 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label> : null}
       </div>;
     }
 
     if (step === "print" && !isRollStockBase) {
-      return <div style={tileGrid}>{printMethods.map((item) => <button key={item.key} type="button" onClick={() => { setPrintMethod(item.key as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(printMethod === item.key)}>{icon(item.key === "no_print" ? "∅" : item.key === "direct_print" ? "▦" : item.key === "roll_stock" ? "◫" : "✂")}<strong style={{ fontSize: 16 }}>{item.label}</strong></button>)}</div>;
+      return <div style={tileGrid}>{printMethods.map((item) => {
+        const selected = printMethod === item.key;
+        const kind = item.key === "no_print" ? "no_print" : item.key === "direct_print" ? "direct_print" : item.key === "roll_stock" ? "roll_stock" : "cut_vinyl";
+        return <button key={item.key} type="button" onClick={() => { setPrintMethod(item.key as PrintMethod); setInk(""); setMediaId(""); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(kind)}<strong style={{ fontSize: 15, textAlign: "center" }}>{item.label}</strong></button>;
+      })}</div>;
     }
 
     if (step === "media") {
-      return <div style={tileGrid}>{rollMedia.map((material) => <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(mediaId === material.id)}>{icon("◫")}<strong style={{ fontSize: 15 }}>{internalMaterialName(material)}</strong><span style={{ color: "#64748b", fontSize: 12 }}>{materialCardMeta(material)}</span></button>)}</div>;
+      return <div style={photoGrid}>{rollMedia.map((material) => {
+        const selected = mediaId === material.id;
+        return <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); advance(); }} style={tile(selected)}>{selectedMark(selected)}{visual("banner")}<div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15 }}>{material.name}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+      })}</div>;
     }
 
     if (step === "ink") {
-      return <div style={tileGrid}>{availableInkChoices.map((item) => <button key={item.key} type="button" onClick={() => { setInk(item.key as InkChoice); changed(); advance(); }} style={tile(ink === item.key)}>{icon(item.key === "none" ? "∅" : "●")}<strong style={{ fontSize: 16 }}>{item.label}</strong></button>)}</div>;
+      return <div style={tileGrid}>{availableInkChoices.map((item) => {
+        const selected = ink === item.key;
+        return <button key={item.key} type="button" onClick={() => { setInk(item.key as InkChoice); changed(); advance(); }} style={{ ...artworkTile(selected), minHeight: 160 }}>{selectedMark(selected)}<div aria-hidden="true" style={{ display: "flex", gap: 7, alignItems: "center", justifyContent: "center", minHeight: 60 }}>{item.key === "none" ? <span style={{ fontSize: 46, color: "#94a3b8" }}>∅</span> : <><span style={{ width: 34, height: 34, borderRadius: 999, background: "#06b6d4" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#ec4899" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#facc15" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#111827" }}/></>}</div><strong style={{ fontSize: 16 }}>{item.label}</strong></button>;
+      })}</div>;
     }
 
     if (step === "sides" && !canChooseReversePrint) {
-      return <div style={tileGrid}>
-        <button type="button" onClick={() => { setSides("single"); changed(); advance(); }} style={tile(sides === "single")}>{icon("▱")}<strong>Single sided</strong></button>
-        <button type="button" onClick={() => { setSides("double"); changed(); advance(); }} style={tile(sides === "double")}>{icon("▰")}<strong>Double sided</strong></button>
+      return <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 }}>
+        <button type="button" onClick={() => { setSides("single"); changed(); advance(); }} style={artworkTile(sides === "single")}>{selectedMark(sides === "single")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("single")}</div><strong>Single sided</strong></button>
+        <button type="button" onClick={() => { setSides("double"); changed(); advance(); }} style={artworkTile(sides === "double")}>{selectedMark(sides === "double")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("double")}</div><strong>Double sided</strong></button>
       </div>;
     }
 
