@@ -933,47 +933,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       <p style={{ margin: "6px 0 0", color: "#667085" }}>Client: <strong>{selectedQuote.clientName}</strong> · {quoteLines.length} quote line{quoteLines.length === 1 ? "" : "s"} · {formatMoney(quoteSubtotal)} ex GST</p>
                     </div>
                   </div>
-                  {requestedChangeLines.length ? (
-                    <div style={{ flex: "1 1 520px", maxWidth: 780, border: "1px solid #fdba74", borderRadius: 16, background: "#fff7ed", color: "#9a3412", padding: "10px 12px", display: "grid", gap: 6 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-                        <strong style={{ fontSize: 13 }}>Client requested changes</strong>
-                        <span style={{ fontSize: 11, fontWeight: 900, color: "#c2410c" }}>{requestedChangeLines.length} line{requestedChangeLines.length === 1 ? "" : "s"}</span>
-                      </div>
-                      <div style={{ display: "grid", gap: 4 }}>
-                        {requestedChangeLines.slice(0, 3).map((line) => (
-                          <a key={line.id} href={`#quote-line-${line.id}`} style={{ color: "#9a3412", textDecoration: "none", fontSize: 12, lineHeight: 1.4 }}>
-                            <strong>{line.productName}</strong>{line.clientResponseNotes ? ` — ${line.clientResponseNotes}` : " — Review requested changes"}
-                          </a>
-                        ))}
-                        {requestedChangeLines.length > 3 ? <span style={{ fontSize: 11, color: "#c2410c" }}>+ {requestedChangeLines.length - 3} more requested-change line{requestedChangeLines.length - 3 === 1 ? "" : "s"}</span> : null}
-                      </div>
-                    </div>
-                  ) : null}
-                  {(() => { const tone = quoteStatusTone(selectedQuote.status); return <span style={{ border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedQuote.status.replace(/_/g, " ")}</span>; })()}
-                </div>
-
-                <section style={{ border: "1px solid #d9e2ef", borderRadius: 18, background: "#fff", padding: 14, display: "grid", gap: 12, order: 2 }}>
-                  <form action={updateQuoteJobNameAction} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end" }}>
-                    <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                    <label style={{ display: "grid", gap: 6 }}>
-                      <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.06em" }}>Job name / quote title</span>
-                      <input
-                        name="jobName"
-                        defaultValue={selectedQuote.jobName ?? ""}
-                        placeholder="e.g. Fyshwick reception signs"
-                        required
-                        maxLength={255}
-                        style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cfd9e8", padding: "0 14px", width: "100%", boxSizing: "border-box", background: "#fff" }}
-                      />
-                    </label>
-                    <button type="submit" style={{ ...buttonStyle, minWidth: 132 }}>Save job name</button>
-                    <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
-                  </form>
-
-                  <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
-
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", minWidth: 0, padding: "2px 0 4px" }}>
-                    {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Open client quote</a> : null}
+                  <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", flex: "1 1 620px" }}>
+                    {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 42, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Open client quote</a> : null}
                     {selectedQuote.status !== "deleted" ? (
                       <div style={{ flex: "0 0 auto" }}>
                         <EmailRecipientModalForm
@@ -1009,12 +970,50 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         <button type="submit" style={{ ...buttonStyle, background: "#067647" }}>Restore quote</button>
                       </form>
                     ) : (
-                      <form action={deleteQuoteDraftAction} style={{ flex: "0 0 auto", marginLeft: "auto" }}>
+                      <form action={deleteQuoteDraftAction} style={{ flex: "0 0 auto" }}>
                         <input type="hidden" name="quoteId" value={selectedQuote.id} />
                         <button type="submit" style={{ ...buttonStyle, background: "#b42318" }}>Delete quote</button>
                       </form>
                     )}
+                    {(() => { const tone = quoteStatusTone(selectedQuote.status); return <span style={{ border: `1px solid ${tone.border}`, background: tone.bg, color: tone.fg, borderRadius: 999, padding: "8px 12px", fontSize: 12, fontWeight: 950 }}>{selectedQuote.status.replace(/_/g, " ")}</span>; })()}
                   </div>
+                  {requestedChangeLines.length ? (
+                    <div style={{ flex: "1 1 100%", width: "100%", border: "1px solid #fdba74", borderRadius: 16, background: "#fff7ed", color: "#9a3412", padding: "10px 12px", display: "grid", gap: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                        <strong style={{ fontSize: 13 }}>Client requested changes</strong>
+                        <span style={{ fontSize: 11, fontWeight: 900, color: "#c2410c" }}>{requestedChangeLines.length} line{requestedChangeLines.length === 1 ? "" : "s"}</span>
+                      </div>
+                      <div style={{ display: "grid", gap: 4 }}>
+                        {requestedChangeLines.slice(0, 3).map((line) => (
+                          <a key={line.id} href={`#quote-line-${line.id}`} style={{ color: "#9a3412", textDecoration: "none", fontSize: 12, lineHeight: 1.4 }}>
+                            <strong>{line.productName}</strong>{line.clientResponseNotes ? ` — ${line.clientResponseNotes}` : " — Review requested changes"}
+                          </a>
+                        ))}
+                        {requestedChangeLines.length > 3 ? <span style={{ fontSize: 11, color: "#c2410c" }}>+ {requestedChangeLines.length - 3} more requested-change line{requestedChangeLines.length - 3 === 1 ? "" : "s"}</span> : null}
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <section style={{ border: "1px solid #d9e2ef", borderRadius: 18, background: "#fff", padding: 14, display: "grid", gap: 12, order: 2 }}>
+                  <form action={updateQuoteJobNameAction} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end" }}>
+                    <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                    <label style={{ display: "grid", gap: 6 }}>
+                      <span style={{ fontSize: 12, fontWeight: 950, color: "#344054", textTransform: "uppercase", letterSpacing: "0.06em" }}>Job name / quote title</span>
+                      <input
+                        name="jobName"
+                        defaultValue={selectedQuote.jobName ?? ""}
+                        placeholder="e.g. Fyshwick reception signs"
+                        required
+                        maxLength={255}
+                        style={{ minHeight: 44, borderRadius: 14, border: "1px solid #cfd9e8", padding: "0 14px", width: "100%", boxSizing: "border-box", background: "#fff" }}
+                      />
+                    </label>
+                    <button type="submit" style={{ ...buttonStyle, minWidth: 132 }}>Save job name</button>
+                    <small style={{ gridColumn: "1 / -1", color: "#667085" }}>This is the customer-facing heading used on the quote and carried into the Artwork / Production workflow.</small>
+                  </form>
+
+                  <QuoteLifecycleStrip steps={quoteLifecycleSteps} />
 
                   <details style={{ border: "1px solid #e4e7ec", borderRadius: 14, background: "#f8fafc", overflow: "hidden" }}>
                     <summary style={{ cursor: "pointer", padding: "12px 14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
