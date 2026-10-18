@@ -502,20 +502,30 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1900, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
-              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label) => <th key={label || "controls"} style={{ padding: "9px 8px", borderBottom: "1px solid #e4e7ec", whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</th>)}
+              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
+                padding: "9px 8px",
+                borderBottom: "1px solid #e4e7ec",
+                whiteSpace: "nowrap",
+                fontSize: 11,
+                textTransform: "uppercase",
+                letterSpacing: "0.03em",
+                ...(index === 0 ? { position: "sticky" as const, left: 0, zIndex: 5, width: 58, minWidth: 58, maxWidth: 58, background: "#f9fafb" } : {}),
+                ...(index === 1 ? { position: "sticky" as const, left: 58, zIndex: 5, minWidth: 210, background: "#f9fafb", boxShadow: "5px 0 7px -5px rgba(16,24,40,0.28)" } : {})
+              }}>{label}</th>)}
             </tr>
           </thead>
           <tbody>
             {visibleRows.map((row) => {
               const changed = dirty.has(row.key);
               const inactive = !row.active && row.id;
-              return <tr key={row.key} style={{ background: changed ? "#fffcf5" : inactive ? "#f9fafb" : "#fff", opacity: inactive ? 0.78 : 1 }}>
-                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", width: 112 }}>
+              const rowBackground = changed ? "#fffcf5" : inactive ? "#f9fafb" : "#fff";
+              return <tr key={row.key} style={{ background: rowBackground, opacity: inactive ? 0.78 : 1 }}>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", position: "sticky", left: 0, zIndex: 3, width: 58, minWidth: 58, maxWidth: 58, background: rowBackground }}>
                   <select value={row.action} disabled={!row.id} onChange={(event) => updateRow(row.key, "action", event.target.value as MaterialAction)} style={{ ...cellInputStyle, borderColor: changed ? "#fdb022" : "#d0d5dd", background: row.action === "HIDE" || row.action === "ARCHIVE" ? "#fff5f4" : row.action === "RESTORE" ? "#ecfdf3" : "#fff", fontWeight: 800 }}>
                     {row.id ? <><option value="KEEP">{row.savedState === "hidden" ? "HIDDEN" : row.savedState === "archived" ? "ARCHIVED" : "KEEP"}</option><option value="HIDE">HIDE</option><option value="ARCHIVE">DELETE / ARCHIVE</option>{row.savedState === "active" ? null : <option value="RESTORE">RESTORE</option>}</> : <option value="ADD">ADD</option>}
                   </select>
                 </td>
-                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 210 }}><input value={row.name} onChange={(event) => updateRow(row.key, "name", event.target.value)} style={{ ...cellInputStyle, fontWeight: 750, borderColor: changed ? "#fdb022" : "#e4e7ec" }} placeholder="Material name" /></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 210, position: "sticky", left: 58, zIndex: 3, background: rowBackground, boxShadow: "5px 0 7px -5px rgba(16,24,40,0.28)" }}><input value={row.name} onChange={(event) => updateRow(row.key, "name", event.target.value)} style={{ ...cellInputStyle, fontWeight: 750, borderColor: changed ? "#fdb022" : "#e4e7ec" }} placeholder="Material name" /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 190 }}><input value={row.customerFacingName} onChange={(event) => updateRow(row.key, "customerFacingName", event.target.value)} style={cellInputStyle} placeholder="Optional" /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 185 }}><input list="pm-material-suppliers" value={row.supplierName} onChange={(event) => updateRow(row.key, "supplierName", event.target.value)} style={cellInputStyle} placeholder="Supplier" /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105 }}><input value={row.sku} onChange={(event) => updateRow(row.key, "sku", event.target.value)} style={cellInputStyle} placeholder="SKU" /></td>
