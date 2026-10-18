@@ -1,4 +1,4 @@
-# Production Manager V26.10.18.01
+# Production Manager V26.10.18.02
 
 ## Quote wizard image management
 
@@ -23,4 +23,4 @@ Runtime schema hardening also creates these columns if the migration has not yet
 
 ## Version
 
-V26.10.18.01
+V26.10.18.02

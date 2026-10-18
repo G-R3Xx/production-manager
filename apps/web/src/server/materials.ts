@@ -83,6 +83,39 @@ export type UpdateMaterialInput = CreateMaterialInput & {
 
 let materialPricingSchemaReady = false;
 let materialPricingSchemaPromise: Promise<void> | null = null;
+let materialVisualSchemaReady = false;
+let materialVisualSchemaPromise: Promise<void> | null = null;
+
+async function ensureMaterialVisualColumns(): Promise<void> {
+  if (!process.env.DATABASE_URL || materialVisualSchemaReady) return;
+  if (materialVisualSchemaPromise) return materialVisualSchemaPromise;
+  materialVisualSchemaPromise = (async () => {
+    // These columns are optional presentation data, but quote pages read materials
+    // when an existing quote is opened. Check the live schema even in production
+    // so a deploy cannot crash old quotes just because migration 052 has not yet
+    // been applied by the deployment pipeline.
+    const result = await pool.query<{ columnCount: string }>(`
+      SELECT count(DISTINCT column_name)::text AS "columnCount"
+      FROM information_schema.columns
+      WHERE table_schema = 'catalog'
+        AND table_name = 'materials'
+        AND column_name = ANY($1::text[])
+    `, [["quote_image_url", "quote_image_storage_path", "quote_visual_category"]]);
+    if (Number(result.rows[0]?.columnCount ?? 0) < 3) {
+      await pool.query(`
+        ALTER TABLE catalog.materials
+          ADD COLUMN IF NOT EXISTS quote_image_url text,
+          ADD COLUMN IF NOT EXISTS quote_image_storage_path text,
+          ADD COLUMN IF NOT EXISTS quote_visual_category varchar(40)
+      `);
+    }
+    materialVisualSchemaReady = true;
+  })().catch((error) => {
+    materialVisualSchemaPromise = null;
+    throw error;
+  });
+  return materialVisualSchemaPromise;
+}
 
 export async function ensureMaterialPricingColumns(): Promise<void> {
   if (!process.env.DATABASE_URL || materialPricingSchemaReady) return;
@@ -181,6 +214,7 @@ function presentMaterialType(value: string): string {
 
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
   await ensureMaterialPricingColumns();
+  await ensureMaterialVisualColumns().catch(() => undefined);
   const result = await pool.query<MaterialRecord>(`
     SELECT
       m.id,
@@ -212,9 +246,9 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.roll_width_mm::text AS "rollWidthMm",
       m.gsm::text AS gsm,
       m.notes,
-      m.quote_image_url AS "quoteImageUrl",
-      m.quote_image_storage_path AS "quoteImageStoragePath",
-      m.quote_visual_category AS "quoteVisualCategory",
+      COALESCE(to_jsonb(m) ->> 'quote_image_url', m.cost_json ->> 'quoteImageUrl') AS "quoteImageUrl",
+      COALESCE(to_jsonb(m) ->> 'quote_image_storage_path', m.cost_json ->> 'quoteImageStoragePath') AS "quoteImageStoragePath",
+      COALESCE(to_jsonb(m) ->> 'quote_visual_category', m.cost_json ->> 'quoteVisualCategory') AS "quoteVisualCategory",
       m.cost_json AS "costJson",
       m.myob_uid AS "myobUid",
       m.myob_display_id AS "myobDisplayId",

@@ -591,7 +591,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
     selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
     builderDataNeeded ? getQuoteEntryLayoutForUser(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve("list" as const),
-    builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId) : Promise.resolve({})
+    builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId).catch(() => ({})) : Promise.resolve({})
   ]);
 
   const selectedQuote = initialSelectedQuote;

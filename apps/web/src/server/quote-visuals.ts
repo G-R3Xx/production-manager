@@ -36,14 +36,23 @@ export async function ensureQuoteVisualSettingsColumns(): Promise<void> {
   if (!process.env.DATABASE_URL || quoteVisualSettingsSchemaReady) return;
   if (quoteVisualSettingsSchemaPromise) return quoteVisualSettingsSchemaPromise;
   quoteVisualSettingsSchemaPromise = (async () => {
-    if (await relationHasColumns("app.tenant_settings", ["quote_visual_categories_json"])) {
-      quoteVisualSettingsSchemaReady = true;
-      return;
-    }
-    await pool.query(`
-      ALTER TABLE app.tenant_settings
-        ADD COLUMN IF NOT EXISTS quote_visual_categories_json jsonb NOT NULL DEFAULT '{}'::jsonb
+    // Quote visuals are optional UI data, but the selected-quote page reads them.
+    // Verify this new column against the live production schema instead of relying
+    // on the global migration-trust shortcut, otherwise an unapplied migration
+    // can turn opening an old quote into a Server Component 500.
+    const result = await pool.query<{ columnCount: string }>(`
+      SELECT count(DISTINCT column_name)::text AS "columnCount"
+      FROM information_schema.columns
+      WHERE table_schema = 'app'
+        AND table_name = 'tenant_settings'
+        AND column_name = 'quote_visual_categories_json'
     `);
+    if (Number(result.rows[0]?.columnCount ?? 0) < 1) {
+      await pool.query(`
+        ALTER TABLE app.tenant_settings
+          ADD COLUMN IF NOT EXISTS quote_visual_categories_json jsonb NOT NULL DEFAULT '{}'::jsonb
+      `);
+    }
     quoteVisualSettingsSchemaReady = true;
   })().catch((error) => {
     quoteVisualSettingsSchemaPromise = null;
@@ -62,10 +71,13 @@ function cleanRecord(value: unknown): QuoteVisualCategoryRecord | null {
 }
 
 export async function getQuoteVisualCategoryImages(tenantId: string): Promise<QuoteVisualCategoryImages> {
-  await ensureQuoteVisualSettingsColumns();
+  // Failure to add the optional visual column must never stop an existing quote
+  // from opening. The to_jsonb lookup below is valid whether the column exists or
+  // not and simply falls back to an empty visual configuration.
+  await ensureQuoteVisualSettingsColumns().catch(() => undefined);
   const result = await pool.query<{ value: unknown }>(`
-    SELECT COALESCE(quote_visual_categories_json, '{}'::jsonb) AS value
-    FROM app.tenant_settings
+    SELECT COALESCE(to_jsonb(ts) -> 'quote_visual_categories_json', '{}'::jsonb) AS value
+    FROM app.tenant_settings ts
     WHERE tenant_id = $1::uuid
     LIMIT 1
   `, [tenantId]);
