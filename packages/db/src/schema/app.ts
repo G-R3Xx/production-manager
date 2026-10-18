@@ -103,6 +103,7 @@ export const tenantSettings = appSchema.table("tenant_settings", {
   globalProfitMultiplier: numeric("global_profit_multiplier", { precision: 8, scale: 4 }).notNull().default("1.2"),
   profitTiersJson: jsonb("profit_tiers_json").notNull().default([]),
   quoteInkBillingIncrementSqm: numeric("quote_ink_billing_increment_sqm", { precision: 6, scale: 4 }).notNull().default("0.5"),
+  quoteVisualCategoriesJson: jsonb("quote_visual_categories_json").notNull().default({}),
   myobPriceLevelFactorsJson: jsonb("myob_price_level_factors_json").notNull().default({ "Level A": "1", "Level B": "1", "Level C": "1", "Level D": "1", "Level E": "1", "Level F": "1" }),
   myobPurchaseExpenseAccountUid: varchar("myob_purchase_expense_account_uid", { length: 255 }),
   myobPurchaseExpenseAccountName: varchar("myob_purchase_expense_account_name", { length: 255 }),

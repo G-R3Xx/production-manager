@@ -1,5 +1,6 @@
 "use server";
 
+import { Buffer } from "node:buffer";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
@@ -8,6 +9,8 @@ import { createMaterial, listMaterialsForTenant, saveMaterialPriceManagerChanges
 import { listSuppliersForTenant } from "@/server/suppliers";
 import { bulkApplyMaterialSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
+import { quoteVisualCategoryKey, saveQuoteVisualCategoryImage } from "@/server/quote-visuals";
 
 function readString(formData: FormData, key: string): string { return String(formData.get(key) ?? "").trim(); }
 function readOptionalNumeric(formData: FormData, key: string): string | null {
@@ -19,7 +22,31 @@ function readRequiredNumeric(formData: FormData,key:string,fallback="0"):string{
 function readChecked(formData: FormData,key:string):boolean{return ["1","true","on","yes"].includes(readString(formData,key).toLowerCase());}
 function getErrorMessage(error:unknown):string{return error instanceof Error&&error.message?error.message:"Something went wrong while saving the material";}
 async function tenant(){const user=await getRequiredSessionUser();const active=await resolveActiveTenantForAuthUserId(user.id);if(!active)redirect('/bootstrap');return active!;}
-function materialInput(tenantId:string,formData:FormData,name:string){return{
+type UploadedQuoteImage = { imageUrl: string | null; storagePath: string | null };
+
+async function uploadQuoteImageIfPresent(tenantId: string, scope: string, formData: FormData, fieldName = "quoteImageFile"): Promise<UploadedQuoteImage | null> {
+  const rawFile = formData.get(fieldName);
+  if (!rawFile || typeof rawFile !== "object" || !("size" in rawFile) || !("arrayBuffer" in rawFile)) return null;
+  const file = rawFile as unknown as { name?: string; type?: string; size: number; arrayBuffer: () => Promise<ArrayBuffer> };
+  if (!file.size || file.size <= 0) return null;
+  if (file.size > 10_000_000) throw new Error("Quote image is too large. Keep images under 10 MB.");
+  const contentType = String(file.type || "").toLowerCase();
+  const allowed = new Set(["image/jpeg", "image/png", "image/webp", "image/gif", "image/avif"]);
+  if (contentType && !allowed.has(contentType)) throw new Error("Use a JPG, PNG, WebP, GIF or AVIF image for quote imagery.");
+  const safeName = String(file.name || "quote-image.png").replace(/[^a-z0-9._-]+/gi, "-").slice(0, 120) || "quote-image.png";
+  const safeScope = scope.replace(/[^a-z0-9/_-]+/gi, "-");
+  const storagePath = `${tenantId}/${safeScope}/${Date.now()}-${safeName}`;
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const supabase = getSupabaseServiceRoleClient();
+  const bucket = "quote-visuals";
+  await supabase.storage.createBucket(bucket, { public: true }).catch(() => undefined);
+  const { error } = await supabase.storage.from(bucket).upload(storagePath, bytes, { contentType: contentType || "application/octet-stream", upsert: true });
+  if (error) throw new Error(`Quote image upload failed: ${error.message}`);
+  const { data } = supabase.storage.from(bucket).getPublicUrl(storagePath);
+  return { imageUrl: data.publicUrl, storagePath };
+}
+
+function materialInput(tenantId:string,formData:FormData,name:string,image:UploadedQuoteImage){return{
   tenantId,supplierId:readString(formData,'supplierId')||null,sourceProductId:null,name,
   customerFacingName:readString(formData,'customerFacingName')||null,sku:readString(formData,'sku')||null,
   materialType:readString(formData,'materialType')||'sheet_media',materialGroup:readString(formData,'materialGroup')||null,
@@ -27,27 +54,67 @@ function materialInput(tenantId:string,formData:FormData,name:string){return{
   reversePrintable:readChecked(formData,'reversePrintable'),usedForBacking:readChecked(formData,'usedForBacking'),showAsInstallationOption:readChecked(formData,'showAsInstallationOption'),stockUom:readString(formData,'stockUom')||'sheet',
   purchaseUom:readString(formData,'purchaseUom')||'sheet',stockQuantity:readRequiredNumeric(formData,'stockQuantity'),purchaseCost:readRequiredNumeric(formData,'purchaseCost'),
   wastagePercent:String(Math.max(0,Number(readRequiredNumeric(formData,'wastagePercent'))||0)),
-  widthMm:readOptionalNumeric(formData,'widthMm'),lengthMm:readOptionalNumeric(formData,'lengthMm'),rollWidthMm:readOptionalNumeric(formData,'rollWidthMm'),gsm:readOptionalNumeric(formData,'gsm'),notes:readString(formData,'notes')||null
+  widthMm:readOptionalNumeric(formData,'widthMm'),lengthMm:readOptionalNumeric(formData,'lengthMm'),rollWidthMm:readOptionalNumeric(formData,'rollWidthMm'),gsm:readOptionalNumeric(formData,'gsm'),notes:readString(formData,'notes')||null,
+  quoteImageUrl:image.imageUrl,quoteImageStoragePath:image.storagePath,quoteVisualCategory:quoteVisualCategoryKey(readString(formData,'quoteVisualCategory'))
 };}
+
 
 
 export async function createMaterialAction(formData:FormData){
   const active=await tenant();const name=readString(formData,'name');if(!name)redirect('/materials?error=Material%20name%20is%20required');
   let created:{id:string}|null=null;let saveError="";
-  try{created=await createMaterial(materialInput(active.tenantId,formData,name));}catch(error){console.error('Create material failed',error);saveError=getErrorMessage(error);}
+  try{
+    const uploaded=await uploadQuoteImageIfPresent(active.tenantId,"materials/new",formData);
+    created=await createMaterial(materialInput(active.tenantId,formData,name,uploaded??{imageUrl:null,storagePath:null}));
+  }catch(error){console.error('Create material failed',error);saveError=getErrorMessage(error);}
   if(saveError||!created)redirect(`/materials?error=${encodeURIComponent(saveError||"Could not create material")}`);
+  if(!created) throw new Error("Material was not created.");
   const queued=await queueMyobMasterDataSync(active.tenantId,"material",created.id);
+  revalidatePath('/materials');revalidatePath('/quotes');
   redirect(`/materials?message=${encodeURIComponent(queued?"Material created · MYOB sync queued":"Material created")}`);
 }
 
 export async function updateMaterialAction(formData:FormData){
   const active=await tenant();const materialId=readString(formData,'materialId');const name=readString(formData,'name');
   if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');if(!name)redirect('/materials?error=Material%20name%20is%20required');
-  let saveError="";try{await updateMaterial({id:materialId,...materialInput(active.tenantId,formData,name)});}catch(error){console.error('Update material failed',error);saveError=getErrorMessage(error);}
+  let saveError="";
+  try{
+    const removeImage=readChecked(formData,'removeQuoteImage');
+    const uploaded=await uploadQuoteImageIfPresent(active.tenantId,`materials/${materialId}`,formData);
+    const image:UploadedQuoteImage=removeImage
+      ? {imageUrl:null,storagePath:null}
+      : uploaded ?? {imageUrl:readString(formData,'existingQuoteImageUrl')||null,storagePath:readString(formData,'existingQuoteImageStoragePath')||null};
+    await updateMaterial({id:materialId,...materialInput(active.tenantId,formData,name,image)});
+  }catch(error){console.error('Update material failed',error);saveError=getErrorMessage(error);}
   if(saveError)redirect(`/materials?error=${encodeURIComponent(saveError)}`);
   const queued=await queueMyobMasterDataSync(active.tenantId,"material",materialId);
+  revalidatePath('/materials');revalidatePath('/quotes');
   redirect(`/materials?message=${encodeURIComponent(queued?"Material updated · MYOB sync queued":"Material updated")}`);
 }
+
+export async function saveQuoteVisualCategoryImageAction(formData:FormData){
+  const active=await tenant();
+  const key=quoteVisualCategoryKey(readString(formData,'categoryKey'));
+  if(!key) throw new Error("Invalid quote visual category.");
+  let saveError="";
+  try{
+    const removeImage=readChecked(formData,'removeCategoryImage');
+    const uploaded=await uploadQuoteImageIfPresent(active.tenantId,`categories/${key}`,formData,'categoryImageFile');
+    if(removeImage){
+      await saveQuoteVisualCategoryImage(active.tenantId,key,null);
+    }else if(uploaded){
+      await saveQuoteVisualCategoryImage(active.tenantId,key,uploaded);
+    }else{
+      const existingUrl=readString(formData,'existingCategoryImageUrl')||null;
+      const existingPath=readString(formData,'existingCategoryImageStoragePath')||null;
+      if(existingUrl||existingPath) await saveQuoteVisualCategoryImage(active.tenantId,key,{imageUrl:existingUrl,storagePath:existingPath});
+    }
+  }catch(error){console.error('Quote category image save failed',error);saveError=getErrorMessage(error);}
+  if(saveError)redirect(`/materials?error=${encodeURIComponent(saveError)}`);
+  revalidatePath('/materials');revalidatePath('/quotes');
+  redirect('/materials?message=Quote%20wizard%20category%20image%20saved');
+}
+
 
 export async function setMaterialActiveAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');const nextActive=readString(formData,'active')==='true';if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');try{await setMaterialActive(active.tenantId,materialId,nextActive);}catch(error){redirect(`/materials?error=${encodeURIComponent(getErrorMessage(error))}`);}redirect(nextActive?'/materials?message=Material%20restored':'/materials?message=Material%20deleted');}
 export async function syncMaterialToMyobAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');let result:{number?:string|null}|null=null;let errorMessage="";try{result=await runMyobMasterDataSyncNow(active.tenantId,"material",materialId);}catch(error){errorMessage=getErrorMessage(error);}redirect(`/materials?${errorMessage?`error=${encodeURIComponent(errorMessage)}`:`message=${encodeURIComponent(`Material synced to MYOB item ${result?.number??"linked"}`)}`}`);}

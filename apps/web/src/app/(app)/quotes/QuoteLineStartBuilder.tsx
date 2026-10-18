@@ -20,6 +20,7 @@ type QuoteLineStartBuilderProps = {
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
   quoteEntryLayout?: "list" | "catalogue";
+  categoryImages?: Record<string, string | null | undefined>;
 };
 
 const optionButton = (active: boolean) => ({
@@ -44,6 +45,7 @@ export function QuoteLineStartBuilder({
   canOverrideMarkup = false,
   costingResources,
   quoteEntryLayout = "list",
+  categoryImages = {},
 }: QuoteLineStartBuilderProps) {
   const [mode, setMode] = useState<StartMode>("saved");
 
@@ -58,6 +60,7 @@ export function QuoteLineStartBuilder({
           pricingSettings={pricingSettings}
           canOverrideMarkup={canOverrideMarkup}
           costingResources={costingResources}
+          categoryImages={categoryImages}
         />
       </Suspense>
     );
@@ -103,6 +106,7 @@ export function QuoteLineStartBuilder({
               canOverrideMarkup={canOverrideMarkup}
               pricingSettings={pricingSettings}
               costingResources={costingResources}
+              categoryImages={categoryImages}
             />
           )}
         </Suspense>

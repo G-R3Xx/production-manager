@@ -148,6 +148,9 @@ export const materials = catalogSchema.table("materials", {
   gsm: integer("gsm"),
   finish: varchar("finish", { length: 100 }),
   costJson: jsonb("cost_json").notNull().default({}),
+  quoteImageUrl: text("quote_image_url"),
+  quoteImageStoragePath: text("quote_image_storage_path"),
+  quoteVisualCategory: varchar("quote_visual_category", { length: 40 }),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()

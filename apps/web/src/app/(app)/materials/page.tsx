@@ -12,6 +12,8 @@ import { AutoRefreshWhenPending } from "@/components/AutoRefreshWhenPending";
 import { MaterialPriceSheetManager } from "./MaterialPriceSheetManager";
 import { MaterialPriceManager } from "./MaterialPriceManager";
 import { MyobSyncStatus, readMyobSyncStatus } from "@/components/MyobSyncStatus";
+import { getQuoteVisualCategoryImages } from "@/server/quote-visuals";
+import { QuoteVisualCategoryManager } from "./QuoteVisualCategoryManager";
 
 type MaterialsPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -245,6 +247,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
         {material.supplierId ? <form action={startPurchaseOrderAction}><input type="hidden" name="supplierId" value={material.supplierId} /><input type="hidden" name="materialId" value={material.id} /><button type="submit" style={secondaryButtonStyle}>New PO for this material</button></form> : <span style={{ ...mutedTextStyle, alignSelf: "center" }}>Set a supplier to start a PO from this material.</span>}
       </div> : null}
       <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
+      {(material.quoteVisualCategory || material.quoteImageUrl) ? <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>{material.quoteImageUrl ? <img src={material.quoteImageUrl} alt="" style={{ width: 88, height: 62, objectFit: "contain", borderRadius: 9, border: "1px solid #e2e8f0", background: "#f8fafc" }} /> : null}<span style={mutedTextStyle}>Quote wizard: {material.quoteVisualCategory ? formatMaterialType(material.quoteVisualCategory) : "automatic category"}{material.quoteImageUrl ? " · custom image" : " · category fallback image"}</span></div> : null}
       {typeof material.costJson?.priceCheckedAt === "string" && material.costJson.priceCheckedAt ? <div style={mutedTextStyle}>Price checked: {String(material.costJson.priceCheckedAt)}</div> : null}
       {isSheetType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Sheet billing: {minimumSheetBillingLabel(material)}</div> : null}
       {isRollType(normaliseMaterialType(material.materialType)) ? <div style={mutedTextStyle}>Roll billing: {rollBillingLabel(material)}</div> : null}
@@ -266,9 +269,10 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
   const canManagePrices = ["owner", "manager"].includes(String(activeTenant.tenantRole).toLowerCase());
 
-  const [materials, suppliers] = await Promise.all([
+  const [materials, suppliers, quoteVisualCategoryImages] = await Promise.all([
     listMaterialsForTenant(activeTenant.tenantId),
-    listSuppliersForTenant(activeTenant.tenantId)
+    listSuppliersForTenant(activeTenant.tenantId),
+    getQuoteVisualCategoryImages(activeTenant.tenantId)
   ]);
 
   const params = (await searchParams) ?? {};
@@ -354,6 +358,8 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
           <MaterialPriceSheetManager />
         </>
       ) : null}
+
+      {canManagePrices ? <QuoteVisualCategoryManager images={quoteVisualCategoryImages} /> : null}
 
       <section style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.95fr) minmax(0, 1.25fr)", gap: 16, alignItems: "start" }}>
         <details open={!canManagePrices} style={{ ...cardStyle, display: "grid", gap: 16 }}>

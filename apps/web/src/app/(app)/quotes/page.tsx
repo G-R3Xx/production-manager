@@ -29,6 +29,7 @@ import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, lis
 import type { QuoteCostingResources } from "./quoteCostingResources";
 import { getQuoteEntryLayoutForUser } from "@/server/users";
 import { QuoteSearchInput } from "./QuoteSearchInput";
+import { getQuoteVisualCategoryImages } from "@/server/quote-visuals";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -570,7 +571,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     quoteLines,
     selectedArtworkApproval,
     selectedProductionJob,
-    quoteEntryLayout
+    quoteEntryLayout,
+    quoteVisualCategoryRecords
   ] = await Promise.all([
     listQuoteDraftSummariesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? cachedQuoteMaterials(activeTenant.tenantId) : Promise.resolve([]),
@@ -588,12 +590,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? listQuoteLines(selected) : Promise.resolve([]),
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
     selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
-    builderDataNeeded ? getQuoteEntryLayoutForUser(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve("list" as const)
+    builderDataNeeded ? getQuoteEntryLayoutForUser(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve("list" as const),
+    builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId) : Promise.resolve({})
   ]);
 
   const selectedQuote = initialSelectedQuote;
   const clients = initialClients;
   const [costingProcesses, costingMachines, costingLabour, costingRecipes] = costingSource;
+  const quoteVisualCategoryImages = Object.fromEntries(Object.entries(quoteVisualCategoryRecords as Record<string, { imageUrl?: string | null }>).map(([key, value]) => [key, value?.imageUrl ?? null]));
   const quoteCostingResources: QuoteCostingResources = {
     processes: costingProcesses.filter((row) => row.active).map((row) => ({
       id: row.id,
@@ -1210,6 +1214,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         canOverrideMarkup={canOverrideQuoteMarkup}
                         costingResources={quoteCostingResources}
                         quoteEntryLayout={quoteEntryLayout}
+                        categoryImages={quoteVisualCategoryImages}
                         pricingSettings={{
                           markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                           accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",
@@ -1383,6 +1388,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           myobMatrixItems={myobMatrixItems}
                           canOverrideMarkup={canOverrideQuoteMarkup}
                           costingResources={quoteCostingResources}
+                          categoryImages={quoteVisualCategoryImages}
                           pricingSettings={{
                             markupMultiplier: companySettings?.globalMarkupMultiplier ?? "1.5",
                             accessEquipmentMarkupMultiplier: companySettings?.accessEquipmentMarkupMultiplier ?? companySettings?.globalMarkupMultiplier ?? "1.5",

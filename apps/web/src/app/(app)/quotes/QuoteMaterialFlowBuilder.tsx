@@ -28,6 +28,8 @@ export type QuoteMaterial = {
   rollWidthMm?: string | null;
   gsm?: string | null;
   notes?: string | null;
+  quoteImageUrl?: string | null;
+  quoteVisualCategory?: string | null;
 };
 
 type QuoteSizePreset = {
@@ -81,6 +83,7 @@ type QuoteMaterialFlowBuilderProps = {
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
   presentation?: "full" | "wizard";
+  categoryImages?: Record<string, string | null | undefined>;
 };
 
 type FlowType = QuickQuoteFlowType;
@@ -590,7 +593,15 @@ function isPrintRollMaterial(material: QuoteMaterial): boolean {
   return isRollMaterial(material) && !isLaminateMaterial(material);
 }
 
+function explicitQuoteVisualBase(material: QuoteMaterial): BaseType | null {
+  const value = String(material.quoteVisualCategory ?? "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+  if (value === "acrylic" || value === "acm" || value === "corflute" || value === "pvc" || value === "banner" || value === "other_sheet") return value;
+  return null;
+}
+
 function materialMatchesSpecificBase(material: QuoteMaterial, baseType: Exclude<BaseType, "other_sheet">): boolean {
+  const explicit = explicitQuoteVisualBase(material);
+  if (explicit) return explicit === baseType;
   const text = materialText(material);
   if (baseType === "acrylic") return text.includes("acrylic") || text.includes("perspex") || text.includes("pmma");
   if (baseType === "acm") return text.includes("acm") || text.includes("aluminium composite") || text.includes("aluminum composite");
@@ -600,6 +611,8 @@ function materialMatchesSpecificBase(material: QuoteMaterial, baseType: Exclude<
 }
 
 function materialMatchesBase(material: QuoteMaterial, baseType: BaseType): boolean {
+  const explicit = explicitQuoteVisualBase(material);
+  if (explicit) return explicit === baseType;
   if (baseType !== "other_sheet") return materialMatchesSpecificBase(material, baseType);
   if (!isSheetMaterial(material)) return false;
 
@@ -1343,7 +1356,7 @@ function bestRollMaterialForGroup(materials: QuoteMaterial[], widthMm: number, h
   })[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources, presentation = "full" }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources, presentation = "full", categoryImages = {} }: QuoteMaterialFlowBuilderProps) {
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const [wizardIndex, setWizardIndex] = useState(0);
   const standardMarkupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
@@ -3316,7 +3329,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       artwork_supplied: "/quote-wizard/artwork-supplied.png",
       artwork_required: "/quote-wizard/artwork-required.png"
     };
-    const approvedAsset = approvedWizardAssets[kind];
+    const approvedAsset = categoryImages[kind] || approvedWizardAssets[kind];
     if (approvedAsset) {
       return <img src={approvedAsset} alt="" aria-hidden="true" style={{ width: "100%", height: "100%", display: "block", objectFit: "contain", objectPosition: "center", background: "#f8fafc" }} />;
     }
@@ -3386,9 +3399,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     const selectedMark = (selected: boolean) => selected ? <span aria-hidden="true" style={{ position: "absolute", top: 10, right: 10, width: 28, height: 28, borderRadius: 999, background: "#2563eb", color: "#fff", display: "grid", placeItems: "center", fontSize: 17, fontWeight: 950, boxShadow: "0 4px 12px rgba(37,99,235,.28)", zIndex: 2 }}>✓</span> : null;
     const visual = (kind: string) => <div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}>{wizardIllustration(kind)}</div>;
     const materialVisual = (material: QuoteMaterial, fallbackKind: BaseType | "other_sheet") => {
+      const base = fallbackKind === "other_sheet" ? "other_sheet" : fallbackKind;
+      const directImage = material.quoteImageUrl || categoryImages[base];
+      if (directImage) {
+        return <div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}><img src={directImage} alt="" aria-hidden="true" style={{ width: "100%", height: "100%", maxHeight: 178, objectFit: "contain", objectPosition: "center", display: "block" }} /></div>;
+      }
       const text = `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""} ${material.materialGroup ?? ""}`.toLowerCase();
       const has = (value: string) => text.includes(value);
-      const base = fallbackKind === "other_sheet" ? "other_sheet" : fallbackKind;
       let kind: string = base;
       let tint: string | null = null;
 

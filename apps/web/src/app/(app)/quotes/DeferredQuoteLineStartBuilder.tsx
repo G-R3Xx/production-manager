@@ -14,6 +14,7 @@ type Props = {
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
   quoteEntryLayout?: "list" | "catalogue";
+  categoryImages?: Record<string, string | null | undefined>;
 };
 
 export function DeferredQuoteLineStartBuilder(props: Props) {

@@ -16,6 +16,7 @@ type Props = {
   pricingSettings?: PricingSettings;
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
+  categoryImages?: Record<string, string | null | undefined>;
 };
 
 type DepartmentFilter = "all" | "signage" | "small_format";
@@ -72,7 +73,8 @@ export function VisualQuoteCatalogue({
   myobMatrixItems = [],
   pricingSettings,
   canOverrideMarkup = false,
-  costingResources
+  costingResources,
+  categoryImages = {}
 }: Props) {
   const [search, setSearch] = useState("");
   const [department, setDepartment] = useState<DepartmentFilter>("all");
@@ -254,6 +256,7 @@ export function VisualQuoteCatalogue({
                     pricingSettings={pricingSettings}
                     costingResources={costingResources}
                     presentation="wizard"
+                    categoryImages={categoryImages}
                   />
                 )}
               </Suspense>

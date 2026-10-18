@@ -35,6 +35,7 @@ export type QuoteLineEditorProps = {
   pricingSettings?: FlowPricingSettings;
   canOverrideMarkup?: boolean;
   costingResources?: QuoteCostingResources;
+  categoryImages?: Record<string, string | null | undefined>;
 };
 
 type SummaryRow = { label: string; value: string };
@@ -397,7 +398,7 @@ function productFamilyForDepartment(department: string): string {
   }
 }
 
-export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixItems = [], pricingSettings, canOverrideMarkup = false, costingResources }: QuoteLineEditorProps) {
+export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixItems = [], pricingSettings, canOverrideMarkup = false, costingResources, categoryImages = {} }: QuoteLineEditorProps) {
   const quickSnapshot = useMemo(() => {
     if (product) return null;
     return readQuickQuoteSnapshot(line.configurationSnapshot) ?? inferLegacyQuickQuoteSnapshot({
@@ -503,6 +504,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
           pricingSettings={pricingSettings}
           canOverrideMarkup={canOverrideMarkup}
           costingResources={costingResources}
+          categoryImages={categoryImages}
           editingLine={{
             id: line.id,
             productName: line.productName,

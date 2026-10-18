@@ -30,6 +30,9 @@ export type MaterialRecord = {
   rollWidthMm: string | null;
   gsm: string | null;
   notes: string | null;
+  quoteImageUrl: string | null;
+  quoteImageStoragePath: string | null;
+  quoteVisualCategory: string | null;
   costJson: Record<string, unknown>;
   myobUid: string | null;
   myobDisplayId: string | null;
@@ -69,6 +72,9 @@ export type CreateMaterialInput = {
   rollWidthMm: string | null;
   gsm: string | null;
   notes: string | null;
+  quoteImageUrl: string | null;
+  quoteImageStoragePath: string | null;
+  quoteVisualCategory: string | null;
 };
 
 export type UpdateMaterialInput = CreateMaterialInput & {
@@ -85,7 +91,8 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
     if (await relationHasColumns("catalog.materials", [
       "material_group", "minimum_billable_sheet_fraction", "roll_billing_increment_metres",
       "reverse_printable", "used_for_backing", "customer_facing_name", "myob_uid",
-      "myob_display_id", "myob_sync_state", "myob_payload_json"
+      "myob_display_id", "myob_sync_state", "myob_payload_json", "quote_image_url",
+      "quote_image_storage_path", "quote_visual_category"
     ])) {
       materialPricingSchemaReady = true;
       return;
@@ -102,7 +109,10 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS myob_uid varchar(255),
       ADD COLUMN IF NOT EXISTS myob_display_id varchar(30),
       ADD COLUMN IF NOT EXISTS myob_sync_state varchar(30),
-      ADD COLUMN IF NOT EXISTS myob_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb
+      ADD COLUMN IF NOT EXISTS myob_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
+      ADD COLUMN IF NOT EXISTS quote_image_url text,
+      ADD COLUMN IF NOT EXISTS quote_image_storage_path text,
+      ADD COLUMN IF NOT EXISTS quote_visual_category varchar(40)
   `);
     materialPricingSchemaReady = true;
   })().catch((error) => {
@@ -202,6 +212,9 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       m.roll_width_mm::text AS "rollWidthMm",
       m.gsm::text AS gsm,
       m.notes,
+      m.quote_image_url AS "quoteImageUrl",
+      m.quote_image_storage_path AS "quoteImageStoragePath",
+      m.quote_visual_category AS "quoteVisualCategory",
       m.cost_json AS "costJson",
       m.myob_uid AS "myobUid",
       m.myob_display_id AS "myobDisplayId",
@@ -281,6 +294,9 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
       roll_width_mm,
       gsm,
       notes,
+      quote_image_url,
+      quote_image_storage_path,
+      quote_visual_category,
       active,
       created_at,
       updated_at
@@ -308,6 +324,9 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
       $21::numeric,
       $22::numeric,
       $23::varchar,
+      $25::text,
+      $26::text,
+      $27::varchar,
       true,
       now(),
       now()
@@ -337,7 +356,10 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
     input.rollWidthMm,
     input.gsm,
     input.notes,
-    input.showAsInstallationOption
+    input.showAsInstallationOption,
+    input.quoteImageUrl,
+    input.quoteImageStoragePath,
+    input.quoteVisualCategory
   ]);
   return result.rows[0];
 }
@@ -370,6 +392,9 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       roll_width_mm = $22::numeric,
       gsm = $23::numeric,
       notes = $24::varchar,
+      quote_image_url = $26::text,
+      quote_image_storage_path = $27::text,
+      quote_visual_category = $28::varchar,
       updated_at = now()
     WHERE id = $1::uuid
       AND tenant_id = $2::uuid
@@ -398,7 +423,10 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     input.rollWidthMm,
     input.gsm,
     input.notes,
-    input.showAsInstallationOption
+    input.showAsInstallationOption,
+    input.quoteImageUrl,
+    input.quoteImageStoragePath,
+    input.quoteVisualCategory
   ]);
 }
 

@@ -49,3 +49,5 @@ pnpm db:studio
 - `045_job_process_staff_assignments.sql` — adds multi-staff ownership and due dates for each job process, plus inherited or overridden production-step assignments.
 
 - `050_default_task_assignments.sql` — adds company-wide default staff routing for artwork, signage print/manufacture, small format, installation and dispatch, plus the default-rule key inherited by production steps.
+
+- `052_quote_visual_images.sql` — adds material-specific quote-wizard images/categories plus tenant-managed fallback images for visual quote categories.

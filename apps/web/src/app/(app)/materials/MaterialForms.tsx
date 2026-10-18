@@ -32,6 +32,9 @@ type MaterialFormRecord = {
   rollWidthMm: string | null;
   gsm: string | null;
   notes: string | null;
+  quoteImageUrl: string | null;
+  quoteImageStoragePath: string | null;
+  quoteVisualCategory: string | null;
 };
 
 type MaterialGroupValue = "signage" | "plan-printing" | "poster-printing" | "small-format" | "shared";
@@ -70,6 +73,17 @@ const materialTypeOptions: Array<{ value: MaterialKind; label: string; hint: str
   { value: "item", label: "Consumable / each item", hint: "Items bought and used one-by-one or by box/pack." },
   { value: "other", label: "Other", hint: "Fallback for anything that does not fit above." }
 ];
+
+const quoteVisualCategoryOptions = [
+  { value: "", label: "Automatic / not assigned" },
+  { value: "acrylic", label: "Acrylic" },
+  { value: "acm", label: "ACM / Aluminium composite" },
+  { value: "corflute", label: "Corflute / corrugated plastic" },
+  { value: "pvc", label: "PVC / Foam" },
+  { value: "banner", label: "Vinyl / Roll stock" },
+  { value: "other_sheet", label: "Other sheet" }
+] as const;
+
 
 const inputStyle: CSSProperties = {
   width: "100%",
@@ -435,6 +449,35 @@ function ParameterFields({ kind, material }: { kind: MaterialKind; material?: Ma
   return <EachFields kind={kind} material={material} />;
 }
 
+function QuoteImageField({ material }: { material?: MaterialFormRecord }) {
+  const [preview, setPreview] = useState<string | null>(material?.quoteImageUrl ?? null);
+  return (
+    <div style={{ display: "grid", gap: 9 }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+        <div style={{ width: 150, height: 105, border: "1px solid #d0d5dd", borderRadius: 12, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center" }}>
+          {preview ? <img src={preview} alt="Quote material preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#98a2b3", fontSize: 12, fontWeight: 800, textAlign: "center", padding: 10 }}>No quote image</span>}
+        </div>
+        <div style={{ display: "grid", gap: 7, flex: "1 1 280px" }}>
+          <input
+            name="quoteImageFile"
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif"
+            onChange={(event) => {
+              const file = event.target.files?.[0];
+              if (file) setPreview(URL.createObjectURL(file));
+            }}
+            style={{ ...inputStyle, paddingTop: 9 }}
+          />
+          <p style={helperStyle}>Optional. This exact image is used on the visual quote wizard. JPG, PNG, WebP, GIF or AVIF, up to 10 MB. The wizard uses contain-fit so the image is never cropped.</p>
+          {material?.quoteImageUrl ? <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, fontWeight: 800, color: "#b42318" }}><input type="checkbox" name="removeQuoteImage" value="1" onChange={(event) => { if (event.target.checked) setPreview(null); else setPreview(material.quoteImageUrl); }} /> Remove current quote image</label> : null}
+        </div>
+      </div>
+      {material?.quoteImageUrl ? <input type="hidden" name="existingQuoteImageUrl" value={material.quoteImageUrl} /> : null}
+      {material?.quoteImageStoragePath ? <input type="hidden" name="existingQuoteImageStoragePath" value={material.quoteImageStoragePath} /> : null}
+    </div>
+  );
+}
+
 function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: SupplierOption[]; material?: MaterialFormRecord; submitLabel: string }) {
   const initialKind = useMemo(() => normaliseMaterialKind(material?.materialType), [material?.materialType]);
   const initialGroup = useMemo(() => normaliseMaterialGroup(material?.materialGroup, initialKind), [material?.materialGroup, initialKind]);
@@ -451,6 +494,16 @@ function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: Sup
       </div>
       <GroupHint group={group} />
       <TypeHint kind={kind} />
+      <div style={gridStyle}>
+        <Field label="Quote wizard category" helper="Assign signage stock to a visual category. Choose Other sheet only when it does not belong to Acrylic, ACM, Corflute, PVC/Foam or Vinyl/Roll stock.">
+          <select name="quoteVisualCategory" defaultValue={material?.quoteVisualCategory ?? ""} style={inputStyle}>
+            {quoteVisualCategoryOptions.map((option) => <option key={option.value || "auto"} value={option.value}>{option.label}</option>)}
+          </select>
+        </Field>
+        <Field label="Quote wizard image" helper="A material-specific image overrides its category image in the visual quote wizard.">
+          <QuoteImageField material={material} />
+        </Field>
+      </div>
       <ParameterFields kind={kind} material={material} />
       <Field label="Wastage allowance %" helper="Added to the real material usage before markup and profit. Example: vinyl stock at 20% wastage charges 1.2 × the calculated stock cost.">
         <input name="wastagePercent" defaultValue={material?.wastagePercent ?? "0"} type="number" min="0" max="500" step="0.01" inputMode="decimal" placeholder="eg 20" style={inputStyle} />
@@ -477,7 +530,7 @@ function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: Sup
 
 export function CreateMaterialForm({ suppliers }: { suppliers: SupplierOption[] }) {
   return (
-    <form action={createMaterialAction} style={{ display: "grid", gap: 14, marginTop: 16 }}>
+    <form action={createMaterialAction} encType="multipart/form-data" style={{ display: "grid", gap: 14, marginTop: 16 }}>
       <MaterialFormBody suppliers={suppliers} submitLabel="Create material" />
     </form>
   );
@@ -485,7 +538,7 @@ export function CreateMaterialForm({ suppliers }: { suppliers: SupplierOption[] 
 
 export function EditMaterialForm({ suppliers, material }: { suppliers: SupplierOption[]; material: MaterialFormRecord }) {
   return (
-    <form action={updateMaterialAction} style={{ display: "grid", gap: 14, marginTop: 14 }}>
+    <form action={updateMaterialAction} encType="multipart/form-data" style={{ display: "grid", gap: 14, marginTop: 14 }}>
       <MaterialFormBody suppliers={suppliers} material={material} submitLabel="Save material changes" />
     </form>
   );
