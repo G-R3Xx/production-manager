@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createMaterial, listMaterialsForTenant, saveMaterialPriceManagerChanges, setMaterialActive, updateMaterial, type MaterialPriceManagerChange } from "@/server/materials";
+import { createMaterial, listMaterialsForTenant, saveMaterialPriceManagerChanges, setMaterialActive, setMaterialQuoteImage, updateMaterial, type MaterialPriceManagerChange } from "@/server/materials";
 import { listSuppliersForTenant } from "@/server/suppliers";
 import { bulkApplyMaterialSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
@@ -90,6 +90,25 @@ export async function updateMaterialAction(formData:FormData){
   const queued=await queueMyobMasterDataSync(active.tenantId,"material",materialId);
   revalidatePath('/materials');revalidatePath('/quotes');
   redirect(`/materials?message=${encodeURIComponent(queued?"Material updated · MYOB sync queued":"Material updated")}`);
+}
+
+export async function saveMaterialPriceManagerQuoteImageAction(formData: FormData) {
+  const active = await tenant();
+  const materialId = readString(formData, "materialId");
+  if (!materialId) return { ok: false as const, error: "Save the material before adding its quote image." };
+  try {
+    const removeImage = readChecked(formData, "removeQuoteImage");
+    const uploaded = removeImage ? null : await uploadQuoteImageIfPresent(active.tenantId, `materials/${materialId}`, formData);
+    if (!removeImage && !uploaded) return { ok: false as const, error: "Choose an image first." };
+    const image: UploadedQuoteImage = removeImage ? { imageUrl: null, storagePath: null } : uploaded!;
+    await setMaterialQuoteImage(active.tenantId, materialId, image);
+    revalidatePath("/materials");
+    revalidatePath("/quotes");
+    return { ok: true as const, imageUrl: image.imageUrl, storagePath: image.storagePath };
+  } catch (error) {
+    console.error("Material Price Manager quote image save failed", error);
+    return { ok: false as const, error: getErrorMessage(error) };
+  }
 }
 
 export async function saveQuoteVisualCategoryImageAction(formData:FormData){

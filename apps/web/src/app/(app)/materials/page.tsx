@@ -351,7 +351,10 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
               gsm: material.gsm,
               active: material.active,
               priceCheckedAt: typeof material.costJson?.priceCheckedAt === "string" ? String(material.costJson.priceCheckedAt) : "",
-              catalogState: typeof material.costJson?.catalogSheetState === "string" ? String(material.costJson.catalogSheetState) : ""
+              catalogState: typeof material.costJson?.catalogSheetState === "string" ? String(material.costJson.catalogSheetState) : "",
+              quoteImageUrl: material.quoteImageUrl,
+              quoteImageStoragePath: material.quoteImageStoragePath,
+              quoteVisualCategory: material.quoteVisualCategory
             }))}
             suppliers={suppliers.map((supplier) => ({ displayName: supplier.displayName, isActive: supplier.isActive }))}
           />

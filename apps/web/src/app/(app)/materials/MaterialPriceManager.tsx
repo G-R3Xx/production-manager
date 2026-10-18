@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { saveMaterialPriceManagerAction } from "./actions";
+import { saveMaterialPriceManagerAction, saveMaterialPriceManagerQuoteImageAction } from "./actions";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 
 type MaterialManagerSource = {
@@ -26,6 +26,9 @@ type MaterialManagerSource = {
   active: boolean;
   priceCheckedAt: string;
   catalogState: string;
+  quoteImageUrl: string | null;
+  quoteImageStoragePath: string | null;
+  quoteVisualCategory: string | null;
 };
 
 type SupplierOption = { displayName: string; isActive: boolean };
@@ -55,6 +58,9 @@ type GridRow = {
   priceCheckedAt: string;
   active: boolean;
   savedState: "active" | "hidden" | "archived";
+  quoteImageUrl: string | null;
+  quoteImageStoragePath: string | null;
+  quoteVisualCategory: string;
 };
 
 type SaveResult =
@@ -121,6 +127,16 @@ const TYPE_OPTIONS = [
   ["fixing", "Hardware / fixing"],
   ["item", "Consumable"],
   ["other", "Other"]
+] as const;
+
+const QUOTE_CATEGORY_OPTIONS = [
+  ["", "Auto"],
+  ["acrylic", "Acrylic"],
+  ["acm", "ACM"],
+  ["corflute", "Corflute"],
+  ["pvc", "PVC / Foam"],
+  ["banner", "Vinyl / Roll stock"],
+  ["other_sheet", "Other sheet"]
 ] as const;
 
 const cellInputStyle = {
@@ -194,7 +210,10 @@ function rowsFromMaterials(materials: MaterialManagerSource[]): GridRow[] {
     gsm: material.gsm ?? "",
     priceCheckedAt: priceChecked(material),
     active: material.active,
-    savedState: savedState(material)
+    savedState: savedState(material),
+    quoteImageUrl: material.quoteImageUrl ?? null,
+    quoteImageStoragePath: material.quoteImageStoragePath ?? null,
+    quoteVisualCategory: material.quoteVisualCategory ?? ""
   }));
 }
 
@@ -240,6 +259,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
   const [error, setError] = useState("");
   const [syncMyob, setSyncMyob] = useState(false);
   const [isPending, startTransition] = useTransition();
+  const [imageBusy, setImageBusy] = useState<Set<string>>(() => new Set());
   const dirtyCountRef = useRef(0);
 
   useEffect(() => { dirtyCountRef.current = dirty.size; }, [dirty]);
@@ -293,7 +313,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       if (!showInactive && !row.active && row.id && !dirty.has(row.key)) return false;
       if (section !== "all" && sectionForType(group, row.materialType) !== section && !dirty.has(row.key)) return false;
       if (!needle) return true;
-      return [row.name, row.customerFacingName, row.supplierName, row.sku, row.materialType, row.purchaseUom, row.stockUom].join(" ").toLowerCase().includes(needle);
+      return [row.name, row.customerFacingName, row.supplierName, row.sku, row.materialType, row.purchaseUom, row.stockUom, row.quoteVisualCategory].join(" ").toLowerCase().includes(needle);
     });
   }, [rows, group, showInactive, section, search, dirty]);
 
@@ -332,7 +352,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     setRows((current) => [...current, {
       key, id: null, action: "ADD", materialGroup: group, materialType, name: "", customerFacingName: "", supplierName: "", sku: "",
       purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
-      priceCheckedAt: todayLocal(), active: true, savedState: "active"
+      priceCheckedAt: todayLocal(), active: true, savedState: "active", quoteImageUrl: null, quoteImageStoragePath: null, quoteVisualCategory: ""
     }]);
     setSection(currentSection.key);
     markDirty(key);
@@ -340,7 +360,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
 
   function duplicateRow(source: GridRow) {
     const key = `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
-    const copy: GridRow = { ...source, key, id: null, action: "ADD", name: `${source.name} copy`, active: true, savedState: "active", priceCheckedAt: todayLocal() };
+    const copy: GridRow = { ...source, key, id: null, action: "ADD", name: `${source.name} copy`, active: true, savedState: "active", priceCheckedAt: todayLocal(), quoteImageUrl: null, quoteImageStoragePath: null };
     setRows((current) => [...current, copy]);
     markDirty(key);
   }
@@ -383,7 +403,8 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       lengthMm: row.lengthMm || null,
       rollWidthMm: row.rollWidthMm || null,
       gsm: row.gsm || null,
-      priceCheckedAt: row.priceCheckedAt || null
+      priceCheckedAt: row.priceCheckedAt || null,
+      quoteVisualCategory: row.quoteVisualCategory || null
     }));
     const formData = new FormData();
     formData.set("changes", JSON.stringify(payload));
@@ -406,6 +427,24 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       setMessage(parts.length ? `${parts.join(" · ")}.` : "Changes saved.");
       router.refresh();
     });
+  }
+
+  async function saveQuoteImage(row: GridRow, file: File | null, remove = false) {
+    if (!row.id) { setError("Save the new material first, then add its quote image."); return; }
+    setImageBusy((current) => new Set(current).add(row.key));
+    setError(""); setMessage("");
+    try {
+      const formData = new FormData();
+      formData.set("materialId", row.id);
+      if (remove) formData.set("removeQuoteImage", "true");
+      if (file) formData.set("quoteImageFile", file);
+      const result = await saveMaterialPriceManagerQuoteImageAction(formData);
+      if (!("ok" in result) || !result.ok) { setError("error" in result ? result.error : "Quote image could not be saved."); return; }
+      setRows((current) => current.map((item) => item.key === row.key ? { ...item, quoteImageUrl: result.imageUrl, quoteImageStoragePath: result.storagePath } : item));
+      setMessage(remove ? "Quote image removed." : "Quote image saved.");
+    } finally {
+      setImageBusy((current) => { const next = new Set(current); next.delete(row.key); return next; });
+    }
   }
 
   function pasteCosts(startKey: string, raw: string) {
@@ -431,7 +470,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
               <h2 style={{ margin: 0, fontSize: 22 }}>Material Price Manager</h2>
               <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 9px", fontSize: 11, fontWeight: 900 }}>OWNER / MANAGER</span>
             </div>
-            <p style={{ margin: "6px 0 0", color: "#475467", lineHeight: 1.5, maxWidth: 880 }}>Edit materials directly like a spreadsheet. Changes stay highlighted until you save them. New supplier names automatically create a placeholder supplier in PM.</p>
+            <p style={{ margin: "6px 0 0", color: "#475467", lineHeight: 1.5, maxWidth: 880 }}>Edit materials directly like a spreadsheet, including quote category and quote imagery. Row changes stay highlighted until you save them; quote image uploads save immediately. New supplier names automatically create a placeholder supplier in PM.</p>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             {dirty.size ? <span style={{ borderRadius: 999, background: "#fff7ed", color: "#b54708", padding: "7px 10px", fontSize: 12, fontWeight: 900 }}>{dirty.size} unsaved</span> : <span style={{ borderRadius: 999, background: "#ecfdf3", color: "#067647", padding: "7px 10px", fontSize: 12, fontWeight: 900 }}>Up to date</span>}
@@ -460,10 +499,10 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       </div>
 
       <div style={{ overflowX: "auto", maxHeight: 620, overflowY: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1880, fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 2220, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
-              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label) => <th key={label || "controls"} style={{ padding: "9px 8px", borderBottom: "1px solid #e4e7ec", whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</th>)}
+              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label) => <th key={label || "controls"} style={{ padding: "9px 8px", borderBottom: "1px solid #e4e7ec", whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</th>)}
             </tr>
           </thead>
           <tbody>
@@ -481,6 +520,19 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 185 }}><input list="pm-material-suppliers" value={row.supplierName} onChange={(event) => updateRow(row.key, "supplierName", event.target.value)} style={cellInputStyle} placeholder="Supplier" /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105 }}><input value={row.sku} onChange={(event) => updateRow(row.key, "sku", event.target.value)} style={cellInputStyle} placeholder="SKU" /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 150 }}><select value={row.materialType} onChange={(event) => updateRow(row.key, "materialType", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }}>{TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 150 }}><select value={row.quoteVisualCategory} onChange={(event) => updateRow(row.key, "quoteVisualCategory", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }}>{QUOTE_CATEGORY_OPTIONS.map(([value, label]) => <option key={value || "auto"} value={value}>{label}</option>)}</select></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 175 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
+                    <div style={{ width: 46, height: 34, border: "1px solid #e4e7ec", borderRadius: 7, background: "#f8fafc", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto" }}>
+                      {row.quoteImageUrl ? <img src={row.quoteImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 9, color: "#98a2b3", fontWeight: 800 }}>None</span>}
+                    </div>
+                    {row.id ? <label style={{ border: "1px solid #d0d5dd", borderRadius: 7, minHeight: 32, padding: "0 8px", display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 800, cursor: imageBusy.has(row.key) ? "wait" : "pointer", background: "#fff", whiteSpace: "nowrap", opacity: imageBusy.has(row.key) ? 0.6 : 1 }}>
+                      {imageBusy.has(row.key) ? "Saving…" : row.quoteImageUrl ? "Replace" : "Upload"}
+                      <input type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif" disabled={imageBusy.has(row.key)} onChange={(event) => { const file = event.target.files?.[0] ?? null; event.currentTarget.value = ""; if (file) void saveQuoteImage(row, file); }} style={{ display: "none" }} />
+                    </label> : <span style={{ fontSize: 10, color: "#98a2b3", fontWeight: 700 }}>Save first</span>}
+                    {row.id && row.quoteImageUrl ? <button type="button" disabled={imageBusy.has(row.key)} onClick={() => void saveQuoteImage(row, null, true)} title="Remove quote image" style={{ border: "none", background: "transparent", color: "#b42318", fontWeight: 900, cursor: imageBusy.has(row.key) ? "wait" : "pointer", padding: 2 }}>×</button> : null}
+                  </div>
+                </td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105 }}><input value={row.purchaseUom} onChange={(event) => updateRow(row.key, "purchaseUom", event.target.value)} style={cellInputStyle} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 95 }}><input value={row.stockUom} onChange={(event) => updateRow(row.key, "stockUom", event.target.value)} style={cellInputStyle} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 110 }}><input inputMode="decimal" value={row.stockQuantity} onChange={(event) => updateRow(row.key, "stockQuantity", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>

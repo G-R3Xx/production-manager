@@ -481,6 +481,20 @@ export async function getMaterialById(tenantId: string, materialId: string | nul
   return rows.find((row) => row.id === materialId) ?? null;
 }
 
+export async function setMaterialQuoteImage(tenantId: string, materialId: string, image: { imageUrl: string | null; storagePath: string | null }): Promise<void> {
+  await ensureMaterialVisualColumns();
+  await pool.query(`
+    UPDATE catalog.materials
+    SET quote_image_url=$3::text,
+        quote_image_storage_path=$4::text,
+        cost_json=(COALESCE(cost_json,'{}'::jsonb)-'quoteImageUrl'-'quoteImageStoragePath')
+          || CASE WHEN $3::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteImageUrl',$3::text) END
+          || CASE WHEN $4::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteImageStoragePath',$4::text) END,
+        updated_at=now()
+    WHERE tenant_id=$1::uuid AND id=$2::uuid
+  `,[tenantId,materialId,image.imageUrl,image.storagePath]);
+}
+
 export async function updateMaterialMyobLink(tenantId: string, materialId: string, input: {
   myobUid: string; myobDisplayId?: string | null; myobSyncState?: string | null; myobPayloadJson?: Record<string, unknown>;
 }): Promise<void> {
@@ -515,6 +529,7 @@ export type MaterialPriceManagerChange = {
   rollWidthMm: string | null;
   gsm: string | null;
   priceCheckedAt: string | null;
+  quoteVisualCategory: string | null;
 };
 
 function cleanMaterialManagerText(value: unknown, max = 200): string {
@@ -547,11 +562,18 @@ function cleanPriceCheckedDate(value: unknown): string | null {
   return raw;
 }
 
+function cleanQuoteVisualCategory(value: unknown): string | null {
+  const raw = cleanMaterialManagerText(value, 40).toLowerCase().replace(/[\s-]+/g, "_");
+  if (!raw) return null;
+  return ["acrylic", "acm", "corflute", "pvc", "banner", "other_sheet"].includes(raw) ? raw : null;
+}
+
 export async function saveMaterialPriceManagerChanges(
   tenantId: string,
   changes: MaterialPriceManagerChange[]
 ): Promise<{ updatedIds: string[]; createdIds: string[]; placeholderSuppliers: number; hidden: number; archived: number; restored: number }> {
   await ensureMaterialPricingColumns();
+  await ensureMaterialVisualColumns();
   if (!changes.length) return { updatedIds: [], createdIds: [], placeholderSuppliers: 0, hidden: 0, archived: 0, restored: 0 };
   if (changes.length > 500) throw new Error("Save up to 500 material changes at a time.");
 
@@ -621,21 +643,24 @@ export async function saveMaterialPriceManagerChanges(
       const priceCheckedAt = cleanPriceCheckedDate(rawChange.priceCheckedAt);
       const customerFacingName = cleanMaterialManagerText(rawChange.customerFacingName, 200) || null;
       const sku = cleanMaterialManagerText(rawChange.sku, 100) || null;
+      const quoteVisualCategory = cleanQuoteVisualCategory(rawChange.quoteVisualCategory);
 
       if (!rawChange.id || action === "ADD") {
         const created = await client.query<{ id: string }>(`
           INSERT INTO catalog.materials (
             tenant_id,supplier_id,source_product_id,name,customer_facing_name,sku,type,material_type,material_group,
             minimum_billable_sheet_fraction,roll_billing_increment_metres,reverse_printable,used_for_backing,
-            stock_uom,purchase_uom,stock_quantity,purchase_cost,width_mm,length_mm,roll_width_mm,gsm,notes,cost_json,active,created_at,updated_at
+            stock_uom,purchase_uom,stock_quantity,purchase_cost,width_mm,length_mm,roll_width_mm,gsm,quote_visual_category,notes,cost_json,active,created_at,updated_at
           ) VALUES (
             $1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,
-            null,null,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,null,
-            jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'priceManagerSource','in-app') || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END,
+            null,null,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$20::varchar,null,
+            jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'priceManagerSource','in-app')
+              || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END
+              || CASE WHEN $20::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteVisualCategory',$20::text) END,
             true,now(),now()
           )
           RETURNING id
-        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption]);
+        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory]);
         const id = created.rows[0]?.id;
         if (!id) throw new Error(`Could not add material '${name}'.`);
         createdIds.push(id);
@@ -659,13 +684,15 @@ export async function saveMaterialPriceManagerChanges(
             length_mm=$16::numeric,
             roll_width_mm=$17::numeric,
             gsm=$18::numeric,
-            cost_json=(COALESCE(cost_json,'{}'::jsonb)-'priceCheckedAt')
+            quote_visual_category=$21::varchar,
+            cost_json=(COALESCE(cost_json,'{}'::jsonb)-'priceCheckedAt'-'quoteVisualCategory')
               || jsonb_build_object('purchaseCost',$13::numeric,'wastagePercent',$14::numeric,'showAsInstallationOption',$20::boolean,'priceManagerSource','in-app')
-              || CASE WHEN $19::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$19::text) END,
+              || CASE WHEN $19::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$19::text) END
+              || CASE WHEN $21::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteVisualCategory',$21::text) END,
             updated_at=now()
         WHERE tenant_id=$1::uuid AND id=$2::uuid
         RETURNING id
-      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption]);
+      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory]);
       if (!result.rows[0]?.id) throw new Error(`Material '${name}' no longer exists.`);
       updatedIds.push(rawChange.id);
 
