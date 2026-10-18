@@ -305,7 +305,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
     : [];
 
   return (
-    <div style={{ maxWidth: 1360, margin: "0 auto", display: "grid", gap: 16, minWidth: 0 }}>
+    <div style={{ width: "100%", maxWidth: "none", margin: 0, display: "grid", gap: 16, minWidth: 0 }}>
       <AutoRefreshWhenPending active={hasPendingMyobSync} />
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 16, fontWeight: 700 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 16, fontWeight: 700 }}>{error}</section> : null}

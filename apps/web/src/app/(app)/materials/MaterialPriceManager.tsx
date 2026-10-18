@@ -498,8 +498,8 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         {error ? <div style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 10, padding: "10px 12px", fontSize: 13, fontWeight: 750 }}>{error}</div> : null}
       </div>
 
-      <div style={{ overflowX: "auto", maxHeight: 620, overflowY: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 2220, fontSize: 13 }}>
+      <div style={{ width: "100%", minWidth: 0, overflowX: "auto", maxHeight: 620, overflowY: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1900, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
               {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label) => <th key={label || "controls"} style={{ padding: "9px 8px", borderBottom: "1px solid #e4e7ec", whiteSpace: "nowrap", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.03em" }}>{label}</th>)}
