@@ -169,10 +169,37 @@ function snapshotCustomerMaterialName(snapshot: Record<string, unknown> | null |
 }
 
 function snapshotPrimaryCustomerMaterialName(snapshot: Record<string, unknown> | null | undefined): string | null {
-  return snapshotCustomerMaterialName(snapshot, "media")
-    || snapshotCustomerMaterialName(snapshot, "main")
+  // A rigid quote line can have both a substrate (`main`) and applied print media
+  // (`media`). The substrate is the product the client is buying; print media is a
+  // construction/detail choice and must never replace the substrate as the line title.
+  return snapshotCustomerMaterialName(snapshot, "main")
+    || snapshotCustomerMaterialName(snapshot, "media")
     || snapshotCustomerMaterialName(snapshot, "smallStock")
     || null;
+}
+
+function snapshotText(snapshot: Record<string, unknown> | null | undefined, key: string): string {
+  return compactText(typeof snapshot?.[key] === "string" ? snapshot[key] as string : null);
+}
+
+function clientPrintApplication(snapshot: Record<string, unknown> | null | undefined, parts: string[], primaryMaterial: string): string | null {
+  const method = snapshotText(snapshot, "printMethod").toLowerCase();
+  const direction = snapshotText(snapshot, "printDirection").toLowerCase();
+  const mediaSnapshotName = snapshotCustomerMaterialName(snapshot, "media");
+  const summaryMedia = parts.find((part) => /^(?:print\s*media|roll\s*print\s*media|media)\s*:/i.test(part));
+  const summaryMediaName = summaryMedia
+    ? stripClientUsage(summaryMedia.replace(/^(?:print\s*media|roll\s*print\s*media|media)\s*:\s*/i, ""))
+    : "";
+  const mediaName = clientMaterialTitle(mediaSnapshotName || summaryMediaName);
+  const distinctMedia = mediaName && mediaName.toLowerCase() !== primaryMaterial.toLowerCase() ? mediaName : "";
+
+  if (method === "roll_stock" || distinctMedia) {
+    if (direction === "reverse") return distinctMedia ? `Reverse applied ${distinctMedia}` : "Reverse print";
+    return distinctMedia ? `Applied ${distinctMedia}` : null;
+  }
+  if (method === "cut_vinyl") return distinctMedia ? `Applied ${distinctMedia}` : "Cut vinyl";
+  if (direction === "reverse") return "Reverse print";
+  return null;
 }
 
 function stripClientUsage(value: string): string {
@@ -236,6 +263,7 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
   const selectedMaterial = cleanSelectedMaterialName(line);
   const savedMaterialName = snapshotPrimaryCustomerMaterialName(line.configurationSnapshot);
   const materialTitle = clientMaterialTitle(savedMaterialName || selectedMaterial) || base;
+  const printApplication = clientPrintApplication(line.configurationSnapshot, parts, materialTitle);
   const dimension = findDimension(parts, combined);
 
   // Use the explicit customer-facing material name saved with the quote wherever
@@ -253,7 +281,7 @@ function signageLineForClient(line: Pick<QuoteLineRecord, "productName" | "optio
     ? `${standoffSnapshotName} × ${standoffQtyMatch[1]}`
     : friendlyStandoffs(standoffPart);
 
-  const title = [materialTitle, dimension, laminate, standoffs].filter(Boolean).join(" · ") || line.productName;
+  const title = [materialTitle, printApplication, dimension, laminate, standoffs].filter(Boolean).join(" · ") || line.productName;
 
   // Everything else on a signage quote line is production/setup data and stays internal.
   return { title, detail: null };

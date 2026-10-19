@@ -133,14 +133,24 @@ function friendlyLaminate(raw:string|null|undefined):string|null{const v=stripCl
 function friendlyStandoffs(raw:string|null|undefined):string|null{const v=compactText(raw).replace(/^standoffs:\s*/i,"");if(!v)return null;const m=v.match(/^(.*?)\s*[×x]\s*(\d+(?:\.\d+)?)$/i);return m?`${compactText(m[1])} x ${m[2]}`:v;}
 function isInstallLine(line:Pick<QuoteLineRecord,"productName">):boolean{return /^(sign install|installation|install)$/i.test(compactText(line.productName))||/\b(sign install|installation service)\b/i.test(line.productName);}
 function snapshotPrimaryCustomerMaterialName(snapshot:Record<string,unknown>|null|undefined):string|null{
-  // Roll-print products store the selected print media in `media`, while rigid
-  // panel products store their substrate in `main`. Prefer the saved
-  // customer-facing material name so the emailed PDF matches the public quote
-  // and never leaks supplier/internal stock naming such as Avery/Aslan SKUs.
-  return snapshotCustomerMaterialName(snapshot,"media")
-    || snapshotCustomerMaterialName(snapshot,"main")
+  // A rigid quote line can contain both the substrate (`main`) and an applied
+  // printable film (`media`). The substrate remains the client-facing product;
+  // media is described as part of the construction instead of replacing it.
+  return snapshotCustomerMaterialName(snapshot,"main")
+    || snapshotCustomerMaterialName(snapshot,"media")
     || snapshotCustomerMaterialName(snapshot,"smallStock")
     || null;
+}
+function snapshotText(snapshot:Record<string,unknown>|null|undefined,key:string):string{return compactText(typeof snapshot?.[key]==="string"?snapshot[key] as string:null);}
+function clientPrintApplication(snapshot:Record<string,unknown>|null|undefined,parts:string[],primaryMaterial:string):string|null{
+  const method=snapshotText(snapshot,"printMethod").toLowerCase(),direction=snapshotText(snapshot,"printDirection").toLowerCase();
+  const mediaSnapshotName=snapshotCustomerMaterialName(snapshot,"media"),summaryMedia=parts.find(p=>/^(?:print\s*media|roll\s*print\s*media|media)\s*:/i.test(p));
+  const summaryMediaName=summaryMedia?stripClientUsage(summaryMedia.replace(/^(?:print\s*media|roll\s*print\s*media|media)\s*:\s*/i,"")):"";
+  const mediaName=clientMaterialTitle(mediaSnapshotName||summaryMediaName),distinctMedia=mediaName&&mediaName.toLowerCase()!==primaryMaterial.toLowerCase()?mediaName:"";
+  if(method==="roll_stock"||distinctMedia){if(direction==="reverse")return distinctMedia?`Reverse applied ${distinctMedia}`:"Reverse print";return distinctMedia?`Applied ${distinctMedia}`:null;}
+  if(method==="cut_vinyl")return distinctMedia?`Applied ${distinctMedia}`:"Cut vinyl";
+  if(direction==="reverse")return "Reverse print";
+  return null;
 }
 export function quoteLineClientTitle(line:QuoteLineRecord):string{
   if(isInstallLine(line))return "Sign Install";
@@ -148,10 +158,11 @@ export function quoteLineClientTitle(line:QuoteLineRecord):string{
   const parts=summaryParts(line),combined=[line.productName,line.optionSummary].filter(Boolean).join(" · "), base=cleanBaseMaterialName(line.productName),selected=cleanSelectedMaterialName(line);
   const savedMaterialName=snapshotPrimaryCustomerMaterialName(line.configurationSnapshot);
   const material=savedMaterialName?clientMaterialTitle(savedMaterialName):(clientMaterialTitle(selected)||base);
+  const printApplication=clientPrintApplication(line.configurationSnapshot,parts,material);
   const dim=findDimension(parts,combined);
   const lamName=snapshotCustomerMaterialName(line.configurationSnapshot,"laminate"),lam=lamName?stripClientUsage(lamName):friendlyLaminate(parts.find(p=>/^laminate:/i.test(p)));
   const stName=snapshotCustomerMaterialName(line.configurationSnapshot,"standoff"),stPart=parts.find(p=>/^standoffs:/i.test(p)),qm=compactText(stPart).match(/[×x]\s*(\d+(?:\.\d+)?)\s*$/i),st=stName&&qm?`${stName} x ${qm[1]}`:friendlyStandoffs(stPart);
-  return [material,dim,lam,st].filter(Boolean).join(" · ")||line.productName;
+  return [material,printApplication,dim,lam,st].filter(Boolean).join(" · ")||line.productName;
 }
 
 type Rgb = readonly [number, number, number];
