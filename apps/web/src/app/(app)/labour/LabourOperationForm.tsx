@@ -168,9 +168,9 @@ export function LabourOperationForm({
     }
 
     return {
-      headline: `${cleanNumber(minutesNumber, 1)} minutes ${basisDetails.unitLabel}`,
+      headline: `${cleanNumber(minutesNumber, 2)} minutes ${basisDetails.unitLabel}`,
       cost: money(minutesNumber / 60 * rate),
-      detail: `${basisDetails.exampleQuantityLabel} would charge ${cleanNumber(sampleMinutes, 1)} minutes (${money(sampleCost)}).${minimumNumber > sampleCalculatedMinutes ? " The minimum charge applies." : ""}`
+      detail: `${basisDetails.exampleQuantityLabel} would charge ${cleanNumber(sampleMinutes, 2)} minutes (${money(sampleCost)}).${minimumNumber > sampleCalculatedMinutes ? " The minimum charge applies." : ""}`
     };
   }, [basis, basisDetails, minimumNumber, minutesNumber, rate]);
 
@@ -332,7 +332,7 @@ export function LabourOperationForm({
                   name="timeMinutes"
                   type="number"
                   min="0"
-                  step={basis === "guillotine_stacks" ? "1" : "0.1"}
+                  step={basis === "guillotine_stacks" ? "1" : "0.01"}
                   value={minutes}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => setMinutes(event.target.value)}
                   className={styles.input}
@@ -348,7 +348,7 @@ export function LabourOperationForm({
                   name="minimumMinutes"
                   type="number"
                   min="0"
-                  step="0.1"
+                  step="0.01"
                   value={minimumMinutes}
                   onChange={(event: ChangeEvent<HTMLInputElement>) => setMinimumMinutes(event.target.value)}
                   className={styles.input}
