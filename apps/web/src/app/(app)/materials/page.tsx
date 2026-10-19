@@ -354,7 +354,9 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
               catalogState: typeof material.costJson?.catalogSheetState === "string" ? String(material.costJson.catalogSheetState) : "",
               quoteImageUrl: material.quoteImageUrl,
               quoteImageStoragePath: material.quoteImageStoragePath,
-              quoteVisualCategory: material.quoteVisualCategory
+              quoteVisualCategory: material.quoteVisualCategory,
+              minimumBillableSheetFraction: material.minimumBillableSheetFraction,
+              rollBillingIncrementMetres: material.rollBillingIncrementMetres
             }))}
             suppliers={suppliers.map((supplier) => ({ displayName: supplier.displayName, isActive: supplier.isActive }))}
           />

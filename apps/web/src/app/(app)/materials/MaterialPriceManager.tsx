@@ -29,6 +29,8 @@ type MaterialManagerSource = {
   quoteImageUrl: string | null;
   quoteImageStoragePath: string | null;
   quoteVisualCategory: string | null;
+  minimumBillableSheetFraction: string | null;
+  rollBillingIncrementMetres: string | null;
 };
 
 type SupplierOption = { displayName: string; isActive: boolean };
@@ -61,6 +63,8 @@ type GridRow = {
   quoteImageUrl: string | null;
   quoteImageStoragePath: string | null;
   quoteVisualCategory: string;
+  minimumBillableSheetFraction: string;
+  rollBillingIncrementMetres: string;
 };
 
 type SaveResult =
@@ -213,7 +217,9 @@ function rowsFromMaterials(materials: MaterialManagerSource[]): GridRow[] {
     savedState: savedState(material),
     quoteImageUrl: material.quoteImageUrl ?? null,
     quoteImageStoragePath: material.quoteImageStoragePath ?? null,
-    quoteVisualCategory: material.quoteVisualCategory ?? ""
+    quoteVisualCategory: material.quoteVisualCategory ?? "",
+    minimumBillableSheetFraction: material.minimumBillableSheetFraction ?? "",
+    rollBillingIncrementMetres: material.rollBillingIncrementMetres ?? ""
   }));
 }
 
@@ -230,6 +236,14 @@ function defaultUoms(type: string): { purchaseUom: string; stockUom: string } {
   if (["roll_media", "roll_laminate", "cello_stock"].includes(type)) return { purchaseUom: "roll", stockUom: "m" };
   if (type === "sheet_media") return { purchaseUom: "sheet", stockUom: "sheet" };
   return { purchaseUom: "unit", stockUom: "unit" };
+}
+
+function usesSheetBilling(type: string): boolean {
+  return ["sheet_media", "paper_stock", "card_stock"].includes(canonicalType(type));
+}
+
+function usesRollBilling(type: string): boolean {
+  return ["roll_media", "roll_laminate", "cello_stock"].includes(canonicalType(type));
 }
 
 function unitCost(row: GridRow): number {
@@ -352,7 +366,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     setRows((current) => [...current, {
       key, id: null, action: "ADD", materialGroup: group, materialType, name: "", customerFacingName: "", supplierName: "", sku: "",
       purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
-      priceCheckedAt: todayLocal(), active: true, savedState: "active", quoteImageUrl: null, quoteImageStoragePath: null, quoteVisualCategory: ""
+      priceCheckedAt: todayLocal(), active: true, savedState: "active", quoteImageUrl: null, quoteImageStoragePath: null, quoteVisualCategory: "", minimumBillableSheetFraction: "", rollBillingIncrementMetres: ""
     }]);
     setSection(currentSection.key);
     markDirty(key);
@@ -404,7 +418,9 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       rollWidthMm: row.rollWidthMm || null,
       gsm: row.gsm || null,
       priceCheckedAt: row.priceCheckedAt || null,
-      quoteVisualCategory: row.quoteVisualCategory || null
+      quoteVisualCategory: row.quoteVisualCategory || null,
+      minimumBillableSheetFraction: row.minimumBillableSheetFraction || null,
+      rollBillingIncrementMetres: row.rollBillingIncrementMetres || null
     }));
     const formData = new FormData();
     formData.set("changes", JSON.stringify(payload));
@@ -499,10 +515,10 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       </div>
 
       <div style={{ width: "100%", minWidth: 0, overflowX: "auto", maxHeight: 620, overflowY: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 1900, fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 2060, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
-              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
+              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Billing increment", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
                 padding: "9px 8px",
                 borderBottom: "1px solid #e4e7ec",
                 whiteSpace: "nowrap",
@@ -548,6 +564,25 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 110 }}><input inputMode="decimal" value={row.stockQuantity} onChange={(event) => updateRow(row.key, "stockQuantity", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 120 }}><input inputMode="decimal" value={row.purchaseCost} onPaste={(event) => { if (pasteCosts(row.key, event.clipboardData.getData("text"))) event.preventDefault(); }} onChange={(event) => updateRow(row.key, "purchaseCost", event.target.value)} style={{ ...cellInputStyle, textAlign: "right", fontWeight: 800, borderColor: changed ? "#fdb022" : "#e4e7ec" }} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 90 }}><input inputMode="decimal" value={row.wastagePercent} onChange={(event) => updateRow(row.key, "wastagePercent", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 165 }}>
+                  {usesSheetBilling(row.materialType) ? (
+                    <select value={row.minimumBillableSheetFraction} onChange={(event) => updateRow(row.key, "minimumBillableSheetFraction", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }} title="Minimum billable sheet increment for the whole quote line">
+                      <option value="">Auto recommended</option>
+                      <option value="0">Exact usage</option>
+                      <option value="0.25">¼ sheet</option>
+                      <option value="0.5">½ sheet</option>
+                      <option value="1">Full sheet</option>
+                    </select>
+                  ) : usesRollBilling(row.materialType) ? (
+                    <select value={row.rollBillingIncrementMetres} onChange={(event) => updateRow(row.key, "rollBillingIncrementMetres", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }} title="Billable roll increment for the whole quote line">
+                      <option value="">Auto 0.5m</option>
+                      <option value="0">Exact usage</option>
+                      <option value="0.25">0.25m</option>
+                      <option value="0.5">0.5m</option>
+                      <option value="1">1m</option>
+                    </select>
+                  ) : <span style={{ color: "#98a2b3", fontWeight: 700, paddingLeft: 8 }}>—</span>}
+                </td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "center" }}><input type="checkbox" checked={row.showAsInstallationOption} onChange={(event) => updateRow(row.key, "showAsInstallationOption", event.target.checked)} title="Show this material as a selectable item on Install quote lines" /></td>
                 <td style={{ padding: "5px 10px", borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "right", fontWeight: 850, color: "#0f766e", whiteSpace: "nowrap" }}>{money.format(unitCost(row))}</td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 135 }}><input type="date" value={row.priceCheckedAt} onChange={(event) => updateRow(row.key, "priceCheckedAt", event.target.value)} style={cellInputStyle} /></td>

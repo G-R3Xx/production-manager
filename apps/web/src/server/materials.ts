@@ -530,6 +530,8 @@ export type MaterialPriceManagerChange = {
   gsm: string | null;
   priceCheckedAt: string | null;
   quoteVisualCategory: string | null;
+  minimumBillableSheetFraction: string | null;
+  rollBillingIncrementMetres: string | null;
 };
 
 function cleanMaterialManagerText(value: unknown, max = 200): string {
@@ -644,6 +646,8 @@ export async function saveMaterialPriceManagerChanges(
       const customerFacingName = cleanMaterialManagerText(rawChange.customerFacingName, 200) || null;
       const sku = cleanMaterialManagerText(rawChange.sku, 100) || null;
       const quoteVisualCategory = cleanQuoteVisualCategory(rawChange.quoteVisualCategory);
+      const minimumBillableSheetFraction = cleanMaterialManagerNumber(rawChange.minimumBillableSheetFraction, true);
+      const rollBillingIncrementMetres = cleanMaterialManagerNumber(rawChange.rollBillingIncrementMetres, true);
 
       if (!rawChange.id || action === "ADD") {
         const created = await client.query<{ id: string }>(`
@@ -653,14 +657,14 @@ export async function saveMaterialPriceManagerChanges(
             stock_uom,purchase_uom,stock_quantity,purchase_cost,width_mm,length_mm,roll_width_mm,gsm,quote_visual_category,notes,cost_json,active,created_at,updated_at
           ) VALUES (
             $1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,
-            null,null,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$20::varchar,null,
+            $21::numeric,$22::numeric,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$20::varchar,null,
             jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'priceManagerSource','in-app')
               || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END
               || CASE WHEN $20::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteVisualCategory',$20::text) END,
             true,now(),now()
           )
           RETURNING id
-        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory]);
+        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres]);
         const id = created.rows[0]?.id;
         if (!id) throw new Error(`Could not add material '${name}'.`);
         createdIds.push(id);
@@ -676,6 +680,8 @@ export async function saveMaterialPriceManagerChanges(
             type=$7::material_type,
             material_type=$8::varchar,
             material_group=$9::varchar,
+            minimum_billable_sheet_fraction=$22::numeric,
+            roll_billing_increment_metres=$23::numeric,
             stock_uom=$10::varchar,
             purchase_uom=$11::varchar,
             stock_quantity=$12::numeric,
@@ -692,7 +698,7 @@ export async function saveMaterialPriceManagerChanges(
             updated_at=now()
         WHERE tenant_id=$1::uuid AND id=$2::uuid
         RETURNING id
-      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory]);
+      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres]);
       if (!result.rows[0]?.id) throw new Error(`Material '${name}' no longer exists.`);
       updatedIds.push(rawChange.id);
 
