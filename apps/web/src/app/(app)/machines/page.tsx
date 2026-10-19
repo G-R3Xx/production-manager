@@ -179,7 +179,7 @@ export default async function MachinesPage() {
         </p>
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <Link href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Machines</Link>
-          <Link href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Labour & time</Link>
+          <Link href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Shop operations</Link>
         </div>
       </header>
 

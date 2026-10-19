@@ -18,6 +18,18 @@ type LabourFormValues = {
   consumableBasis?: string;
 };
 
+type MaterialOption = {
+  id: string;
+  name: string;
+  stockUom: string;
+  purchaseUom: string;
+  stockQuantity: string;
+  purchaseCost: string;
+  wastagePercent: string;
+  widthMm: string | null;
+  lengthMm: string | null;
+};
+
 type Template = {
   label: string;
   description: string;
@@ -116,6 +128,58 @@ function cleanNumber(value: number, decimals = 2): string {
   return value.toFixed(decimals).replace(/\.00$/, "").replace(/(\.\d*[1-9])0+$/, "$1");
 }
 
+function materialRate(material: MaterialOption, basis: string): { rate: number; unit: string; note?: string } {
+  const wastePercent = Math.max(0, Number(material.wastagePercent) || 0);
+  const purchaseCost = Math.max(0, Number(material.purchaseCost) || 0) * (1 + wastePercent / 100);
+  const stockQty = Math.max(0, Number(material.stockQuantity) || 0);
+  const purchaseUom = String(material.purchaseUom ?? "").trim().toLowerCase();
+  const stockUom = String(material.stockUom ?? "").trim().toLowerCase();
+  const wasteNote = wastePercent > 0 ? `${cleanNumber(wastePercent)}% wastage included` : undefined;
+
+  if (basis === "per_linear_metre") {
+    if (["lm", "m", "metre", "meter", "linear metre", "linear meter"].includes(purchaseUom)) {
+      return { rate: purchaseCost, unit: "lm", note: wasteNote };
+    }
+    if ((purchaseUom.includes("roll") || ["lm", "m", "metre", "meter"].includes(stockUom)) && stockQty > 0) {
+      return { rate: purchaseCost / stockQty, unit: "lm", note: [`${cleanNumber(stockQty)}lm per ${purchaseUom || "purchase unit"}`, wasteNote].filter(Boolean).join(" · ") };
+    }
+    return { rate: purchaseCost, unit: "lm", note: ["check saved roll length", wasteNote].filter(Boolean).join(" · ") || undefined };
+  }
+
+  if (basis === "per_sqm") {
+    let sheetRate = purchaseCost;
+    if ((purchaseUom.includes("1000") || purchaseUom.includes("thousand") || purchaseUom.includes("ream") || purchaseUom.includes("pack") || purchaseUom.includes("box")) && stockQty > 0 && (stockUom.includes("sheet") || stockUom.includes("each"))) {
+      sheetRate = purchaseCost / stockQty;
+    }
+    const width = Math.max(0, Number(material.widthMm) || 0);
+    const length = Math.max(0, Number(material.lengthMm) || 0);
+    const area = width > 0 && length > 0 ? width / 1000 * (length / 1000) : 0;
+    if (area > 0) return { rate: sheetRate / area, unit: "m²", note: [`${cleanNumber(area)}m² parent sheet`, wasteNote].filter(Boolean).join(" · ") };
+    return { rate: sheetRate, unit: "m²", note: ["check saved material dimensions", wasteNote].filter(Boolean).join(" · ") || undefined };
+  }
+
+  if (stockQty > 0 && purchaseUom && stockUom && purchaseUom !== stockUom) {
+    return { rate: purchaseCost / stockQty, unit: "each", note: [`${cleanNumber(stockQty)} ${stockUom} per ${purchaseUom}`, wasteNote].filter(Boolean).join(" · ") };
+  }
+  return { rate: purchaseCost, unit: "each", note: wasteNote };
+}
+
+function previewUnitLabel(basis: LabourBasis): string {
+  if (basis === "fixed_minutes") return "1 use";
+  if (basis === "per_sqm_hours") return "1 m²";
+  if (basis === "per_sheet_hours") return "1 sheet";
+  if (basis === "per_linear_metre_hours") return "1 linear metre";
+  if (basis === "per_item_hours") return "1 operation unit";
+  return "Calculated on quote";
+}
+
+function materialBasisLabel(basis: string): string {
+  if (basis === "per_linear_metre") return "linear metre";
+  if (basis === "per_sqm") return "m²";
+  if (basis === "per_finished_item") return "finished item";
+  return "operation unit";
+}
+
 export function LabourOperationForm({
   mode = "create",
   initialValues,
@@ -123,7 +187,7 @@ export function LabourOperationForm({
 }: {
   mode?: "create" | "edit";
   initialValues?: LabourFormValues;
-  materials?: Array<{ id: string; name: string; stockUom: string }>;
+  materials?: MaterialOption[];
 }) {
   const initialBasis = initialValues?.calculationBasis ?? "fixed_minutes";
   const [name, setName] = useState(initialValues?.name ?? "");
@@ -143,36 +207,79 @@ export function LabourOperationForm({
   const minutesNumber = Math.max(0, Number(minutes) || 0);
   const minimumNumber = Math.max(0, Number(minimumMinutes) || 0);
 
+  const selectedConsumable = useMemo(
+    () => materials.find((material) => material.id === consumableMaterialId) ?? null,
+    [consumableMaterialId, materials]
+  );
+
   const liveExample = useMemo(() => {
     if (basis === "guillotine_stacks") {
       return {
         headline: `${cleanNumber(minutesNumber, 0)} cuts per stack`,
-        cost: "Calculated on quote",
-        detail: "The quote combines this with parent sheets, the guillotine’s maximum stack size and cuts-per-minute speed. Staff can override the resulting total minutes."
+        labourCost: null as number | null,
+        labourDetail: "Labour is calculated on the quote from sheets, stack capacity and cuts per minute.",
+        materialCost: null as number | null,
+        materialDetail: selectedConsumable ? `${selectedConsumable.name} usage is calculated on the quote.` : "No linked consumable.",
+        totalCost: null as number | null,
+        totalLabel: "Calculated on quote",
+        sampleDetail: "Raw shop cost only — markup, profit and client pricing are applied later on the quote."
       };
     }
-    const sampleCalculatedMinutes = basis === "fixed_minutes"
-      ? minutesNumber
-      : minutesNumber * basisDetails.exampleQuantity;
-    const sampleMinutes = Math.max(sampleCalculatedMinutes, minimumNumber);
-    const sampleCost = sampleMinutes / 60 * rate;
 
-    if (basis === "fixed_minutes") {
-      return {
-        headline: `${cleanNumber(sampleMinutes, 1)} minutes ${basisDetails.exampleQuantityLabel}`,
-        cost: money(sampleCost),
-        detail: minimumNumber > minutesNumber
-          ? `The ${cleanNumber(minimumNumber, 1)} minute minimum is currently setting the charge.`
-          : `${money(rate)}/hr equals ${money(rate / 60)} per minute.`
-      };
+    const rawLabourMinutes = minutesNumber;
+    const chargedLabourMinutes = Math.max(rawLabourMinutes, minimumNumber);
+    const labourCost = chargedLabourMinutes / 60 * rate;
+    const labourDetail = minimumNumber > rawLabourMinutes
+      ? `${cleanNumber(rawLabourMinutes, 2)} min base · ${cleanNumber(minimumNumber, 2)} min minimum at ${money(rate)}/hr`
+      : `${cleanNumber(chargedLabourMinutes, 2)} min at ${money(rate)}/hr`;
+
+    let materialCost: number | null = 0;
+    let materialDetail = "No linked consumable.";
+    let aligned = true;
+
+    if (selectedConsumable && Math.max(0, Number(consumableQuantity) || 0) > 0) {
+      const configuredQuantity = Math.max(0, Number(consumableQuantity) || 0);
+      const pricing = materialRate(selectedConsumable, consumableBasis);
+      aligned =
+        (basis === "per_item_hours" && ["per_operation_unit", "per_finished_item"].includes(consumableBasis)) ||
+        (basis === "per_linear_metre_hours" && consumableBasis === "per_linear_metre") ||
+        (basis === "per_sqm_hours" && consumableBasis === "per_sqm") ||
+        (basis === "fixed_minutes" && consumableBasis === "per_operation_unit");
+
+      if (aligned) {
+        materialCost = configuredQuantity * pricing.rate;
+        materialDetail = `${cleanNumber(configuredQuantity, 4)} × ${selectedConsumable.name} @ ${money(pricing.rate)}/${pricing.unit}${pricing.note ? ` · ${pricing.note}` : ""}`;
+      } else {
+        materialCost = null;
+        materialDetail = `${selectedConsumable.name}: ${cleanNumber(configuredQuantity, 4)} per ${materialBasisLabel(consumableBasis)} @ ${money(pricing.rate)}/${pricing.unit}. Usage depends on the quote dimensions/quantity.`;
+      }
+    }
+
+    const totalCost = materialCost === null ? null : labourCost + materialCost;
+    const sampleQuantity = basisDetails.exampleQuantity;
+    const sampleRawMinutes = basis === "fixed_minutes" ? minutesNumber : minutesNumber * sampleQuantity;
+    const sampleMinutes = Math.max(sampleRawMinutes, minimumNumber);
+    const sampleLabourCost = sampleMinutes / 60 * rate;
+    let sampleDetail = "Raw shop cost only — markup, profit and client pricing are applied later on the quote.";
+
+    if (selectedConsumable && materialCost !== null && basis !== "fixed_minutes" && sampleQuantity > 1) {
+      const sampleMaterialCost = materialCost * sampleQuantity;
+      sampleDetail = `${basisDetails.exampleQuantityLabel}: labour ${money(sampleLabourCost)} + material ${money(sampleMaterialCost)} = ${money(sampleLabourCost + sampleMaterialCost)} raw cost. Before markup & profit.`;
+    } else if (basis !== "fixed_minutes" && sampleQuantity > 1) {
+      sampleDetail = `${basisDetails.exampleQuantityLabel}: labour ${money(sampleLabourCost)}. Before markup & profit.`;
     }
 
     return {
-      headline: `${cleanNumber(minutesNumber, 2)} minutes ${basisDetails.unitLabel}`,
-      cost: money(minutesNumber / 60 * rate),
-      detail: `${basisDetails.exampleQuantityLabel} would charge ${cleanNumber(sampleMinutes, 2)} minutes (${money(sampleCost)}).${minimumNumber > sampleCalculatedMinutes ? " The minimum charge applies." : ""}`
+      headline: previewUnitLabel(basis),
+      labourCost,
+      labourDetail,
+      materialCost,
+      materialDetail,
+      totalCost,
+      totalLabel: totalCost === null ? "Calculated on quote" : money(totalCost),
+      sampleDetail
     };
-  }, [basis, basisDetails, minimumNumber, minutesNumber, rate]);
+  }, [basis, basisDetails, consumableBasis, consumableQuantity, minimumNumber, minutesNumber, rate, selectedConsumable]);
 
   function applyTemplate(template: Template) {
     setName(template.name);
@@ -362,12 +469,32 @@ export function LabourOperationForm({
       </section>
 
       <section className={styles.previewCard} aria-live="polite">
-        <div>
-          <div className={styles.previewLabel}>Live cost example</div>
+        <div className={styles.previewMain}>
+          <div className={styles.previewLabel}>Live raw cost example</div>
           <strong className={styles.previewHeadline}>{liveExample.headline}</strong>
-          <p>{liveExample.detail}</p>
+          <div className={styles.previewBreakdown}>
+            <div className={styles.previewBreakdownRow}>
+              <div>
+                <span>Labour</span>
+                <small>{liveExample.labourDetail}</small>
+              </div>
+              <strong>{liveExample.labourCost === null ? "Calculated on quote" : money(liveExample.labourCost)}</strong>
+            </div>
+            <div className={styles.previewBreakdownRow}>
+              <div>
+                <span>Consumable / material</span>
+                <small>{liveExample.materialDetail}</small>
+              </div>
+              <strong>{liveExample.materialCost === null ? "Calculated on quote" : money(liveExample.materialCost)}</strong>
+            </div>
+          </div>
+          <p className={styles.previewNote}>{liveExample.sampleDetail}</p>
         </div>
-        <div className={styles.previewPrice}>{liveExample.cost}</div>
+        <div className={styles.previewTotal}>
+          <span>Total raw cost</span>
+          <strong>{liveExample.totalLabel}</strong>
+          <small>Before markup &amp; profit</small>
+        </div>
       </section>
 
       <div className={styles.formActions}>

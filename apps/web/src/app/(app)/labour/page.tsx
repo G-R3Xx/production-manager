@@ -50,7 +50,19 @@ function operationSummary(row: LabourRecord) {
   };
 }
 
-function LabourOperationCard({ row, materials }: { row: LabourRecord; materials: Array<{ id: string; name: string; stockUom: string }> }) {
+type LabourMaterialOption = {
+  id: string;
+  name: string;
+  stockUom: string;
+  purchaseUom: string;
+  stockQuantity: string;
+  purchaseCost: string;
+  wastagePercent: string;
+  widthMm: string | null;
+  lengthMm: string | null;
+};
+
+function LabourOperationCard({ row, materials }: { row: LabourRecord; materials: LabourMaterialOption[] }) {
   const summary = operationSummary(row);
 
   return (
@@ -83,7 +95,7 @@ function LabourOperationCard({ row, materials }: { row: LabourRecord; materials:
           <strong>{summary.timeText}</strong>
         </div>
         <div className={styles.summaryItem}>
-          <span>{row.calculationBasis === "guillotine_stacks" ? "Costing source" : row.calculationBasis === "fixed_minutes" ? "Cost per use" : "Base unit cost before minimum"}</span>
+          <span>{row.calculationBasis === "guillotine_stacks" ? "Costing source" : row.calculationBasis === "fixed_minutes" ? "Labour cost per use" : "Base labour cost before minimum"}</span>
           <strong>{row.calculationBasis === "guillotine_stacks" ? "Calculated on quote" : <>{money(summary.unitCost)}{row.calculationBasis === "fixed_minutes" ? " per use" : ` ${labourBasisUnit(row.calculationBasis)}`}</>}</strong>
         </div>
       </div>
@@ -139,7 +151,19 @@ export default async function LabourPage({
     listLabourForTenant(tenant.tenantId),
     listMaterialsForTenant(tenant.tenantId)
   ]);
-  const materials = allMaterials.filter((material) => material.active && ["consumable", "item", "finishing", "fixing", "hardware", "binding"].includes(String(material.materialType).toLowerCase())).map((material) => ({ id: material.id, name: material.name, stockUom: material.stockUom }));
+  const materials: LabourMaterialOption[] = allMaterials
+    .filter((material) => material.active && ["consumable", "item", "finishing", "fixing", "hardware", "binding"].includes(String(material.materialType).toLowerCase()))
+    .map((material) => ({
+      id: material.id,
+      name: material.name,
+      stockUom: material.stockUom,
+      purchaseUom: material.purchaseUom,
+      stockQuantity: material.stockQuantity,
+      purchaseCost: material.purchaseCost,
+      wastagePercent: material.wastagePercent,
+      widthMm: material.widthMm,
+      lengthMm: material.lengthMm
+    }));
   const activeRows = rows.filter((row) => row.active);
   const archivedRows = rows.filter((row) => !row.active);
 
@@ -175,7 +199,7 @@ export default async function LabourPage({
         <div className={styles.cardHeader}>
           <div>
             <h2>Add a shop operation</h2>
-            <p>Use a common template or build your own. The live example shows the actual charge before you save.</p>
+            <p>Use a common template or build your own. The live example shows labour, linked consumable cost and the combined raw cost before quote markup and profit.</p>
           </div>
         </div>
         <LabourOperationForm materials={materials} />
@@ -184,7 +208,7 @@ export default async function LabourPage({
       <section className={styles.operationList}>
         <div className={styles.listHeader}>
           <div>
-            <h2>Available labour operations</h2>
+            <h2>Available shop operations</h2>
             <p>These appear in the Process Library when assigning the normal human labour for an action.</p>
           </div>
           <span className={styles.countPill}>{activeRows.length} active</span>
@@ -193,7 +217,7 @@ export default async function LabourPage({
         {activeRows.length ? activeRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} />) : (
           <div className={styles.emptyState}>
             <div>
-              <strong>No labour operations yet</strong>
+              <strong>No shop operations yet</strong>
               <p>Start with one of the quick templates above.</p>
             </div>
           </div>
