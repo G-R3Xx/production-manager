@@ -45,6 +45,10 @@ export type LabourRecord = {
   calculationBasis: string;
   calculationValue: string;
   minimumMinutes: string;
+  consumableMaterialId: string | null;
+  consumableMaterialName: string | null;
+  consumableQuantity: string;
+  consumableBasis: string;
   active: boolean;
 };
 
@@ -72,7 +76,7 @@ export type RecipeRecord = {
 };
 
 type MachineInput = Omit<MachineRecord, "id" | "active" | "processIds"> & { tenantId: string };
-type LabourInput = Omit<LabourRecord, "id" | "active"> & { tenantId: string };
+type LabourInput = Omit<LabourRecord, "id" | "active" | "consumableMaterialName"> & { tenantId: string };
 type ProcessInput = {
   tenantId: string;
   name: string;
@@ -347,20 +351,39 @@ export async function setMachineActive(tenantId: string, id: string, active: boo
   `, [tenantId, id, active]);
 }
 
+
+let operationRecipeSchemaReady = false;
+async function ensureOperationRecipeColumns(): Promise<void> {
+  if (!process.env.DATABASE_URL || operationRecipeSchemaReady) return;
+  await pool.query(`
+    ALTER TABLE catalog.labour_operations
+      ADD COLUMN IF NOT EXISTS consumable_material_id uuid REFERENCES catalog.materials(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS consumable_quantity numeric(12,4) NOT NULL DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS consumable_basis varchar(40) NOT NULL DEFAULT 'per_operation_unit'
+  `);
+  operationRecipeSchemaReady = true;
+}
+
 async function loadLabourForTenant(tenantId: string): Promise<LabourRecord[]> {
+  await ensureOperationRecipeColumns();
   const result = await pool.query<LabourRecord>(`
     SELECT
-      id::text,
-      name,
-      department,
-      hourly_rate::text AS "hourlyRate",
-      calculation_basis AS "calculationBasis",
-      calculation_value::text AS "calculationValue",
-      minimum_minutes::text AS "minimumMinutes",
-      active
-    FROM catalog.labour_operations
-    WHERE tenant_id = $1::uuid
-    ORDER BY active DESC, name
+      l.id::text,
+      l.name,
+      l.department,
+      l.hourly_rate::text AS "hourlyRate",
+      l.calculation_basis AS "calculationBasis",
+      l.calculation_value::text AS "calculationValue",
+      l.minimum_minutes::text AS "minimumMinutes",
+      l.consumable_material_id::text AS "consumableMaterialId",
+      m.name AS "consumableMaterialName",
+      l.consumable_quantity::text AS "consumableQuantity",
+      l.consumable_basis AS "consumableBasis",
+      l.active
+    FROM catalog.labour_operations l
+    LEFT JOIN catalog.materials m ON m.id = l.consumable_material_id
+    WHERE l.tenant_id = $1::uuid
+    ORDER BY l.active DESC, l.name
   `, [tenantId]);
   return result.rows;
 }
@@ -375,6 +398,7 @@ export type ProcessSetupResources = {
 };
 
 async function loadProcessSetupResourcesForTenant(tenantId: string): Promise<ProcessSetupResources> {
+  await ensureOperationRecipeColumns();
   // Production Setup is opened frequently while configuring products. Pull the three
   // small reference collections in one Postgres round trip instead of opening three
   // concurrent serverless DB connections for every navigation.
@@ -449,6 +473,10 @@ async function loadProcessSetupResourcesForTenant(tenantId: string): Promise<Pro
             calculation_basis AS "calculationBasis",
             calculation_value::text AS "calculationValue",
             minimum_minutes::text AS "minimumMinutes",
+            consumable_material_id::text AS "consumableMaterialId",
+            (SELECT m.name FROM catalog.materials m WHERE m.id = catalog.labour_operations.consumable_material_id) AS "consumableMaterialName",
+            consumable_quantity::text AS "consumableQuantity",
+            consumable_basis AS "consumableBasis",
             active
           FROM catalog.labour_operations
           WHERE tenant_id = $1::uuid
@@ -486,8 +514,11 @@ export async function createLabour(input: LabourInput): Promise<{ id: string }> 
       hourly_rate,
       calculation_basis,
       calculation_value,
-      minimum_minutes
-    ) VALUES ($1::uuid, $2, $3, $4::numeric, $5, $6::numeric, $7::numeric)
+      minimum_minutes,
+      consumable_material_id,
+      consumable_quantity,
+      consumable_basis
+    ) VALUES ($1::uuid, $2, $3, $4::numeric, $5, $6::numeric, $7::numeric, NULLIF($8, '')::uuid, $9::numeric, $10)
     RETURNING id::text
   `, [
     input.tenantId,
@@ -496,7 +527,10 @@ export async function createLabour(input: LabourInput): Promise<{ id: string }> 
     input.hourlyRate,
     input.calculationBasis,
     input.calculationValue,
-    input.minimumMinutes
+    input.minimumMinutes,
+    input.consumableMaterialId ?? "",
+    input.consumableQuantity,
+    input.consumableBasis
   ]);
   return { id: result.rows[0]?.id ?? "" };
 }
@@ -510,6 +544,9 @@ export async function updateLabour(input: LabourInput & { id: string }): Promise
         calculation_basis = $6,
         calculation_value = $7::numeric,
         minimum_minutes = $8::numeric,
+        consumable_material_id = NULLIF($9, '')::uuid,
+        consumable_quantity = $10::numeric,
+        consumable_basis = $11,
         updated_at = now()
     WHERE tenant_id = $1::uuid AND id = $2::uuid
   `, [
@@ -520,7 +557,10 @@ export async function updateLabour(input: LabourInput & { id: string }): Promise
     input.hourlyRate,
     input.calculationBasis,
     input.calculationValue,
-    input.minimumMinutes
+    input.minimumMinutes,
+    input.consumableMaterialId ?? "",
+    input.consumableQuantity,
+    input.consumableBasis
   ]);
 }
 

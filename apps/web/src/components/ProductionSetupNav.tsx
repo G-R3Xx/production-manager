@@ -4,8 +4,8 @@ import type { CSSProperties } from "react";
 type Section = "resources" | "processes" | "methods";
 
 const steps: Array<{ section: Section; href: string; number: string; label: string; body: string }> = [
-  { section: "resources", href: "/machines", number: "1", label: "Resources", body: "Machines and labour store capability, speed and cost." },
-  { section: "processes", href: "/processes", number: "2", label: "Process", body: "Connect one action to its normal machine and labour." },
+  { section: "resources", href: "/machines", number: "1", label: "Resources", body: "Machines for equipment costs; Shop Operations for simple consumable + labour rules." },
+  { section: "processes", href: "/processes", number: "2", label: "Process", body: "Connect an action to a Shop Operation and, only when needed, a machine." },
   { section: "methods", href: "/manufacturing-methods", number: "3", label: "Production method", body: "Arrange saved processes in the exact order a product is made." }
 ];
 
@@ -17,7 +17,7 @@ export function ProductionSetupNav({ active }: { active: Section }) {
           <div style={eyebrow}>Settings · Production setup</div>
           <h1 style={{ margin: "5px 0 4px", fontSize: 34 }}>Production setup</h1>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.5, maxWidth: 780 }}>
-            One setup flow: define the resources you own, connect them to a process once, then combine processes into reusable production methods.
+            Keep normal finishing simple: consumable + labour lives in a Shop Operation. Add machine costing only for equipment that genuinely has run cost, wear, ink, bits or capacity limits.
           </p>
         </div>
         <Link href="/settings" style={backLink}>← Settings</Link>

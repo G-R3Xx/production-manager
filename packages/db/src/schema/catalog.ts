@@ -182,6 +182,9 @@ export const labourOperations = catalogSchema.table("labour_operations", {
   calculationBasis: varchar("calculation_basis", { length: 40 }).notNull().default("fixed_minutes"),
   calculationValue: numeric("calculation_value", { precision: 12, scale: 4 }).notNull().default("0"),
   minimumMinutes: numeric("minimum_minutes", { precision: 12, scale: 2 }).notNull().default("0"),
+  consumableMaterialId: uuid("consumable_material_id").references(() => materials.id, { onDelete: "set null" }),
+  consumableQuantity: numeric("consumable_quantity", { precision: 12, scale: 4 }).notNull().default("0"),
+  consumableBasis: varchar("consumable_basis", { length: 40 }).notNull().default("per_operation_unit"),
   active: boolean("active").notNull().default(true),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow()

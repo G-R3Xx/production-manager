@@ -60,11 +60,11 @@ export const LABOUR_BASIS_OPTIONS: LabourBasisOption[] = [
   },
   {
     value: "per_item_hours",
-    label: "Time per finished item",
-    shortLabel: "item",
-    description: "Time grows with quantity. Best for drilling, trimming, assembly and individual packing.",
-    inputLabel: "Minutes per item",
-    unitLabel: "per item",
+    label: "Time per operation unit / item",
+    shortLabel: "unit",
+    description: "Time grows with the operation quantity. Best for eyelets, spiral binding, book taping, drilling and individual assembly.",
+    inputLabel: "Minutes per operation unit",
+    unitLabel: "per unit",
     exampleQuantity: 10,
     exampleQuantityLabel: "10 items"
   },

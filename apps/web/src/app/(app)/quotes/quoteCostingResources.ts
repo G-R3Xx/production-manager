@@ -30,6 +30,9 @@ export type QuoteCostingLabour = {
   calculationBasis: string;
   calculationValue: string;
   minimumMinutes: string;
+  consumableMaterialId: string | null;
+  consumableQuantity: string;
+  consumableBasis: string;
 };
 
 export type QuoteCostingRecipeStep = {

@@ -628,7 +628,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       hourlyRate: row.hourlyRate,
       calculationBasis: row.calculationBasis,
       calculationValue: row.calculationValue,
-      minimumMinutes: row.minimumMinutes
+      minimumMinutes: row.minimumMinutes,
+      consumableMaterialId: row.consumableMaterialId,
+      consumableQuantity: row.consumableQuantity,
+      consumableBasis: row.consumableBasis
     })),
     recipes: costingRecipes.filter((row) => row.active).map((row) => ({
       id: row.id,

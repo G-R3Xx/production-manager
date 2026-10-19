@@ -133,7 +133,7 @@ const processAliases = {
   score: ["scoring", "creasing", "score", "crease"],
   staple: ["saddle stitch", "stapling", "staple", "stitch"],
   numbering: ["sequential numbering", "numbering", "number"],
-  padding: ["padding", "book padding", "binding", "tape binding"]
+  padding: ["padding", "book padding", "binding", "tape binding", "book edge tape", "edge tape", "book tape", "spiral binding", "coil binding"]
 } as const;
 
 const signageFinishingProcessAliases: Record<string, readonly string[]> = {
@@ -173,6 +173,28 @@ function automaticLabourForProcess(
     hourlyRate: details.hourlyRate,
     calculationBasis: details.calculationBasis
   };
+}
+
+function operationConsumableAmount(
+  labour: { consumableQuantity?: string | null; consumableBasis?: string | null } | null,
+  metrics: MachineCostMetrics,
+  quoteQuantity: number
+): number {
+  if (!labour) return 0;
+  const configured = Math.max(0, numberValue(labour.consumableQuantity, 0));
+  if (configured <= 0) return 0;
+  const safeQuoteQty = Math.max(1, quoteQuantity);
+  const basis = String(labour.consumableBasis ?? "per_operation_unit");
+  if (basis === "per_finished_item") return configured;
+  if (basis === "per_linear_metre") return configured * Math.max(0, metrics.linearMetresPerLine ?? 0) / safeQuoteQty;
+  if (basis === "per_sqm") return configured * Math.max(0, metrics.areaSqmPerUnit) ;
+  return configured * Math.max(1, metrics.quantity || safeQuoteQty) / safeQuoteQty;
+}
+
+function operationConsumableRate(material: QuoteMaterial, basis: string | null | undefined): { rate: number; unit: string; note?: string } {
+  if (basis === "per_linear_metre") { const row = rollRate(material); return { ...row, unit: "lm" }; }
+  if (basis === "per_sqm") { const row = rateForComponentUnit(material, "sqm"); return { ...row, unit: "sqm" }; }
+  const row = eachRate(material); return { ...row, unit: "each" };
 }
 
 function automaticLabourNote(costing: AutomaticLabourCost): string {
@@ -296,7 +318,7 @@ const smallFinishingOptions = [
   { key: "score", label: "Scoring / creasing", icon: "▱", description: "Add crease/score labour." },
   { key: "staple", label: "Staple / saddle stitch", icon: "⌁", description: "Add booklet finishing labour." },
   { key: "numbering", label: "Sequential numbering", icon: "#", description: "Add numbering setup/labour." },
-  { key: "padding", label: "Padding / tape", icon: "▥", description: "Add book padding, tape or binding labour." }
+  { key: "padding", label: "Padding / tape / binding", icon: "▥", description: "Add book padding, edge tape, spiral/coil binding or similar finishing." }
 ];
 
 const serviceTypes: Array<{ key: Exclude<ServiceType, "">; label: string; icon: string; description: string }> = [
@@ -1934,6 +1956,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
   const printLabourRate = labourRateForProcess(costingResources, [...processAliases.print], costingDepartment, labourRate);
   const laminateLabourRate = labourRateForProcess(costingResources, [...processAliases.laminate], costingDepartment, labourRate);
+  const eyeletOperation = labourForProcess(costingResources, [...processAliases.eyelets], costingDepartment);
+  const configuredEyeletMaterial = eyeletOperation?.consumableMaterialId ? materialPool.find((material) => material.id === eyeletOperation.consumableMaterialId) : undefined;
+  const effectiveEyeletMaterial = configuredEyeletMaterial ?? eyeletMaterial;
   const eyeletLabourRate = labourRateForProcess(costingResources, [...processAliases.eyelets], costingDepartment, labourRate);
   const jingweiLabourRate = labourRateForProcess(costingResources, [...processAliases.jingwei], costingDepartment, labourRate);
   const mountLabourRate = labourRateForProcess(costingResources, [...processAliases.print_vinyl_application], costingDepartment, labourRate);
@@ -1946,6 +1971,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const laminateAutomaticLabour = ((flowType === "signage" && selectedLaminate && laminateId !== "none") || ((flowType === "small_format" || isPrintDepartment) && selectedSmallCoating && smallCoatingId !== "none"))
     ? automaticLabourForProcess(costingResources, processAliases.laminate, costingDepartment, laminateMachineMetrics, quantityNumber)
     : null;
+  const operationConsumableRow = (aliases: readonly string[], metrics: MachineCostMetrics, label: string): CostRow | null => {
+    const operation = labourForProcess(costingResources, [...aliases], costingDepartment);
+    if (!operation?.consumableMaterialId) return null;
+    const material = materialPool.find((item) => item.id === operation.consumableMaterialId);
+    if (!material) return null;
+    const amount = operationConsumableAmount(operation, metrics, quantityNumber);
+    if (amount <= 0) return null;
+    const pricing = operationConsumableRate(material, operation.consumableBasis);
+    return { label: `${label} material`, detail: material.name, amount, unit: pricing.unit, rate: pricing.rate, cost: amount * pricing.rate, note: ["linked from shop operation", pricing.note].filter(Boolean).join(" · ") || undefined };
+  };
+
   const signageFinishingAutomaticLabour = Object.fromEntries(finishings.map((key) => {
     const aliases = signageFinishingProcessAliases[key];
     if (!aliases) return [key, null];
@@ -2205,9 +2241,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (item.key === "eyelets") {
           const preset = eyeletPresets.find((option) => option.label === eyeletPresetLabel);
           const qty = preset?.qty === 0 ? numberValue(customEyeletQty, 0) : preset?.qty ?? 0;
-          if (qty > 0 && eyeletMaterial) {
-            const rate = eachRate(eyeletMaterial);
-            rows.push({ label: "Eyelets", detail: eyeletMaterial.name, amount: qty, unit: "each", rate: rate.rate, cost: qty * rate.rate, note: [eyeletPresetLabel, rate.note].filter(Boolean).join(" · ") || undefined });
+          if (qty > 0 && effectiveEyeletMaterial) {
+            const configuredQty = eyeletOperation?.consumableMaterialId ? Math.max(0, numberValue(eyeletOperation.consumableQuantity, 1)) : 1;
+            const amount = qty * (configuredQty || 1);
+            const rate = eachRate(effectiveEyeletMaterial);
+            rows.push({ label: "Eyelets", detail: effectiveEyeletMaterial.name, amount, unit: "each", rate: rate.rate, cost: amount * rate.rate, note: [eyeletPresetLabel, configuredEyeletMaterial ? "linked from Eyelet operation" : null, rate.note].filter(Boolean).join(" · ") || undefined });
           }
           if (eyeletMachineSelection?.machine && eyeletMachineSelection.machineCostPerUnit > 0) {
             rows.push({ label: "Eyelet machine", detail: eyeletMachineSelection.machine.name, amount: 1, unit: "item", rate: eyeletMachineSelection.machineCostPerUnit, cost: eyeletMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
@@ -2229,6 +2267,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const processMachine = item.key === "jingwei" ? jingweiMachineSelection : item.key === "print_vinyl_application" ? mountMachineSelection : null;
         if (processMachine?.machine && processMachine.machineCostPerUnit > 0) {
           rows.push({ label: `${item.label} machine`, detail: processMachine.machine.name, amount: 1, unit: "item", rate: processMachine.machineCostPerUnit, cost: processMachine.machineCostPerUnit, note: "Machine cost from Machines settings" });
+        }
+        const aliases = signageFinishingProcessAliases[item.key];
+        if (aliases) {
+          const materialRow = operationConsumableRow(aliases, { quantity: quantityNumber, areaSqmPerUnit: areaSqm, sheetsPerLine: signagePrintSheetUse?.physicalSheets ?? quantityNumber, linearMetresPerLine: signagePrintRollUse?.unroundedAmount ?? 0, requiredWidthMm: signageProcessWidthMm }, item.label);
+          if (materialRow) rows.push(materialRow);
         }
         const minutes = numberValue(finishingMinutes[item.key], 0);
         if (minutes > 0) {
@@ -2353,6 +2396,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (item.key === "trim" && trimMachineSelection?.machine && trimMachineSelection.machineCostPerUnit > 0) {
           rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
         }
+        const aliases = smallFinishingProcessAliases[item.key];
+        if (aliases) {
+          const materialRow = operationConsumableRow(aliases, { quantity: quantityNumber, areaSqmPerUnit: areaSqm, sheetsPerLine: smallSheetsForMachine, linearMetresPerLine: smallRollUseForMachine?.unroundedAmount ?? 0, requiredWidthMm: trimMachineMetrics.requiredWidthMm }, item.label);
+          if (materialRow) rows.push(materialRow);
+        }
         const minutes = numberValue(smallFinishingMinutes[item.key], 0);
         if (minutes > 0) {
           const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
@@ -2470,6 +2518,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (item.key === "trim" && trimMachineSelection?.machine && trimMachineSelection.machineCostPerUnit > 0) {
           rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
         }
+        const aliases = smallFinishingProcessAliases[item.key];
+        if (aliases) {
+          const materialRow = operationConsumableRow(aliases, { quantity: quantityNumber, areaSqmPerUnit: areaSqm, sheetsPerLine: smallSheetsForMachine, linearMetresPerLine: smallRollUseForMachine?.unroundedAmount ?? 0, requiredWidthMm: trimMachineMetrics.requiredWidthMm }, item.label);
+          if (materialRow) rows.push(materialRow);
+        }
         const minutes = numberValue(smallFinishingMinutes[item.key], 0);
         if (minutes > 0) {
           const basis = smallFinishingLabourBasis[item.key] ?? smallFinishingDefaultBasis;
@@ -2557,7 +2610,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, effectiveEyeletMaterial, eyeletOperation, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -2917,7 +2970,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       laminate: snapshotMaterialForSave(selectedLaminate),
       smallStock: snapshotMaterialForSave(selectedSmallStock),
       smallCoating: snapshotMaterialForSave(selectedSmallCoating),
-      eyelet: snapshotMaterialForSave(eyeletMaterial),
+      eyelet: snapshotMaterialForSave(effectiveEyeletMaterial),
       standoff: snapshotMaterialForSave(panelStandoffsApplicable ? selectedStandoffMaterial : undefined),
       componentParts: Array.from(new Map(componentParts
         .map((part) => materialPool.find((material) => material.id === part.materialId))

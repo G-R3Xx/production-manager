@@ -36,7 +36,10 @@ function labourInput(formData: FormData, tenantId: string) {
     hourlyRate: String(Math.max(0, numericValue(formData, "hourlyRate"))),
     calculationBasis,
     calculationValue: storedCalculationValue(formData, calculationBasis),
-    minimumMinutes: String(Math.max(0, numericValue(formData, "minimumMinutes")))
+    minimumMinutes: String(Math.max(0, numericValue(formData, "minimumMinutes"))),
+    consumableMaterialId: stringValue(formData, "consumableMaterialId") || null,
+    consumableQuantity: String(Math.max(0, numericValue(formData, "consumableQuantity"))),
+    consumableBasis: stringValue(formData, "consumableBasis") || "per_operation_unit"
   };
 }
 

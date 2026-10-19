@@ -13,6 +13,9 @@ type LabourFormValues = {
   calculationBasis: LabourBasis;
   calculationValue: string;
   minimumMinutes: string;
+  consumableMaterialId?: string;
+  consumableQuantity?: string;
+  consumableBasis?: string;
 };
 
 type Template = {
@@ -66,6 +69,30 @@ const TEMPLATES: Template[] = [
     minimum: 5
   },
   {
+    label: "Eyelets",
+    description: "0.25 min each, 2 min minimum",
+    name: "Eyelets",
+    basis: "per_item_hours",
+    minutes: 0.25,
+    minimum: 2
+  },
+  {
+    label: "Book edge tape",
+    description: "0.5 min per book",
+    name: "Book edge tape",
+    basis: "per_item_hours",
+    minutes: 0.5,
+    minimum: 2
+  },
+  {
+    label: "Spiral binding",
+    description: "1 min per book",
+    name: "Spiral binding",
+    basis: "per_item_hours",
+    minutes: 1,
+    minimum: 2
+  },
+  {
     label: "Packing",
     description: "10 minutes once",
     name: "Packing",
@@ -91,10 +118,12 @@ function cleanNumber(value: number, decimals = 2): string {
 
 export function LabourOperationForm({
   mode = "create",
-  initialValues
+  initialValues,
+  materials = []
 }: {
   mode?: "create" | "edit";
   initialValues?: LabourFormValues;
+  materials?: Array<{ id: string; name: string; stockUom: string }>;
 }) {
   const initialBasis = initialValues?.calculationBasis ?? "fixed_minutes";
   const [name, setName] = useState(initialValues?.name ?? "");
@@ -104,7 +133,10 @@ export function LabourOperationForm({
   const [minutes, setMinutes] = useState(
     cleanNumber(storedLabourValueToMinutes(initialBasis, initialValues?.calculationValue ?? "15"), 2)
   );
-  const [minimumMinutes, setMinimumMinutes] = useState(initialValues?.minimumMinutes ?? "15");
+  const [minimumMinutes, setMinimumMinutes] = useState(initialValues?.minimumMinutes ?? "0");
+  const [consumableMaterialId, setConsumableMaterialId] = useState(initialValues?.consumableMaterialId ?? "");
+  const [consumableQuantity, setConsumableQuantity] = useState(initialValues?.consumableQuantity ?? "0");
+  const [consumableBasis, setConsumableBasis] = useState(initialValues?.consumableBasis ?? "per_operation_unit");
 
   const basisDetails = LABOUR_BASIS_OPTIONS.find((option) => option.value === basis) ?? LABOUR_BASIS_OPTIONS[0]!;
   const rate = Math.max(0, Number(hourlyRate) || 0);
@@ -160,7 +192,7 @@ export function LabourOperationForm({
           <div>
             <div className={styles.stepEyebrow}>Quick start</div>
             <h3 className={styles.sectionTitle}>Start with a common operation</h3>
-            <p className={styles.helpText}>Choose a starting point, then adjust it below. Nothing is saved until you select Add labour operation.</p>
+            <p className={styles.helpText}>Choose a starting point, then adjust it below. Nothing is saved until you select Add shop operation.</p>
           </div>
           <div className={styles.templateGrid}>
             {TEMPLATES.map((template) => (
@@ -181,8 +213,8 @@ export function LabourOperationForm({
       <section className={styles.formSection}>
         <div className={styles.stepNumber}>1</div>
         <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>What work is being charged?</h3>
-          <p className={styles.helpText}>Use a clear reusable name. You will select this operation later inside a product’s production action.</p>
+          <h3 className={styles.sectionTitle}>What operation is this?</h3>
+          <p className={styles.helpText}>Give it the name staff recognise. This one operation can carry its consumable and labour rule together.</p>
           <div className={styles.twoColumnGrid}>
             <label className={styles.fieldLabel}>
               Operation name
@@ -216,8 +248,39 @@ export function LabourOperationForm({
       <section className={styles.formSection}>
         <div className={styles.stepNumber}>2</div>
         <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>What does one labour hour cost?</h3>
-          <p className={styles.helpText}>Use your internal labour cost or charge-out rate, depending on how you want product costs calculated.</p>
+          <h3 className={styles.sectionTitle}>Does it use a material or consumable?</h3>
+          <p className={styles.helpText}>Optional. Link the item once and PM can consume it automatically whenever this operation is used.</p>
+          <div className={styles.twoColumnGrid}>
+            <label className={styles.fieldLabel}>
+              Consumable / material
+              <select name="consumableMaterialId" value={consumableMaterialId} onChange={(event) => setConsumableMaterialId(event.target.value)} className={styles.input}>
+                <option value="">No linked consumable</option>
+                {materials.map((material) => <option key={material.id} value={material.id}>{material.name}{material.stockUom ? ` · ${material.stockUom}` : ""}</option>)}
+              </select>
+            </label>
+            <label className={styles.fieldLabel}>
+              Quantity used
+              <input name="consumableQuantity" type="number" min="0" step="0.0001" value={consumableQuantity} onChange={(event) => setConsumableQuantity(event.target.value)} className={styles.input} disabled={!consumableMaterialId} />
+            </label>
+            <label className={styles.fieldLabel}>
+              Material usage basis
+              <select name="consumableBasis" value={consumableBasis} onChange={(event) => setConsumableBasis(event.target.value)} className={styles.input} disabled={!consumableMaterialId}>
+                <option value="per_operation_unit">Per operation unit</option>
+                <option value="per_finished_item">Per finished item</option>
+                <option value="per_linear_metre">Per linear metre</option>
+                <option value="per_sqm">Per square metre</option>
+              </select>
+              <span className={styles.fieldHint}>Examples: Eyelet = 1 per operation unit. Spiral = 1 per finished book. Edge tape = metres of tape per book edge.</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section className={styles.formSection}>
+        <div className={styles.stepNumber}>3</div>
+        <div className={styles.sectionContent}>
+          <h3 className={styles.sectionTitle}>How much labour does it take?</h3>
+          <p className={styles.helpText}>Set the labour rate and then choose the simple basis below. Machines such as printers, cutters and CNCs keep their own machine running costs separately.</p>
           <label className={styles.rateField}>
             Hourly rate
             <div className={styles.moneyInputWrap}>
@@ -240,10 +303,10 @@ export function LabourOperationForm({
       </section>
 
       <section className={styles.formSection}>
-        <div className={styles.stepNumber}>3</div>
+        <div className={styles.stepNumber}>4</div>
         <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>How should the time be calculated?</h3>
-          <p className={styles.helpText}>Choose what makes this operation take longer. All time is entered in minutes.</p>
+          <h3 className={styles.sectionTitle}>What makes the labour increase?</h3>
+          <p className={styles.helpText}>Keep it simple: fixed, per item, per metre, per m² or per sheet. Guillotine stack calculation is only for machine-style trimming.</p>
           <div className={styles.basisGrid}>
             {LABOUR_BASIS_OPTIONS.map((option) => (
               <label key={option.value} className={`${styles.basisCard} ${basis === option.value ? styles.basisCardSelected : ""}`}>
@@ -309,7 +372,7 @@ export function LabourOperationForm({
 
       <div className={styles.formActions}>
         <button type="submit" className={styles.primaryButton}>
-          {mode === "edit" ? "Save labour operation" : "Add labour operation"}
+          {mode === "edit" ? "Save shop operation" : "Add shop operation"}
         </button>
         <span className={styles.saveHint}>The system stores the calculation in the existing costing engine automatically.</span>
       </div>

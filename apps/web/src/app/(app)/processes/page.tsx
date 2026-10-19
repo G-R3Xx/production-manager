@@ -71,7 +71,7 @@ export default async function ProcessesPage({
         <div style={eyebrow}>Process library</div>
         <h1 style={{ margin: "6px 0", fontSize: 38 }}>Processes</h1>
         <p style={{ margin: 0, maxWidth: 960, color: "#64748b", lineHeight: 1.6 }}>
-          A process is one reusable action—such as Direct print, Laminate, Trim / cut or Eyelets. Assign its normal machine and labour here once. Production Methods only arrange these processes in order.
+          A process is one reusable shop action. For normal finishing, link one Shop Operation and let that operation carry its consumable + labour rule. Only link a Machine when the equipment itself has meaningful run cost, wear, ink, bits or capacity constraints.
         </p>
       </header>
 
@@ -162,10 +162,10 @@ function ProcessCard({ row, labour, machines }: { row: ProcessRecord; labour: La
                   <label style={fieldLabel}>Process name<input name="name" defaultValue={row.name} required style={inputStyle} /></label>
                   <label style={fieldLabel}>Work area<select name="department" defaultValue={row.department} style={inputStyle}>{departments.map((department) => <option key={department.value} value={department.value}>{department.label}</option>)}</select></label>
                   <label style={fieldLabel}>Process category<select name="processType" defaultValue={row.processType} style={inputStyle}>{types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
-                  <label style={fieldLabel}>Default machine<select name="machineId" defaultValue={row.machineIds[0] ?? ""} style={inputStyle}><option value="">No machine cost</option>{machines.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
-                  <label style={fieldLabel}>Default labour<select name="labourOperationId" defaultValue={row.labourOperationId ?? ""} style={inputStyle}><option value="">No default labour</option>{labour.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
+                  <label style={fieldLabel}>Machine (optional)<select name="machineId" defaultValue={row.machineIds[0] ?? ""} style={inputStyle}><option value="">No machine needed</option>{machines.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
+                  <label style={fieldLabel}>Shop operation<select name="labourOperationId" defaultValue={row.labourOperationId ?? ""} style={inputStyle}><option value="">No labour / consumable recipe</option>{labour.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
                 </div>
-                <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>This Process is now the single place that links its machine and normal labour. Production Methods and Products reuse these resources rather than redefining them.</div>
+                <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>Simple finishing usually needs only a Shop Operation. Printers, cutters, CNCs and similar equipment can also link a Machine for run cost, wear, ink/bits and capacity.</div>
                 <div style={{ display: "flex", justifyContent: "flex-end" }}><button style={primaryButton}>Save changes</button></div>
               </form>
             </div>
@@ -179,8 +179,8 @@ function ProcessCard({ row, labour, machines }: { row: ProcessRecord; labour: La
       </div>
 
       <div style={{ paddingTop: 12, borderTop: "1px solid #e2e8f0", color: "#475569", fontSize: 14, display: "flex", gap: 18, flexWrap: "wrap" }}>
-        <span>Machine: <strong style={{ color: "#0f172a" }}>{row.machineNames[0] ?? "Not linked"}</strong></span>
-        <span>Labour: <strong style={{ color: "#0f172a" }}>{row.labourOperationName ?? "Not linked"}</strong></span>
+        <span>Machine: <strong style={{ color: "#0f172a" }}>{row.machineNames[0] ?? "Not required"}</strong></span>
+        <span>Operation: <strong style={{ color: "#0f172a" }}>{row.labourOperationName ?? "Not linked"}</strong></span>
       </div>
     </article>
   );
