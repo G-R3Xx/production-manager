@@ -3417,6 +3417,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       plan_printing: "/quote-wizard/flow-plan-printing.png",
       poster_printing: "/quote-wizard/flow-poster-printing.png",
       service: "/quote-wizard/flow-service.png",
+      pickup: "/quote-wizard/flow-service.png",
+      delivery: "/quote-wizard/flow-service.png",
+      install: "/quote-wizard/flow-service.png",
+      access_equipment: "/quote-wizard/flow-service.png",
       component: "/quote-wizard/flow-component.png",
       acrylic: "/quote-wizard/material-acrylic-clear.webp",
       acrylic_clear: "/quote-wizard/material-acrylic-clear.webp",
@@ -3473,7 +3477,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
   function renderWizardStep(step: QuickQuoteStep) {
     const tileGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(190px, 1fr))", gap: 14 } as const;
-    const photoGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 14 } as const;
+    const photoGrid = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 240px))", gap: 14, justifyContent: "start" } as const;
     const tile = (selected: boolean, compact = false) => ({
       position: "relative" as const,
       minHeight: compact ? 178 : 210,
@@ -3487,6 +3491,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       alignItems: "stretch",
       textAlign: "left" as const,
       gap: 10,
+      cursor: "pointer",
+      overflow: "hidden"
+    });
+    const imageOnlyTile = (selected: boolean) => ({
+      position: "relative" as const,
+      width: "100%",
+      aspectRatio: "4 / 3",
+      borderRadius: 16,
+      border: selected ? "2px solid #2563eb" : "1px solid #d7e0ea",
+      background: selected ? "linear-gradient(180deg,#f6faff 0%,#ffffff 100%)" : "#fff",
+      boxShadow: selected ? "0 10px 26px rgba(37,99,235,.14)" : "0 7px 18px rgba(15,23,42,.05)",
+      padding: 8,
+      display: "grid",
+      placeItems: "stretch",
       cursor: "pointer",
       overflow: "hidden"
     });
@@ -3511,7 +3529,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       const base = fallbackKind === "other_sheet" ? "other_sheet" : fallbackKind;
       const directImage = material.quoteImageUrl || categoryImages[base];
       if (directImage) {
-        return <div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}><img src={directImage} alt="" aria-hidden="true" style={{ width: "100%", height: "100%", maxHeight: 178, objectFit: "contain", objectPosition: "center", display: "block" }} /></div>;
+        return <div style={{ width: "100%", height: "100%", borderRadius: 11, overflow: "hidden", background: "#f8fafc", display: "grid", placeItems: "center" }}><img src={directImage} alt="" aria-hidden="true" style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }} /></div>;
       }
       const text = `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""} ${material.materialGroup ?? ""}`.toLowerCase();
       const has = (value: string) => text.includes(value);
@@ -3547,7 +3565,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (match && base !== "other_sheet") tint = match[1];
       }
 
-      return <div style={{ position: "relative", borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}>
+      return <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: 11, overflow: "hidden", background: "#f8fafc", display: "grid", placeItems: "center" }}>
         {wizardIllustration(kind)}
         {tint ? <span aria-hidden="true" style={{ position: "absolute", inset: 0, background: tint, opacity: 0.42, mixBlendMode: "multiply", pointerEvents: "none" }} /> : null}
       </div>;
@@ -3577,16 +3595,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (step === "thickness" || step === "colour") {
-      return <div style={{ display: "grid", gap: 10 }}>
-        <div style={{ border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#166534", borderRadius: 12, padding: "10px 12px", fontSize: 12, lineHeight: 1.45 }}><b>Automatic stock size:</b> choose the material family only. Where multiple parent-sheet sizes or roll widths share the same Customer-facing name, PM chooses the lowest-cost stock for the finished size, quantity and nesting.</div>
-        <div style={photoGrid}>{baseMaterialGroups.map((group) => {
-          const material = group.representative;
-          const selected = selectedMainMaterialGroup?.key === group.key;
-          const description = isRollStockBase ? rollGroupDescription(group) : sheetGroupDescription(group);
-          const suppliers = Array.from(new Set(group.materials.map((item) => item.supplierName).filter(Boolean)));
-          return <button key={group.key} type="button" onClick={() => { setMainMaterialChoiceId(material.id); if (baseType === "banner") setMediaId(material.id); setThickness(thicknessFor(material)); setColour(colourFor(material)); changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, baseType || "other_sheet")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{group.label}</strong><span style={{ color: group.materials.length > 1 ? "#0f766e" : "#64748b", fontSize: 12, fontWeight: group.materials.length > 1 ? 850 : 800 }}>{description}</span>{selected && selectedMainMaterial && width > 0 && height > 0 && group.materials.length > 1 ? <span style={{ color: "#2563eb", fontSize: 11, fontWeight: 850 }}>PM stock: {internalMaterialName(selectedMainMaterial)}</span> : null}{suppliers.length === 1 ? <span style={{ color: "#64748b", fontSize: 12 }}>{suppliers[0]}</span> : suppliers.length > 1 ? <span style={{ color: "#64748b", fontSize: 12 }}>Multiple suppliers</span> : null}{group.materials.length === 1 && material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
-        })}</div>
-      </div>;
+      return <div style={photoGrid}>{baseMaterialGroups.map((group) => {
+        const material = group.representative;
+        const selected = selectedMainMaterialGroup?.key === group.key;
+        return <button key={group.key} type="button" aria-label={group.label} title={group.label} onClick={() => { setMainMaterialChoiceId(material.id); if (baseType === "banner") setMediaId(material.id); setThickness(thicknessFor(material)); setColour(colourFor(material)); changed(); }} style={imageOnlyTile(selected)}>{selectedMark(selected)}{materialVisual(material, baseType || "other_sheet")}</button>;
+      })}</div>;
     }
 
     if (step === "artwork") {
@@ -3608,7 +3621,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     if (step === "media") {
       return <div style={photoGrid}>{rollMedia.map((material) => {
         const selected = mediaId === material.id;
-        return <button key={material.id} type="button" onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15 }}>{material.name}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 13, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+        return <button key={material.id} type="button" aria-label={internalMaterialName(material)} title={internalMaterialName(material)} onClick={() => { setMediaId(material.id); setPrintDirection(""); setBackingId(""); changed(); }} style={imageOnlyTile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}</button>;
       })}</div>;
     }
 
@@ -3617,6 +3630,47 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const selected = ink === item.key;
         return <button key={item.key} type="button" onClick={() => { setInk(item.key as InkChoice); changed(); }} style={{ ...artworkTile(selected), minHeight: 160 }}>{selectedMark(selected)}<div aria-hidden="true" style={{ display: "flex", gap: 7, alignItems: "center", justifyContent: "center", minHeight: 60 }}>{item.key === "none" ? <span style={{ fontSize: 46, color: "#94a3b8" }}>∅</span> : <><span style={{ width: 34, height: 34, borderRadius: 999, background: "#06b6d4" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#ec4899" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#facc15" }}/><span style={{ width: 34, height: 34, borderRadius: 999, background: "#111827" }}/></>}</div><strong style={{ fontSize: 16 }}>{item.label}</strong></button>;
       })}</div>;
+    }
+
+    const serviceChoiceGrid = (choices: typeof serviceTypes) => (
+      <div style={{ display: "grid", gridTemplateColumns: `repeat(${Math.min(choices.length, 4)}, minmax(0, 1fr))`, gap: 14 }}>
+        {choices.map((item) => {
+          const selected = serviceType === item.key;
+          return <button key={item.key} type="button" onClick={() => { setServiceType(item.key); changed(); }} style={tile(selected, true)}>{selectedMark(selected)}{visual(item.key)}<strong style={{ fontSize: 16, lineHeight: 1.2, textAlign: "center" }}>{item.label}</strong></button>;
+        })}
+      </div>
+    );
+
+    const wizardServiceDetails = () => {
+      if (!serviceType) return null;
+      if (serviceType === "pickup") return <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, color: "#475467", fontSize: 13 }}>Client pickup selected. No delivery or installation charge will be added.</div>;
+      if (serviceType === "delivery") return <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}><label style={{ display: "grid", gap: 6, maxWidth: 360 }}><b>Delivery charge ($)</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} /></label></div>;
+      if (serviceType === "install") return <div style={{ display: "grid", gap: 12 }}>
+        <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
+            <label style={{ display: "grid", gap: 6 }}><b>Installers</b><input value={installCrewSize} onChange={(event) => { setInstallCrewSize(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label>
+            <label style={{ display: "grid", gap: 6 }}><b>Travel / call-out charge ($)</b><input value={travelCharge} onChange={(event) => { setTravelCharge(event.target.value); changed(); }} placeholder="Dollar amount, not minutes" type="number" min="0" step="0.01" style={inputStyle} /><small style={{ color: "#64748b" }}>Enter the total dollar charge once for this quote line.</small></label>
+          </div>
+          <InstallLabourField value={installMinutes} basis={installLabourBasis} crewSize={installCrewSize} quantity={quantityNumber} labourRate={labourRate} onChange={(value) => { setInstallMinutes(value); changed(); }} onBasisChange={(basis) => { setInstallLabourBasis(basis); changed(); }} />
+        </div>
+        <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", padding: 12, display: "grid", gap: 10 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontWeight: 900 }}><input type="checkbox" checked={accessEquipmentRequired} onChange={(event) => { setAccessEquipmentRequired(event.target.checked); changed(); }} />Is access equipment required?</label>
+          {accessEquipmentRequired ? <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}><label style={{ display: "grid", gap: 6 }}><b>Type of equipment</b><input value={accessEquipmentType} onChange={(event) => { setAccessEquipmentType(event.target.value); changed(); }} placeholder="eg Scissor lift" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Daily charge ($)</b><input value={accessEquipmentDailyCharge} onChange={(event) => { setAccessEquipmentDailyCharge(event.target.value); changed(); }} placeholder="Equipment cost per day" type="number" min="0" step="0.01" style={inputStyle} /><small style={{ color: "#64748b" }}>Markup, profit and the client price level are applied automatically.</small></label><label style={{ display: "grid", gap: 6 }}><b>Number of days</b><input value={accessEquipmentDays} onChange={(event) => { setAccessEquipmentDays(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label></div> : null}
+        </div>
+      </div>;
+      return <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}><div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}><label style={{ display: "grid", gap: 6 }}><b>Type of equipment</b><input value={accessEquipmentType} onChange={(event) => { setAccessEquipmentType(event.target.value); changed(); }} placeholder="eg Scissor lift" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Daily charge ($)</b><input value={accessEquipmentDailyCharge} onChange={(event) => { setAccessEquipmentDailyCharge(event.target.value); changed(); }} placeholder="Equipment cost per day" type="number" min="0" step="0.01" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Number of days</b><input value={accessEquipmentDays} onChange={(event) => { setAccessEquipmentDays(event.target.value); changed(); }} type="number" min="1" step="1" style={inputStyle} /></label></div></div>;
+    };
+
+    if (step === "service_type") {
+      return serviceChoiceGrid(serviceTypes);
+    }
+
+    if (step === "service_details") {
+      return wizardServiceDetails();
+    }
+
+    if (step === "dispatch") {
+      return <div style={{ display: "grid", gap: 14 }}>{serviceChoiceGrid(dispatchServiceTypes)}{wizardServiceDetails()}</div>;
     }
 
     if (step === "sides" && !canChooseReversePrint) {
@@ -3632,15 +3686,13 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           <section style={{ display: "grid", gap: 10 }}>
             <div>
               <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>Backing</div>
-              <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>Choose the backing material visually where images are available.</div>
             </div>
             <div style={photoGrid}>
               <button type="button" onClick={() => { setBackingId("none"); changed(); }} style={tile(backingId === "none")}>{selectedMark(backingId === "none")}<div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}><span aria-hidden="true" style={{ width: 58, height: 58, borderRadius: 999, border: "2px dashed #cbd5e1", color: "#94a3b8", display: "grid", placeItems: "center", fontSize: 30, fontWeight: 900 }}>∅</span></div><div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15, lineHeight: 1.2 }}>No backing</strong><span style={{ color: "#64748b", fontSize: 12 }}>Printed face only</span></div></button>
               {backingGroups.map((group) => {
                 const material = group.representative;
                 const selected = backingId !== "none" && selectedBackingGroup?.key === group.key;
-                const suppliers = Array.from(new Set(group.materials.map((item) => item.supplierName).filter(Boolean)));
-                return <button key={group.key} type="button" onClick={() => { setBackingId(material.id); changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{group.label}</strong><span style={{ color: group.materials.length > 1 ? "#0f766e" : "#64748b", fontSize: 12, fontWeight: group.materials.length > 1 ? 850 : 800 }}>{rollGroupDescription(group)}</span>{suppliers.length === 1 ? <span style={{ color: "#64748b", fontSize: 12 }}>{suppliers[0]}</span> : suppliers.length > 1 ? <span style={{ color: "#64748b", fontSize: 12 }}>Multiple suppliers</span> : null}{group.materials.length === 1 && material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+                return <button key={group.key} type="button" aria-label={group.label} title={group.label} onClick={() => { setBackingId(material.id); changed(); }} style={imageOnlyTile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}</button>;
               })}
             </div>
           </section>
@@ -3648,13 +3700,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         <section style={{ display: "grid", gap: 10 }}>
           <div>
             <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>Laminate</div>
-            <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>Use image cards instead of a plain list wherever laminate images exist.</div>
           </div>
           <div style={photoGrid}>
             <button type="button" onClick={() => { setLaminateId("none"); changed(); }} style={tile(laminateId === "none")}>{selectedMark(laminateId === "none")}<div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}><span aria-hidden="true" style={{ width: 58, height: 58, borderRadius: 999, border: "2px dashed #cbd5e1", color: "#94a3b8", display: "grid", placeItems: "center", fontSize: 30, fontWeight: 900 }}>∅</span></div><div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15, lineHeight: 1.2 }}>No laminate</strong><span style={{ color: "#64748b", fontSize: 12 }}>No protective overlaminate</span></div></button>
             {laminateMaterials.map((material) => {
               const selected = laminateId === material.id;
-              return <button key={material.id} type="button" onClick={() => { setLaminateId(material.id); changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{internalMaterialName(material)}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+              return <button key={material.id} type="button" aria-label={internalMaterialName(material)} title={internalMaterialName(material)} onClick={() => { setLaminateId(material.id); changed(); }} style={imageOnlyTile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}</button>;
             })}
           </div>
         </section>
@@ -3666,13 +3717,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       return <div style={{ display: "grid", gap: 10 }}>
         <div>
           <div style={{ color: "#0f172a", fontSize: 16, fontWeight: 900 }}>Cello / coating</div>
-          <div style={{ color: "#64748b", fontSize: 12, marginTop: 2 }}>Use image cards instead of a plain list wherever coating images exist.</div>
         </div>
         <div style={photoGrid}>
           <button type="button" onClick={() => { setSmallCoatingId("none"); changed(); }} style={tile(smallCoatingId === "none")}>{selectedMark(smallCoatingId === "none")}<div style={{ borderRadius: 11, overflow: "hidden", background: "#f8fafc", minHeight: 108, display: "grid", placeItems: "center" }}><span aria-hidden="true" style={{ width: 58, height: 58, borderRadius: 999, border: "2px dashed #cbd5e1", color: "#94a3b8", display: "grid", placeItems: "center", fontSize: 30, fontWeight: 900 }}>∅</span></div><div style={{ display: "grid", gap: 3 }}><strong style={{ fontSize: 15, lineHeight: 1.2 }}>No coating</strong><span style={{ color: "#64748b", fontSize: 12 }}>Leave uncoated</span></div></button>
           {laminateMaterials.map((material) => {
             const selected = smallCoatingId === material.id;
-            return <button key={material.id} type="button" onClick={() => { setSmallCoatingId(material.id); changed(); }} style={tile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}<div style={{ display: "grid", gap: 3, minWidth: 0 }}><strong style={{ fontSize: 15, lineHeight: 1.2, overflowWrap: "anywhere" }}>{internalMaterialName(material)}</strong>{material.rollWidthMm ? <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>{material.rollWidthMm}mm roll</span> : null}{material.supplierName ? <span style={{ color: "#64748b", fontSize: 12 }}>{material.supplierName}</span> : null}{material.sku ? <span style={{ color: "#64748b", fontSize: 11 }}>{material.sku}</span> : null}</div></button>;
+            return <button key={material.id} type="button" aria-label={internalMaterialName(material)} title={internalMaterialName(material)} onClick={() => { setSmallCoatingId(material.id); changed(); }} style={imageOnlyTile(selected)}>{selectedMark(selected)}{materialVisual(material, "banner")}</button>;
           })}
         </div>
         {smallCoatingId && smallCoatingId !== "none" ? <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}><InlineLabourField label="Coating labour" value={laminateMinutes} basis={laminateLabourBasis} onChange={(value) => { setLaminateMinutes(value); changed(); }} onBasisChange={(basis) => { setLaminateLabourBasis(basis); changed(); }} labourRate={laminateLabourRate} quantity={quantityNumber} automatic={laminateAutomaticLabour} /></div> : null}
@@ -3797,7 +3847,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           {presentation === "wizard" ? (() => {
             const safeWizardIndex = Math.min(Math.max(0, wizardIndex), Math.max(0, allSignageSteps.length - 1));
             const step = allSignageSteps[safeWizardIndex];
-            const stepComplete = step === "flow" ? Boolean(flowType) : step === "base" ? Boolean(baseType) : step === "thickness" || step === "colour" ? Boolean(selectedMainMaterial) : step === "size" || step === "small_size" ? width > 0 && height > 0 : step === "artwork" ? Boolean(artworkChoice) : step === "print" ? Boolean(resolvedPrintMethod) : step === "media" ? Boolean(mediaId) : step === "ink" ? Boolean(ink) : step === "sides" || step === "small_sides" ? Boolean(sides && (!canChooseReversePrint || !printed || printDirection)) : step === "laminate" ? Boolean((!backingApplicable || backingId) && (!printed || laminateId)) : step === "dispatch" ? dispatchComplete : true;
+            const stepComplete = step === "flow" ? Boolean(flowType) : step === "service_type" ? Boolean(serviceType) : step === "base" ? Boolean(baseType) : step === "thickness" || step === "colour" ? Boolean(selectedMainMaterial) : step === "size" || step === "small_size" ? width > 0 && height > 0 : step === "artwork" ? Boolean(artworkChoice) : step === "print" ? Boolean(resolvedPrintMethod) : step === "media" ? Boolean(mediaId) : step === "ink" ? Boolean(ink) : step === "sides" || step === "small_sides" ? Boolean(sides && (!canChooseReversePrint || !printed || printDirection)) : step === "laminate" ? Boolean((!backingApplicable || backingId) && (!printed || laminateId)) : step === "dispatch" ? dispatchComplete : true;
             const atLast = safeWizardIndex === allSignageSteps.length - 1;
             return <div style={{ display: "grid", gap: 16 }}>
               <div style={{ display: "grid", gap: 8 }}>
