@@ -121,10 +121,10 @@ type AutomaticLabourCost = {
 };
 
 const processAliases = {
-  print: ["direct print", "digital print", "small format print", "print"],
+  print: ["direct print", "digital print", "small format print", "print", "print file setup"],
   laminate: ["laminate", "laminating", "cello", "coating"],
   eyelets: ["eyelets", "eyelet"],
-  jingwei: ["jewei cut", "jingwei cut", "jewei", "jingwei"],
+  jingwei: ["jewei cut", "jingwei cut", "jewei cutting", "jingwei cutting", "jewei", "jingwei"],
   vinyl_cutting: ["vinyl cutting", "cut vinyl", "vinyl cut"],
   print_vinyl_application: ["mount apply", "mounting application", "mount apply vinyl", "vinyl application"],
   tape_hem_banner: ["tape hem banner", "banner hem", "hemming", "hem banner"],
@@ -3159,11 +3159,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (compactStep === "size" || compactStep === "small_size") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Preset finished size</b><select value={activeSizePresetValue} onChange={(event) => { const preset = activeSizePresets.find((item) => `${item.width}x${item.height}` === event.target.value); if (preset) { setWidthMm(preset.width); setHeightMm(preset.height); changed(); } }} style={inputStyle}><option value="">Custom size</option>{activeSizePresets.map((preset) => <option key={`${preset.label}-${preset.width}-${preset.height}`} value={`${preset.width}x${preset.height}`}>{preset.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}{compactStep === "size" && isRollStockBase ? renderDropLayoutControls(true) : null}</div>;
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Preset finished size</b><select value={activeSizePresetValue} onChange={(event) => { const preset = activeSizePresets.find((item) => `${item.width}x${item.height}` === event.target.value); if (preset) { setWidthMm(preset.width); setHeightMm(preset.height); changed(); } }} style={inputStyle}><option value="">Custom size</option>{activeSizePresets.map((preset) => <option key={`${preset.label}-${preset.width}-${preset.height}`} value={`${preset.width}x${preset.height}`}>{preset.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Width mm</b><input value={widthMm} onChange={(event) => { setWidthMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Height mm</b><input value={heightMm} onChange={(event) => { setHeightMm(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Bleed / spacing per side mm</b><input value={bleedSpacingMm} onChange={(event) => { setBleedSpacingMm(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label></div>{nestingFootprintLabel ? <small style={{ color: "#64748b" }}>Material yield uses {nestingFootprintLabel}; client-facing finished size stays unchanged.</small> : null}{compactStep === "size" && isRollStockBase ? renderDropLayoutControls(true) : null}</div>;
     }
 
     if (compactStep === "artwork") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Artwork</b><select value={artworkChoice} onChange={(event) => { setArtworkChoice(event.target.value as ArtworkChoice); changed(); }} style={inputStyle}><option value="">Choose artwork</option><option value="client_supplied">Print-ready artwork supplied</option><option value="required">Artwork / setup required</option></select></label>{artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label> : null}</div></div>;
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Artwork</b><select value={artworkChoice} onChange={(event) => { setArtworkChoice(event.target.value as ArtworkChoice); changed(); }} style={inputStyle}><option value="">Choose artwork</option><option value="client_supplied">Print-ready artwork supplied</option><option value="required">Artwork / setup required</option></select></label>{artworkChoice === "required" ? <label style={{ display: "grid", gap: 6 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label> : null}</div></div>;
     }
 
     if (compactStep === "print") {
@@ -3448,7 +3448,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
 
     if (compactStep === "component_labour") {
-      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Labour label</b><input value={componentLabourLabel} onChange={(event) => { setComponentLabourLabel(event.target.value); changed(); }} style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Labour minutes</b><input value={componentLabourMinutes} onChange={(event) => { setComponentLabourMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label></div></div>;
+      return <div style={compactPanel}><div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Labour label</b><input value={componentLabourLabel} onChange={(event) => { setComponentLabourLabel(event.target.value); changed(); }} style={inputStyle} /></label><label style={{ display: "grid", gap: 6 }}><b>Labour minutes</b><input value={componentLabourMinutes} onChange={(event) => { setComponentLabourMinutes(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label></div></div>;
     }
 
     return <div style={compactPanel}><span style={{ color: "#64748b" }}>This component is stored in the structured quote snapshot and can be updated here.</span></div>;
@@ -3661,7 +3661,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       return <div style={{ display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 }}>
         <button type="button" onClick={() => { setArtworkChoice("client_supplied"); changed(); }} style={artworkTile(artworkChoice === "client_supplied")}>{selectedMark(artworkChoice === "client_supplied")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_supplied")}</div><strong style={{ fontSize: 16 }}>Print-ready artwork supplied</strong><span style={{ color: "#64748b", fontSize: 12 }}>No artwork/setup allowance</span></button>
         <button type="button" onClick={() => { setArtworkChoice("required"); changed(); }} style={artworkTile(artworkChoice === "required")}>{selectedMark(artworkChoice === "required")}<div style={{ width: "100%", maxWidth: 280, height: 118 }}>{wizardIllustration("artwork_required")}</div><strong style={{ fontSize: 16 }}>Artwork / setup required</strong><span style={{ color: "#64748b", fontSize: 12 }}>Add artwork time before continuing</span></button>
-        {artworkChoice === "required" ? <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, maxWidth: 360 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.5" style={inputStyle} /></label> : null}
+        {artworkChoice === "required" ? <label style={{ gridColumn: "1 / -1", display: "grid", gap: 6, maxWidth: 360 }}><b>Artwork minutes</b><input value={artworkMinutes} onChange={(event) => { setArtworkMinutes(event.target.value); changed(); }} type="number" min="0" step="0.01" style={inputStyle} /></label> : null}
       </div>;
     }
 
@@ -3994,7 +3994,7 @@ function InlineLabourField({ label, value, basis, onChange, onBasisChange, labou
     <div style={{ display: "grid", gap: 6 }}>
       <b>{label} {automatic ? "override (optional)" : "(optional)"}</b>
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 170px", gap: 8 }}>
-        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={automatic ? "Leave blank to use automatic time" : "Minutes, eg 0.5"} type="number" min="0" step="0.5" style={inputStyle} />
+        <input value={value} onChange={(event) => onChange(event.target.value)} placeholder={automatic ? "Leave blank to use automatic time" : "Minutes, eg 0.5"} type="number" min="0" step="0.01" style={inputStyle} />
         <select value={basis} onChange={(event) => onBasisChange(event.target.value as LabourBasis)} style={inputStyle}>
           <option value="line_total">Total line item</option>
           <option value="per_item">{perItemLabel}</option>
@@ -4054,7 +4054,7 @@ function SelectedLabourMinutes<T extends { key: string; label: string }>({ optio
             <div key={item.key} style={{ display: "grid", gap: 6 }}>
               <b>{item.label} labour {automatic ? "override (optional)" : ""}</b>
               <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) 155px", gap: 8 }}>
-                <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder={automatic ? "Automatic unless overridden" : "Minutes, eg 0.5"} type="number" min="0" step="0.5" style={inputStyle} />
+                <input value={values[item.key] ?? ""} onChange={(event) => onChange({ ...values, [item.key]: event.target.value })} placeholder={automatic ? "Automatic unless overridden" : "Minutes, eg 0.5"} type="number" min="0" step="0.01" style={inputStyle} />
                 <select value={basis} onChange={(event) => onBasesChange({ ...bases, [item.key]: event.target.value as LabourBasis })} style={inputStyle}>
                   <option value="line_total">Total line item</option>
                   <option value="per_item">{perItemLabel}</option>

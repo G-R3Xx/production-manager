@@ -207,8 +207,20 @@ export function labourForProcess(
   const process = explicitProcessId
     ? resources.processes.find((row) => row.id === explicitProcessId) ?? null
     : matchingProcesses(resources, aliases, department)[0] ?? null;
-  if (!process?.labourOperationId) return null;
-  return resources.labour.find((row) => row.id === process.labourOperationId) ?? null;
+  if (process?.labourOperationId) {
+    const linked = resources.labour.find((row) => row.id === process.labourOperationId) ?? null;
+    if (linked) return linked;
+  }
+
+  // Simple Shop Operations should not require an extra Process record just to be
+  // usable by the quote builder. If there is no explicit Process → operation
+  // link, fall back to an active costing resource whose name exactly matches one
+  // of the known aliases for the quote action. Exact matching is deliberate so a
+  // generic action such as "binding" cannot silently select the wrong recipe.
+  const normalizedAliases = new Set(aliases.map(normalizeCostingName).filter(Boolean));
+  return resources.labour.find((row) =>
+    departmentMatches(row.department, department) && normalizedAliases.has(normalizeCostingName(row.name))
+  ) ?? null;
 }
 
 export function labourRateForProcess(

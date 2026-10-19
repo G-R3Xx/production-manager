@@ -1,4 +1,4 @@
-# Production Manager V26.10.19.11
+# Production Manager V26.10.19.12
 
 ## Shop operation cost preview clarity
 
@@ -11,4 +11,4 @@
 - Machine setup navigation now consistently calls the simplified area **Shop operations** instead of Labour & time.
 - Saved-operation cards explicitly label labour-only base costs to avoid confusing them with full operation costs.
 
-Version: V26.10.19.11
+Version: V26.10.19.12
