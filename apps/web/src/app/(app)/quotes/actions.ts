@@ -22,6 +22,7 @@ import {
   markQuoteEmailSentForTenant,
   markQuoteEmailFailedForTenant,
   removeArtworkApprovalPageForTenant,
+  saveQuoteLineBundleForTenant,
   setQuoteDraftStatusForTenant,
   getQuoteDraftById,
   respondToQuoteByToken,
@@ -537,6 +538,106 @@ export async function updateQuoteJobNameAction(formData: FormData): Promise<void
   await updateQuoteJobNameForTenant(activeTenant.tenantId, quoteId, jobName);
   revalidatePath("/quotes");
   redirect(`/quotes?selected=${quoteId}&message=Job%20name%20updated`);
+}
+
+
+export type FastQuoteLineSaveResult = {
+  ok: boolean;
+  quoteId: string;
+  lineId: string | null;
+  message: string;
+  error: string | null;
+  serverElapsedMs: number;
+};
+
+function validUuidOrNull(value: unknown): string | null {
+  const text = String(value ?? "").trim();
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(text) ? text : null;
+}
+
+export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQuoteLineSaveResult> {
+  const startedAt = Date.now();
+  let quoteId = String(formData.get("quoteId") ?? "").trim();
+  try {
+    const activeTenant = await requireTenant();
+    const editingLineId = validUuidOrNull(formData.get("editingLineId"));
+    const productId = validUuidOrNull(formData.get("productId"));
+    const formProductName = String(formData.get("productName") ?? "").trim();
+    const quantity = String(formData.get("quantity") ?? "1").trim();
+    const unitPrice = String(formData.get("unitPrice") ?? "0").trim();
+    const configurationSnapshot = jsonObject(formData.get("configurationSnapshot"));
+
+    if (!validUuidOrNull(quoteId)) {
+      return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Select a quote first.", serverElapsedMs: Date.now() - startedAt };
+    }
+
+    let productName = formProductName || (productId ? "Saved product" : "Custom material quote line");
+    const savedProductId: string | null = productId;
+
+    const serviceLineProductName = String(formData.get("serviceLineProductName") ?? "").trim();
+    const serviceLineUnitPrice = String(formData.get("serviceLineUnitPrice") ?? "").trim();
+    const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
+    const serviceLineSnapshot = jsonObject(formData.get("serviceLineConfigurationSnapshot"));
+    const serviceLineInput: LinkedQuoteLineInput | null = serviceLineProductName && serviceLineUnitPrice
+      ? {
+          productName: serviceLineProductName,
+          optionSummary: nullable(formData.get("serviceLineOptionSummary")),
+          quantity: serviceLineQuantity,
+          unitPrice: serviceLineUnitPrice,
+          notes: nullable(formData.get("serviceLineNotes")),
+          configurationSnapshot: serviceLineSnapshot
+        }
+      : null;
+
+    const accessEquipmentLineProductName = String(formData.get("accessEquipmentLineProductName") ?? "").trim();
+    const accessEquipmentLineUnitPrice = String(formData.get("accessEquipmentLineUnitPrice") ?? "").trim();
+    const accessEquipmentLineQuantity = String(formData.get("accessEquipmentLineQuantity") ?? "1").trim() || "1";
+    const accessEquipmentLineSnapshot = jsonObject(formData.get("accessEquipmentLineConfigurationSnapshot"));
+    const accessEquipmentLineInput: LinkedQuoteLineInput | null = accessEquipmentLineProductName && accessEquipmentLineUnitPrice
+      ? {
+          productName: accessEquipmentLineProductName,
+          optionSummary: nullable(formData.get("accessEquipmentLineOptionSummary")),
+          quantity: accessEquipmentLineQuantity,
+          unitPrice: accessEquipmentLineUnitPrice,
+          notes: nullable(formData.get("accessEquipmentLineNotes")),
+          configurationSnapshot: accessEquipmentLineSnapshot
+        }
+      : null;
+
+    const existingDispatchLineId = validUuidOrNull(configurationSnapshot.linkedDispatchLineId);
+    const existingAccessEquipmentLineId = validUuidOrNull(configurationSnapshot.linkedAccessEquipmentLineId)
+      || validUuidOrNull(serviceLineSnapshot.linkedAccessEquipmentLineId);
+
+    const saved = await saveQuoteLineBundleForTenant(activeTenant.tenantId, quoteId, {
+      lineId: editingLineId,
+      productId: savedProductId,
+      productName,
+      optionSummary: nullable(formData.get("optionSummary")),
+      quantity,
+      unitPrice,
+      notes: nullable(formData.get("notes")),
+      configurationSnapshot,
+      existingDispatchLineId,
+      existingAccessEquipmentLineId,
+      dispatchLine: serviceLineInput,
+      accessEquipmentLine: accessEquipmentLineInput
+    });
+
+    const elapsed = Date.now() - startedAt;
+    console.info("[quote-line-save]", { quoteId, lineId: saved.mainLineId, editing: Boolean(editingLineId), elapsedMs: elapsed });
+    return {
+      ok: true,
+      quoteId,
+      lineId: saved.mainLineId,
+      message: editingLineId ? "Quote line updated" : "Quote line added",
+      error: null,
+      serverElapsedMs: elapsed
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The quote line could not be saved.";
+    console.error("[quote-line-save] failed", { quoteId, error: message });
+    return { ok: false, quoteId, lineId: null, message: "", error: message, serverElapsedMs: Date.now() - startedAt };
+  }
 }
 
 export async function addQuoteLineAction(formData: FormData): Promise<void> {

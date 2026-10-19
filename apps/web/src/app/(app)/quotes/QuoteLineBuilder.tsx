@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { addQuoteLineAction } from "./actions";
+import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { saveQuoteLineFastAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
 import { guillotineCostingDetails, labourForProcess, labourLineCost, normalizeCostingName, recipeForId, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
@@ -1695,6 +1696,10 @@ function productDepartment(product: QuoteProduct): SavedProductDepartment | null
 }
 
 export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings, costingResources, initialProductId = null, hideProductPicker = false }: QuoteLineBuilderProps) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [, startRefresh] = useTransition();
   const eligibleProducts = useMemo(
     () => products.filter((product) => productDepartment(product) !== null),
     [products]
@@ -1933,6 +1938,29 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     );
   }
 
+  const handleFastSave = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (isSaving || machineWarnings.length > 0) return;
+    const form = event.currentTarget;
+    setSaveError("");
+    setIsSaving(true);
+    try {
+      const result = await saveQuoteLineFastAction(new FormData(form));
+      if (!result.ok) {
+        setSaveError(result.error || "The quote line could not be saved.");
+        return;
+      }
+      const details = form.closest("details") as HTMLDetailsElement | null;
+      if (details) details.open = false;
+      window.dispatchEvent(new CustomEvent("production-manager:quote-line-saved", { detail: result }));
+      startRefresh(() => router.refresh());
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The quote line could not be saved.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   if (eligibleProducts.length === 0) {
     return (
       <div style={{ border: "1px solid #fedf89", background: "#fffcf5", borderRadius: 16, padding: 16, display: "grid", gap: 6 }}>
@@ -1943,9 +1971,10 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   }
 
   return (
-    <form action={addQuoteLineAction} style={{ display: "grid", gap: 14 }}>
+    <form onSubmit={handleFastSave} style={{ display: "grid", gap: 14 }}>
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="productId" value={selectedProductId} />
+      <input type="hidden" name="productName" value={selectedProduct?.name ?? "Saved product"} />
       <input type="hidden" name="optionSummary" value={autoSummary} />
       <input type="hidden" name="configurationSnapshot" value={JSON.stringify({
         source: "saved_product_builder",
@@ -1968,6 +1997,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         pricingProfileLabel
       })} />
       {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
+      {saveError ? <div role="alert" style={{ border: "1px solid #fca5a5", background: "#fff1f2", color: "#b42318", borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 850 }}>{saveError}</div> : null}
 
       {!hideProductPicker ? <section style={{ display: "grid", gap: 9 }}>
         <span style={labelTextStyle}>1. Pick saved product</span>
@@ -2310,7 +2340,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         </div>
       </div>
 
-      <button type="submit" disabled={machineWarnings.length > 0} style={{ ...buttonStyle, opacity: machineWarnings.length > 0 ? 0.45 : 1, cursor: machineWarnings.length > 0 ? "not-allowed" : "pointer" }}>{machineWarnings.length > 0 ? "Machine width exceeds configured capacity" : "Add saved product to quote"}</button>
+      <button type="submit" disabled={machineWarnings.length > 0 || isSaving} style={{ ...buttonStyle, opacity: machineWarnings.length > 0 || isSaving ? 0.45 : 1, cursor: machineWarnings.length > 0 || isSaving ? "not-allowed" : "pointer" }}>{isSaving ? "Saving…" : machineWarnings.length > 0 ? "Machine width exceeds configured capacity" : "Add saved product to quote"}</button>
     </form>
   );
 }

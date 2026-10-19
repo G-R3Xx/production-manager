@@ -5,7 +5,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { listProcessSetupResourcesForTenant, type LabourRecord, type MachineRecord, type ProcessRecord } from "@/server/productionResources";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 import { ProcessBuilder } from "./ProcessBuilder";
-import { createStarterProcessesAction, setProcessActiveAction, updateProcessAction } from "./actions";
+import { ProcessEditDialog } from "./ProcessEditDialog";
+import { createStarterProcessesAction, setProcessActiveAction } from "./actions";
 
 const departments = [
   { value: "signage", label: "Signage" },
@@ -149,27 +150,18 @@ function ProcessCard({ row, labour, machines }: { row: ProcessRecord; labour: La
           </div>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <details>
-            <summary style={secondaryButton}>Edit</summary>
-            <div style={editPopover}>
-              <form action={updateProcessAction} style={{ display: "grid", gap: 16 }}>
-                <input type="hidden" name="id" value={row.id} />
-                <div>
-                  <div style={eyebrow}>Edit process</div>
-                  <h3 style={{ margin: "5px 0 0", fontSize: 23 }}>{row.name}</h3>
-                </div>
-                <div style={editGrid}>
-                  <label style={fieldLabel}>Process name<input name="name" defaultValue={row.name} required style={inputStyle} /></label>
-                  <label style={fieldLabel}>Work area<select name="department" defaultValue={row.department} style={inputStyle}>{departments.map((department) => <option key={department.value} value={department.value}>{department.label}</option>)}</select></label>
-                  <label style={fieldLabel}>Process category<select name="processType" defaultValue={row.processType} style={inputStyle}>{types.map((type) => <option key={type.value} value={type.value}>{type.label}</option>)}</select></label>
-                  <label style={fieldLabel}>Machine (optional)<select name="machineId" defaultValue={row.machineIds[0] ?? ""} style={inputStyle}><option value="">No machine needed</option>{machines.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
-                  <label style={fieldLabel}>Shop operation<select name="labourOperationId" defaultValue={row.labourOperationId ?? ""} style={inputStyle}><option value="">No labour / consumable recipe</option>{labour.map((item) => <option key={item.id} value={item.id}>{item.name}{item.active ? "" : " (archived)"}</option>)}</select></label>
-                </div>
-                <div style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>Simple finishing usually needs only a Shop Operation. Printers, cutters, CNCs and similar equipment can also link a Machine for run cost, wear, ink/bits and capacity.</div>
-                <div style={{ display: "flex", justifyContent: "flex-end" }}><button style={primaryButton}>Save changes</button></div>
-              </form>
-            </div>
-          </details>
+          <ProcessEditDialog
+            row={{
+              id: row.id,
+              name: row.name,
+              department: row.department,
+              processType: row.processType,
+              machineIds: row.machineIds,
+              labourOperationId: row.labourOperationId
+            }}
+            labour={labour.map((item) => ({ id: item.id, name: item.name, active: item.active }))}
+            machines={machines.map((item) => ({ id: item.id, name: item.name, active: item.active }))}
+          />
           <form action={setProcessActiveAction}>
             <input type="hidden" name="id" value={row.id} />
             <input type="hidden" name="active" value={row.active ? "false" : "true"} />
@@ -196,7 +188,3 @@ const successBanner: CSSProperties = { border: "1px solid #86efac", background: 
 const errorBanner: CSSProperties = { border: "1px solid #fca5a5", background: "#fef2f2", color: "#991b1b", borderRadius: 12, padding: "12px 14px", fontWeight: 800 };
 const primaryButton: CSSProperties = { minHeight: 44, border: 0, borderRadius: 10, background: "#0f766e", color: "#fff", fontWeight: 950, padding: "0 18px", cursor: "pointer", font: "inherit" };
 const secondaryButton: CSSProperties = { listStyle: "none", minHeight: 38, display: "grid", placeItems: "center", border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", color: "#334155", padding: "0 11px", fontWeight: 850, cursor: "pointer", font: "inherit" };
-const editPopover: CSSProperties = { position: "absolute", zIndex: 30, right: 18, marginTop: 8, width: "min(760px,calc(100vw - 70px))", border: "1px solid #cbd5e1", borderRadius: 16, background: "#fff", padding: 20, boxShadow: "0 22px 70px rgba(15,23,42,.24)" };
-const editGrid: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2,minmax(0,1fr))", gap: 14 };
-const fieldLabel: CSSProperties = { display: "grid", gap: 7, color: "#0f172a", fontWeight: 850 };
-const inputStyle: CSSProperties = { width: "100%", minHeight: 44, border: "1px solid #cbd5e1", borderRadius: 9, padding: "0 11px", font: "inherit", color: "#0f172a", background: "#fff" };

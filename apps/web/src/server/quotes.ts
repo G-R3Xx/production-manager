@@ -1,6 +1,6 @@
 import "server-only";
 
-import { randomBytes } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import { after } from "next/server";
 import { pool } from "@production-manager/db";
 import { createProductionJobFromArtworkApprovalForTenant } from "@/server/production";
@@ -873,6 +873,279 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
     input.notes ?? null,
     input.configurationSnapshot === undefined ? null : JSON.stringify(input.configurationSnapshot ?? {})
   ]);
+}
+
+
+export type QuoteLineBundleSaveInput = {
+  lineId?: string | null;
+  productId?: string | null;
+  productName: string;
+  optionSummary?: string | null;
+  quantity: string;
+  unitPrice: string;
+  notes?: string | null;
+  configurationSnapshot?: Record<string, unknown> | null;
+  existingDispatchLineId?: string | null;
+  existingAccessEquipmentLineId?: string | null;
+  dispatchLine?: {
+    productName: string;
+    optionSummary?: string | null;
+    quantity: string;
+    unitPrice: string;
+    notes?: string | null;
+    configurationSnapshot?: Record<string, unknown> | null;
+  } | null;
+  accessEquipmentLine?: {
+    productName: string;
+    optionSummary?: string | null;
+    quantity: string;
+    unitPrice: string;
+    notes?: string | null;
+    configurationSnapshot?: Record<string, unknown> | null;
+  } | null;
+};
+
+export async function saveQuoteLineBundleForTenant(
+  tenantId: string,
+  quoteId: string,
+  input: QuoteLineBundleSaveInput
+): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
+  await Promise.all([
+    ensureQuoteLineConfigurationColumn(),
+    ensureQuoteLineClientResponseColumns()
+  ]);
+
+  const mainLineId = input.lineId || randomUUID();
+  const dispatchLineId = input.dispatchLine ? (input.existingDispatchLineId || randomUUID()) : null;
+  const accessEquipmentLineId = input.accessEquipmentLine ? (input.existingAccessEquipmentLineId || randomUUID()) : null;
+
+  const mainSnapshot = {
+    ...(input.configurationSnapshot ?? {}),
+    linkedDispatchLineId: dispatchLineId,
+    linkedAccessEquipmentLineId: accessEquipmentLineId
+  };
+  const dispatchSnapshot = input.dispatchLine ? {
+    ...(input.dispatchLine.configurationSnapshot ?? {}),
+    parentLineId: mainLineId,
+    linkedAccessEquipmentLineId: accessEquipmentLineId
+  } : null;
+  const accessSnapshot = input.accessEquipmentLine ? {
+    ...(input.accessEquipmentLine.configurationSnapshot ?? {}),
+    parentLineId: dispatchLineId || mainLineId
+  } : null;
+
+  const deleteIds = [
+    input.existingDispatchLineId && input.existingDispatchLineId !== dispatchLineId ? input.existingDispatchLineId : null,
+    input.existingAccessEquipmentLineId && input.existingAccessEquipmentLineId !== accessEquipmentLineId ? input.existingAccessEquipmentLineId : null
+  ].filter((value): value is string => Boolean(value));
+
+  const payload = {
+    mainId: mainLineId,
+    mainProductId: input.productId ?? null,
+    mainProductName: input.productName,
+    mainOptionSummary: input.optionSummary ?? null,
+    mainQuantity: normaliseMoney(input.quantity, "1"),
+    mainUnitPrice: normaliseMoney(input.unitPrice, "0"),
+    mainNotes: input.notes ?? null,
+    mainSnapshot,
+    dispatchEnabled: Boolean(input.dispatchLine),
+    dispatchId: dispatchLineId,
+    dispatchProductName: input.dispatchLine?.productName ?? "",
+    dispatchOptionSummary: input.dispatchLine?.optionSummary ?? null,
+    dispatchQuantity: normaliseMoney(input.dispatchLine?.quantity, "1"),
+    dispatchUnitPrice: normaliseMoney(input.dispatchLine?.unitPrice, "0"),
+    dispatchNotes: input.dispatchLine?.notes ?? null,
+    dispatchSnapshot,
+    accessEnabled: Boolean(input.accessEquipmentLine),
+    accessId: accessEquipmentLineId,
+    accessProductName: input.accessEquipmentLine?.productName ?? "",
+    accessOptionSummary: input.accessEquipmentLine?.optionSummary ?? null,
+    accessQuantity: normaliseMoney(input.accessEquipmentLine?.quantity, "1"),
+    accessUnitPrice: normaliseMoney(input.accessEquipmentLine?.unitPrice, "0"),
+    accessNotes: input.accessEquipmentLine?.notes ?? null,
+    accessSnapshot,
+    deleteIds
+  };
+
+  const result = await pool.query<{ mainLineId: string | null; dispatchLineId: string | null; accessEquipmentLineId: string | null }>(`
+    WITH payload AS (
+      SELECT *
+      FROM jsonb_to_record($3::jsonb) AS p(
+        "mainId" text,
+        "mainProductId" text,
+        "mainProductName" text,
+        "mainOptionSummary" text,
+        "mainQuantity" text,
+        "mainUnitPrice" text,
+        "mainNotes" text,
+        "mainSnapshot" jsonb,
+        "dispatchEnabled" boolean,
+        "dispatchId" text,
+        "dispatchProductName" text,
+        "dispatchOptionSummary" text,
+        "dispatchQuantity" text,
+        "dispatchUnitPrice" text,
+        "dispatchNotes" text,
+        "dispatchSnapshot" jsonb,
+        "accessEnabled" boolean,
+        "accessId" text,
+        "accessProductName" text,
+        "accessOptionSummary" text,
+        "accessQuantity" text,
+        "accessUnitPrice" text,
+        "accessNotes" text,
+        "accessSnapshot" jsonb,
+        "deleteIds" jsonb
+      )
+    ),
+    target_quote AS (
+      SELECT id
+      FROM sales.quote_drafts
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+      LIMIT 1
+    ),
+    removed AS (
+      DELETE FROM sales.quote_lines ql
+      USING payload p
+      WHERE ql.quote_id = $2::uuid
+        AND ql.id::text IN (SELECT value FROM jsonb_array_elements_text(COALESCE(p."deleteIds", '[]'::jsonb)))
+      RETURNING ql.id
+    ),
+    main_saved AS (
+      INSERT INTO sales.quote_lines AS ql (
+        id, quote_id, product_id, product_name, option_summary, quantity, unit_price, line_total, notes,
+        configuration_snapshot, client_response_status, client_response_notes, client_responded_at,
+        client_revision_excluded, created_at, updated_at
+      )
+      SELECT
+        p."mainId"::uuid,
+        tq.id,
+        CASE
+          WHEN NULLIF(p."mainProductId", '') IS NULL THEN NULL
+          ELSE (
+            SELECT cp.id
+            FROM catalog.products cp
+            WHERE cp.tenant_id = $1::uuid
+              AND cp.id = NULLIF(p."mainProductId", '')::uuid
+            LIMIT 1
+          )
+        END,
+        p."mainProductName"::varchar,
+        p."mainOptionSummary"::text,
+        p."mainQuantity"::numeric,
+        p."mainUnitPrice"::numeric,
+        (p."mainQuantity"::numeric * p."mainUnitPrice"::numeric),
+        p."mainNotes"::text,
+        COALESCE(p."mainSnapshot", '{}'::jsonb),
+        'pending', NULL, NULL, false, now(), now()
+      FROM payload p
+      CROSS JOIN target_quote tq
+      ON CONFLICT (id) DO UPDATE SET
+        product_id = COALESCE(EXCLUDED.product_id, ql.product_id),
+        product_name = EXCLUDED.product_name,
+        option_summary = EXCLUDED.option_summary,
+        quantity = EXCLUDED.quantity,
+        unit_price = EXCLUDED.unit_price,
+        line_total = EXCLUDED.line_total,
+        notes = EXCLUDED.notes,
+        configuration_snapshot = EXCLUDED.configuration_snapshot,
+        client_response_status = 'pending',
+        client_response_notes = NULL,
+        client_responded_at = NULL,
+        client_revision_excluded = false,
+        updated_at = now()
+      WHERE ql.quote_id = EXCLUDED.quote_id
+      RETURNING id
+    ),
+    dispatch_saved AS (
+      INSERT INTO sales.quote_lines AS ql (
+        id, quote_id, product_id, product_name, option_summary, quantity, unit_price, line_total, notes,
+        configuration_snapshot, client_response_status, client_response_notes, client_responded_at,
+        client_revision_excluded, created_at, updated_at
+      )
+      SELECT
+        p."dispatchId"::uuid,
+        tq.id,
+        NULL,
+        p."dispatchProductName"::varchar,
+        p."dispatchOptionSummary"::text,
+        p."dispatchQuantity"::numeric,
+        p."dispatchUnitPrice"::numeric,
+        (p."dispatchQuantity"::numeric * p."dispatchUnitPrice"::numeric),
+        p."dispatchNotes"::text,
+        COALESCE(p."dispatchSnapshot", '{}'::jsonb),
+        'pending', NULL, NULL, false, now(), now()
+      FROM payload p
+      CROSS JOIN target_quote tq
+      WHERE p."dispatchEnabled" AND p."dispatchId" IS NOT NULL
+      ON CONFLICT (id) DO UPDATE SET
+        product_name = EXCLUDED.product_name,
+        option_summary = EXCLUDED.option_summary,
+        quantity = EXCLUDED.quantity,
+        unit_price = EXCLUDED.unit_price,
+        line_total = EXCLUDED.line_total,
+        notes = EXCLUDED.notes,
+        configuration_snapshot = EXCLUDED.configuration_snapshot,
+        client_response_status = 'pending',
+        client_response_notes = NULL,
+        client_responded_at = NULL,
+        client_revision_excluded = false,
+        updated_at = now()
+      WHERE ql.quote_id = EXCLUDED.quote_id
+      RETURNING id
+    ),
+    access_saved AS (
+      INSERT INTO sales.quote_lines AS ql (
+        id, quote_id, product_id, product_name, option_summary, quantity, unit_price, line_total, notes,
+        configuration_snapshot, client_response_status, client_response_notes, client_responded_at,
+        client_revision_excluded, created_at, updated_at
+      )
+      SELECT
+        p."accessId"::uuid,
+        tq.id,
+        NULL,
+        p."accessProductName"::varchar,
+        p."accessOptionSummary"::text,
+        p."accessQuantity"::numeric,
+        p."accessUnitPrice"::numeric,
+        (p."accessQuantity"::numeric * p."accessUnitPrice"::numeric),
+        p."accessNotes"::text,
+        COALESCE(p."accessSnapshot", '{}'::jsonb),
+        'pending', NULL, NULL, false, now(), now()
+      FROM payload p
+      CROSS JOIN target_quote tq
+      WHERE p."accessEnabled" AND p."accessId" IS NOT NULL
+      ON CONFLICT (id) DO UPDATE SET
+        product_name = EXCLUDED.product_name,
+        option_summary = EXCLUDED.option_summary,
+        quantity = EXCLUDED.quantity,
+        unit_price = EXCLUDED.unit_price,
+        line_total = EXCLUDED.line_total,
+        notes = EXCLUDED.notes,
+        configuration_snapshot = EXCLUDED.configuration_snapshot,
+        client_response_status = 'pending',
+        client_response_notes = NULL,
+        client_responded_at = NULL,
+        client_revision_excluded = false,
+        updated_at = now()
+      WHERE ql.quote_id = EXCLUDED.quote_id
+      RETURNING id
+    )
+    SELECT
+      (SELECT id::text FROM main_saved LIMIT 1) as "mainLineId",
+      (SELECT id::text FROM dispatch_saved LIMIT 1) as "dispatchLineId",
+      (SELECT id::text FROM access_saved LIMIT 1) as "accessEquipmentLineId"
+  `, [tenantId, quoteId, JSON.stringify(payload)]);
+
+  const saved = result.rows[0];
+  if (!saved?.mainLineId) {
+    throw new Error("The quote or quote line could not be found.");
+  }
+  return {
+    mainLineId: saved.mainLineId,
+    dispatchLineId: saved.dispatchLineId ?? null,
+    accessEquipmentLineId: saved.accessEquipmentLineId ?? null
+  };
 }
 
 export async function getQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<QuoteLineRecord | null> {

@@ -107,6 +107,12 @@ export function VisualQuoteCatalogue({
   }, [search, department]);
 
   useEffect(() => {
+    const onSaved = () => setModalOpen(false);
+    window.addEventListener("production-manager:quote-line-saved", onSaved);
+    return () => window.removeEventListener("production-manager:quote-line-saved", onSaved);
+  }, []);
+
+  useEffect(() => {
     if (!modalOpen) return;
     const oldOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";

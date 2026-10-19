@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type FormEvent, type KeyboardEvent } from "react";
-import { addQuoteLineAction } from "./actions";
+import { useEffect, useMemo, useState, useTransition, type FormEvent, type KeyboardEvent } from "react";
+import { useRouter } from "next/navigation";
+import { saveQuoteLineFastAction } from "./actions";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
 import { labourCostingDetails, labourForProcess, labourRateForProcess, selectMachineForProcess, type MachineCostMetrics, type QuoteCostingResources } from "./quoteCostingResources";
 
@@ -1471,6 +1472,10 @@ function bestSheetMaterialForGroup(materials: QuoteMaterial[], widthMm: number, 
 }
 
 export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources, presentation = "full", categoryImages = {} }: QuoteMaterialFlowBuilderProps) {
+  const router = useRouter();
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [, startRefresh] = useTransition();
   const initialSnapshot = useMemo(() => readQuickQuoteSnapshot(editingLine?.configurationSnapshot), [editingLine?.configurationSnapshot]);
   const [wizardIndex, setWizardIndex] = useState(0);
   const standardMarkupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
@@ -3800,9 +3805,28 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     }
   };
 
-  const handleBuilderSubmit = (event: FormEvent<HTMLFormElement>) => {
-    if (!canSave) {
-      event.preventDefault();
+  const handleBuilderSubmit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!canSave || isSaving) return;
+
+    const form = event.currentTarget;
+    setSaveError("");
+    setIsSaving(true);
+    try {
+      const result = await saveQuoteLineFastAction(new FormData(form));
+      if (!result.ok) {
+        setSaveError(result.error || "The quote line could not be saved.");
+        return;
+      }
+
+      const details = form.closest("details") as HTMLDetailsElement | null;
+      if (details) details.open = false;
+      window.dispatchEvent(new CustomEvent("production-manager:quote-line-saved", { detail: result }));
+      startRefresh(() => router.refresh());
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "The quote line could not be saved.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -3862,7 +3886,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       review: "Quantity and internal notes",
     };
     return (
-      <form data-production-manager-auto-refresh-protected="true" action={addQuoteLineAction} onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
+      <form data-production-manager-auto-refresh-protected="true" onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
         <input type="hidden" name="quoteId" value={quoteId} />
         {editingLine ? <input type="hidden" name="editingLineId" value={editingLine.id} /> : null}
         <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
@@ -3889,6 +3913,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             <input type="hidden" name="accessEquipmentLineConfigurationSnapshot" value={JSON.stringify(accessEquipmentConfigurationSnapshot)} />
           </>
         ) : null}
+        {saveError ? <div role="alert" style={{ border: "1px solid #fca5a5", background: "#fff1f2", color: "#b42318", borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 850 }}>{saveError}</div> : null}
 
         <div style={{ display: "grid", gap: 14 }}>
           <div style={{ borderRadius: 14, background: "#eff6ff", border: "1px solid #bfdbfe", padding: "12px 14px" }}>
@@ -3915,7 +3940,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
               <section style={{ minHeight: 330, display: "grid", alignContent: "start", gap: 14 }}><div><div style={{ color: "#64748b", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Build quote line</div><h2 style={{ margin: "3px 0 0", color: "#0f172a", fontSize: 26 }}>{allStepLabels[step] ?? step.replaceAll("_", " ")}</h2></div>{renderWizardStep(step)}</section>
               <div style={{ position: "sticky", bottom: 0, zIndex: 3, margin: "0 -18px -18px", padding: "12px 18px", borderTop: "1px solid #e2e8f0", background: "rgba(255,255,255,.97)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                 <button type="button" disabled={safeWizardIndex === 0} onClick={() => setWizardIndex((current) => Math.max(0, current - 1))} style={{ ...ghostButton, minHeight: 42, opacity: safeWizardIndex === 0 ? .4 : 1 }}>← Back</button>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: "#0f172a" }}>{money(unitPrice)} each</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 42, opacity: canSave ? 1 : .45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Add quote line" : "Complete required fields"}</button>}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: "#0f172a" }}>{money(unitPrice)} each</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave || isSaving} style={{ ...primaryButton, minHeight: 42, opacity: canSave && !isSaving ? 1 : .45, cursor: canSave && !isSaving ? "pointer" : "not-allowed" }}>{isSaving ? "Saving…" : canSave ? (editingLine ? "Save quote line" : "Add quote line") : "Complete required fields"}</button>}</div>
               </div>
             </div>;
           })() : allSignageSteps.map((step, index) => (
@@ -3975,7 +4000,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             {shouldCreateAccessEquipmentLine ? <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 850 }}>Plus Access Equipment - {accessEquipmentType.trim()}: {usage(accessEquipmentDaysNumber)} day{accessEquipmentDaysNumber === 1 ? "" : "s"} × {money(accessEquipmentDailySellPrice)} = {money(accessEquipmentLineTotal)}</span> : null}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="submit" disabled={!canSave} style={{ ...primaryButton, minHeight: 40, opacity: canSave ? 1 : 0.45, cursor: canSave ? "pointer" : "not-allowed" }}>{canSave ? "Save Quote Line" : "Complete required fields"}</button>
+            <button type="submit" disabled={!canSave || isSaving} style={{ ...primaryButton, minHeight: 40, opacity: canSave && !isSaving ? 1 : 0.45, cursor: canSave && !isSaving ? "pointer" : "not-allowed" }}>{isSaving ? "Saving…" : canSave ? "Save Quote Line" : "Complete required fields"}</button>
           </div>
         </div>
       </form>
