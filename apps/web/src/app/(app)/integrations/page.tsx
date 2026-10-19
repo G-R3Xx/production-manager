@@ -7,7 +7,8 @@ import {
   importMyobCustomersAction,
   importMyobItemsAction,
   importMyobSuppliersAction,
-  pushProductionManagerMasterDataToMyobAction
+  pushProductionManagerMasterDataToMyobAction,
+  pushProductionManagerMaterialsToMyobAction
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
@@ -61,7 +62,7 @@ function formatDateTime(value: string | null | undefined) {
 export default async function IntegrationsPage({
   searchParams
 }: {
-  searchParams?: Promise<{ message?: string; error?: string }>;
+  searchParams?: Promise<{ message?: string; error?: string; materialSyncSummary?: string; materialSyncFailures?: string }>;
 }) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -109,6 +110,19 @@ export default async function IntegrationsPage({
       ) : null}
       {params.error ? (
         <div style={{ ...cardStyle(), borderColor: "#fda4af", background: "#fff1f2", color: "#9f1239" }}>{params.error}</div>
+      ) : null}
+      {params.materialSyncSummary ? (
+        <div style={{ ...cardStyle(), borderColor: params.materialSyncFailures ? "#fbbf24" : "#86efac", background: params.materialSyncFailures ? "#fffbeb" : "#f0fdf4", color: params.materialSyncFailures ? "#92400e" : "#166534", display: "grid", gap: 8 }}>
+          <div style={{ fontWeight: 850 }}>{params.materialSyncSummary}</div>
+          {params.materialSyncFailures ? (
+            <div>
+              <div style={{ fontWeight: 750, marginBottom: 4 }}>Failed materials</div>
+              <ul style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 3 }}>
+                {params.materialSyncFailures.split("\n").filter(Boolean).map((failure) => <li key={failure}>{failure}</li>)}
+              </ul>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       <div style={{ ...cardStyle(), display: "grid", gap: 16 }}>
@@ -229,8 +243,14 @@ export default async function IntegrationsPage({
             </button>
           </form>
 
-          <form action={pushProductionManagerMasterDataToMyobAction}>
+          <form action={pushProductionManagerMaterialsToMyobAction}>
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#0f766e", color: "#fff", fontWeight: 800, padding: "0 16px", cursor: "pointer" }}>
+              Sync all Materials to MYOB ({localMaterials.filter((row) => row.active).length})
+            </button>
+          </form>
+
+          <form action={pushProductionManagerMasterDataToMyobAction}>
+            <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "1px solid #0f766e", background: "#f0fdfa", color: "#0f766e", fontWeight: 800, padding: "0 16px", cursor: "pointer" }}>
               Push PM clients + suppliers + materials to MYOB
             </button>
           </form>

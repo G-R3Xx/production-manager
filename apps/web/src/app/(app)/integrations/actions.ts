@@ -164,6 +164,37 @@ export async function importMyobSuppliersAction() {
   redirect(`/integrations?${errorMessage ? `error=${encodeURIComponent(errorMessage)}` : `message=${encodeURIComponent(`Imported ${count} MYOB suppliers`)}`}`);
 }
 
+export async function pushProductionManagerMaterialsToMyobAction() {
+  const tenantId = await requireReadyTenant();
+  const materials = await listMaterialsForTenant(tenantId);
+  const activeMaterials = materials.filter((row) => row.active);
+  let materialCount = 0;
+  const failures: string[] = [];
+
+  for (const row of activeMaterials) {
+    try {
+      await syncLocalMaterialToMyobForTenant(tenantId, row.id);
+      materialCount += 1;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const compact = detail.replace(/\s+/g, " ").trim().slice(0, 280);
+      failures.push(`${row.name}: ${compact || "Unknown MYOB sync error"}`);
+    }
+  }
+
+  revalidatePath("/materials");
+  revalidatePath("/integrations");
+
+  const params = new URLSearchParams();
+  params.set("materialSyncSummary", `Materials synced: ${materialCount} · Failed: ${failures.length}`);
+  if (failures.length) {
+    const visibleFailures = failures.slice(0, 8);
+    if (failures.length > visibleFailures.length) visibleFailures.push(`…and ${failures.length - visibleFailures.length} more failure${failures.length - visibleFailures.length === 1 ? "" : "s"}.`);
+    params.set("materialSyncFailures", visibleFailures.join("\n"));
+  }
+  redirect(`/integrations?${params.toString()}`);
+}
+
 export async function pushProductionManagerMasterDataToMyobAction() {
   const tenantId = await requireReadyTenant();
   const [customers, suppliers, materials] = await Promise.all([
