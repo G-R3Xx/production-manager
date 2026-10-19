@@ -441,9 +441,19 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         result.restored ? `${result.restored} restored` : "",
         result.syncQueued ? `${result.syncQueued} MYOB sync${result.syncQueued === 1 ? "" : "s"} queued` : ""
       ].filter(Boolean);
+      const changedKeys = new Set(changedRows.map((row) => row.key));
+      setRows((current) => current.map((row) => {
+        if (!row.id || !changedKeys.has(row.key)) return row;
+        const nextSavedState: GridRow["savedState"] = row.active ? "active" : row.action === "HIDE" ? "hidden" : row.action === "ARCHIVE" ? "archived" : row.savedState;
+        return { ...row, action: "KEEP", savedState: nextSavedState };
+      }));
       setDirty(new Set());
       setMessage(parts.length ? `${parts.join(" · ")}.` : "Changes saved.");
-      router.refresh();
+      // Existing rows are already current in local state. Avoid a full Server Component
+      // refresh (and re-downloading quote thumbnails) after every ordinary price edit.
+      // New rows need the database-generated ID; new supplier placeholders need the
+      // refreshed supplier list, so only those cases refresh the page.
+      if (changedRows.some((row) => !row.id) || result.supplierPlaceholders > 0) router.refresh();
     });
   }
 
@@ -494,7 +504,6 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       }
       if (failures.length) setError(`${failures.length} image${failures.length === 1 ? "" : "s"} could not be normalized: ${failures.slice(0, 4).join(" · ")}${failures.length > 4 ? " …" : ""}`);
       setMessage(`${updated} quote image${updated === 1 ? "" : "s"} normalized to the 1:1 PM standard${failures.length ? ` · ${failures.length} failed` : ""}.`);
-      router.refresh();
     } finally {
       setNormalizingImages(false);
     }
@@ -588,7 +597,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 175 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                     <div style={{ width: 40, height: 40, border: "1px solid #e4e7ec", borderRadius: 7, background: "#f8fafc", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto" }}>
-                      {row.quoteImageUrl ? <img src={row.quoteImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 9, color: "#98a2b3", fontWeight: 800 }}>None</span>}
+                      {row.quoteImageUrl ? <img src={row.quoteImageUrl} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 9, color: "#98a2b3", fontWeight: 800 }}>None</span>}
                     </div>
                     {row.id ? <label style={{ border: "1px solid #d0d5dd", borderRadius: 7, minHeight: 32, padding: "0 8px", display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 800, cursor: imageBusy.has(row.key) ? "wait" : "pointer", background: "#fff", whiteSpace: "nowrap", opacity: imageBusy.has(row.key) ? 0.6 : 1 }}>
                       {imageBusy.has(row.key) ? "Saving…" : row.quoteImageUrl ? "Replace" : "Upload"}

@@ -3585,9 +3585,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       const base = fallbackKind === "other_sheet" ? "other_sheet" : fallbackKind;
       const directImage = material.quoteImageUrl || categoryImages[base];
       if (directImage) {
-        return <div style={{ position: "relative", width: "100%", height: "100%", minWidth: 0, minHeight: 0, borderRadius: 11, background: "#eef2f6", overflow: "hidden" }}>
-          <img src={directImage} alt="" aria-hidden="true" style={{ position: "absolute", inset: -18, width: "calc(100% + 36px)", height: "calc(100% + 36px)", objectFit: "cover", filter: "blur(14px)", opacity: 0.42, transform: "scale(1.04)", display: "block" }} />
-          <img src={directImage} alt="" aria-hidden="true" style={{ position: "relative", zIndex: 1, width: "100%", height: "100%", minWidth: 0, minHeight: 0, objectFit: "contain", objectPosition: "center", display: "block" }} />
+        return <div style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 0, borderRadius: 11, background: "#eef2f6", overflow: "hidden" }}>
+          <img src={directImage} alt="" aria-hidden="true" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", minWidth: 0, minHeight: 0, objectFit: "cover", objectPosition: "center", display: "block" }} />
         </div>;
       }
       const text = `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""} ${material.materialGroup ?? ""}`.toLowerCase();

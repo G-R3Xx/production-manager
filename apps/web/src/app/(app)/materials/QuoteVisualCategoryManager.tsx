@@ -46,7 +46,7 @@ export function QuoteVisualCategoryManager({ images }: { images: QuoteVisualCate
               {current?.storagePath ? <input type="hidden" name="existingCategoryImageStoragePath" value={current.storagePath} /> : null}
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <div style={{ width: 88, height: 88, border: "1px solid #dbe3ef", borderRadius: 10, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center", flex: "0 0 auto" }}>
-                  {current?.imageUrl ? <img src={current.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800 }}>Default image</span>}
+                  {current?.imageUrl ? <img src={current.imageUrl} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800 }}>Default image</span>}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: "#2563eb", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>{category.group}</div>

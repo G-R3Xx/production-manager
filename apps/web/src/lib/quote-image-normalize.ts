@@ -1,6 +1,6 @@
-const QUOTE_IMAGE_SIZE = 1200;
+const QUOTE_IMAGE_SIZE = 720;
 const QUOTE_IMAGE_TYPE = "image/webp";
-const QUOTE_IMAGE_QUALITY = 0.92;
+const QUOTE_IMAGE_QUALITY = 0.84;
 
 function safeBaseName(name: string): string {
   const base = (name || "quote-image").replace(/\.[^.]+$/, "").replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");

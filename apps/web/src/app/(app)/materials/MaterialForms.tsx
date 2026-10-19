@@ -456,7 +456,7 @@ function QuoteImageField({ material }: { material?: MaterialFormRecord }) {
     <div style={{ display: "grid", gap: 9 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
         <div style={{ width: 120, height: 120, border: "1px solid #d0d5dd", borderRadius: 12, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center" }}>
-          {preview ? <img src={preview} alt="Quote material preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#98a2b3", fontSize: 12, fontWeight: 800, textAlign: "center", padding: 10 }}>No quote image</span>}
+          {preview ? <img src={preview} alt="Quote material preview" decoding="async" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#98a2b3", fontSize: 12, fontWeight: 800, textAlign: "center", padding: 10 }}>No quote image</span>}
         </div>
         <div style={{ display: "grid", gap: 7, flex: "1 1 280px" }}>
           <input
