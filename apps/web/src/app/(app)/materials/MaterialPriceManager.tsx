@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { saveMaterialPriceManagerAction, saveMaterialPriceManagerQuoteImageAction } from "./actions";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { normalizeQuoteImageFile, normalizeQuoteImageUrl } from "@/lib/quote-image-normalize";
 
 type MaterialManagerSource = {
   id: string;
@@ -274,6 +275,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
   const [syncMyob, setSyncMyob] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [imageBusy, setImageBusy] = useState<Set<string>>(() => new Set());
+  const [normalizingImages, setNormalizingImages] = useState(false);
   const dirtyCountRef = useRef(0);
 
   useEffect(() => { dirtyCountRef.current = dirty.size; }, [dirty]);
@@ -453,13 +455,48 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       const formData = new FormData();
       formData.set("materialId", row.id);
       if (remove) formData.set("removeQuoteImage", "true");
-      if (file) formData.set("quoteImageFile", file);
+      if (file) formData.set("quoteImageFile", await normalizeQuoteImageFile(file));
       const result = await saveMaterialPriceManagerQuoteImageAction(formData);
       if (!("ok" in result) || !result.ok) { setError("error" in result ? result.error : "Quote image could not be saved."); return; }
       setRows((current) => current.map((item) => item.key === row.key ? { ...item, quoteImageUrl: result.imageUrl, quoteImageStoragePath: result.storagePath } : item));
-      setMessage(remove ? "Quote image removed." : "Quote image saved.");
+      setMessage(remove ? "Quote image removed." : "Quote image saved · normalized to 1:1.");
+    } catch (imageError) {
+      setError(imageError instanceof Error ? imageError.message : "Quote image could not be prepared.");
     } finally {
       setImageBusy((current) => { const next = new Set(current); next.delete(row.key); return next; });
+    }
+  }
+
+  async function normalizeExistingQuoteImages() {
+    const targets = rows.filter((row) => row.id && row.quoteImageUrl);
+    if (!targets.length) { setMessage("There are no saved quote images to normalize."); return; }
+    setNormalizingImages(true);
+    setError("");
+    setMessage(`Normalizing 0 of ${targets.length} quote images…`);
+    let updated = 0;
+    const failures: string[] = [];
+    try {
+      for (let index = 0; index < targets.length; index += 1) {
+        const row = targets[index];
+        setMessage(`Normalizing ${index + 1} of ${targets.length}: ${row.name}`);
+        try {
+          const normalized = await normalizeQuoteImageUrl(row.quoteImageUrl!, row.name);
+          const formData = new FormData();
+          formData.set("materialId", row.id!);
+          formData.set("quoteImageFile", normalized);
+          const result = await saveMaterialPriceManagerQuoteImageAction(formData);
+          if (!("ok" in result) || !result.ok) throw new Error("error" in result ? result.error : "Could not save normalized image.");
+          updated += 1;
+          setRows((current) => current.map((item) => item.key === row.key ? { ...item, quoteImageUrl: result.imageUrl, quoteImageStoragePath: result.storagePath } : item));
+        } catch (imageError) {
+          failures.push(`${row.name}: ${imageError instanceof Error ? imageError.message : "failed"}`);
+        }
+      }
+      if (failures.length) setError(`${failures.length} image${failures.length === 1 ? "" : "s"} could not be normalized: ${failures.slice(0, 4).join(" · ")}${failures.length > 4 ? " …" : ""}`);
+      setMessage(`${updated} quote image${updated === 1 ? "" : "s"} normalized to the 1:1 PM standard${failures.length ? ` · ${failures.length} failed` : ""}.`);
+      router.refresh();
+    } finally {
+      setNormalizingImages(false);
     }
   }
 
@@ -504,9 +541,10 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
           {sections.map((item) => <button key={item.key} type="button" onClick={() => setSection(item.key)} style={{ border: section === item.key ? "1px solid #667085" : "1px solid #e4e7ec", background: section === item.key ? "#f2f4f7" : "#fff", borderRadius: 999, minHeight: 34, padding: "0 11px", fontWeight: 800, cursor: "pointer" }}>{item.label}</button>)}
         </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto auto", gap: 10, alignItems: "center" }}>
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(220px,1fr) auto auto auto", gap: 10, alignItems: "center" }}>
           <input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search material, supplier or SKU…" style={{ minHeight: 40, border: "1px solid #d0d5dd", borderRadius: 10, padding: "0 12px", fontSize: 14 }} />
           <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, color: "#344054", fontWeight: 700, whiteSpace: "nowrap" }}><input type="checkbox" checked={showInactive} onChange={(event) => setShowInactive(event.target.checked)} /> Show hidden / archived</label>
+          <button type="button" disabled={normalizingImages} onClick={() => void normalizeExistingQuoteImages()} title="Convert all saved material quote images to Production Manager's 1:1 image standard" style={{ minHeight: 40, borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff", color: "#344054", fontWeight: 850, padding: "0 12px", cursor: normalizingImages ? "wait" : "pointer", opacity: normalizingImages ? 0.6 : 1, whiteSpace: "nowrap" }}>{normalizingImages ? "Normalizing…" : "Normalize quote images"}</button>
           <button type="button" onClick={addMaterial} style={{ minHeight: 40, borderRadius: 10, border: "none", background: "#2563eb", color: "#fff", fontWeight: 900, padding: "0 14px", cursor: "pointer" }}>+ Add material</button>
         </div>
 
@@ -549,7 +587,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 150 }}><select value={row.quoteVisualCategory} onChange={(event) => updateRow(row.key, "quoteVisualCategory", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }}>{QUOTE_CATEGORY_OPTIONS.map(([value, label]) => <option key={value || "auto"} value={value}>{label}</option>)}</select></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 175 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-                    <div style={{ width: 46, height: 34, border: "1px solid #e4e7ec", borderRadius: 7, background: "#f8fafc", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto" }}>
+                    <div style={{ width: 40, height: 40, border: "1px solid #e4e7ec", borderRadius: 7, background: "#f8fafc", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto" }}>
                       {row.quoteImageUrl ? <img src={row.quoteImageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain" }} /> : <span style={{ fontSize: 9, color: "#98a2b3", fontWeight: 800 }}>None</span>}
                     </div>
                     {row.id ? <label style={{ border: "1px solid #d0d5dd", borderRadius: 7, minHeight: 32, padding: "0 8px", display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 800, cursor: imageBusy.has(row.key) ? "wait" : "pointer", background: "#fff", whiteSpace: "nowrap", opacity: imageBusy.has(row.key) ? 0.6 : 1 }}>

@@ -3,6 +3,7 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { createMaterialAction, updateMaterialAction } from "./actions";
+import { normalizeQuoteImageFile } from "@/lib/quote-image-normalize";
 
 type SupplierOption = {
   id: string;
@@ -454,7 +455,7 @@ function QuoteImageField({ material }: { material?: MaterialFormRecord }) {
   return (
     <div style={{ display: "grid", gap: 9 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-        <div style={{ width: 150, height: 105, border: "1px solid #d0d5dd", borderRadius: 12, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center" }}>
+        <div style={{ width: 120, height: 120, border: "1px solid #d0d5dd", borderRadius: 12, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center" }}>
           {preview ? <img src={preview} alt="Quote material preview" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#98a2b3", fontSize: 12, fontWeight: 800, textAlign: "center", padding: 10 }}>No quote image</span>}
         </div>
         <div style={{ display: "grid", gap: 7, flex: "1 1 280px" }}>
@@ -463,12 +464,19 @@ function QuoteImageField({ material }: { material?: MaterialFormRecord }) {
             type="file"
             accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif"
             onChange={(event) => {
-              const file = event.target.files?.[0];
-              if (file) setPreview(URL.createObjectURL(file));
+              const input = event.currentTarget;
+              const file = input.files?.[0];
+              if (!file) return;
+              void normalizeQuoteImageFile(file).then((normalized) => {
+                const transfer = new DataTransfer();
+                transfer.items.add(normalized);
+                input.files = transfer.files;
+                setPreview(URL.createObjectURL(normalized));
+              }).catch(() => setPreview(URL.createObjectURL(file)));
             }}
             style={{ ...inputStyle, paddingTop: 9 }}
           />
-          <p style={helperStyle}>Optional. This exact image is used on the visual quote wizard. JPG, PNG, WebP, GIF or AVIF, up to 10 MB. The wizard uses contain-fit so the image is never cropped.</p>
+          <p style={helperStyle}>Optional. PM automatically prepares quote images to the standard 1:1 square canvas without cropping the subject. JPG, PNG, WebP, GIF or AVIF, up to 10 MB.</p>
           {material?.quoteImageUrl ? <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12, fontWeight: 800, color: "#b42318" }}><input type="checkbox" name="removeQuoteImage" value="1" onChange={(event) => { if (event.target.checked) setPreview(null); else setPreview(material.quoteImageUrl); }} /> Remove current quote image</label> : null}
         </div>
       </div>

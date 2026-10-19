@@ -1,6 +1,9 @@
+"use client";
+
 import type { CSSProperties } from "react";
 import type { QuoteVisualCategoryImages, QuoteVisualCategoryKey } from "@/server/quote-visuals";
 import { saveQuoteVisualCategoryImageAction } from "./actions";
+import { normalizeQuoteImageFile } from "@/lib/quote-image-normalize";
 
 const categories: Array<{ key: QuoteVisualCategoryKey; label: string; group: string; hint: string }> = [
   { key: "signage", label: "Large format / signage", group: "Quote line type", hint: "Panels, vinyl, banners and fabricated signage." },
@@ -31,7 +34,7 @@ export function QuoteVisualCategoryManager({ images }: { images: QuoteVisualCate
     <details style={{ border: "1px solid #dbeafe", borderRadius: 18, background: "#fff", padding: 14 }}>
       <summary style={{ cursor: "pointer", fontSize: 18, fontWeight: 900 }}>Quote wizard category images</summary>
       <p style={{ margin: "8px 0 14px", color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>
-        These images are fallbacks for the visual quote wizard. A material-specific image always wins. Upload uncropped images with the full subject visible; PM displays them using contain-fit.
+        These images are fallbacks for the visual quote wizard. A material-specific image always wins. Upload the full subject. PM automatically prepares category images to the same 1:1 square quote-image standard.
       </p>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: 12 }}>
         {categories.map((category) => {
@@ -42,7 +45,7 @@ export function QuoteVisualCategoryManager({ images }: { images: QuoteVisualCate
               {current?.imageUrl ? <input type="hidden" name="existingCategoryImageUrl" value={current.imageUrl} /> : null}
               {current?.storagePath ? <input type="hidden" name="existingCategoryImageStoragePath" value={current.storagePath} /> : null}
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-                <div style={{ width: 108, height: 78, border: "1px solid #dbe3ef", borderRadius: 10, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center", flex: "0 0 auto" }}>
+                <div style={{ width: 88, height: 88, border: "1px solid #dbe3ef", borderRadius: 10, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center", flex: "0 0 auto" }}>
                   {current?.imageUrl ? <img src={current.imageUrl} alt="" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800 }}>Default image</span>}
                 </div>
                 <div style={{ minWidth: 0 }}>
@@ -51,9 +54,9 @@ export function QuoteVisualCategoryManager({ images }: { images: QuoteVisualCate
                   <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.35, marginTop: 3 }}>{category.hint}</div>
                 </div>
               </div>
-              <input name="categoryImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif" style={input} />
+              <input name="categoryImageFile" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif,.jpg,.jpeg,.png,.webp,.gif,.avif" onChange={(event) => { const inputElement = event.currentTarget; const file = inputElement.files?.[0]; if (!file) return; void normalizeQuoteImageFile(file).then((normalized) => { const transfer = new DataTransfer(); transfer.items.add(normalized); inputElement.files = transfer.files; }).catch(() => undefined); }} style={input} />
               <div style={{ display: "flex", gap: 8, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-                {current?.imageUrl ? <label style={{ display: "flex", gap: 7, alignItems: "center", color: "#b42318", fontSize: 11, fontWeight: 800 }}><input type="checkbox" name="removeCategoryImage" value="1" /> Remove custom image</label> : <span style={{ color: "#64748b", fontSize: 11 }}>JPG, PNG, WebP, GIF or AVIF · max 10 MB</span>}
+                {current?.imageUrl ? <label style={{ display: "flex", gap: 7, alignItems: "center", color: "#b42318", fontSize: 11, fontWeight: 800 }}><input type="checkbox" name="removeCategoryImage" value="1" /> Remove custom image</label> : <span style={{ color: "#64748b", fontSize: 11 }}>Auto-normalised to 1:1 · max 10 MB</span>}
                 <button type="submit" style={button}>Save image</button>
               </div>
             </form>
