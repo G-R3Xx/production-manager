@@ -1352,6 +1352,31 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {canOverrideQuoteMarkup ? (
                               <QuoteLineProfitEditor quoteId={selectedQuote.id} lineId={line.id} profitPercent={profitInfo.percent} standardProfitPercent={profitInfo.standardPercent} disabledReason={profitInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null} />
                             ) : null}
+                            <form action={deleteQuoteLineAction} style={{ display: "inline-flex", margin: 0 }}>
+                              <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                              <input type="hidden" name="lineId" value={line.id} />
+                              <button
+                                type="submit"
+                                title="Delete quote line"
+                                aria-label={`Delete ${line.productName} quote line`}
+                                style={{
+                                  border: "1px solid #fca5a5",
+                                  background: "#fff1f2",
+                                  color: "#b42318",
+                                  borderRadius: 10,
+                                  minHeight: 34,
+                                  padding: "6px 11px",
+                                  fontSize: 12,
+                                  fontWeight: 950,
+                                  cursor: "pointer",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  gap: 6
+                                }}
+                              >
+                                <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>×</span> Delete line
+                              </button>
+                            </form>
                             <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
                           </div>
                         </div>
