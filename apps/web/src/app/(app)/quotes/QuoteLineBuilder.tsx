@@ -1727,13 +1727,17 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     () => eligibleProducts.find((product) => product.id === selectedProductId),
     [eligibleProducts, selectedProductId]
   );
-  const [answers, setAnswers] = useState<Record<string, string>>(() => defaultAnswersFor(initialProduct));
+  const [answers, setAnswers] = useState<Record<string, string>>(() => {
+    const defaults = defaultAnswersFor(initialProduct);
+    if (hideProductPicker && initialProduct?.fields.some((field) => field.key === "quantity")) defaults.quantity = "";
+    return defaults;
+  });
   const [followUpAnswers, setFollowUpAnswers] = useState<Record<string, string>>({});
   const [customFollowUpAnswers, setCustomFollowUpAnswers] = useState<Record<string, string>>({});
   const [manualSummary, setManualSummary] = useState("");
   const [unitPrice, setUnitPrice] = useState("0.00");
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
-  const [standaloneQuantity, setStandaloneQuantity] = useState("1");
+  const [standaloneQuantity, setStandaloneQuantity] = useState(hideProductPicker ? "" : "1");
   const guillotineSteps = useMemo(() => {
     const recipe = recipeForId(costingResources, selectedProduct?.productionRecipeId);
     if (!recipe || !costingResources) return [];
@@ -1803,8 +1807,11 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   );
 
   const quantityField = visibleFields.find((field) => field.key === "quantity");
-  const quantity = quantityField ? answers[quantityField.key] || String(quantityField.defaultValue ?? "1") : standaloneQuantity;
+  const quantity = quantityField
+    ? (answers[quantityField.key] || (hideProductPicker ? "" : String(quantityField.defaultValue ?? "1")))
+    : standaloneQuantity;
   const quantityNumber = Math.max(1, numberValue(quantity, 1));
+  const quoteQuantityEntered = numberValue(quantity, 0) > 0;
   const autoSummary = selectedProduct && visibleFields.length > 0 ? summaryFor(selectedProduct, visibleFields, answers, followUpAnswers, customFollowUpAnswers, materials) : manualSummary;
   const autoPricing = useMemo(
     () => calculateQuoteProductPricing(selectedProduct, materials, answers, pricingSettings, followUpAnswers, customFollowUpAnswers, quantityNumber, costingResources),
@@ -1843,12 +1850,14 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   function handleProductChange(productId: string) {
     const nextProduct = eligibleProducts.find((product) => product.id === productId);
     setSelectedProductId(productId);
-    setAnswers(defaultAnswersFor(nextProduct));
+    const nextAnswers = defaultAnswersFor(nextProduct);
+    if (hideProductPicker && nextProduct?.fields.some((field) => field.key === "quantity")) nextAnswers.quantity = "";
+    setAnswers(nextAnswers);
     setFollowUpAnswers({});
     setCustomFollowUpAnswers({});
     setManualSummary("");
     setUnitPriceOverridden(false);
-    setStandaloneQuantity("1");
+    setStandaloneQuantity(hideProductPicker ? "" : "1");
   }
 
   function updateAnswer(key: string, value: string) {
@@ -1941,11 +1950,22 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const handleFastSave = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSaving || machineWarnings.length > 0) return;
+    if (!quoteQuantityEntered) {
+      setSaveError("Enter a quantity greater than zero.");
+      return;
+    }
     const form = event.currentTarget;
     setSaveError("");
     setIsSaving(true);
     try {
+      const saveStartedAt = performance.now();
       const result = await saveQuoteLineFastAction(new FormData(form));
+      console.info("[quote-line-save-client]", {
+        requestElapsedMs: Math.round(performance.now() - saveStartedAt),
+        serverElapsedMs: result.serverElapsedMs,
+        authElapsedMs: result.authElapsedMs,
+        dbElapsedMs: result.dbElapsedMs
+      });
       if (!result.ok) {
         setSaveError(result.error || "The quote line could not be saved.");
         return;
@@ -1996,7 +2016,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         smallFormatCostingProfile: selectedProduct?.smallFormatCostingProfile ?? null,
         pricingProfileLabel
       })} />
-      {quantityField ? <input type="hidden" name="quantity" value={quantity || "1"} /> : null}
+      <input type="hidden" name="quantity" value={quantity} />
       {saveError ? <div role="alert" style={{ border: "1px solid #fca5a5", background: "#fff1f2", color: "#b42318", borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 850 }}>{saveError}</div> : null}
 
       {!hideProductPicker ? <section style={{ display: "grid", gap: 9 }}>
@@ -2060,6 +2080,31 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         </section>
       ) : null}
 
+      {hideProductPicker ? (
+        <section style={{ border: "2px solid #bfdbfe", background: "#f8fbff", borderRadius: 16, padding: 14, display: "grid", gap: 9 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: "0.06em", color: "#2563eb" }}>Required</div>
+              <strong style={{ fontSize: 17, color: "#0f172a" }}>Quantity</strong>
+            </div>
+            <strong style={{ color: "#0f172a" }}>{quoteQuantityEntered ? `${formatMoney(autoUnitPrice)} each · ${formatMoney(autoLineTotal)} total` : `${formatMoney(autoUnitPrice)} each`}</strong>
+          </div>
+          <label style={{ ...labelStyle, maxWidth: 360 }}>
+            <span style={labelTextStyle}>How many?</span>
+            <input
+              value={quantity}
+              onChange={(event) => quantityField ? updateAnswer(quantityField.key, event.target.value) : setStandaloneQuantity(event.target.value)}
+              type="number"
+              min="1"
+              step="any"
+              autoFocus
+              placeholder="Enter quantity"
+              style={inputStyle}
+            />
+          </label>
+        </section>
+      ) : null}
+
       <div style={quotePanelStyle}>
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
           <div>
@@ -2071,7 +2116,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
 
         {selectedProduct && selectedProduct.fields.length > 0 ? (
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {visibleFields.map((field) => {
+            {visibleFields.filter((field) => !(hideProductPicker && field.key === "quantity")).map((field) => {
               const fieldType = normalizedQuestionType(field);
               const value = answers[field.key] ?? String(field.defaultValue ?? "");
 
@@ -2119,7 +2164,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                   <label key={field.id ?? field.key} style={labelStyle}>
                     <span style={labelTextStyle}>{field.label}{field.required === false ? "" : " *"}</span>
                     <select
-                      name={field.key === "quantity" ? "quantity" : `option_${field.key}`}
+                      name={field.key === "quantity" ? undefined : `option_${field.key}`}
                       value={value}
                       required={field.required !== false}
                       onChange={(event) => updateAnswer(field.key, event.target.value)}
@@ -2182,7 +2227,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
                   <label key={field.id ?? field.key} style={labelStyle}>
                     <span style={labelTextStyle}>{field.label}{field.required === false ? "" : " *"}</span>
                     <input
-                      name={field.key === "quantity" ? "quantity" : `option_${field.key}`}
+                      name={field.key === "quantity" ? undefined : `option_${field.key}`}
                       type={inputTypeFor(fieldType)}
                       min={fieldType === "quantity" ? "1" : undefined}
                       step="any"
@@ -2257,11 +2302,11 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
 
       <div style={{ ...quotePanelStyle, background: "#ffffff" }}>
         <strong>3. Price and quantity</strong>
-        <div style={{ display: "grid", gridTemplateColumns: quantityField ? "1fr" : "1fr 1fr", gap: 10 }}>
-          {!quantityField ? (
+        <div style={{ display: "grid", gridTemplateColumns: quantityField || hideProductPicker ? "1fr" : "1fr 1fr", gap: 10 }}>
+          {!quantityField && !hideProductPicker ? (
             <label style={labelStyle}>
               <span style={labelTextStyle}>Quantity</span>
-              <input name="quantity" value={standaloneQuantity} onChange={(event) => setStandaloneQuantity(event.target.value)} type="number" min="1" step="any" style={inputStyle} />
+              <input value={standaloneQuantity} onChange={(event) => setStandaloneQuantity(event.target.value)} type="number" min="1" step="any" style={inputStyle} />
             </label>
           ) : null}
           <label style={labelStyle}>
@@ -2340,7 +2385,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
         </div>
       </div>
 
-      <button type="submit" disabled={machineWarnings.length > 0 || isSaving} style={{ ...buttonStyle, opacity: machineWarnings.length > 0 || isSaving ? 0.45 : 1, cursor: machineWarnings.length > 0 || isSaving ? "not-allowed" : "pointer" }}>{isSaving ? "Saving…" : machineWarnings.length > 0 ? "Machine width exceeds configured capacity" : "Add saved product to quote"}</button>
+      <button type="submit" disabled={machineWarnings.length > 0 || isSaving || !quoteQuantityEntered} style={{ ...buttonStyle, opacity: machineWarnings.length > 0 || isSaving || !quoteQuantityEntered ? 0.45 : 1, cursor: machineWarnings.length > 0 || isSaving || !quoteQuantityEntered ? "not-allowed" : "pointer" }}>{isSaving ? "Saving…" : machineWarnings.length > 0 ? "Machine width exceeds configured capacity" : !quoteQuantityEntered ? "Enter quantity" : "Add saved product to quote"}</button>
     </form>
   );
 }

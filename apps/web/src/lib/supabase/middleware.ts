@@ -13,6 +13,14 @@ function isProtectedPath(pathname: string): boolean {
 }
 
 export async function updateSession(request: NextRequest): Promise<NextResponse> {
+  // Server Actions authenticate again inside the action itself. Calling Supabase
+  // Auth here as well makes every mutation pay for two sequential getUser()
+  // requests before it can touch Postgres. Skip the duplicate middleware lookup
+  // for Server Action POSTs; the action remains the security boundary.
+  if (request.headers.has("next-action") && request.nextUrl.pathname.startsWith("/quotes")) {
+    return NextResponse.next({ request });
+  }
+
   const response = NextResponse.next({
     request
   });

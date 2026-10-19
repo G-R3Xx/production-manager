@@ -1596,7 +1596,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const [componentLabourLabel, setComponentLabourLabel] = useState(snapshotString(initialSnapshot, "componentLabourLabel", "Build / assembly labour"));
   const [componentLabourMinutes, setComponentLabourMinutes] = useState(snapshotString(initialSnapshot, "componentLabourMinutes"));
 
-  const [quantity, setQuantity] = useState(editingLine?.quantity ?? snapshotString(initialSnapshot, "quantity", "1"));
+  const [quantity, setQuantity] = useState(
+    editingLine?.quantity ?? snapshotString(initialSnapshot, "quantity", presentation === "wizard" ? "" : "1")
+  );
   const [lineMarkupInput, setLineMarkupInput] = useState(() => initialSavedMarkupMultiplier.toFixed(2));
   const [markupTouched, setMarkupTouched] = useState(Boolean(editingLine && Math.abs(initialSavedMarkupMultiplier - initialStandardMarkupMultiplier) > 0.000001));
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(Boolean(initialSnapshot?.unitPriceOverridden));
@@ -1837,6 +1839,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     ? accessEquipmentDays
     : quantity;
   const quantityNumber = Math.max(1, numberValue(effectiveQuantity, 1));
+  const quoteQuantityEntered = flowType === "service" && serviceType === "access_equipment"
+    ? numberValue(accessEquipmentDays, 0) > 0
+    : numberValue(quantity, 0) > 0;
   const safeDropOverlapMm = Math.max(0, numberValue(dropOverlapMm, 0));
   const activeRollMaterial = isRollStockBase ? selectedMainMaterial : selectedMedia;
   const activeRollWidthMm = numberValue(activeRollMaterial?.rollWidthMm, 0);
@@ -2850,7 +2855,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       laminateUseLabel || (selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null),
       standoffSummary || null,
       finishingSummary ? `Finishing: ${finishingSummary}` : null,
-      serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null
+      serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
+      `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ");
 
   const accessEquipmentSelectionComplete = !accessEquipmentRequired || accessEquipmentDetailsComplete;
@@ -2861,19 +2867,19 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const planMatrixPricingReady = flowType !== "plan_printing" || planPricingMode === "pm_calculated" || Boolean(selectedPlanMatrixItem && selectedPlanMatrixPrice);
 
   const canSaveBase = flowType === "component"
-    ? Boolean(componentName.trim() && componentHasCost)
+    ? Boolean(componentName.trim() && componentHasCost && quoteQuantityEntered)
     : flowType === "service"
-    ? Boolean(serviceType && (
+    ? Boolean(serviceType && quoteQuantityEntered && (
       serviceType === "pickup"
       || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0)
       || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0 && accessEquipmentSelectionComplete)
       || (serviceType === "access_equipment" && accessEquipmentDetailsComplete)
     ))
     : isPrintDepartment
-      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quantityNumber > 0 && dispatchComplete && planMatrixPricingReady)
+      ? Boolean(selectedSmallStock && width > 0 && height > 0 && artworkChoice && sides && smallPrintColour && smallCoatingId && quoteQuantityEntered && dispatchComplete && planMatrixPricingReady)
       : flowType === "small_format"
-        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quantityNumber > 0 && dispatchComplete)
-        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!canChooseReversePrint || !printed || printDirection) && (!backingApplicable || Boolean(backingId)) && (!printed || Boolean(laminateId)) && dispatchComplete);
+        ? Boolean(smallType && ncrDetailsComplete && selectedSmallStock && width > 0 && height > 0 && artworkChoice && (isDuplicateBook || (sides && smallPrintColour && smallCoatingId)) && quoteQuantityEntered && dispatchComplete)
+        : Boolean(baseType && selectedMainMaterial && width > 0 && height > 0 && quoteQuantityEntered && artworkChoice && resolvedPrintMethod && (!needsMediaStep || mediaId) && (!needsInkStep || ink) && (!printed || sides) && (!canChooseReversePrint || !printed || printDirection) && (!backingApplicable || Boolean(backingId)) && (!printed || Boolean(laminateId)) && dispatchComplete);
   const canSave = canSaveBase && machineCompatibilityIssues.length === 0;
 
   const configurationSnapshot: QuickQuoteSnapshot = {
@@ -3306,8 +3312,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       return <div style={compactPanel}><div style={checkGrid}>{smallFinishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={smallFinishings.includes(item.key)} onChange={() => { toggleSmallFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); changed(); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} labourRatesByKey={smallFinishingLabourRates} automaticByKey={smallFinishingAutomaticLabour} quantity={quantityNumber} /></div>;
     }
 
-    if (compactStep === "small_quantity" || compactStep === "review") {
-      return <div style={compactPanel}><div style={compactGrid}>{serviceType !== "access_equipment" ? <label style={{ display: "grid", gap: 6 }}><b>Quantity</b><input value={quantity} onChange={(event) => { setQuantity(event.target.value); changed(); }} type="number" min="1" step="any" style={inputStyle} /></label> : null}<label style={{ display: "grid", gap: 6 }}><b>Internal line notes</b><textarea value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} style={textareaStyle} /></label></div></div>;
+    if (compactStep === "quantity" || compactStep === "small_quantity") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6, maxWidth: 360 }}><b>Quantity</b><input value={quantity} onChange={(event) => { setQuantity(event.target.value); changed(); }} type="number" min="1" step="any" autoFocus={presentation === "wizard"} placeholder="Enter quantity" style={inputStyle} /><small style={{ color: "#64748b" }}>This quantity drives stock usage, labour, MYOB quantity breaks and the final line total.</small></label></div>;
+    }
+
+    if (compactStep === "review") {
+      return <div style={compactPanel}><label style={{ display: "grid", gap: 6 }}><b>Internal line notes (optional)</b><textarea value={lineNotes} onChange={(event) => setLineNotes(event.target.value)} style={textareaStyle} /></label></div>;
     }
 
     if (compactStep === "service_type") {
@@ -3813,7 +3823,14 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     setSaveError("");
     setIsSaving(true);
     try {
+      const saveStartedAt = performance.now();
       const result = await saveQuoteLineFastAction(new FormData(form));
+      console.info("[quote-line-save-client]", {
+        requestElapsedMs: Math.round(performance.now() - saveStartedAt),
+        serverElapsedMs: result.serverElapsedMs,
+        authElapsedMs: result.authElapsedMs,
+        dbElapsedMs: result.dbElapsedMs
+      });
       if (!result.ok) {
         setSaveError(result.error || "The quote line could not be saved.");
         return;
@@ -3831,20 +3848,21 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   };
 
   const allSignageSteps: QuickQuoteStep[] = flowType === "service"
-      ? ["flow", "service_type", "service_details", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "review"]
+      ? ["flow", "service_type", ...(serviceType === "access_equipment" ? [] : ["quantity" as QuickQuoteStep]), "service_details", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "review"]
       : flowType === "component"
-        ? ["flow", "component_details", "component_parts", "component_labour", "review"]
+        ? ["flow", "component_details", "quantity", "component_parts", "component_labour", "review"]
         : flowType === "small_format"
-          ? ["flow", "small_type", ...(isDuplicateBook ? ["ncr_details" as QuickQuoteStep] : []), "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
+          ? ["flow", "small_type", ...(isDuplicateBook ? ["ncr_details" as QuickQuoteStep] : []), "small_stock", "small_size", "quantity", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "review"]
           : flowType === "plan_printing"
-            ? ["flow", "small_size", "small_print", "small_stock", "artwork", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
+            ? ["flow", "small_size", "quantity", "small_print", "small_stock", "artwork", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "review"]
             : isPrintDepartment
-              ? ["flow", "small_stock", "small_size", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "small_quantity"]
+              ? ["flow", "small_stock", "small_size", "quantity", "artwork", "small_print", "small_sides", "small_coating", "small_finishing", "dispatch", ...(serviceType === "install" ? ["service_fixings" as QuickQuoteStep] : []), "review"]
               : [
               "flow",
               "base",
               "thickness",
               "size",
+              "quantity",
               "artwork",
               "print",
               ...(!isRollStockBase && needsMediaStep ? ["media" as QuickQuoteStep] : []),
@@ -3860,6 +3878,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       base: "Sign type",
       thickness: "Substrate / material",
       size: "Finished size",
+      quantity: "Quantity",
       artwork: "Artwork",
       print: "Print method",
       media: "Roll stock / media",
@@ -3875,7 +3894,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       small_sides: "Sides",
       small_coating: "Cello / coating",
       small_finishing: "Finishing",
-      small_quantity: "Quantity and internal notes",
+      small_quantity: "Quantity",
       service_type: "Service type",
       service_details: "Service details",
       service_fixings: "Fixings and consumables",
@@ -3883,7 +3902,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       component_parts: "Materials and parts",
       component_labour: "Assembly labour",
       dispatch: "Pickup / delivery / install",
-      review: "Quantity and internal notes",
+      review: "Internal notes",
     };
     return (
       <form data-production-manager-auto-refresh-protected="true" onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
@@ -3930,7 +3949,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
           {presentation === "wizard" ? (() => {
             const safeWizardIndex = Math.min(Math.max(0, wizardIndex), Math.max(0, allSignageSteps.length - 1));
             const step = allSignageSteps[safeWizardIndex];
-            const stepComplete = step === "flow" ? Boolean(flowType) : step === "service_type" ? Boolean(serviceType) : step === "base" ? Boolean(baseType) : step === "thickness" || step === "colour" ? Boolean(selectedMainMaterial) : step === "size" || step === "small_size" ? width > 0 && height > 0 : step === "artwork" ? Boolean(artworkChoice) : step === "print" ? Boolean(resolvedPrintMethod) : step === "media" ? Boolean(mediaId) : step === "ink" ? Boolean(ink) : step === "sides" || step === "small_sides" ? Boolean(sides && (!canChooseReversePrint || !printed || printDirection)) : step === "laminate" ? Boolean((!backingApplicable || backingId) && (!printed || laminateId)) : step === "dispatch" ? dispatchComplete : true;
+            const stepComplete = step === "flow" ? Boolean(flowType) : step === "service_type" ? Boolean(serviceType) : step === "base" ? Boolean(baseType) : step === "thickness" || step === "colour" ? Boolean(selectedMainMaterial) : step === "size" || step === "small_size" ? width > 0 && height > 0 : step === "quantity" || step === "small_quantity" ? quoteQuantityEntered : step === "artwork" ? Boolean(artworkChoice) : step === "print" ? Boolean(resolvedPrintMethod) : step === "media" ? Boolean(mediaId) : step === "ink" ? Boolean(ink) : step === "sides" || step === "small_sides" ? Boolean(sides && (!canChooseReversePrint || !printed || printDirection)) : step === "laminate" ? Boolean((!backingApplicable || backingId) && (!printed || laminateId)) : step === "dispatch" ? dispatchComplete : true;
             const atLast = safeWizardIndex === allSignageSteps.length - 1;
             return <div style={{ display: "grid", gap: 16 }}>
               <div style={{ display: "grid", gap: 8 }}>
@@ -3940,7 +3959,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
               <section style={{ minHeight: 330, display: "grid", alignContent: "start", gap: 14 }}><div><div style={{ color: "#64748b", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Build quote line</div><h2 style={{ margin: "3px 0 0", color: "#0f172a", fontSize: 26 }}>{allStepLabels[step] ?? step.replaceAll("_", " ")}</h2></div>{renderWizardStep(step)}</section>
               <div style={{ position: "sticky", bottom: 0, zIndex: 3, margin: "0 -18px -18px", padding: "12px 18px", borderTop: "1px solid #e2e8f0", background: "rgba(255,255,255,.97)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                 <button type="button" disabled={safeWizardIndex === 0} onClick={() => setWizardIndex((current) => Math.max(0, current - 1))} style={{ ...ghostButton, minHeight: 42, opacity: safeWizardIndex === 0 ? .4 : 1 }}>← Back</button>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: "#0f172a" }}>{money(unitPrice)} each</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave || isSaving} style={{ ...primaryButton, minHeight: 42, opacity: canSave && !isSaving ? 1 : .45, cursor: canSave && !isSaving ? "pointer" : "not-allowed" }}>{isSaving ? "Saving…" : canSave ? (editingLine ? "Save quote line" : "Add quote line") : "Complete required fields"}</button>}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: "#0f172a" }}>{quoteQuantityEntered ? `${money(unitPrice)} each · Qty ${usage(quantityNumber)} · ${money(lineTotal)} total` : `${money(unitPrice)} each · Qty required`}</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave || isSaving} style={{ ...primaryButton, minHeight: 42, opacity: canSave && !isSaving ? 1 : .45, cursor: canSave && !isSaving ? "pointer" : "not-allowed" }}>{isSaving ? "Saving…" : canSave ? (editingLine ? "Save quote line" : "Add quote line") : "Complete required fields"}</button>}</div>
               </div>
             </div>;
           })() : allSignageSteps.map((step, index) => (

@@ -905,8 +905,12 @@ export type QuoteLineBundleSaveInput = {
   } | null;
 };
 
-export async function saveQuoteLineBundleForTenant(
-  tenantId: string,
+type QuoteLineSavePrincipal =
+  | { kind: "tenant"; id: string }
+  | { kind: "auth_user"; id: string };
+
+async function saveQuoteLineBundleForPrincipal(
+  principal: QuoteLineSavePrincipal,
   quoteId: string,
   input: QuoteLineBundleSaveInput
 ): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
@@ -999,15 +1003,29 @@ export async function saveQuoteLineBundleForTenant(
       )
     ),
     target_quote AS (
-      SELECT id
-      FROM sales.quote_drafts
-      WHERE tenant_id = $1::uuid AND id = $2::uuid
+      SELECT qd.id, qd.tenant_id
+      FROM sales.quote_drafts qd
+      WHERE qd.id = $2::uuid
+        AND (
+          ($4::text = 'tenant' AND qd.tenant_id = $1::uuid)
+          OR (
+            $4::text = 'auth_user'
+            AND EXISTS (
+              SELECT 1
+              FROM app.user_profiles up
+              INNER JOIN app.memberships m ON m.user_profile_id = up.id
+              WHERE up.auth_user_id = $1::uuid
+                AND m.tenant_id = qd.tenant_id
+                AND m.status = 'active'
+            )
+          )
+        )
       LIMIT 1
     ),
     removed AS (
       DELETE FROM sales.quote_lines ql
-      USING payload p
-      WHERE ql.quote_id = $2::uuid
+      USING payload p, target_quote tq
+      WHERE ql.quote_id = tq.id
         AND ql.id::text IN (SELECT value FROM jsonb_array_elements_text(COALESCE(p."deleteIds", '[]'::jsonb)))
       RETURNING ql.id
     ),
@@ -1025,7 +1043,7 @@ export async function saveQuoteLineBundleForTenant(
           ELSE (
             SELECT cp.id
             FROM catalog.products cp
-            WHERE cp.tenant_id = $1::uuid
+            WHERE cp.tenant_id = tq.tenant_id
               AND cp.id = NULLIF(p."mainProductId", '')::uuid
             LIMIT 1
           )
@@ -1135,7 +1153,7 @@ export async function saveQuoteLineBundleForTenant(
       (SELECT id::text FROM main_saved LIMIT 1) as "mainLineId",
       (SELECT id::text FROM dispatch_saved LIMIT 1) as "dispatchLineId",
       (SELECT id::text FROM access_saved LIMIT 1) as "accessEquipmentLineId"
-  `, [tenantId, quoteId, JSON.stringify(payload)]);
+  `, [principal.id, quoteId, JSON.stringify(payload), principal.kind]);
 
   const saved = result.rows[0];
   if (!saved?.mainLineId) {
@@ -1146,6 +1164,22 @@ export async function saveQuoteLineBundleForTenant(
     dispatchLineId: saved.dispatchLineId ?? null,
     accessEquipmentLineId: saved.accessEquipmentLineId ?? null
   };
+}
+
+export async function saveQuoteLineBundleForTenant(
+  tenantId: string,
+  quoteId: string,
+  input: QuoteLineBundleSaveInput
+): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
+  return saveQuoteLineBundleForPrincipal({ kind: "tenant", id: tenantId }, quoteId, input);
+}
+
+export async function saveQuoteLineBundleForAuthUser(
+  authUserId: string,
+  quoteId: string,
+  input: QuoteLineBundleSaveInput
+): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
+  return saveQuoteLineBundleForPrincipal({ kind: "auth_user", id: authUserId }, quoteId, input);
 }
 
 export async function getQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<QuoteLineRecord | null> {

@@ -7,6 +7,7 @@ export type QuickQuoteStep =
   | "thickness"
   | "colour"
   | "size"
+  | "quantity"
   | "artwork"
   | "print"
   | "media"

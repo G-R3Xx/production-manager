@@ -23,6 +23,7 @@ import {
   markQuoteEmailFailedForTenant,
   removeArtworkApprovalPageForTenant,
   saveQuoteLineBundleForTenant,
+  saveQuoteLineBundleForAuthUser,
   setQuoteDraftStatusForTenant,
   getQuoteDraftById,
   respondToQuoteByToken,
@@ -548,6 +549,8 @@ export type FastQuoteLineSaveResult = {
   message: string;
   error: string | null;
   serverElapsedMs: number;
+  authElapsedMs: number;
+  dbElapsedMs: number;
 };
 
 function validUuidOrNull(value: unknown): string | null {
@@ -558,8 +561,13 @@ function validUuidOrNull(value: unknown): string | null {
 export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQuoteLineSaveResult> {
   const startedAt = Date.now();
   let quoteId = String(formData.get("quoteId") ?? "").trim();
+  let authElapsedMs = 0;
+  let dbElapsedMs = 0;
   try {
-    const activeTenant = await requireTenant();
+    const authStartedAt = Date.now();
+    const user = await getRequiredSessionUser();
+    authElapsedMs = Date.now() - authStartedAt;
+
     const editingLineId = validUuidOrNull(formData.get("editingLineId"));
     const productId = validUuidOrNull(formData.get("productId"));
     const formProductName = String(formData.get("productName") ?? "").trim();
@@ -568,10 +576,14 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
     const configurationSnapshot = jsonObject(formData.get("configurationSnapshot"));
 
     if (!validUuidOrNull(quoteId)) {
-      return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Select a quote first.", serverElapsedMs: Date.now() - startedAt };
+      return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Select a quote first.", serverElapsedMs: Date.now() - startedAt, authElapsedMs, dbElapsedMs };
     }
 
-    let productName = formProductName || (productId ? "Saved product" : "Custom material quote line");
+    if (!(Number(quantity) > 0)) {
+      return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Enter a quantity greater than zero.", serverElapsedMs: Date.now() - startedAt, authElapsedMs, dbElapsedMs };
+    }
+
+    const productName = formProductName || (productId ? "Saved product" : "Custom material quote line");
     const savedProductId: string | null = productId;
 
     const serviceLineProductName = String(formData.get("serviceLineProductName") ?? "").trim();
@@ -608,7 +620,11 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
     const existingAccessEquipmentLineId = validUuidOrNull(configurationSnapshot.linkedAccessEquipmentLineId)
       || validUuidOrNull(serviceLineSnapshot.linkedAccessEquipmentLineId);
 
-    const saved = await saveQuoteLineBundleForTenant(activeTenant.tenantId, quoteId, {
+    const dbStartedAt = Date.now();
+    // Authorisation and tenant ownership are checked inside the same PostgreSQL
+    // statement that writes the line. This removes the extra membership query
+    // that previously ran before every quote-line save.
+    const saved = await saveQuoteLineBundleForAuthUser(user.id, quoteId, {
       lineId: editingLineId,
       productId: savedProductId,
       productName,
@@ -622,21 +638,32 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
       dispatchLine: serviceLineInput,
       accessEquipmentLine: accessEquipmentLineInput
     });
+    dbElapsedMs = Date.now() - dbStartedAt;
 
     const elapsed = Date.now() - startedAt;
-    console.info("[quote-line-save]", { quoteId, lineId: saved.mainLineId, editing: Boolean(editingLineId), elapsedMs: elapsed });
+    console.info("[quote-line-save]", {
+      quoteId,
+      lineId: saved.mainLineId,
+      editing: Boolean(editingLineId),
+      elapsedMs: elapsed,
+      authElapsedMs,
+      dbElapsedMs
+    });
     return {
       ok: true,
       quoteId,
       lineId: saved.mainLineId,
       message: editingLineId ? "Quote line updated" : "Quote line added",
       error: null,
-      serverElapsedMs: elapsed
+      serverElapsedMs: elapsed,
+      authElapsedMs,
+      dbElapsedMs
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "The quote line could not be saved.";
-    console.error("[quote-line-save] failed", { quoteId, error: message });
-    return { ok: false, quoteId, lineId: null, message: "", error: message, serverElapsedMs: Date.now() - startedAt };
+    const elapsed = Date.now() - startedAt;
+    console.error("[quote-line-save] failed", { quoteId, error: message, elapsedMs: elapsed, authElapsedMs, dbElapsedMs });
+    return { ok: false, quoteId, lineId: null, message: "", error: message, serverElapsedMs: elapsed, authElapsedMs, dbElapsedMs };
   }
 }
 
