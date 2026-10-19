@@ -3497,16 +3497,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     const imageOnlyTile = (selected: boolean) => ({
       position: "relative" as const,
       width: "100%",
-      aspectRatio: "4 / 3",
+      height: 210,
       borderRadius: 16,
       border: selected ? "2px solid #2563eb" : "1px solid #d7e0ea",
       background: selected ? "linear-gradient(180deg,#f6faff 0%,#ffffff 100%)" : "#fff",
       boxShadow: selected ? "0 10px 26px rgba(37,99,235,.14)" : "0 7px 18px rgba(15,23,42,.05)",
       padding: 8,
-      display: "grid",
-      placeItems: "stretch",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
       cursor: "pointer",
-      overflow: "hidden"
+      overflow: "hidden",
+      boxSizing: "border-box" as const
     });
     const artworkTile = (selected: boolean) => ({
       position: "relative" as const,
@@ -3529,7 +3531,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       const base = fallbackKind === "other_sheet" ? "other_sheet" : fallbackKind;
       const directImage = material.quoteImageUrl || categoryImages[base];
       if (directImage) {
-        return <div style={{ width: "100%", height: "100%", borderRadius: 11, overflow: "hidden", background: "#f8fafc", display: "grid", placeItems: "center" }}><img src={directImage} alt="" aria-hidden="true" style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }} /></div>;
+        return <div style={{ width: "100%", height: "100%", borderRadius: 11, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", padding: 8, boxSizing: "border-box" }}><img src={directImage} alt="" aria-hidden="true" style={{ maxWidth: "100%", maxHeight: "100%", width: "auto", height: "auto", objectFit: "contain", objectPosition: "center", display: "block" }} /></div>;
       }
       const text = `${material.name} ${material.customerFacingName ?? ""} ${material.materialType ?? ""} ${material.materialGroup ?? ""}`.toLowerCase();
       const has = (value: string) => text.includes(value);
@@ -3565,7 +3567,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         if (match && base !== "other_sheet") tint = match[1];
       }
 
-      return <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: 11, overflow: "hidden", background: "#f8fafc", display: "grid", placeItems: "center" }}>
+      return <div style={{ position: "relative", width: "100%", height: "100%", borderRadius: 11, background: "#f8fafc", display: "flex", alignItems: "center", justifyContent: "center", padding: 8, boxSizing: "border-box" }}>
         {wizardIllustration(kind)}
         {tint ? <span aria-hidden="true" style={{ position: "absolute", inset: 0, background: tint, opacity: 0.42, mixBlendMode: "multiply", pointerEvents: "none" }} /> : null}
       </div>;
