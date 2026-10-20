@@ -909,15 +909,26 @@ type QuoteLineSavePrincipal =
   | { kind: "tenant"; id: string }
   | { kind: "auth_user"; id: string };
 
+export type QuoteLineBundleSaveResult = {
+  mainLineId: string;
+  dispatchLineId: string | null;
+  accessEquipmentLineId: string | null;
+  schemaElapsedMs: number;
+  connectionElapsedMs: number;
+  queryElapsedMs: number;
+};
+
 async function saveQuoteLineBundleForPrincipal(
   principal: QuoteLineSavePrincipal,
   quoteId: string,
   input: QuoteLineBundleSaveInput
-): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
+): Promise<QuoteLineBundleSaveResult> {
+  const schemaStartedAt = Date.now();
   await Promise.all([
     ensureQuoteLineConfigurationColumn(),
     ensureQuoteLineClientResponseColumns()
   ]);
+  const schemaElapsedMs = Date.now() - schemaStartedAt;
 
   const mainLineId = input.lineId || randomUUID();
   const dispatchLineId = input.dispatchLine ? (input.existingDispatchLineId || randomUUID()) : null;
@@ -971,7 +982,13 @@ async function saveQuoteLineBundleForPrincipal(
     deleteIds
   };
 
-  const result = await pool.query<{ mainLineId: string | null; dispatchLineId: string | null; accessEquipmentLineId: string | null }>(`
+  const connectionStartedAt = Date.now();
+  const client = await pool.connect();
+  const connectionElapsedMs = Date.now() - connectionStartedAt;
+  const queryStartedAt = Date.now();
+  let result: { rows: Array<{ mainLineId: string | null; dispatchLineId: string | null; accessEquipmentLineId: string | null }> };
+  try {
+    result = await client.query<{ mainLineId: string | null; dispatchLineId: string | null; accessEquipmentLineId: string | null }>(`
     WITH payload AS (
       SELECT *
       FROM jsonb_to_record($3::jsonb) AS p(
@@ -1154,6 +1171,10 @@ async function saveQuoteLineBundleForPrincipal(
       (SELECT id::text FROM dispatch_saved LIMIT 1) as "dispatchLineId",
       (SELECT id::text FROM access_saved LIMIT 1) as "accessEquipmentLineId"
   `, [principal.id, quoteId, JSON.stringify(payload), principal.kind]);
+  } finally {
+    client.release();
+  }
+  const queryElapsedMs = Date.now() - queryStartedAt;
 
   const saved = result.rows[0];
   if (!saved?.mainLineId) {
@@ -1162,7 +1183,10 @@ async function saveQuoteLineBundleForPrincipal(
   return {
     mainLineId: saved.mainLineId,
     dispatchLineId: saved.dispatchLineId ?? null,
-    accessEquipmentLineId: saved.accessEquipmentLineId ?? null
+    accessEquipmentLineId: saved.accessEquipmentLineId ?? null,
+    schemaElapsedMs,
+    connectionElapsedMs,
+    queryElapsedMs
   };
 }
 
@@ -1170,7 +1194,7 @@ export async function saveQuoteLineBundleForTenant(
   tenantId: string,
   quoteId: string,
   input: QuoteLineBundleSaveInput
-): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
+): Promise<QuoteLineBundleSaveResult> {
   return saveQuoteLineBundleForPrincipal({ kind: "tenant", id: tenantId }, quoteId, input);
 }
 
@@ -1178,7 +1202,7 @@ export async function saveQuoteLineBundleForAuthUser(
   authUserId: string,
   quoteId: string,
   input: QuoteLineBundleSaveInput
-): Promise<{ mainLineId: string; dispatchLineId: string | null; accessEquipmentLineId: string | null }> {
+): Promise<QuoteLineBundleSaveResult> {
   return saveQuoteLineBundleForPrincipal({ kind: "auth_user", id: authUserId }, quoteId, input);
 }
 

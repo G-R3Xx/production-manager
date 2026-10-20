@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
-import { saveQuoteLineFastAction } from "./actions";
+import { saveQuoteLineFast } from "./saveQuoteLineClient";
 import { materialsFromSnapshot, readQuickQuoteSnapshot, type QuickQuoteFlowType, type QuickQuoteSnapshot, type QuickQuoteStep, type SnapshotMaterial } from "./quoteLineSnapshot";
 import { labourCostingDetails, labourForProcess, labourRateForProcess, selectMachineForProcess, type MachineCostMetrics, type QuoteCostingResources } from "./quoteCostingResources";
 
@@ -3828,12 +3828,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     setIsSaving(true);
     try {
       const saveStartedAt = performance.now();
-      const result = await saveQuoteLineFastAction(new FormData(form));
+      const result = await saveQuoteLineFast(new FormData(form));
       console.info("[quote-line-save-client]", {
         requestElapsedMs: Math.round(performance.now() - saveStartedAt),
         serverElapsedMs: result.serverElapsedMs,
         authElapsedMs: result.authElapsedMs,
-        dbElapsedMs: result.dbElapsedMs
+        dbElapsedMs: result.dbElapsedMs,
+        dbSchemaElapsedMs: result.dbSchemaElapsedMs,
+        dbConnectionElapsedMs: result.dbConnectionElapsedMs,
+        dbQueryElapsedMs: result.dbQueryElapsedMs,
+        runtimeRegion: result.runtimeRegion
       });
       if (!result.ok) {
         setSaveError(result.error || "The quote line could not be saved.");
@@ -3909,7 +3913,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       review: "Internal notes",
     };
     return (
-      <form data-production-manager-auto-refresh-protected="true" onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
+      <form data-no-global-loader="true" data-production-manager-auto-refresh-protected="true" onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
         <input type="hidden" name="quoteId" value={quoteId} />
         {editingLine ? <input type="hidden" name="editingLineId" value={editingLine.id} /> : null}
         <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />

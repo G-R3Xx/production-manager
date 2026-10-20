@@ -124,6 +124,7 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [siteAddress, setSiteAddress] = useState("");
+  const [siteSurveyRequired, setSiteSurveyRequired] = useState<"" | "yes" | "no">("");
   const [dragActive, setDragActive] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState(
@@ -299,7 +300,42 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
           ))}
         </select>
       </div>
-      <input name="siteAddress" value={siteAddress} onChange={(event) => setSiteAddress(event.currentTarget.value)} placeholder="Site address if relevant" style={fieldStyle} />
+      <section
+        style={{
+          border: `1px solid ${siteSurveyRequired === "yes" ? "#93c5fd" : "#dbe4f0"}`,
+          borderRadius: isTablet ? 18 : 14,
+          background: siteSurveyRequired === "yes" ? "#eff6ff" : "#fbfdff",
+          padding: isTablet ? 14 : 11,
+          display: "grid",
+          gap: 8
+        }}
+      >
+        <strong style={{ fontSize: isTablet ? 16 : 13 }}>Site survey required?</strong>
+        <select
+          name="siteSurveyRequired"
+          value={siteSurveyRequired}
+          required
+          onChange={(event) => setSiteSurveyRequired(event.currentTarget.value as "" | "yes" | "no")}
+          style={{ ...fieldStyle, background: "#fff" }}
+        >
+          <option value="" disabled>Select Yes or No</option>
+          <option value="no">No — survey not required</option>
+          <option value="yes">Yes — create survey request now</option>
+        </select>
+        <span style={{ color: siteSurveyRequired === "yes" ? "#1d4ed8" : "#64748b", fontSize: isTablet ? 13 : 12, lineHeight: 1.4 }}>
+          {siteSurveyRequired === "yes"
+            ? "Creating this enquiry will also create the site survey in Production Manager and send it to Install Scheduler automatically."
+            : "Choose explicitly so a required site survey cannot be missed during intake."}
+        </span>
+      </section>
+      <input
+        name="siteAddress"
+        value={siteAddress}
+        onChange={(event) => setSiteAddress(event.currentTarget.value)}
+        placeholder={siteSurveyRequired === "yes" ? "Site address required for survey" : "Site address if relevant"}
+        required={siteSurveyRequired === "yes"}
+        style={fieldStyle}
+      />
       <input name="clientPurchaseOrderNumber" placeholder="Client purchase order number (optional)" style={fieldStyle} />
       <textarea name="requestSummary" placeholder="Rough idea of what they require" required style={tabletTextareaStyle} />
       <textarea name="notes" placeholder="Internal notes" style={tabletTextareaStyle} />

@@ -17,7 +17,10 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   // Auth here as well makes every mutation pay for two sequential getUser()
   // requests before it can touch Postgres. Skip the duplicate middleware lookup
   // for Server Action POSTs; the action remains the security boundary.
-  if (request.headers.has("next-action") && request.nextUrl.pathname.startsWith("/quotes")) {
+  if (
+    (request.headers.has("next-action") && request.nextUrl.pathname.startsWith("/quotes"))
+    || request.nextUrl.pathname === "/api/quotes/line"
+  ) {
     return NextResponse.next({ request });
   }
 

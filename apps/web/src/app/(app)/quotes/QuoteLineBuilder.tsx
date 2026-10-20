@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState, useTransition, type FormEvent } from "react";
 import { useRouter } from "next/navigation";
-import { saveQuoteLineFastAction } from "./actions";
+import { saveQuoteLineFast } from "./saveQuoteLineClient";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
 import { guillotineCostingDetails, labourForProcess, labourLineCost, normalizeCostingName, recipeForId, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
@@ -1959,12 +1959,16 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
     setIsSaving(true);
     try {
       const saveStartedAt = performance.now();
-      const result = await saveQuoteLineFastAction(new FormData(form));
+      const result = await saveQuoteLineFast(new FormData(form));
       console.info("[quote-line-save-client]", {
         requestElapsedMs: Math.round(performance.now() - saveStartedAt),
         serverElapsedMs: result.serverElapsedMs,
         authElapsedMs: result.authElapsedMs,
-        dbElapsedMs: result.dbElapsedMs
+        dbElapsedMs: result.dbElapsedMs,
+        dbSchemaElapsedMs: result.dbSchemaElapsedMs,
+        dbConnectionElapsedMs: result.dbConnectionElapsedMs,
+        dbQueryElapsedMs: result.dbQueryElapsedMs,
+        runtimeRegion: result.runtimeRegion
       });
       if (!result.ok) {
         setSaveError(result.error || "The quote line could not be saved.");
@@ -1991,7 +1995,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   }
 
   return (
-    <form onSubmit={handleFastSave} style={{ display: "grid", gap: 14 }}>
+    <form data-no-global-loader="true" onSubmit={handleFastSave} style={{ display: "grid", gap: 14 }}>
       <input type="hidden" name="quoteId" value={quoteId} />
       <input type="hidden" name="productId" value={selectedProductId} />
       <input type="hidden" name="productName" value={selectedProduct?.name ?? "Saved product"} />

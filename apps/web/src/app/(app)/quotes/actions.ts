@@ -551,6 +551,10 @@ export type FastQuoteLineSaveResult = {
   serverElapsedMs: number;
   authElapsedMs: number;
   dbElapsedMs: number;
+  dbSchemaElapsedMs?: number;
+  dbConnectionElapsedMs?: number;
+  dbQueryElapsedMs?: number;
+  runtimeRegion?: string | null;
 };
 
 function validUuidOrNull(value: unknown): string | null {
@@ -647,7 +651,11 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
       editing: Boolean(editingLineId),
       elapsedMs: elapsed,
       authElapsedMs,
-      dbElapsedMs
+      dbElapsedMs,
+      dbSchemaElapsedMs: saved.schemaElapsedMs,
+      dbConnectionElapsedMs: saved.connectionElapsedMs,
+      dbQueryElapsedMs: saved.queryElapsedMs,
+      runtimeRegion: process.env.VERCEL_REGION ?? null
     });
     return {
       ok: true,
@@ -657,7 +665,11 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
       error: null,
       serverElapsedMs: elapsed,
       authElapsedMs,
-      dbElapsedMs
+      dbElapsedMs,
+      dbSchemaElapsedMs: saved.schemaElapsedMs,
+      dbConnectionElapsedMs: saved.connectionElapsedMs,
+      dbQueryElapsedMs: saved.queryElapsedMs,
+      runtimeRegion: process.env.VERCEL_REGION ?? null
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "The quote line could not be saved.";

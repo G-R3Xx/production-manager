@@ -85,9 +85,14 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
   const linkedCustomer = linkedCustomerId ? await getCustomerById(activeTenant.tenantId, linkedCustomerId) : null;
   const clientName = String(formData.get("clientName") ?? "").trim() || linkedCustomer?.displayName || "";
   const requestSummary = String(formData.get("requestSummary") ?? "").trim();
+  const siteSurveyChoice = String(formData.get("siteSurveyRequired") ?? "").trim().toLowerCase();
+  const siteSurveyRequired = siteSurveyChoice === "yes";
 
   if (!clientName || !requestSummary) {
     redirect(enquiryRedirectUrl(returnTo, "error", "Client name and request summary are required"));
+  }
+  if (siteSurveyChoice !== "yes" && siteSurveyChoice !== "no") {
+    redirect(enquiryRedirectUrl(returnTo, "error", "Choose whether a site survey is required"));
   }
 
   const pastedClientLogoUrl = nullable(formData.get("clientLogoUrl"));
@@ -95,22 +100,34 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     redirect(enquiryRedirectUrl(returnTo, "error", "Client logo URL must start with http or https"));
   }
 
+  const contactName = nullable(formData.get("contactName")) ?? ([linkedCustomer?.firstName, linkedCustomer?.lastName].filter(Boolean).join(" ") || null);
+  const email = nullable(formData.get("email")) ?? linkedCustomer?.email ?? null;
+  const phone = nullable(formData.get("phone")) ?? linkedCustomer?.phone ?? null;
+  const siteAddress = nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress.trim() || null : null);
+  const notes = nullable(formData.get("notes"));
+  let effectiveClientLogoUrl = pastedClientLogoUrl || customerLogoUrl(linkedCustomer) || null;
+  let effectiveClientLogoStoragePath = !pastedClientLogoUrl && customerLogoUrl(linkedCustomer)
+    && typeof linkedCustomer?.payloadJson.logoStoragePath === "string"
+    ? linkedCustomer.payloadJson.logoStoragePath
+    : null;
+
+  if (siteSurveyRequired && !siteAddress) {
+    redirect(enquiryRedirectUrl(returnTo, "error", "A site address is required when a site survey is requested"));
+  }
+
   const created = await createEnquiryForTenant(activeTenant.tenantId, {
     clientName,
-    contactName: nullable(formData.get("contactName")) ?? ([linkedCustomer?.firstName, linkedCustomer?.lastName].filter(Boolean).join(" ") || null),
-    email: nullable(formData.get("email")) ?? linkedCustomer?.email ?? null,
-    phone: nullable(formData.get("phone")) ?? linkedCustomer?.phone ?? null,
+    contactName,
+    email,
+    phone,
     source: nullable(formData.get("source")),
     urgency: nullable(formData.get("urgency")) ?? "Normal",
-    siteAddress: nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress : null),
+    siteAddress,
     requestSummary,
     clientPurchaseOrderNumber: nullable(formData.get("clientPurchaseOrderNumber")),
-    clientLogoUrl: pastedClientLogoUrl || customerLogoUrl(linkedCustomer) || null,
-    clientLogoStoragePath: !pastedClientLogoUrl && customerLogoUrl(linkedCustomer)
-      && typeof linkedCustomer?.payloadJson.logoStoragePath === "string"
-      ? linkedCustomer.payloadJson.logoStoragePath
-      : null,
-    notes: nullable(formData.get("notes")),
+    clientLogoUrl: effectiveClientLogoUrl,
+    clientLogoStoragePath: effectiveClientLogoStoragePath,
+    notes,
     linkedCustomerId: linkedCustomer?.id ?? null
   });
 
@@ -118,6 +135,8 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     const uploadedLogo = await uploadEnquiryLogoIfPresent(activeTenant.tenantId, created.id, formData);
     if (uploadedLogo.logoUrl) {
       await updateEnquiryClientLogoForTenant(activeTenant.tenantId, created.id, uploadedLogo);
+      effectiveClientLogoUrl = uploadedLogo.logoUrl;
+      effectiveClientLogoStoragePath = uploadedLogo.logoStoragePath ?? null;
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -158,7 +177,43 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     });
   }
 
-  const message = fileNames.length > 0 ? "Enquiry created and correspondence attached" : "Enquiry created";
+  let message = fileNames.length > 0 ? "Enquiry created and correspondence attached" : "Enquiry created";
+
+  if (siteSurveyRequired) {
+    try {
+      const createdSurvey = await createSurveyRequestForTenant(activeTenant.tenantId, {
+        enquiryId: created.id,
+        linkedCustomerId: linkedCustomer?.id ?? null,
+        clientName,
+        contactName,
+        phone,
+        siteAddress,
+        notes: [requestSummary, notes].filter(Boolean).join("\n\n")
+      });
+
+      await updateEnquiryStatusForTenant(activeTenant.tenantId, created.id, "survey_requested");
+      const survey = await getSurveyRequestById(activeTenant.tenantId, createdSurvey.id);
+      const bridgeResult = survey
+        ? await createInstallSchedulerSurveyJob({
+            tenantId: activeTenant.tenantId,
+            survey,
+            enquiryRequestSummary: requestSummary,
+            enquiryNotes: notes,
+            email,
+            clientLogoUrl: effectiveClientLogoUrl,
+            clientLogoStoragePath: effectiveClientLogoStoragePath,
+          })
+        : { ok: false, error: "Survey was created but could not be reloaded" };
+
+      message = bridgeResult.ok
+        ? `${message} · Site survey request sent to Install Scheduler`
+        : `${message} · Site survey created in PM, but Install Scheduler sync failed: ${bridgeResult.error || "bridge not configured"}`;
+    } catch (err) {
+      const surveyError = err instanceof Error ? err.message : String(err);
+      redirect(enquiryRedirectUrl(returnTo, "error", `Enquiry created, but the required site survey could not be created: ${surveyError}`));
+    }
+  }
+
   redirect(enquiryRedirectUrl(returnTo, "message", message));
 }
 
