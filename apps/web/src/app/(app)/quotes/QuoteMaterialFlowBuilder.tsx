@@ -3488,7 +3488,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       pickup: "/quote-wizard/flow-service.png",
       delivery: "/quote-wizard/flow-service.png",
       install: "/quote-wizard/flow-service.png",
-      access_equipment: "/quote-wizard/flow-service.png",
+      access_equipment: "/quote-wizard/service-access-equipment.webp",
       component: "/quote-wizard/flow-component.png",
       acrylic: "/quote-wizard/material-acrylic-clear.webp",
       acrylic_clear: "/quote-wizard/material-acrylic-clear.webp",
@@ -3508,7 +3508,11 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       banner_black: "/quote-wizard/material-vinyl-black.webp",
       other_sheet: "/quote-wizard/base-other-sheet.png",
       artwork_supplied: "/quote-wizard/artwork-supplied.png",
-      artwork_required: "/quote-wizard/artwork-required.png"
+      artwork_required: "/quote-wizard/artwork-required.png",
+      no_print: "/quote-wizard/print-no-print.webp",
+      direct_print: "/quote-wizard/print-direct.webp",
+      roll_stock: "/quote-wizard/print-roll-stock.webp",
+      cut_vinyl: "/quote-wizard/print-cut-vinyl.webp"
     };
     const approvedAsset = categoryImages[kind] || approvedWizardAssets[kind];
     if (approvedAsset) {

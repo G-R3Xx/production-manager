@@ -21,7 +21,11 @@ export const quoteVisualCategoryKeys = [
   "banner",
   "other_sheet",
   "artwork_supplied",
-  "artwork_required"
+  "artwork_required",
+  "no_print",
+  "direct_print",
+  "roll_stock",
+  "cut_vinyl"
 ] as const;
 
 export type QuoteVisualCategoryKey = (typeof quoteVisualCategoryKeys)[number];

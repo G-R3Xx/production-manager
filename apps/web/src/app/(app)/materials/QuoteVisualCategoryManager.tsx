@@ -23,8 +23,37 @@ const categories: Array<{ key: QuoteVisualCategoryKey; label: string; group: str
   { key: "banner", label: "Vinyl / Roll Stock", group: "Sign type", hint: "Fallback image for SAV, vinyl, banner and roll media." },
   { key: "other_sheet", label: "Other sheet", group: "Sign type", hint: "Only for sheet stock that does not belong to another category." },
   { key: "artwork_supplied", label: "Print-ready artwork supplied", group: "Artwork", hint: "Visual used for supplied print-ready artwork." },
-  { key: "artwork_required", label: "Artwork / setup required", group: "Artwork", hint: "Visual used when artwork/setup work is required." }
+  { key: "artwork_required", label: "Artwork / setup required", group: "Artwork", hint: "Visual used when artwork/setup work is required." },
+  { key: "no_print", label: "No print", group: "Print method", hint: "Catalogue image when the selected material is supplied without printing." },
+  { key: "direct_print", label: "Direct print", group: "Print method", hint: "Catalogue image for direct / flatbed printing onto the selected substrate." },
+  { key: "roll_stock", label: "Roll stock", group: "Print method", hint: "Catalogue image for printed SAV, vinyl, banner and other roll media." },
+  { key: "cut_vinyl", label: "Cut vinyl", group: "Print method", hint: "Catalogue image for plotter-cut vinyl lettering and graphics." }
 ];
+
+const defaultCategoryImages: Partial<Record<QuoteVisualCategoryKey, string>> = {
+  signage: "/quote-wizard/flow-signage.png",
+  small_format: "/quote-wizard/flow-small-format.png",
+  plan_printing: "/quote-wizard/flow-plan-printing.png",
+  poster_printing: "/quote-wizard/flow-poster-printing.png",
+  service: "/quote-wizard/flow-service.png",
+  pickup: "/quote-wizard/flow-service.png",
+  delivery: "/quote-wizard/flow-service.png",
+  install: "/quote-wizard/flow-service.png",
+  access_equipment: "/quote-wizard/service-access-equipment.webp",
+  component: "/quote-wizard/flow-component.png",
+  acrylic: "/quote-wizard/material-acrylic-clear.webp",
+  acm: "/quote-wizard/material-acm-silver.webp",
+  corflute: "/quote-wizard/material-corflute-white.webp",
+  pvc: "/quote-wizard/material-pvc-white.webp",
+  banner: "/quote-wizard/material-vinyl-white.webp",
+  other_sheet: "/quote-wizard/base-other-sheet.png",
+  artwork_supplied: "/quote-wizard/artwork-supplied.png",
+  artwork_required: "/quote-wizard/artwork-required.png",
+  no_print: "/quote-wizard/print-no-print.webp",
+  direct_print: "/quote-wizard/print-direct.webp",
+  roll_stock: "/quote-wizard/print-roll-stock.webp",
+  cut_vinyl: "/quote-wizard/print-cut-vinyl.webp"
+};
 
 const input: CSSProperties = { width: "100%", minHeight: 40, border: "1px solid #cbd5e1", borderRadius: 10, padding: "7px 10px", boxSizing: "border-box", background: "#fff" };
 const button: CSSProperties = { minHeight: 38, border: 0, borderRadius: 10, background: "#111827", color: "#fff", fontWeight: 850, padding: "0 13px", cursor: "pointer" };
@@ -39,6 +68,7 @@ export function QuoteVisualCategoryManager({ images }: { images: QuoteVisualCate
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(270px,1fr))", gap: 12 }}>
         {categories.map((category) => {
           const current = images[category.key];
+          const previewUrl = current?.imageUrl || defaultCategoryImages[category.key] || null;
           return (
             <form key={category.key} action={saveQuoteVisualCategoryImageAction} encType="multipart/form-data" style={{ border: "1px solid #e2e8f0", borderRadius: 14, padding: 12, display: "grid", gap: 9, background: "#fbfdff" }}>
               <input type="hidden" name="categoryKey" value={category.key} />
@@ -46,7 +76,7 @@ export function QuoteVisualCategoryManager({ images }: { images: QuoteVisualCate
               {current?.storagePath ? <input type="hidden" name="existingCategoryImageStoragePath" value={current.storagePath} /> : null}
               <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
                 <div style={{ width: 88, height: 88, border: "1px solid #dbe3ef", borderRadius: 10, background: "#f8fafc", overflow: "hidden", display: "grid", placeItems: "center", flex: "0 0 auto" }}>
-                  {current?.imageUrl ? <img src={current.imageUrl} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800 }}>Default image</span>}
+                  {previewUrl ? <img src={previewUrl} alt="" loading="lazy" decoding="async" style={{ width: "100%", height: "100%", objectFit: "contain", display: "block" }} /> : <span style={{ color: "#94a3b8", fontSize: 11, fontWeight: 800 }}>Default image</span>}
                 </div>
                 <div style={{ minWidth: 0 }}>
                   <div style={{ color: "#2563eb", fontSize: 10, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>{category.group}</div>
