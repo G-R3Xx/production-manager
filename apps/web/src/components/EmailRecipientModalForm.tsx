@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useFormStatus } from "react-dom";
+import { useRouter } from "next/navigation";
 
 type EmailAction = (formData: FormData) => void | Promise<void>;
 
@@ -15,6 +16,7 @@ type Props = {
   modalTitle: string;
   modalDescription: string;
   submitLabel?: string;
+  endpoint?: string;
 };
 
 function SendButton({ label }: { label: string }) {
@@ -49,9 +51,13 @@ export function EmailRecipientModalForm({
   modalTitle,
   modalDescription,
   submitLabel = "Send link + PDF",
+  endpoint,
 }: Props) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [email, setEmail] = useState(defaultEmail ?? "");
+  const [sending, setSending] = useState(false);
+  const [feedback, setFeedback] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   const isArtwork = variant === "artwork";
   const isInvoice = variant === "invoice";
@@ -66,6 +72,7 @@ export function EmailRecipientModalForm({
         disabled={disabled}
         onClick={() => {
           setEmail(defaultEmail ?? "");
+          setFeedback(null);
           setOpen(true);
         }}
         className={isArtwork ? "artwork-email-send" : undefined}
@@ -146,7 +153,37 @@ export function EmailRecipientModalForm({
               </button>
             </div>
 
-            <form action={action} style={{ padding: 20, display: "grid", gap: 16 }}>
+            <form
+              action={endpoint ? undefined : action}
+              onSubmit={endpoint ? async (event) => {
+                event.preventDefault();
+                if (sending) return;
+                setSending(true);
+                setFeedback(null);
+                try {
+                  const formData = new FormData(event.currentTarget);
+                  const response = await fetch(endpoint, { method: "POST", body: formData, cache: "no-store" });
+                  const payload = await response.json().catch(() => ({})) as { ok?: boolean; message?: string; error?: string };
+                  if (!response.ok || !payload.ok) {
+                    throw new Error(payload.error || `Email request failed (${response.status}).`);
+                  }
+                  const message = payload.message || "Email sent.";
+                  setFeedback({ tone: "success", text: message });
+                  const quoteId = String(formData.get("quoteId") ?? "").trim();
+                  window.setTimeout(() => {
+                    setOpen(false);
+                    if (quoteId) router.replace(`/quotes?selected=${encodeURIComponent(quoteId)}&message=${encodeURIComponent(message)}`);
+                    else router.refresh();
+                  }, 650);
+                } catch (error) {
+                  const message = error instanceof Error ? error.message : "Email could not be sent.";
+                  setFeedback({ tone: "error", text: message });
+                } finally {
+                  setSending(false);
+                }
+              } : undefined}
+              style={{ padding: 20, display: "grid", gap: 16 }}
+            >
               {Object.entries(hiddenFields).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
               <label style={{ display: "grid", gap: 7, color: "#344054", fontSize: 12, fontWeight: 900 }}>
                 Send to
@@ -175,6 +212,12 @@ export function EmailRecipientModalForm({
                 This changes the recipient for <strong>this email only</strong>. It does not overwrite the client/contact email saved in Production Manager.
               </div>
 
+              {feedback ? (
+                <div style={{ border: `1px solid ${feedback.tone === "success" ? "#86efac" : "#fecaca"}`, background: feedback.tone === "success" ? "#f0fdf4" : "#fef2f2", color: feedback.tone === "success" ? "#166534" : "#991b1b", borderRadius: 12, padding: "10px 12px", fontSize: 12, fontWeight: 800, lineHeight: 1.45 }}>
+                  {feedback.text}
+                </div>
+              ) : null}
+
               <div style={{ display: "flex", justifyContent: "flex-end", gap: 9, flexWrap: "wrap" }}>
                 <button
                   type="button"
@@ -183,7 +226,15 @@ export function EmailRecipientModalForm({
                 >
                   Cancel
                 </button>
-                <SendButton label={submitLabel} />
+                {endpoint ? (
+                  <button
+                    type="submit"
+                    disabled={sending}
+                    style={{ minHeight: 44, borderRadius: 12, border: "1px solid #0f766e", background: sending ? "#94a3b8" : "#0f766e", color: "#fff", fontWeight: 950, padding: "0 16px", cursor: sending ? "wait" : "pointer" }}
+                  >
+                    {sending ? "Sending…" : submitLabel}
+                  </button>
+                ) : <SendButton label={submitLabel} />}
               </div>
             </form>
           </div>

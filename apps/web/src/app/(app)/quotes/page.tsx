@@ -35,6 +35,9 @@ type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
 
+export const maxDuration = 60;
+export const preferredRegion = "syd1";
+
 // Quote-line saves should not force every low-volatility reference table to be
 // fetched from Postgres again. These caches are deliberately short-lived: they
 // keep the quote workspace responsive while still reflecting admin changes
@@ -942,6 +945,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           modalTitle={selectedQuote.emailStatus === "sent" ? "Resend quote" : "Email quote"}
                           modalDescription="Confirm or change the email address before Production Manager sends the online quote link and downloadable PDF copy."
                           submitLabel={selectedQuote.emailStatus === "sent" ? "Resend link + PDF" : "Send link + PDF"}
+                          endpoint="/api/quotes/email"
                         />
                       </div>
                     ) : null}
