@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type FormEvent } from "rea
 import { useRouter } from "next/navigation";
 import { saveQuoteLineFast } from "./saveQuoteLineClient";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
-import { guillotineCostingDetails, labourForProcess, labourLineCost, normalizeCostingName, recipeForId, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
+import { labourForProcess, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
 export type QuoteChoice = {
   id?: string | null;
@@ -1278,150 +1278,17 @@ function primaryProductDimensions(product: QuoteProduct | undefined, answers: Re
 }
 
 function productionResourceBreakdownFor(
-  product: QuoteProduct | undefined,
-  resources: QuoteCostingResources | undefined,
-  answers: Record<string, string>,
-  materialBreakdown: CostBreakdownItem[],
-  quoteQuantity: number,
-  materials: QuoteMaterial[]
+  _product: QuoteProduct | undefined,
+  _resources: QuoteCostingResources | undefined,
+  _answers: Record<string, string>,
+  _materialBreakdown: CostBreakdownItem[],
+  _quoteQuantity: number,
+  _materials: QuoteMaterial[]
 ): { rows: CostBreakdownItem[]; warnings: string[] } {
-  if (!product?.productionRecipeId || !resources) return { rows: [], warnings: [] };
-  const recipe = recipeForId(resources, product.productionRecipeId);
-  if (!recipe) return { rows: [], warnings: [] };
-  const dimensions = primaryProductDimensions(product, answers);
-  if (!dimensions) return { rows: [], warnings: [] };
-  const quantity = Math.max(1, quoteQuantity || 1);
-  const areaSqmPerUnit = (dimensions.widthMm / 1000) * (dimensions.heightMm / 1000);
-  const sheetsPerLine = materialBreakdown
-    .filter((item) => item.unit.toLowerCase().includes("sheet"))
-    .reduce((sum, item) => sum + Math.max(0, item.amount) * quantity, 0);
-  const linearMetresPerLine = materialBreakdown
-    .filter((item) => ["lm", "m", "metre", "meter"].includes(item.unit.toLowerCase()))
-    .reduce((sum, item) => sum + Math.max(0, item.amount) * quantity, 0);
-  const recipeMaterial = recipe.materialId ? materials.find((material) => material.id === recipe.materialId) : undefined;
-  const recipeSheetWidth = recipeMaterial
-    ? (() => {
-        const parentWidth = numberValue(recipeMaterial.widthMm, 0);
-        const parentLength = numberValue(recipeMaterial.lengthMm, 0);
-        return parentWidth > 0 && parentLength > 0 ? Math.min(parentWidth, parentLength) : 0;
-      })()
-    : 0;
-  const requiredWidthMm = numberValue(recipeMaterial?.rollWidthMm, 0)
-    || recipeSheetWidth
-    || Math.min(dimensions.widthMm, dimensions.heightMm);
-  const smallFormatProfile = product.department === "small_format" ? normalizedSmallFormatProfile(product) : null;
-  const sides = product.department === "small_format" ? smallFormatSides(product, answers, smallFormatProfile) : 1;
-  const metrics = { quantity, areaSqmPerUnit, sheetsPerLine, linearMetresPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: product.department === "small_format" ? 2 : undefined };
-  const explicitLabourRows = materialBreakdown.filter((item) => /labour|labor/i.test(`${item.componentLabel} ${item.materialName} ${item.basis}`));
-  const hasExplicitInk = materialBreakdown.some((item) => /\bink\b|print charge/i.test(`${item.componentLabel} ${item.materialName}`));
-  const rows: CostBreakdownItem[] = [];
-  const warnings: string[] = [];
-  const steps = recipe.processSteps.length
-    ? recipe.processSteps
-    : recipe.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null }));
-
-  for (const step of steps) {
-    const process = resources.processes.find((row) => row.id === step.processId);
-    if (!process) continue;
-    const labour = labourForProcess(resources, [process.name], product.department, step.labourOperationId, step.processId);
-    const isCalculatedGuillotine = labour?.calculationBasis === "guillotine_stacks";
-    const cutsPerStack = isCalculatedGuillotine
-      ? Math.max(0, numberValue(answers[guillotineAnswerKey(process.id, "cuts_per_stack")], numberValue(labour.calculationValue, 0)))
-      : 0;
-    const maxStackOverride = isCalculatedGuillotine
-      ? Math.max(0, numberValue(answers[guillotineAnswerKey(process.id, "max_stack_sheets")], 0))
-      : 0;
-    const minutesOverride = isCalculatedGuillotine
-      ? Math.max(0, numberValue(answers[guillotineAnswerKey(process.id, "minutes_override")], 0))
-      : 0;
-    const stepMetrics = {
-      ...metrics,
-      guillotineCutsPerStack: cutsPerStack,
-      guillotineMaxStackSheets: maxStackOverride || undefined,
-      guillotineMinutesOverride: minutesOverride
-    };
-    const machineSelection = selectMachineForProcess(
-      resources,
-      [process.name],
-      stepMetrics,
-      product.department,
-      step.machineId,
-      step.processId
-    );
-    const machine = machineSelection.machine;
-    const finalStepMetrics = {
-      ...stepMetrics,
-      guillotineMaxStackSheets: maxStackOverride || numberValue(machine?.maxStackSheets, 0),
-      guillotineCutsPerMinute: machine?.speedUom === "cuts_per_minute" ? numberValue(machine.speedValue, 0) : 0,
-      guillotineSetupMinutes: numberValue(machine?.setupMinutes, 0)
-    };
-    const guillotineDetails = guillotineCostingDetails(labour, finalStepMetrics);
-    if (isCalculatedGuillotine && cutsPerStack <= 0) {
-      warnings.push(`${process.name}: enter the number of guillotine cuts required per stack.`);
-    }
-    if (isCalculatedGuillotine && (!machine || machine.speedUom !== "cuts_per_minute" || numberValue(machine.speedValue, 0) <= 0 || (numberValue(machine.maxStackSheets, 0) <= 0 && maxStackOverride <= 0))) {
-      warnings.push(`${process.name}: link a guillotine with cuts-per-minute speed and maximum sheets per stack, or enter a stack override.`);
-    }
-    if (!machineSelection.machine && machineSelection.incompatibleMachines.length) {
-      warnings.push(`${process.name}: ${requiredWidthMm.toFixed(0)}mm required; ${machineSelection.incompatibleMachines.map((machine) => `${machine.name} max ${numberValue(machine.maxWidthMm, 0).toFixed(0)}mm`).join(", ")}.`);
-    }
-    if (machineSelection.machine && machineSelection.machineCostPerUnit > 0) {
-      rows.push(costBreakdownItem({
-        componentLabel: `${process.name} machine`,
-        materialName: machineSelection.machine.name,
-        basis: "Machine running cost",
-        amount: 1,
-        unit: "item",
-        rate: machineSelection.machineCostPerUnit,
-        cost: machineSelection.machineCostPerUnit,
-        note: guillotineDetails
-          ? guillotineDetails.overrideMinutes > 0
-            ? `${formatUsage(guillotineDetails.overrideMinutes)} min actual-time override · ${formatMoney(numberValue(machineSelection.machine.hourlyCost, 0))}/hr`
-            : `${formatUsage(guillotineDetails.sheets)} sheets ÷ ${formatUsage(guillotineDetails.maxStackSheets)} per stack = ${guillotineDetails.stacks} stack${guillotineDetails.stacks === 1 ? "" : "s"} · ${formatUsage(guillotineDetails.cutsPerStack)} cuts/stack · ${formatUsage(guillotineDetails.cutsPerMinute)} cuts/min · ${formatUsage(guillotineDetails.setupMinutes)} min setup`
-          : `${machineSelection.machine.speedValue} ${machineSelection.machine.speedUom.replaceAll("_", " ")} · ${machineSelection.machine.setupMinutes} min setup · ${formatMoney(numberValue(machineSelection.machine.hourlyCost, 0))}/hr`
-      }));
-      const processName = process.name.toLowerCase();
-      const inkRate = numberValue(machineSelection.machine.inkCostPerSqm, 0);
-      if (!hasExplicitInk && inkRate > 0 && /print/.test(processName)) {
-        rows.push(costBreakdownItem({
-          componentLabel: `${process.name} ink`,
-          materialName: machineSelection.machine.name,
-          basis: "Machine ink setting",
-          amount: areaSqmPerUnit,
-          unit: "sqm",
-          rate: inkRate,
-          cost: areaSqmPerUnit * inkRate,
-          note: "ink rate from Machines settings"
-        }));
-      }
-    }
-
-    const processLabourTokens = normalizeCostingName(process.name).split(" ").filter((token) => token.length >= 4);
-    const hasExplicitLabourForProcess = explicitLabourRows.some((item) => {
-      const label = normalizeCostingName(`${item.componentLabel} ${item.materialName} ${item.basis}`);
-      return processLabourTokens.some((token) => label.includes(token));
-    }) || (explicitLabourRows.length === 1 && steps.length === 1);
-    if (!hasExplicitLabourForProcess) {
-      const lineCost = labourLineCost(labour, finalStepMetrics);
-      if (labour && lineCost > 0) {
-        const perUnit = lineCost / quantity;
-        rows.push(costBreakdownItem({
-          componentLabel: `${process.name} labour`,
-          materialName: labour.name,
-          basis: "Labour operation",
-          amount: 1,
-          unit: "item",
-          rate: perUnit,
-          cost: perUnit,
-          note: guillotineDetails
-            ? `${formatUsage(guillotineDetails.chargedMinutes)} min charged${guillotineDetails.overrideMinutes > 0 ? " (staff override)" : " from stack calculation"} · ${formatMoney(numberValue(labour.hourlyRate, 0))}/hr`
-            : `${formatMoney(numberValue(labour.hourlyRate, 0))}/hr from Labour settings`
-        }));
-      }
-    }
-  }
-
-  return { rows, warnings };
+  // V26.10.21.07+: Production Methods / Processes are workflow-only.
+  // Quote manufacturing cost comes from the Operations selected by the quote
+  // builder itself, preventing a second hidden machine/labour charge.
+  return { rows: [], warnings: [] };
 }
 
 export type QuoteProductPricing = {
@@ -1581,15 +1448,8 @@ function smallFormatProfileAdjustments(input: {
     }));
   }
 
-  const recipe = recipeForId(resources, product.productionRecipeId);
-  const printStep = recipe?.processSteps.find((step) => {
-    const process = resources?.processes.find((row) => row.id === step.processId);
-    return Boolean(process && /print/i.test(process.name));
-  }) ?? recipe?.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null })).find((step) => {
-    const process = resources?.processes.find((row) => row.id === step.processId);
-    return Boolean(process && /print/i.test(process.name));
-  }) ?? null;
-  const printProcess = printStep ? resources?.processes.find((row) => row.id === printStep.processId) ?? null : null;
+  const printAliases = ["small format print", "digital print", "direct print", "print"];
+  const printOperation = labourForProcess(resources, printAliases, product.department);
   const firstStockMaterial = firstStockRow?.materialId ? materials.find((item) => item.id === firstStockRow.materialId) : undefined;
   const parentWidth = numberValue(firstStockMaterial?.widthMm, 0);
   const parentLength = numberValue(firstStockMaterial?.lengthMm, 0);
@@ -1598,11 +1458,11 @@ function smallFormatProfileAdjustments(input: {
   const mode = smallFormatPrintMode(product, answers, profile);
   const machineSelection = selectMachineForProcess(
     resources,
-    printProcess ? [printProcess.name] : ["small format print", "digital print", "direct print", "print"],
+    printAliases,
     { quantity, areaSqmPerUnit, sheetsPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: 2 },
     product.department,
-    null,
-    printStep?.processId ?? null
+    printOperation?.machineId ?? null,
+    null
   );
   const machine = machineSelection.machine;
 
@@ -1627,7 +1487,7 @@ function smallFormatProfileAdjustments(input: {
     }
   }
 
-  const labour = labourForProcess(resources, printProcess ? [printProcess.name] : ["small format print", "digital print", "direct print", "print"], product.department, printStep?.labourOperationId ?? null, printStep?.processId ?? null);
+  const labour = printOperation;
   const hourlyRate = Math.max(0, numberValue(labour?.hourlyRate, fallbackLabourRate));
   if (profile.printSetupMinutes > 0 && hourlyRate > 0) {
     const lineCost = profile.printSetupMinutes / 60 * hourlyRate;
@@ -1745,27 +1605,21 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   const [unitPriceOverridden, setUnitPriceOverridden] = useState(false);
   const [standaloneQuantity, setStandaloneQuantity] = useState(hideProductPicker ? "" : "1");
   const guillotineSteps = useMemo(() => {
-    const recipe = recipeForId(costingResources, selectedProduct?.productionRecipeId);
-    if (!recipe || !costingResources) return [];
-    const steps = recipe.processSteps.length
-      ? recipe.processSteps
-      : recipe.processIds.map((processId) => ({ processId, machineId: null, labourOperationId: null }));
-    return steps.flatMap((step) => {
-      const process = costingResources.processes.find((item) => item.id === step.processId);
-      if (!process) return [];
-      const labour = labourForProcess(costingResources, [process.name], selectedProduct?.department, step.labourOperationId, step.processId);
-      if (!labour || labour.calculationBasis !== "guillotine_stacks") return [];
-      const machine = step.machineId
-        ? costingResources.machines.find((item) => item.id === step.machineId) ?? null
-        : costingResources.machines.find((item) => item.processIds.includes(step.processId) && item.speedUom === "cuts_per_minute")
-          ?? costingResources.machines.find((item) => item.processIds.includes(step.processId))
-          ?? null;
+    if (!costingResources) return [];
+    const department = String(selectedProduct?.department ?? "").toLowerCase();
+    return costingResources.labour.flatMap((operation) => {
+      if (operation.calculationBasis !== "guillotine_stacks") return [];
+      const operationDepartment = String(operation.department ?? "").toLowerCase();
+      if (department && ![department, "general", "shared"].includes(operationDepartment)) return [];
+      const machine = operation.machineId
+        ? costingResources.machines.find((item) => item.id === operation.machineId) ?? null
+        : null;
       return [{
-        processId: process.id,
-        processName: process.name,
-        labourName: labour.name,
+        processId: operation.id,
+        processName: operation.name,
+        labourName: operation.name,
         machineName: machine?.name ?? "No guillotine linked",
-        cutsPerStack: numberValue(labour.calculationValue, 0),
+        cutsPerStack: numberValue(operation.calculationValue, 0),
         maxStackSheets: numberValue(machine?.maxStackSheets, 0),
         cutsPerMinute: machine?.speedUom === "cuts_per_minute" ? numberValue(machine.speedValue, 0) : 0,
         setupMinutes: numberValue(machine?.setupMinutes, 0)

@@ -170,16 +170,16 @@ export default async function MachinesPage() {
         }
       `}</style>
 
-      <ProductionSetupNav active="resources" />
+      <ProductionSetupNav active="machines" />
       <header>
         <div style={{ fontSize: 12, fontWeight: 900, color: "#0284c7", textTransform: "uppercase" }}>Resources · machines</div>
         <h1 style={{ margin: "6px 0", fontSize: 36 }}>Machines</h1>
         <p style={{ color: "#64748b", maxWidth: 980, lineHeight: 1.55 }}>
-          Store facts about each machine here: speed, capacity, setup and operating costs. To decide which machine performs Direct print, Laminate, Trim or another action, assign it once under <b>Processes</b>.
+          Store machine facts here: speed, capacity, setup and operating costs. Then link the machine directly to the relevant <b>Operation</b>. The quote charges that Operation once.
         </p>
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <Link prefetch={false} href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Machines</Link>
-          <Link prefetch={false} href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Shop operations</Link>
+          <Link prefetch={false} href="/operations" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Operations &amp; labour</Link>
         </div>
       </header>
 
@@ -188,7 +188,7 @@ export default async function MachinesPage() {
           <div>
             <h2 style={{ margin: 0 }}>Add machine</h2>
             <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Enter only the facts and costs that apply to this machine. After creating it, open Processes to assign it to the work it performs.
+              Enter only the equipment facts and costs. After creating it, open Operations & labour and link it to the work it performs.
             </p>
           </div>
         </div>
@@ -261,7 +261,7 @@ export default async function MachinesPage() {
               </div>
 
               <div style={{ marginTop: 12, paddingTop: 11, borderTop: "1px solid #e2e8f0" }}>
-                <Link prefetch={false} href="/processes" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Machine assignments are managed in Processes →</Link>
+                <Link prefetch={false} href="/operations" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Link machines directly to Operations →</Link>
               </div>
             </article>
           );

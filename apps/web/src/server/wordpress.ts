@@ -13,7 +13,6 @@ import {
 import { ensureMaterialPricingColumns, type MaterialRecord } from "@/server/materials";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { customerMyobPriceLevel, customerMyobPriceLevelName, getCustomerById, type CustomerRecord, type MyobPriceLevel } from "@/server/customers";
-import { listRecipesForTenant, previewRecipeCost } from "@/server/productionResources";
 import { createProductionJobFromWebsiteOrderForTenant, ensureProductionTables } from "@/server/production";
 import { createNotificationForTenant } from "@/server/notifications";
 import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
@@ -611,9 +610,6 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
   }).catch(() => null);
   if (defaultPrice && !defaultPrice.quoteRequired && defaultPrice.validationErrors.length === 0) {
     startingPrice = defaultPrice.unitPrice;
-  } else if (product.productionRecipeId) {
-    const preview = await previewRecipeCost(product.tenantId, product.productionRecipeId, defaults.widthMm, defaults.heightMm, defaults.quantity).catch(() => null);
-    startingPrice = preview?.sellPrice ?? null;
   } else if (config.basePrice != null) {
     startingPrice = numberValue(config.basePrice);
   }
@@ -631,9 +627,7 @@ async function catalogueProduct(product: ProductRecord): Promise<WebsiteCatalogP
     images,
     department: product.department,
     productFamily: product.productFamily,
-    manufacturingMethod: product.productionRecipeId
-      ? { id: product.productionRecipeId, name: product.productionRecipeName ?? "Production method" }
-      : null,
+    manufacturingMethod: null,
     fields,
     defaults,
     startingPrice,
@@ -653,7 +647,7 @@ export async function getWordPressCatalogForConnection(connection: WordPressConn
   const serialised = await Promise.all(products.map(catalogueProduct));
   await pool.query(`UPDATE integration.wordpress_connections SET last_catalog_pull_at=now(),updated_at=now() WHERE id=$1::uuid`, [connection.id]);
   return {
-    version: "V26.10.21.01",
+    version: "V26.10.21.08",
     tenantId: connection.tenantId,
     connectionId: connection.id,
     generatedAt: new Date().toISOString(),
@@ -1287,57 +1281,27 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     }
   }
 
-  const [recipe, recipes, companySettings, pricingCustomer, myobPricingData] = await Promise.all([
-    product.productionRecipeId
-      ? previewRecipeCost(tenantId, product.productionRecipeId, widthMm, heightMm, quantity).catch(() => null)
-      : Promise.resolve(null),
-    product.productionRecipeId ? listRecipesForTenant(tenantId).catch(() => []) : Promise.resolve([]),
+  const [companySettings, pricingCustomer, myobPricingData] = await Promise.all([
     getCompanySettingsByTenantId(tenantId).catch(() => null),
     resolvePricingCustomerForTenant(tenantId, body.customer).catch(() => null),
     websiteMyobPricingData(tenantId, product.id).catch(() => ({ myobUid: product.myobUid ?? null, myobPriceMatrix: null }))
   ]);
-  const recipeSettings = recipes.find((item) => item.id === product.productionRecipeId);
-  const markupMultiplier = Math.max(0, numberValue(recipeSettings?.markupMultiplier, numberValue(websiteConfig.markupMultiplier, 1.5)));
-  const profitMultiplier = Math.max(0, numberValue(recipeSettings?.profitMultiplier, numberValue(websiteConfig.profitMultiplier, 1.2)));
+  // Production Methods are retired from pricing. Website products use their
+  // configured base sell allowance plus the live material/component cost path.
+  const markupMultiplier = Math.max(0, numberValue(websiteConfig.markupMultiplier, 1.5));
+  const profitMultiplier = Math.max(0, numberValue(websiteConfig.profitMultiplier, 1.2));
   const autoMaterialSelections: AutoMaterialSelection[] = [];
   const inkBillingIncrementSqm = Math.max(0, numberValue(companySettings?.quoteInkBillingIncrementSqm, 0.5));
-  const optionalCost = optionalComponentCostTotal(definition, materials, answers, widthMm, heightMm, quantity, autoMaterialSelections, inkBillingIncrementSqm);
-  const defaultOptionalCost = optionalComponentCostTotal(
-    definition,
-    materials,
-    defaultAnswersForFields(fields),
-    widthMm,
-    heightMm,
-    quantity,
-    undefined,
-    inkBillingIncrementSqm
-  );
-  // The recipe preview is the saved/default configuration. Add only the
-  // difference created by the customer's current option answers so default ink
-  // or media is not counted twice.
-  const optionalCostDelta = optionalCost - defaultOptionalCost;
-  const optionalSell = optionalCostDelta * markupMultiplier * profitMultiplier;
-  const materialMap = new Map(materials.map((material) => [material.id, material]));
-  let baseAutoCostDelta = 0;
-  for (const rawComponent of components) {
-    const component = asObject(rawComponent);
-    if (text(component.role) !== "base_material" || componentAutoMaterialIds(component).length < 2) continue;
-    const resolved = resolveWebsiteMaterialForComponent(component, materialMap, widthMm, heightMm, quantity);
-    const representative = materialMap.get(text(component.materialId));
-    if (!resolved.material || !representative) continue;
-    baseAutoCostDelta += websiteMaterialCostForComponent(component, resolved.material, widthMm, heightMm, quantity)
-      - websiteMaterialCostForComponent(component, representative, widthMm, heightMm, quantity);
-    if (resolved.selection && !autoMaterialSelections.some((item) => item.componentId === resolved.selection?.componentId && item.materialId === resolved.selection?.materialId)) {
-      autoMaterialSelections.push(resolved.selection);
-    }
-  }
-  const baseAutoSellDelta = baseAutoCostDelta * markupMultiplier * profitMultiplier;
-  const baseSell = (recipe?.sellPrice ?? numberValue(websiteConfig.basePrice)) + baseAutoSellDelta;
+  const componentCost = optionalComponentCostTotal(definition, materials, answers, widthMm, heightMm, quantity, autoMaterialSelections, inkBillingIncrementSqm);
+  const componentSell = componentCost * markupMultiplier * profitMultiplier;
+  // basePrice is now an explicit sell allowance for website-only setup/operations.
+  // It is not derived from a retired Production Method.
+  const baseSell = Math.max(0, numberValue(websiteConfig.basePrice));
   const pricingContext = websitePricingContext(pricingCustomer, companySettings);
   const myobMatrix = myobPricingData.myobUid
     ? myobWebsiteMatrixPrice(myobPricingData.myobPriceMatrix, pricingContext.priceLevelCode, quantity)
     : null;
-  const pmCalculatedLineTotal = Math.max(0, baseSell + optionalSell + optionDelta);
+  const pmCalculatedLineTotal = Math.max(0, baseSell + componentSell + optionDelta);
   const lineTotal = Math.max(0, Math.round((myobMatrix
     ? myobMatrix.unitPrice * quantity
     : pmCalculatedLineTotal * pricingContext.priceLevelFactor) * 100) / 100);
@@ -1351,9 +1315,9 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
     widthMm,
     heightMm,
     quantity,
-    optionDelta: Math.round((optionDelta + optionalSell) * 100) / 100,
-    optionMaterialCost: Math.round(optionalCostDelta * 100) / 100,
-    optionSellPrice: Math.round(optionalSell * 100) / 100,
+    optionDelta: Math.round((optionDelta + componentSell) * 100) / 100,
+    optionMaterialCost: Math.round(componentCost * 100) / 100,
+    optionSellPrice: Math.round(componentSell * 100) / 100,
     lineTotal,
     unitPrice: Math.round((lineTotal / quantity) * 100) / 100,
     currency: "AUD",
@@ -1368,15 +1332,15 @@ export async function priceWordPressProductForTenant(tenantId: string, body: Pri
       myobMatrixQuantityOver: myobMatrix?.quantityOver ?? null,
       myobMatrixLevelKey: myobMatrix?.levelKey ?? null
     },
-    cost: recipe ? {
-      material: recipe.materialCost,
-      machines: recipe.machineCost,
-      ink: recipe.inkCost,
-      labour: recipe.labourCost,
-      total: Math.round((recipe.totalCost + optionalCostDelta) * 100) / 100
-    } : null,
-    materialUsage: recipe?.materialUsage ?? null,
-    manufacturingMethodId: product.productionRecipeId,
+    cost: {
+      material: Math.round(componentCost * 100) / 100,
+      machines: 0,
+      ink: 0,
+      labour: 0,
+      total: Math.round(componentCost * 100) / 100
+    },
+    materialUsage: null,
+    manufacturingMethodId: null,
     autoMaterialSelections,
     answers,
     displayAnswers: displayAnswersForFields(fields, answers)

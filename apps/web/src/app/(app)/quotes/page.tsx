@@ -25,7 +25,7 @@ import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalModalForm";
 import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
 import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
-import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, listRecipesForTenant } from "@/server/productionResources";
+import { listLabourForTenant, listMachinesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
 import { QuoteSearchInput } from "./QuoteSearchInput";
 import { getQuoteVisualCategoryImages } from "@/server/quote-visuals";
@@ -73,12 +73,10 @@ const cachedQuoteSalesDefaults = unstable_cache(
 );
 const cachedQuoteCostingResources = unstable_cache(
   (tenantId: string) => Promise.all([
-    listProcessesForTenant(tenantId),
     listMachinesForTenant(tenantId),
-    listLabourForTenant(tenantId),
-    listRecipesForTenant(tenantId)
+    listLabourForTenant(tenantId)
   ]),
-  ["quotes-costing-resources"],
+  ["quotes-costing-resources-v2"],
   { revalidate: 30 }
 );
 const cachedQuoteArtworkApproval = unstable_cache(
@@ -588,7 +586,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? cachedQuoteSalesDefaults(activeTenant.tenantId) : Promise.resolve({ incomeAccountUid: null, incomeAccountName: null, incomeAccountDisplayId: null }),
     builderDataNeeded
       ? cachedQuoteCostingResources(activeTenant.tenantId)
-      : Promise.resolve([[], [], [], []] as const),
+      : Promise.resolve([[], []] as const),
     selected ? listQuoteLines(selected) : Promise.resolve([]),
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
     selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
@@ -598,16 +596,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
   const selectedQuote = initialSelectedQuote;
   const clients = initialClients;
-  const [costingProcesses, costingMachines, costingLabour, costingRecipes] = costingSource;
+  const [costingMachines, costingLabour] = costingSource;
   const quoteVisualCategoryImages = Object.fromEntries(Object.entries(quoteVisualCategoryRecords as Record<string, { imageUrl?: string | null }>).map(([key, value]) => [key, value?.imageUrl ?? null]));
   const quoteCostingResources: QuoteCostingResources = {
-    processes: costingProcesses.filter((row) => row.active).map((row) => ({
-      id: row.id,
-      name: row.name,
-      department: row.department,
-      processType: row.processType,
-      labourOperationId: row.labourOperationId
-    })),
+    // Processes / Production Methods are deliberately excluded from quote pricing.
+    // A priced Operation now owns its optional machine + labour + consumable.
+    processes: [],
     machines: costingMachines.filter((row) => row.active).map((row) => ({
       id: row.id,
       name: row.name,
@@ -621,12 +615,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       colourImpressionCost: row.colourImpressionCost,
       monoImpressionCost: row.monoImpressionCost,
       maxStackSheets: row.maxStackSheets,
-      processIds: row.processIds
+      processIds: []
     })),
     labour: costingLabour.filter((row) => row.active).map((row) => ({
       id: row.id,
       name: row.name,
       department: row.department,
+      machineId: row.machineId,
       hourlyRate: row.hourlyRate,
       calculationBasis: row.calculationBasis,
       calculationValue: row.calculationValue,
@@ -635,12 +630,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       consumableQuantity: row.consumableQuantity,
       consumableBasis: row.consumableBasis
     })),
-    recipes: costingRecipes.filter((row) => row.active).map((row) => ({
-      id: row.id,
-      materialId: row.materialId,
-      processIds: row.processIds,
-      processSteps: row.processSteps
-    }))
+    recipes: []
   };
 
   // Never call MYOB as part of a normal quote page GET. Order creation happens

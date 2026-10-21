@@ -180,6 +180,7 @@ export const labourOperations = catalogSchema.table("labour_operations", {
   tenantId: uuid("tenant_id").notNull().references(() => tenants.id, { onDelete: "cascade" }),
   name: varchar("name", { length: 200 }).notNull(),
   department: varchar("department", { length: 50 }).notNull().default("general"),
+  machineId: uuid("machine_id").references(() => machines.id, { onDelete: "set null" }),
   hourlyRate: numeric("hourly_rate", { precision: 12, scale: 2 }).notNull().default("0"),
   calculationBasis: varchar("calculation_basis", { length: 40 }).notNull().default("fixed_minutes"),
   calculationValue: numeric("calculation_value", { precision: 12, scale: 4 }).notNull().default("0"),

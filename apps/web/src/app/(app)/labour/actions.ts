@@ -33,6 +33,7 @@ function labourInput(formData: FormData, tenantId: string) {
     tenantId,
     name: stringValue(formData, "name"),
     department: stringValue(formData, "department") || "general",
+    machineId: stringValue(formData, "machineId") || null,
     hourlyRate: String(Math.max(0, numericValue(formData, "hourlyRate"))),
     calculationBasis,
     calculationValue: storedCalculationValue(formData, calculationBasis),
@@ -49,11 +50,9 @@ export async function createLabourAction(formData: FormData) {
   if (!tenant) redirect("/bootstrap");
 
   const values = labourInput(formData, tenant.tenantId);
-  if (!values.name) redirect("/labour?error=Operation%20name%20is%20required");
-  if (Number(values.hourlyRate) <= 0) redirect("/labour?error=Enter%20an%20hourly%20rate%20greater%20than%20zero");
-
+  if (!values.name) redirect("/operations?error=Operation%20name%20is%20required");
   await createLabour(values);
-  redirect("/labour?message=Labour%20operation%20created");
+  redirect("/operations?message=Operation%20created");
 }
 
 export async function updateLabourAction(formData: FormData) {
@@ -63,11 +62,9 @@ export async function updateLabourAction(formData: FormData) {
 
   const values = labourInput(formData, tenant.tenantId);
   const id = stringValue(formData, "id");
-  if (!id || !values.name) redirect("/labour?error=Operation%20name%20is%20required");
-  if (Number(values.hourlyRate) <= 0) redirect("/labour?error=Enter%20an%20hourly%20rate%20greater%20than%20zero");
-
+  if (!id || !values.name) redirect("/operations?error=Operation%20name%20is%20required");
   await updateLabour({ ...values, id });
-  redirect("/labour?message=Labour%20operation%20updated");
+  redirect("/operations?message=Operation%20updated");
 }
 
 export async function setLabourActiveAction(formData: FormData) {
@@ -80,5 +77,5 @@ export async function setLabourActiveAction(formData: FormData) {
     stringValue(formData, "id"),
     stringValue(formData, "active") === "true"
   );
-  redirect("/labour");
+  redirect("/operations");
 }

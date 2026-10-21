@@ -641,10 +641,10 @@ const testMachines = [
 ] as const;
 
 const testLabour = [
-  { key: "print", name: "TEST — Print operator", department: "general", hourlyRate: "59", calculationBasis: "fixed_minutes", calculationValue: "5", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit" },
-  { key: "finishing", name: "TEST — Finishing operator", department: "general", hourlyRate: "59", calculationBasis: "fixed_minutes", calculationValue: "10", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit" },
-  { key: "guillotine", name: "TEST — Guillotine trim", department: "small_format", hourlyRate: "59", calculationBasis: "guillotine_stacks", calculationValue: "6", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit" },
-  { key: "wide", name: "TEST — Wide-format operator", department: "signage", hourlyRate: "59", calculationBasis: "per_sqm_hours", calculationValue: "0.0833", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit" }
+  { key: "print", name: "TEST — Print operator", department: "general", hourlyRate: "59", calculationBasis: "fixed_minutes", calculationValue: "5", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit", machineId: null },
+  { key: "finishing", name: "TEST — Finishing operator", department: "general", hourlyRate: "59", calculationBasis: "fixed_minutes", calculationValue: "10", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit", machineId: null },
+  { key: "guillotine", name: "TEST — Guillotine trim", department: "small_format", hourlyRate: "59", calculationBasis: "guillotine_stacks", calculationValue: "6", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit", machineId: null },
+  { key: "wide", name: "TEST — Wide-format operator", department: "signage", hourlyRate: "59", calculationBasis: "per_sqm_hours", calculationValue: "0.0833", minimumMinutes: "5", consumableMaterialId: null, consumableQuantity: "0", consumableBasis: "per_operation_unit", machineId: null }
 ] as const;
 
 const testProcesses = [

@@ -446,7 +446,6 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
   const [showSaveProduct, setShowSaveProduct] = useState(false);
   const [productSaveName, setProductSaveName] = useState(line.productName);
   const [productDepartment, setProductDepartment] = useState(product?.department ?? "signage");
-  const [productPricingMode, setProductPricingMode] = useState(product ? "recipe" : "current_price");
   const [createEditableOptions, setCreateEditableOptions] = useState(true);
 
   const visibleFields = configuredFields.filter((field) => isVisible(field, answers));
@@ -543,7 +542,6 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
   function openSaveProduct() {
     setProductSaveName(lineTitle.trim() || line.productName);
     setProductDepartment(product?.department ?? productDepartment ?? "signage");
-    setProductPricingMode(product ? "recipe" : "current_price");
     setShowSaveProduct(true);
   }
 
@@ -948,17 +946,11 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
           <input type="hidden" name="productFamily" value={product?.productFamily ?? productFamilyForDepartment(productDepartment)} />
 
           {product ? (
-            <fieldset style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 9 }}>
-              <legend style={labelTextStyle}>Pricing to save</legend>
-              <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
-                <input type="radio" name="productPricingMode" value="recipe" checked={productPricingMode === "recipe"} onChange={() => setProductPricingMode("recipe")} />
-                <span><strong>Keep the product Production Method</strong><br /><small style={{ color: "#64748b" }}>Copies the linked materials, labour, charges and available option lists. These selections become its defaults.</small></span>
-              </label>
-              <label style={{ display: "flex", gap: 9, alignItems: "start", fontWeight: 850 }}>
-                <input type="radio" name="productPricingMode" value="current_price" checked={productPricingMode === "current_price"} onChange={() => setProductPricingMode("current_price")} />
-                <span><strong>Use the current {formatMoney(unitPrice)} unit price</strong><br /><small style={{ color: "#64748b" }}>Keeps the option lists but replaces the costing method with this quote line's current price basis.</small></span>
-              </label>
-            </fieldset>
+            <section style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 7 }}>
+              <input type="hidden" name="productPricingMode" value="current_price" />
+              <strong>Saved product uses the simplified costing model</strong>
+              <small style={{ color: "#64748b", lineHeight: 1.5 }}>Materials remain product choices. Manufacturing cost comes from the matching Operations (machine + labour + consumable) when quoted; no Production Method pricing is copied.</small>
+            </section>
           ) : (
             <section style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 9 }}>
               <input type="hidden" name="productPricingMode" value="current_price" />
@@ -974,7 +966,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
             <button type="submit" name="productSaveMode" value="new" formAction={saveQuoteLineAsProductAction} style={{ ...buttonStyle, background: "#155eef" }}>Save as new product</button>
             {product ? (
-              <button type="submit" name="productSaveMode" value="update" formAction={saveQuoteLineAsProductAction} style={{ ...buttonStyle, background: productPricingMode === "current_price" ? "#b54708" : "#067647" }}>Update existing product</button>
+              <button type="submit" name="productSaveMode" value="update" formAction={saveQuoteLineAsProductAction} style={{ ...buttonStyle, background: "#b54708" }}>Update existing product</button>
             ) : null}
             <span style={{ color: "#64748b", fontSize: 12 }}>{product ? "Saving as new leaves the original product untouched. Updating changes the product used by every future quote." : "The new product will appear immediately in Predefined products."}</span>
           </div>

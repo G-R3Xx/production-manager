@@ -722,7 +722,7 @@ export function ProductProductionFlowBuilder({
         <div>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#1d4ed8", textTransform: "uppercase", letterSpacing: ".08em" }}>1 · Product and materials</div>
           <h2 style={{ margin: "6px 0" }}>{isSmallFormat ? "Set up the stock and normal product defaults" : "Guided product builder"}</h2>
-          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>{isSmallFormat ? "Start with the paper or card stock, then set the normal finished size, print and finishing defaults. Customer choices and the shared Production Method are configured immediately after this section." : "Choose the substrate, available quote options and the answers staff should see first. The shared Production Method is selected after the product itself is defined."}</p>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>{isSmallFormat ? "Start with the paper or card stock, then set the normal finished size, print and finishing defaults. Manufacturing cost is picked up from the matching Operations when the product is quoted." : "Choose the substrate, available quote options and the answers staff should see first. Manufacturing cost is picked up from the matching Operations when quoted."}</p>
         </div>
         <Link prefetch={false} href={`/products/advanced?selected=${productId}`} style={{ textDecoration: "none", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", fontWeight: 900 }}>Advanced raw setup</Link>
       </div>
@@ -982,7 +982,7 @@ export function ProductProductionFlowBuilder({
       </section> : null}
 
       {activeStep === "review" ? <section style={{ ...panel, background: "linear-gradient(180deg,#f0fdfa,#fff)" }}>
-        <h3 style={{ margin: 0 }}>{stepNumber("review")}. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This save updates the reusable quote options and website fields. It does not redefine the selected Production Method.</p>
+        <h3 style={{ margin: 0 }}>{stepNumber("review")}. Review and save</h3><p style={{ margin: "5px 0 14px", color: "#64748b" }}>Everything above changed instantly without a page load. This save updates the reusable quote options and website fields. Operation pricing stays central under Operations & labour.</p>
         <div style={{ display: "grid", gap: 9, padding: 16, borderRadius: 14, background: "#fff", border: "1px solid #ccfbf1" }}>
           <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Product summary</div>
           <h3 style={{ margin: 0 }}>{baseMaterialMode === "option" ? `${baseMaterialQuestionLabel}: ${baseMaterialChoices.map((choice) => choice.label || materials.find((material) => material.id === choice.materialId)?.name).filter(Boolean).join(", ") || "No choices"}` : selectedMaterial?.name ?? (isSmallFormat ? "Materials not configured" : "No physical material")} · {width} × {height} mm · Qty {quantity}</h3>

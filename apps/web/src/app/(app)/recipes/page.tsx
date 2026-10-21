@@ -1,5 +1,2 @@
 import { redirect } from "next/navigation";
-
-export default function LegacyRecipesRedirect() {
-  redirect("/manufacturing-methods");
-}
+export default function RecipesRedirectPage() { redirect("/operations"); }

@@ -26,6 +26,7 @@ export type QuoteCostingLabour = {
   id: string;
   name: string;
   department: string;
+  machineId: string | null;
   hourlyRate: string;
   calculationBasis: string;
   calculationValue: string;
@@ -162,32 +163,28 @@ export function selectMachineForProcess(
   metrics: MachineCostMetrics,
   department?: string | null,
   explicitMachineId?: string | null,
-  explicitProcessId?: string | null
+  _explicitProcessId?: string | null
 ): MachineCostSelection {
   if (!resources) {
     return { machine: null, process: null, machineCostPerUnit: 0, lineMachineCost: 0, inkRatePerSqm: 0, incompatibleMachines: [] };
   }
 
-  const processes = explicitProcessId
-    ? resources.processes.filter((process) => process.id === explicitProcessId)
-    : matchingProcesses(resources, aliases, department);
-  const processIds = new Set(processes.map((process) => process.id));
-  const candidates = explicitMachineId
-    ? resources.machines.filter((machine) => machine.id === explicitMachineId)
-    : resources.machines.filter((machine) => machine.processIds.some((id) => processIds.has(id)));
+  // V26.10.21.07+: Operations are the single manufacturing-cost source.
+  // A machine is linked directly to the matching Operation; Processes no longer
+  // participate in quote pricing.
+  const operation = labourForProcess(resources, aliases, department);
+  const machineId = explicitMachineId || operation?.machineId || null;
+  const candidates = machineId ? resources.machines.filter((machine) => machine.id === machineId) : [];
   const requiredWidthMm = Math.max(0, metrics.requiredWidthMm ?? 0);
   const compatible = candidates.filter((machine) => machineFitsWidth(machine, requiredWidthMm));
   const incompatibleMachines = candidates.filter((machine) => !machineFitsWidth(machine, requiredWidthMm));
-  const selected = [...compatible].sort((a, b) => lineMachineCost(a, metrics) - lineMachineCost(b, metrics))[0] ?? null;
+  const selected = compatible[0] ?? null;
   const lineCost = selected ? lineMachineCost(selected, metrics) : 0;
   const quantity = Math.max(1, metrics.quantity || 1);
-  const process = selected
-    ? processes.find((row) => selected.processIds.includes(row.id)) ?? processes[0] ?? null
-    : processes[0] ?? null;
 
   return {
     machine: selected,
-    process,
+    process: null,
     machineCostPerUnit: lineCost / quantity,
     lineMachineCost: lineCost,
     inkRatePerSqm: selected ? Math.max(0, n(selected.inkCostPerSqm, 0)) : 0,
@@ -200,27 +197,30 @@ export function labourForProcess(
   aliases: string[],
   department?: string | null,
   explicitLabourId?: string | null,
-  explicitProcessId?: string | null
+  _explicitProcessId?: string | null
 ): QuoteCostingLabour | null {
   if (!resources) return null;
   if (explicitLabourId) return resources.labour.find((row) => row.id === explicitLabourId) ?? null;
-  const process = explicitProcessId
-    ? resources.processes.find((row) => row.id === explicitProcessId) ?? null
-    : matchingProcesses(resources, aliases, department)[0] ?? null;
-  if (process?.labourOperationId) {
-    const linked = resources.labour.find((row) => row.id === process.labourOperationId) ?? null;
-    if (linked) return linked;
-  }
 
-  // Simple Shop Operations should not require an extra Process record just to be
-  // usable by the quote builder. If there is no explicit Process → operation
-  // link, fall back to an active costing resource whose name exactly matches one
-  // of the known aliases for the quote action. Exact matching is deliberate so a
-  // generic action such as "binding" cannot silently select the wrong recipe.
-  const normalizedAliases = new Set(aliases.map(normalizeCostingName).filter(Boolean));
-  return resources.labour.find((row) =>
-    departmentMatches(row.department, department) && normalizedAliases.has(normalizeCostingName(row.name))
-  ) ?? null;
+  const available = resources.labour.filter((row) => departmentMatches(row.department, department));
+  const normalizedAliases = aliases.map(normalizeCostingName).filter(Boolean);
+  if (!normalizedAliases.length) return null;
+
+  // Prefer exact operation names, then a controlled contains match. This lets
+  // familiar quote actions such as "direct print" or "laminate" resolve to the
+  // one priced Operation without needing a separate Process record.
+  for (const alias of normalizedAliases) {
+    const exact = available.find((row) => normalizeCostingName(row.name) === alias);
+    if (exact) return exact;
+  }
+  for (const alias of normalizedAliases) {
+    const partial = available.find((row) => {
+      const name = normalizeCostingName(row.name);
+      return name.includes(alias) || alias.includes(name);
+    });
+    if (partial) return partial;
+  }
+  return null;
 }
 
 export function labourRateForProcess(

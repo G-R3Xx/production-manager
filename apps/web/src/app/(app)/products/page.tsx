@@ -70,7 +70,7 @@ export default async function ProductsPage({ searchParams }: Props) {
         <div style={{ maxWidth: 850 }}>
           <div style={{ fontSize: 12, color: "#2563eb", fontWeight: 950, textTransform: "uppercase", letterSpacing: ".07em" }}>Starter product library</div>
           <h2 style={{ margin: "5px 0" }}>Add the common products in one go</h2>
-          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Creates Cards, Carbon Copy Books, Booklets, DL Flyers, Corflute Signs, ACM Signs, Printed Roll Stock and Cut Vinyl Graphics as editable drafts. You can change every question, material and production method, then duplicate a product whenever you need a variation.</p>
+          <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55 }}>Creates Cards, Carbon Copy Books, Booklets, DL Flyers, Corflute Signs, ACM Signs, Printed Roll Stock and Cut Vinyl Graphics as editable drafts. You can change every question, material and production workflow, then duplicate a product whenever you need a variation.</p>
         </div>
         <div style={{ display: "flex", gap: 9, flexWrap: "wrap", justifyContent: "flex-end" }}>
           <form action={createStarterProductLibraryAction}>

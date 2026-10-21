@@ -1,5 +1,2 @@
 import { redirect } from "next/navigation";
-
-export default function ProductionSetupPage() {
-  redirect("/machines");
-}
+export default function ProductionSetupRedirectPage() { redirect("/operations"); }

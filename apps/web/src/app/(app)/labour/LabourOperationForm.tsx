@@ -9,6 +9,7 @@ type LabourFormValues = {
   id?: string;
   name: string;
   department: string;
+  machineId?: string;
   hourlyRate: string;
   calculationBasis: LabourBasis;
   calculationValue: string;
@@ -17,6 +18,8 @@ type LabourFormValues = {
   consumableQuantity?: string;
   consumableBasis?: string;
 };
+
+type MachineOption = { id: string; name: string; active: boolean; };
 
 type MaterialOption = {
   id: string;
@@ -183,15 +186,18 @@ function materialBasisLabel(basis: string): string {
 export function LabourOperationForm({
   mode = "create",
   initialValues,
-  materials = []
+  materials = [],
+  machines = []
 }: {
   mode?: "create" | "edit";
   initialValues?: LabourFormValues;
   materials?: MaterialOption[];
+  machines?: MachineOption[];
 }) {
   const initialBasis = initialValues?.calculationBasis ?? "fixed_minutes";
   const [name, setName] = useState(initialValues?.name ?? "");
   const [department, setDepartment] = useState(initialValues?.department ?? "signage");
+  const [machineId, setMachineId] = useState(initialValues?.machineId ?? "");
   const [hourlyRate, setHourlyRate] = useState(initialValues?.hourlyRate ?? "120");
   const [basis, setBasis] = useState<LabourBasis>(initialBasis);
   const [minutes, setMinutes] = useState(
@@ -211,6 +217,10 @@ export function LabourOperationForm({
     () => materials.find((material) => material.id === consumableMaterialId) ?? null,
     [consumableMaterialId, materials]
   );
+  const selectedMachine = useMemo(
+    () => machines.find((machine) => machine.id === machineId) ?? null,
+    [machineId, machines]
+  );
 
   const liveExample = useMemo(() => {
     if (basis === "guillotine_stacks") {
@@ -222,7 +232,9 @@ export function LabourOperationForm({
         materialDetail: selectedConsumable ? `${selectedConsumable.name} usage is calculated on the quote.` : "No linked consumable.",
         totalCost: null as number | null,
         totalLabel: "Calculated on quote",
-        sampleDetail: "Raw shop cost only — markup, profit and client pricing are applied later on the quote."
+        sampleDetail: selectedMachine
+          ? `${selectedMachine.name} setup + runtime and labour are calculated together on the quote. Markup and profit are applied later.`
+          : "Raw shop cost only — markup, profit and client pricing are applied later on the quote."
       };
     }
 
@@ -260,7 +272,9 @@ export function LabourOperationForm({
     const sampleRawMinutes = basis === "fixed_minutes" ? minutesNumber : minutesNumber * sampleQuantity;
     const sampleMinutes = Math.max(sampleRawMinutes, minimumNumber);
     const sampleLabourCost = sampleMinutes / 60 * rate;
-    let sampleDetail = "Raw shop cost only — markup, profit and client pricing are applied later on the quote.";
+    let sampleDetail = selectedMachine
+      ? `${selectedMachine.name} machine cost is added from its setup + runtime when the quote dimensions are known. The amount above is labour/consumable only.`
+      : "Raw shop cost only — markup, profit and client pricing are applied later on the quote.";
 
     if (selectedConsumable && materialCost !== null && basis !== "fixed_minutes" && sampleQuantity > 1) {
       const sampleMaterialCost = materialCost * sampleQuantity;
@@ -276,10 +290,14 @@ export function LabourOperationForm({
       materialCost,
       materialDetail,
       totalCost,
-      totalLabel: totalCost === null ? "Calculated on quote" : money(totalCost),
+      totalLabel: totalCost === null
+        ? "Calculated on quote"
+        : selectedMachine
+          ? `${money(totalCost)} + machine`
+          : money(totalCost),
       sampleDetail
     };
-  }, [basis, basisDetails, consumableBasis, consumableQuantity, minimumNumber, minutesNumber, rate, selectedConsumable]);
+  }, [basis, basisDetails, consumableBasis, consumableQuantity, minimumNumber, minutesNumber, rate, selectedConsumable, selectedMachine]);
 
   function applyTemplate(template: Template) {
     setName(template.name);
@@ -299,7 +317,7 @@ export function LabourOperationForm({
           <div>
             <div className={styles.stepEyebrow}>Quick start</div>
             <h3 className={styles.sectionTitle}>Start with a common operation</h3>
-            <p className={styles.helpText}>Choose a starting point, then adjust it below. Nothing is saved until you select Add shop operation.</p>
+            <p className={styles.helpText}>Choose a starting point, then adjust it below. Nothing is saved until you select Add operation.</p>
           </div>
           <div className={styles.templateGrid}>
             {TEMPLATES.map((template) => (
@@ -349,6 +367,21 @@ export function LabourOperationForm({
               <span className={styles.fieldHint}>This only helps organise the list; it does not change the price.</span>
             </label>
           </div>
+          <label className={styles.fieldLabel} style={{ marginTop: 14 }}>
+            Machine (optional)
+            <select
+              name="machineId"
+              value={machineId}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => setMachineId(event.target.value)}
+              className={styles.input}
+            >
+              <option value="">No machine cost</option>
+              {machines.filter((machine) => machine.active || machine.id === machineId).map((machine) => (
+                <option key={machine.id} value={machine.id}>{machine.name}{machine.active ? "" : " · archived"}</option>
+              ))}
+            </select>
+            <span className={styles.fieldHint}>If selected, this operation charges that machine's setup + run cost once. Do not create a separate Process for the same work.</span>
+          </label>
         </div>
       </section>
 
@@ -387,7 +420,7 @@ export function LabourOperationForm({
         <div className={styles.stepNumber}>3</div>
         <div className={styles.sectionContent}>
           <h3 className={styles.sectionTitle}>How much labour does it take?</h3>
-          <p className={styles.helpText}>Set the labour rate and then choose the simple basis below. Machines such as printers, cutters and CNCs keep their own machine running costs separately.</p>
+          <p className={styles.helpText}>Set the labour rate and then choose the simple basis below. If this operation uses a machine, its machine cost is added once from the machine selected above. Labour is charged here and nowhere else.</p>
           <label className={styles.rateField}>
             Hourly rate
             <div className={styles.moneyInputWrap}>
@@ -475,6 +508,13 @@ export function LabourOperationForm({
           <div className={styles.previewBreakdown}>
             <div className={styles.previewBreakdownRow}>
               <div>
+                <span>Machine</span>
+                <small>{selectedMachine ? `${selectedMachine.name} setup + runtime` : "No machine linked."}</small>
+              </div>
+              <strong>{selectedMachine ? "Calculated on quote" : money(0)}</strong>
+            </div>
+            <div className={styles.previewBreakdownRow}>
+              <div>
                 <span>Labour</span>
                 <small>{liveExample.labourDetail}</small>
               </div>
@@ -491,7 +531,7 @@ export function LabourOperationForm({
           <p className={styles.previewNote}>{liveExample.sampleDetail}</p>
         </div>
         <div className={styles.previewTotal}>
-          <span>Total raw cost</span>
+          <span>{selectedMachine ? "Known raw cost + machine" : "Total raw cost"}</span>
           <strong>{liveExample.totalLabel}</strong>
           <small>Before markup &amp; profit</small>
         </div>
@@ -499,9 +539,9 @@ export function LabourOperationForm({
 
       <div className={styles.formActions}>
         <button type="submit" className={styles.primaryButton}>
-          {mode === "edit" ? "Save shop operation" : "Add shop operation"}
+          {mode === "edit" ? "Save operation" : "Add operation"}
         </button>
-        <span className={styles.saveHint}>The system stores the calculation in the existing costing engine automatically.</span>
+        <span className={styles.saveHint}>This operation is the single manufacturing-cost source used by quoting.</span>
       </div>
     </form>
   );
