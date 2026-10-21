@@ -2,42 +2,19 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listCurrentDashboardJobsForTenant, listDashboardJobMetadataForTenant, listJobProcessAssignmentsForTenant, jobProcessKeyForStage, type JobRecord } from "@/server/jobs";
-import { listUsersForTenant } from "@/server/users";
-import { customerLogoUrl, listCustomerLogoSummariesForTenant } from "@/server/customers";
+import { loadDashboardSnapshotForTenant } from "@/server/dashboard";
 import { refreshDashboardJobsAction } from "./actions";
 import { DashboardJobsTable, type DashboardRow } from "./DashboardJobsTable";
 
 type PageProps = { searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const card = { background: "#fff", border: "1px solid #dfe7f2", borderRadius: 22, boxShadow: "0 12px 34px rgba(15,23,42,.05)" } as const;
 
+export const preferredRegion = "syd1";
+
 function readParam(params: Record<string, string | string[] | undefined>, key: string): string {
   const value = params[key];
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
 }
-
-function normaliseClientName(value: string): string {
-  return value.toLowerCase()
-    .replace(/\b(pty|proprietary|limited|ltd|incorporated|inc)\b/g, " ")
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim();
-}
-
-function fmtDate(value: string | null): string {
-  if (!value) return "—";
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Sydney" });
-}
-
-function stageTone(stage: string) {
-  if (stage === "invoice_required" || stage.includes("changes_requested")) return { bg: "#fff1f2", fg: "#b42318", border: "#fecdd3" };
-  if (stage.includes("artwork") || stage.includes("survey")) return { bg: "#f5f3ff", fg: "#6d28d9", border: "#ddd6fe" };
-  if (stage.startsWith("quote")) return { bg: "#fff7ed", fg: "#c2410c", border: "#fed7aa" };
-  if (stage.includes("ready") || stage === "invoiced") return { bg: "#ecfdf3", fg: "#067647", border: "#abefc6" };
-  return { bg: "#eff6ff", fg: "#1d4ed8", border: "#bfdbfe" };
-}
-
 
 function australiaTodayKey(): string {
   const parts = new Intl.DateTimeFormat("en-AU", { timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -45,76 +22,35 @@ function australiaTodayKey(): string {
   return `${get("year")}-${get("month")}-${get("day")}`;
 }
 
-function isOverdue(job: JobRecord): boolean {
+function isOverdue(job: Pick<DashboardRow, "dueDate" | "currentStage">, todayKey: string): boolean {
   if (!job.dueDate || job.currentStage === "invoiced" || job.currentStage === "closed") return false;
-  return job.dueDate < australiaTodayKey();
-}
-
-const stageFilters = [
-  ["", "All active"], ["new_enquiry", "New enquiries"], ["survey", "Surveys"], ["quote_required", "Quote required"],
-  ["quote_awaiting_approval", "Quote pending"], ["changes", "Changes requested"], ["artwork", "Artwork"], ["production", "Production"],
-  ["dispatch", "Pickup / delivery / install"], ["invoice_required", "Invoice required"], ["overdue", "Overdue"],
-] as const;
-
-function stageMatches(job: JobRecord, filter: string): boolean {
-  if (!filter) return true;
-  if (filter === "survey") return job.currentStage.startsWith("survey_");
-  if (filter === "changes") return job.currentStage.includes("changes_requested");
-  if (filter === "artwork") return job.currentStage.startsWith("artwork_");
-  if (filter === "production") return job.currentStage === "production";
-  if (filter === "dispatch") return job.currentStage.startsWith("ready_for_");
-  if (filter === "overdue") return isOverdue(job);
-  return job.currentStage === filter;
+  return job.dueDate < todayKey;
 }
 
 export default async function DashboardPage({ searchParams }: PageProps) {
+  const startedAt = performance.now();
   const user = await getRequiredSessionUser();
+  const authMs = performance.now() - startedAt;
+  const tenantStartedAt = performance.now();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
+  const tenantMs = performance.now() - tenantStartedAt;
   if (!activeTenant) redirect("/bootstrap");
+
   const params = (await searchParams) ?? {};
   const stage = readParam(params, "stage");
   const owner = readParam(params, "owner");
   const q = readParam(params, "q").trim();
   const message = readParam(params, "message");
 
-  const [jobSnapshot, processAssignments, staff, customers, jobMetadata] = await Promise.all([
-    listCurrentDashboardJobsForTenant(activeTenant.tenantId),
-    listJobProcessAssignmentsForTenant(activeTenant.tenantId),
-    listUsersForTenant(activeTenant.tenantId),
-    listCustomerLogoSummariesForTenant(activeTenant.tenantId),
-    listDashboardJobMetadataForTenant(activeTenant.tenantId),
-  ]);
-  const jobs = jobSnapshot.jobs;
-  const activeStaff = staff.filter((row) => row.membershipStatus === "active");
-  const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
-  const customerById = new Map(customers.map((row) => [row.id, row]));
-  const customerByName = new Map(customers.flatMap((row) => {
-    const keys = new Set([normaliseClientName(row.displayName), normaliseClientName(row.companyName ?? "")].filter(Boolean));
-    return Array.from(keys).map((key) => [key, row] as const);
-  }));
-  const metadataByJobId = new Map(jobMetadata.map((row) => [row.jobId, row]));
-  const assignmentByJobAndProcess = new Map(processAssignments.map((assignment) => [`${assignment.jobId}:${assignment.processKey}`, assignment]));
-  const currentAssignment = (job: JobRecord) => {
-    const processKey = jobProcessKeyForStage(job.currentStage);
-    return processKey ? assignmentByJobAndProcess.get(`${job.id}:${processKey}`) : undefined;
-  };
-  const assignedIds = (job: JobRecord): string[] => {
-    const processIds = currentAssignment(job)?.assigneeProfileIds ?? [];
-    return processIds.length ? processIds : job.ownerProfileId ? [job.ownerProfileId] : [];
-  };
-
-  const assignedLabel = (job: JobRecord): string => {
-    const ids = assignedIds(job);
-    return ids.length ? ids.map((id) => staffById.get(id)?.shortName || staffById.get(id)?.fullName || "Staff").join(", ") : "Unassigned";
-  };
-  const dashboardRows: DashboardRow[] = jobs.map((job) => {
-    const linkedCustomer = job.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null;
-    const jobClientKey = normaliseClientName(job.clientName);
-    const linkedClientKeys = linkedCustomer ? new Set([normaliseClientName(linkedCustomer.displayName), normaliseClientName(linkedCustomer.companyName ?? "")].filter(Boolean)) : new Set<string>();
-    const matchingCustomer = customerByName.get(jobClientKey);
-    const metadata = metadataByJobId.get(job.id);
-    const linkedLogo = linkedCustomer && linkedClientKeys.has(jobClientKey) ? customerLogoUrl(linkedCustomer) : "";
-    return ({
+  const snapshotStartedAt = performance.now();
+  const snapshot = await loadDashboardSnapshotForTenant(activeTenant.tenantId);
+  const snapshotMs = performance.now() - snapshotStartedAt;
+  const staffById = new Map(snapshot.staff.map((person) => [person.id, person.name]));
+  const dashboardRows: DashboardRow[] = snapshot.rows.map((job) => {
+    const assigneeProfileIds = job.assigneeProfileIds.length
+      ? job.assigneeProfileIds
+      : job.ownerProfileId ? [job.ownerProfileId] : [];
+    return {
       id: job.id,
       jobNumber: job.jobNumber,
       title: job.title,
@@ -123,28 +59,44 @@ export default async function DashboardPage({ searchParams }: PageProps) {
       currentStageLabel: job.currentStageLabel,
       nextAction: job.nextAction,
       receivedAt: job.receivedAt,
-      dueDate: currentAssignment(job)?.dueDate || job.dueDate,
+      dueDate: job.assignmentDueDate || job.dueDate,
       ownerProfileId: job.ownerProfileId,
-      assigneeProfileIds: assignedIds(job),
-      assigneeLabel: assignedLabel(job),
+      assigneeProfileIds,
+      assigneeLabel: assigneeProfileIds.length
+        ? assigneeProfileIds.map((id) => staffById.get(id) || "Staff").join(", ")
+        : "Unassigned",
       dispatchType: job.dispatchType,
       myobOrderNumber: job.myobOrderNumber,
-      jobType: metadata?.jobType ?? "other",
-      logoUrl: linkedLogo || metadata?.enquiryLogoUrl || customerLogoUrl(matchingCustomer) || null,
-    });
+      jobType: job.jobType,
+      logoUrl: job.logoUrl,
+    };
   });
+
+  const todayKey = australiaTodayKey();
+  const todayAtMiddayUtc = new Date(`${todayKey}T12:00:00Z`);
+  const weekEnd = new Date(todayAtMiddayUtc);
+  weekEnd.setUTCDate(weekEnd.getUTCDate() + 7);
   const counts = {
-    active: jobs.length,
-    changes: jobs.filter((job) => job.currentStage.includes("changes_requested")).length,
-    overdue: jobs.filter(isOverdue).length,
-    invoice: jobs.filter((job) => job.currentStage === "invoice_required").length,
-    dueWeek: jobs.filter((job) => {
+    active: dashboardRows.length,
+    changes: dashboardRows.filter((job) => job.currentStage.includes("changes_requested")).length,
+    overdue: dashboardRows.filter((job) => isOverdue(job, todayKey)).length,
+    invoice: dashboardRows.filter((job) => job.currentStage === "invoice_required").length,
+    dueWeek: dashboardRows.filter((job) => {
       if (!job.dueDate) return false;
-      const todayKey = australiaTodayKey();
-      const start = new Date(`${todayKey}T12:00:00Z`); const end = new Date(start); end.setUTCDate(end.getUTCDate()+7);
-      const due = new Date(`${job.dueDate}T12:00:00Z`); return due >= start && due <= end;
+      const due = new Date(`${job.dueDate}T12:00:00Z`);
+      return due >= todayAtMiddayUtc && due <= weekEnd;
     }).length,
   };
+
+  console.info("[dashboard-page]", {
+    tenantId: activeTenant.tenantId,
+    rowCount: dashboardRows.length,
+    authMs: Math.round(authMs),
+    tenantMs: Math.round(tenantMs),
+    snapshotMs: Math.round(snapshotMs),
+    totalMs: Math.round(performance.now() - startedAt),
+    vercelRegion: process.env.VERCEL_REGION ?? null,
+  });
 
   return (
     <div style={{ maxWidth: 1580, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -161,12 +113,11 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
       <DashboardJobsTable
         rows={dashboardRows}
-        staff={activeStaff.map((person) => ({ id: person.userProfileId, name: person.fullName }))}
-        todayKey={australiaTodayKey()}
+        staff={snapshot.staff}
+        todayKey={todayKey}
         initialStage={stage}
         initialOwner={owner}
         initialQuery={q}
-        reconciliationScheduled={jobSnapshot.reconciliationScheduled}
       />
     </div>
   );
@@ -174,4 +125,3 @@ export default async function DashboardPage({ searchParams }: PageProps) {
 
 const primary = { minHeight: 42, borderRadius: 12, background: "#0f172a", color: "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0 14px", fontWeight: 950, textDecoration: "none" } as const;
 const secondary = { ...primary, background: "#fff", color: "#344054", border: "1px solid #d0d5dd" } as const;
-const control = { width: "100%", minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", padding: "0 11px", background: "#fff", boxSizing: "border-box" as const };

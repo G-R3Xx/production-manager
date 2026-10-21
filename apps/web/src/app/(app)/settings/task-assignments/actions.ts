@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { canManageStaff } from "@/server/users";
+import { syncInheritedJobProcessDefaultsForTenant } from "@/server/jobs";
 import {
   saveTaskAssignmentDefaultsForTenant,
   TASK_ASSIGNMENT_DEFAULT_KEYS,
@@ -26,6 +27,7 @@ export async function saveTaskAssignmentDefaultsAction(formData: FormData): Prom
 
   try {
     await saveTaskAssignmentDefaultsForTenant(tenant.tenantId, payload);
+    await syncInheritedJobProcessDefaultsForTenant(tenant.tenantId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Default assignments could not be saved.";
     redirect(`/settings/task-assignments?error=${encodeURIComponent(message)}`);

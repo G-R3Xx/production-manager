@@ -1,10 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { useMemo, useState, type KeyboardEvent, type MouseEvent } from "react";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
-import { requestAppActivityCheck } from "@/lib/auto-refresh-client";
-import { DashboardJobRow } from "./DashboardJobRow";
 import type { DashboardJobType } from "@/server/jobs";
 
 export type DashboardRow = {
@@ -108,7 +107,8 @@ function fmtDate(value: string | null): string {
   return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-AU", { day: "numeric", month: "short", timeZone: "Australia/Sydney" });
 }
 
-export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", initialOwner = "", initialQuery = "", reconciliationScheduled = false }: { rows: DashboardRow[]; staff: StaffOption[]; todayKey: string; initialStage?: string; initialOwner?: string; initialQuery?: string; reconciliationScheduled?: boolean }) {
+export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", initialOwner = "", initialQuery = "" }: { rows: DashboardRow[]; staff: StaffOption[]; todayKey: string; initialStage?: string; initialOwner?: string; initialQuery?: string }) {
+  const router = useRouter();
   const [stage, setStage] = useState(initialStage);
   const [owner, setOwner] = useState(initialOwner);
   const [age, setAge] = useState("");
@@ -117,12 +117,6 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
   const [sort, setSort] = useState<SortKey | null>(null);
   const [direction, setDirection] = useState<"asc" | "desc">("asc");
 
-  useEffect(() => {
-    if (!reconciliationScheduled) return;
-    requestAppActivityCheck();
-    const timer = window.setInterval(requestAppActivityCheck, 2_000);
-    return () => window.clearInterval(timer);
-  }, [reconciliationScheduled]);
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -138,6 +132,23 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
   const changeSort = (key: SortKey) => {
     if (sort === key) setDirection((current) => current === "asc" ? "desc" : "asc");
     else { setSort(key); setDirection("asc"); }
+  };
+
+  const openRowFromTarget = (target: EventTarget | null) => {
+    if (!(target instanceof HTMLElement)) return;
+    if (target.closest("a,button,input,select,textarea,label")) return;
+    const row = target.closest<HTMLTableRowElement>("tr[data-dashboard-href]");
+    const href = row?.dataset.dashboardHref;
+    if (href) router.push(href);
+  };
+
+  const onTableClick = (event: MouseEvent<HTMLTableSectionElement>) => openRowFromTarget(event.target);
+  const onTableKeyDown = (event: KeyboardEvent<HTMLTableSectionElement>) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    if (!(event.target instanceof HTMLTableRowElement)) return;
+    event.preventDefault();
+    const href = event.target.dataset.dashboardHref;
+    if (href) router.push(href);
   };
 
   return (
@@ -158,10 +169,10 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
           <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", minWidth: 1280 }}>
             <colgroup><col style={{ width: "23%" }} /><col style={{ width: "9%" }} /><col style={{ width: "13%" }} /><col style={{ width: "15%" }} /><col style={{ width: "8%" }} /><col style={{ width: "9%" }} /><col style={{ width: "8%" }} /><col style={{ width: "8%" }} /><col style={{ width: "7%" }} /></colgroup>
             <thead><tr style={{ background: "#f3f6fa", color: "#475467", fontSize: 11, textTransform: "uppercase", letterSpacing: ".05em" }}>{[["Job / client","job"],["Received","received"],["Current stage","stage"],["Next action","next"],["Due","due"],["Assigned","assigned"],["Dispatch","dispatch"],["MYOB","myob"],["",""]].map(([head, key], index) => <th key={`${head}-${index}`} style={{ padding: 0, textAlign: "left", borderBottom: "1px solid #d9e1eb", borderRight: index < 8 ? "1px solid #e4e9f0" : undefined }}>{key ? <button type="button" onClick={() => changeSort(key as SortKey)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: 10, color: "inherit", background: "transparent", border: 0, font: "inherit", textTransform: "inherit", letterSpacing: "inherit", cursor: "pointer" }}>{head}<span aria-hidden="true" style={{ color: sort === key ? "#155eef" : "#98a2b3", fontSize: 10 }}>{sort === key ? direction === "asc" ? "▲" : "▼" : "↕"}</span></button> : null}</th>)}</tr></thead>
-            <tbody>{visible.map((row) => {
+            <tbody onClick={onTableClick} onKeyDown={onTableKeyDown}>{visible.map((row) => {
               const colors = stageTone(row.currentStage);
               const overdue = Boolean(row.dueDate && row.dueDate < todayKey && row.currentStage !== "invoiced" && row.currentStage !== "closed");
-              return <DashboardJobRow key={row.id} href={`/jobs/${row.id}`}>
+              return <tr key={row.id} data-dashboard-href={`/jobs/${row.id}`} tabIndex={0} aria-label="Open job workspace" className="dashboard-job-row" style={{ borderBottom: "1px solid #e6ebf2", background: "#fff", cursor: "pointer", outlineColor: "#155eef" }}>
                 <td style={{ padding: "9px 10px", borderRight: "1px solid #edf1f6" }}><div style={{ display: "grid", gridTemplateColumns: "36px minmax(0,1fr)", gap: 9, alignItems: "center" }}><ClientLogoBadge logoUrl={row.logoUrl} name={row.clientName} size={36} radius={10} padding={3} /><span style={{ minWidth: 0 }}><strong style={{ display: "block", color: "#101828", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: 14 }}>{row.title}</strong><span style={{ display: "block", marginTop: 2, color: "#667085", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{row.jobNumber} · {row.clientName}</span></span></div></td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", fontSize: 11 }}><span style={{ display: "block", color: "#344054", fontWeight: 850 }}>{fmtReceived(row.receivedAt)}</span><span style={{ display: "block", marginTop: 2, color: jobAgeDays(row.receivedAt, todayKey) > 30 ? "#b42318" : "#667085", fontSize: 10, fontWeight: 800 }}>{ageLabel(jobAgeDays(row.receivedAt, todayKey))}</span></td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6" }}><span style={{ borderRadius: 999, background: colors.bg, color: colors.fg, border: `1px solid ${colors.border}`, padding: "5px 8px", fontSize: 10, fontWeight: 950, whiteSpace: "nowrap" }}>{row.currentStageLabel}</span></td>
@@ -171,12 +182,13 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 12, textTransform: "capitalize" }}>{row.dispatchType?.replaceAll("_", " ") || "—"}</td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: row.myobOrderNumber ? "#067647" : "#667085", fontSize: 12, fontWeight: 800 }}>{row.myobOrderNumber || "—"}</td>
                 <td style={{ padding: 10, textAlign: "center" }}><Link href={`/jobs/${row.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Open →</Link></td>
-              </DashboardJobRow>;
+              </tr>;
             })}</tbody>
           </table>
         </div>
         {!visible.length ? <div style={{ padding: 28, textAlign: "center", color: "#667085" }}>No jobs match these filters.</div> : null}
       </section>
+      <style>{`.dashboard-job-row:hover { background: #f5f9ff !important; } .dashboard-job-row:focus-visible { outline: 2px solid #155eef; outline-offset: -2px; }`}</style>
     </>
   );
 }

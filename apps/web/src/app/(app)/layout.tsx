@@ -13,7 +13,9 @@ type AppLayoutProps = {
   children: ReactNode;
 };
 
-const APP_VERSION = "V26.10.21.01";
+export const preferredRegion = "syd1";
+
+const APP_VERSION = "V26.10.21.02";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -32,11 +34,21 @@ const navItems = [
 ];
 
 export default async function AppLayout({ children }: AppLayoutProps) {
+  const startedAt = performance.now();
   const user = await getRequiredSessionUser();
+  const authMs = performance.now() - startedAt;
+  const workspaceStartedAt = performance.now();
   const [memberships, activeTenant] = await Promise.all([
     listMembershipsForAuthUser(user.id),
     resolveActiveTenantForAuthUserId(user.id)
   ]);
+  console.info("[app-shell]", {
+    authMs: Math.round(authMs),
+    workspaceMs: Math.round(performance.now() - workspaceStartedAt),
+    totalMs: Math.round(performance.now() - startedAt),
+    membershipCount: memberships.length,
+    vercelRegion: process.env.VERCEL_REGION ?? null,
+  });
 
   return (
     <div

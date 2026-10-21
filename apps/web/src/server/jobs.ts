@@ -780,19 +780,44 @@ async function dashboardJobsNeedWorkflowSync(tenantId: string): Promise<boolean>
   return Boolean(result.rows[0]?.needsSync);
 }
 
-export async function listCurrentDashboardJobsForTenant(tenantId: string): Promise<{ jobs: JobRecord[]; reconciliationScheduled: boolean }> {
-  const [jobs, needsSync] = await Promise.all([
-    listJobsForTenant(tenantId, { skipSync: true }),
-    dashboardJobsNeedWorkflowSync(tenantId),
-  ]);
-  if (needsSync) {
-    after(async () => {
-      await synchroniseJobsFromCurrentWorkflow(tenantId, { force: true }).catch((error) => {
-        console.error("Dashboard workflow reconciliation failed", error);
+const dashboardSyncCheckScheduledAt = new Map<string, number>();
+const DASHBOARD_SYNC_CHECK_INTERVAL_MS = 60_000;
+
+/**
+ * Reconciliation is important, but checking five workflow source tables must not
+ * sit in the dashboard's first-render critical path. Schedule the check after the
+ * response and throttle it per warm server instance. Normal workflow mutations
+ * already maintain app.jobs; this remains a safety-net for legacy/background data.
+ */
+export function scheduleDashboardWorkflowReconciliation(tenantId: string): void {
+  const now = Date.now();
+  const lastScheduledAt = dashboardSyncCheckScheduledAt.get(tenantId) ?? 0;
+  if (now - lastScheduledAt < DASHBOARD_SYNC_CHECK_INTERVAL_MS) return;
+  dashboardSyncCheckScheduledAt.set(tenantId, now);
+
+  after(async () => {
+    const startedAt = performance.now();
+    try {
+      const needsSync = await dashboardJobsNeedWorkflowSync(tenantId);
+      if (needsSync) await synchroniseJobsFromCurrentWorkflow(tenantId, { force: true });
+      console.info("[dashboard-reconcile]", {
+        tenantId,
+        needsSync,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        vercelRegion: process.env.VERCEL_REGION ?? null,
       });
-    });
-  }
-  return { jobs, reconciliationScheduled: needsSync };
+    } catch (error) {
+      console.error("Dashboard workflow reconciliation failed", error);
+    }
+  });
+}
+
+export async function listCurrentDashboardJobsForTenant(tenantId: string): Promise<{ jobs: JobRecord[]; reconciliationScheduled: boolean }> {
+  // Kept for backwards compatibility with older call sites. The dashboard itself
+  // now uses the purpose-built snapshot reader below and never blocks on sync checks.
+  scheduleDashboardWorkflowReconciliation(tenantId);
+  const jobs = await listJobsForTenant(tenantId, { skipSync: true });
+  return { jobs, reconciliationScheduled: false };
 }
 
 function dashboardJobTypeFromText(values: string[]): DashboardJobType {

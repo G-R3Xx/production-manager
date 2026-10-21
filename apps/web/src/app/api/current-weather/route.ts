@@ -4,6 +4,7 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { getCompanySettingsByTenantId } from "@/server/company";
 
 export const dynamic = "force-dynamic";
+export const preferredRegion = "syd1";
 
 type GeocodingResult = {
   latitude?: number;
