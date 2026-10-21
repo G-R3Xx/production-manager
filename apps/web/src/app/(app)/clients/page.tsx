@@ -282,7 +282,7 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
         <section style={{ ...panelStyle(), display: "grid", gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>Find clients</h2>
-            <Link href="/clients" style={{ textDecoration: "none", borderRadius: 999, border: "1px solid #cbd5e1", padding: "7px 12px", fontWeight: 850, color: "#111827" }}>+ New</Link>
+            <Link prefetch={false} href="/clients" style={{ textDecoration: "none", borderRadius: 999, border: "1px solid #cbd5e1", padding: "7px 12px", fontWeight: 850, color: "#111827" }}>+ New</Link>
           </div>
           <form method="get" style={{ display: "grid", gap: 10 }}>
             <input name="q" defaultValue={q} placeholder="Search name, phone, email, ABN, address" style={inputStyle} />
@@ -291,9 +291,9 @@ export default async function ClientsPage({ searchParams }: ClientsPageProps) {
           </form>
 
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8 }}>
-            <Link href={`/clients?filter=active${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "active" ? "#eff6ff" : "#f8fafc", border: filter === "active" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Active<br /><span style={{ color: "#667085", fontSize: 12 }}>{activeCount}</span></Link>
-            <Link href={`/clients?filter=archived${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "archived" ? "#eff6ff" : "#f8fafc", border: filter === "archived" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Archived<br /><span style={{ color: "#667085", fontSize: 12 }}>{archivedCount}</span></Link>
-            <Link href={`/clients?filter=deleted${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "deleted" ? "#eff6ff" : "#f8fafc", border: filter === "deleted" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Deleted<br /><span style={{ color: "#667085", fontSize: 12 }}>{deletedCount}</span></Link>
+            <Link prefetch={false} href={`/clients?filter=active${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "active" ? "#eff6ff" : "#f8fafc", border: filter === "active" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Active<br /><span style={{ color: "#667085", fontSize: 12 }}>{activeCount}</span></Link>
+            <Link prefetch={false} href={`/clients?filter=archived${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "archived" ? "#eff6ff" : "#f8fafc", border: filter === "archived" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Archived<br /><span style={{ color: "#667085", fontSize: 12 }}>{archivedCount}</span></Link>
+            <Link prefetch={false} href={`/clients?filter=deleted${q ? `&q=${encodeURIComponent(q)}` : ""}`} style={{ textDecoration: "none", textAlign: "center", borderRadius: 14, padding: 10, background: filter === "deleted" ? "#eff6ff" : "#f8fafc", border: filter === "deleted" ? "1px solid #2563eb" : "1px solid #e5e7eb", color: "#111827", fontWeight: 900 }}>Deleted<br /><span style={{ color: "#667085", fontSize: 12 }}>{deletedCount}</span></Link>
           </div>
 
           <div style={{ display: "grid", gap: 10, maxHeight: 650, overflow: "auto", paddingRight: 4 }}>

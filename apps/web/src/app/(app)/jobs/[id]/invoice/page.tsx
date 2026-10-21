@@ -3,7 +3,7 @@ import { notFound, redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getJobById } from "@/server/jobs";
-import { getJobInvoiceSummary, invoiceEmailState, listInvoiceLines } from "@/server/invoicing";
+import { getJobInvoiceSummary, invoiceEmailState, listInvoiceLinesForInvoices } from "@/server/invoicing";
 import { InvoiceBuilder } from "./InvoiceBuilder";
 import { emailInvoiceAction, refreshInvoiceAction, retryInvoiceAction } from "./actions";
 import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
@@ -62,7 +62,8 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
 
   const summary = await getJobInvoiceSummary(tenant.tenantId, job.id, quoteId);
   const unresolvedDraft = summary.invoices.find((invoice) => invoice.status === "draft" && !invoice.myobUid && ["syncing", "error"].includes(invoice.myobSyncStatus));
-  const invoiceLinePairs = await Promise.all(summary.invoices.map(async (invoice) => ({ invoice, lines: await listInvoiceLines(tenant.tenantId, invoice.id) })));
+  const linesByInvoice = await listInvoiceLinesForInvoices(tenant.tenantId, summary.invoices.map((invoice) => invoice.id));
+  const invoiceLinePairs = summary.invoices.map((invoice) => ({ invoice, lines: linesByInvoice.get(invoice.id) ?? [] }));
   const emailConfigured = outboundEmailConfigured();
 
   return <div style={{ maxWidth: 1500, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -76,7 +77,7 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
           <h1 style={{ margin: "5px 0 3px", fontSize: 34, letterSpacing: "-.035em" }}>{job.title}</h1>
           <p style={{ margin: 0, color: "#667085" }}>{job.clientName} · {summary.quote.quoteNumber || "Accepted quote"}{summary.quote.clientPurchaseOrderNumber ? ` · PO ${summary.quote.clientPurchaseOrderNumber}` : ""}{job.myobOrderNumber ? ` · MYOB Order ${job.myobOrderNumber}` : " · MYOB Order not linked"}</p>
         </div>
-        <Link href={`/jobs/${job.id}`} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", border: "1px solid #d0d5dd", borderRadius: 12, color: "#344054", fontWeight: 900, textDecoration: "none", background: "#fff" }}>← Job workspace</Link>
+        <Link prefetch={false} href={`/jobs/${job.id}`} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", border: "1px solid #d0d5dd", borderRadius: 12, color: "#344054", fontWeight: 900, textDecoration: "none", background: "#fff" }}>← Job workspace</Link>
       </div>
     </section>
 
@@ -132,7 +133,7 @@ export default async function JobInvoicePage({ params, searchParams }: PageProps
               </div> : null}
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 {invoice.myobSyncStatus === "error" && !invoice.myobUid ? <form action={retryInvoiceAction}><input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="invoiceId" value={invoice.id} /><button type="submit" style={{ minHeight: 38, border: 0, borderRadius: 10, padding: "0 12px", background: "#b42318", color: "#fff", fontWeight: 900 }}>Recover / retry MYOB</button></form> : null}
-                {invoice.myobUid ? <Link href={`/jobs/${job.id}/invoice/${invoice.id}/pdf`} target="_blank" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", border: "1px solid #2563eb", borderRadius: 10, padding: "0 12px", background: "#eff6ff", color: "#1d4ed8", fontWeight: 900, textDecoration: "none" }}>View invoice PDF</Link> : null}
+                {invoice.myobUid ? <Link prefetch={false} href={`/jobs/${job.id}/invoice/${invoice.id}/pdf`} target="_blank" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", border: "1px solid #2563eb", borderRadius: 10, padding: "0 12px", background: "#eff6ff", color: "#1d4ed8", fontWeight: 900, textDecoration: "none" }}>View invoice PDF</Link> : null}
                 {invoice.myobUid ? <EmailRecipientModalForm action={emailInvoiceAction} hiddenFields={{ jobId: job.id, invoiceId: invoice.id }} defaultEmail={clientEmail.to || summary.quote.emailTo || summary.quote.email} disabled={!emailConfigured} variant="invoice" alreadySent={clientEmail.status === "sent"} modalTitle={clientEmail.status === "sent" ? `Resend invoice ${invoice.myobNumber || invoice.invoiceNumber}` : `Send invoice ${invoice.myobNumber || invoice.invoiceNumber}`} modalDescription="Confirm or change the email address before Production Manager sends the branded invoice PDF to the client." submitLabel={clientEmail.status === "sent" ? "Resend invoice PDF" : "Send invoice PDF"} /> : null}
                 {invoice.myobUid ? <form action={refreshInvoiceAction}><input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="invoiceId" value={invoice.id} /><button type="submit" style={{ minHeight: 40, border: "1px solid #d0d5dd", borderRadius: 10, padding: "0 12px", background: "#fff", color: "#344054", fontWeight: 900 }}>Refresh MYOB status</button></form> : null}
                 {invoice.myobStatus ? <span style={{ alignSelf: "center", color: "#667085", fontSize: 12 }}>MYOB status: <strong>{invoice.myobStatus}</strong>{invoice.myobSyncedAt ? ` · synced ${dateTime(invoice.myobSyncedAt)}` : ""}</span> : null}

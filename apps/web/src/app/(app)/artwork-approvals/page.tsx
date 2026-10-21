@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
@@ -12,13 +13,12 @@ import {
   listArtworkApprovalPages,
   listArtworkApprovalsForTenant,
   prefillArtworkApprovalPagesFromQuoteLines,
-  listQuoteDraftsForTenant,
+  listQuoteClientLogoSummariesForTenant,
+  listQuoteDraftSummariesForTenant,
   listQuoteLines,
   type ArtworkApprovalPageRecord,
   type QuoteLineRecord
 } from "@/server/quotes";
-import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
-import { listEnquiriesForTenant } from "@/server/enquiries";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 import { ArtworkSpecificationPanel } from "@/components/ArtworkSpecificationPanel";
 import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, specificationForRevision } from "@/lib/artworkSpecification";
@@ -193,11 +193,10 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
   const quoteParam = readParam(params, "quote");
   const filter = readParam(params, "filter");
 
-  const [quoteDrafts, allApprovals, clients, allEnquiries] = await Promise.all([
-    listQuoteDraftsForTenant(activeTenant.tenantId),
+  const [quoteDrafts, allApprovals, quoteLogos] = await Promise.all([
+    listQuoteDraftSummariesForTenant(activeTenant.tenantId),
     listArtworkApprovalsForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listCustomersForTenant(activeTenant.tenantId),
-    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true })
+    listQuoteClientLogoSummariesForTenant(activeTenant.tenantId)
   ]);
 
   const deletedCount = allApprovals.filter((item) => item.status === "deleted").length;
@@ -237,17 +236,20 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
     const hasMissingAutoPage = [...expectedLineIds].some((lineId) => !existingLineIds.has(lineId));
 
     if (hasMissingAutoPage) {
-      await prefillArtworkApprovalPagesFromQuoteLines(activeTenant!.tenantId, selectedApproval.id);
-      proofPages = await listArtworkApprovalPages(selectedApproval.id);
+      const tenantId = activeTenant.tenantId;
+      const approvalId = selectedApproval.id;
+      after(async () => {
+        try {
+          await prefillArtworkApprovalPagesFromQuoteLines(tenantId, approvalId);
+        } catch (prefillError) {
+          console.error("Artwork proof-page background prefill failed", { tenantId, approvalId, prefillError });
+        }
+      });
     }
   }
 
-  const customerById = new Map(clients.map((client) => [client.id, client]));
-  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
-  const logoForQuote = (quote: typeof quoteDrafts[number] | null | undefined) => {
-    const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
-    return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
-  };
+  const logoByQuoteId = new Map(quoteLogos.map((item) => [item.quoteId, item.logoUrl]));
+  const logoForQuote = (quote: typeof quoteDrafts[number] | null | undefined) => quote ? (logoByQuoteId.get(quote.id) ?? null) : null;
 
   const selectedLogo = logoForQuote(selectedQuote);
   const usesLineResponses = quoteUsesLineResponses(quoteLines);
@@ -320,8 +322,8 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
           <p style={{ margin: "5px 0 0", color: "#667085" }}>Build proofs from the approved quote scope, send one clean client link, manage revisions, then release approved artwork to production.</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
-          <Link href="/artwork-approvals" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none", background: filter === "deleted" ? "#fff" : "#f2f4f7" }}>Active</Link>
-          <Link href="/artwork-approvals?filter=deleted" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none", background: filter === "deleted" ? "#f2f4f7" : "#fff" }}>Deleted ({deletedCount})</Link>
+          <Link prefetch={false} href="/artwork-approvals" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none", background: filter === "deleted" ? "#fff" : "#f2f4f7" }}>Active</Link>
+          <Link prefetch={false} href="/artwork-approvals?filter=deleted" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none", background: filter === "deleted" ? "#f2f4f7" : "#fff" }}>Deleted ({deletedCount})</Link>
         </div>
       </header>
 
@@ -339,7 +341,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
               const tone = itemAwaitingFinalSignoff ? finalSignoffTone : statusTone(approval.status);
               const statusLabel = itemAwaitingFinalSignoff ? "final sign-off pending" : approval.status.replace(/_/g, " ");
               return (
-                <Link key={approval.id} href={`/artwork-approvals?selected=${approval.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
+                <Link prefetch={false} key={approval.id} href={`/artwork-approvals?selected=${approval.id}${filter === "deleted" ? "&filter=deleted" : ""}`} style={{ textDecoration: "none", color: "inherit" }}>
                   <div style={{ border: selected ? "2px solid #344054" : "1px solid #e4e7ec", borderRadius: 14, padding: 10, background: selected ? "#f8fafc" : "#fff", display: "grid", gap: 6 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center", minWidth: 0 }}>
                       <ClientLogoBadge logoUrl={logoForQuote(quote)} name={approval.clientName} size={34} radius={9} padding={3} />
@@ -386,7 +388,7 @@ export default async function ArtworkApprovalsPage({ searchParams }: PageProps) 
                   <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                     <span style={{ borderRadius: 999, background: selectedDisplayTone.bg, color: selectedDisplayTone.fg, border: `1px solid ${selectedDisplayTone.border}`, padding: "7px 10px", fontSize: 11, fontWeight: 950 }}>{selectedStatusLabel}</span>
                     {publicUrl ? <a href={`${publicUrl}?preview=1`} target="_blank" rel="noreferrer" style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Client preview</a> : null}
-                    <Link href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Source quote</Link>
+                    <Link prefetch={false} href={`/quotes?selected=${selectedQuote.id}`} style={{ ...secondaryButton, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Source quote</Link>
                   </div>
                 </div>
 

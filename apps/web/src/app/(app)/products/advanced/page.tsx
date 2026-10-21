@@ -554,7 +554,7 @@ function ProductChooser({ products, filteredProducts, selectedProduct, query, ac
               ) : (
                 compactResults.map((product) => (
                   <div key={product.id} style={{ ...whitePanelStyle, background: selectedProduct?.id === product.id ? "#eef2ff" : "#fff", display: "grid", gap: 8 }}>
-                    <Link href={selectedProductUrl(product.id, query)} style={{ textDecoration: "none", color: "inherit", display: "grid", gap: 4 }}>
+                    <Link prefetch={false} href={selectedProductUrl(product.id, query)} style={{ textDecoration: "none", color: "inherit", display: "grid", gap: 4 }}>
                       <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                         <strong>{product.name}</strong>
                         <span style={selectedProduct?.id === product.id ? blueChipStyle : plainChipStyle}>{selectedProduct?.id === product.id ? "Open" : "Open product"}</span>
@@ -780,7 +780,7 @@ function QuestionCard({ field, index, selectedProduct, query, components, isEdit
             <input type="hidden" name="direction" value="down" />
             <button type="submit" style={ghostStyle}>↓</button>
           </form>
-          <Link href={editProductUrl(selectedProduct.id, query, questionId)} style={ghostStyle}>{isEditing ? "Editing" : "Edit"}</Link>
+          <Link prefetch={false} href={editProductUrl(selectedProduct.id, query, questionId)} style={ghostStyle}>{isEditing ? "Editing" : "Edit"}</Link>
         </div>
       </div>
 
@@ -794,7 +794,7 @@ function QuestionCard({ field, index, selectedProduct, query, components, isEdit
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "space-between" }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button type="submit" style={blueButtonStyle}>Save question</button>
-              <Link href={selectedProductUrl(selectedProduct.id, query)} style={ghostStyle}>Cancel</Link>
+              <Link prefetch={false} href={selectedProductUrl(selectedProduct.id, query)} style={ghostStyle}>Cancel</Link>
             </div>
             <button type="submit" formAction={deleteProductOptionAction} style={dangerGhostStyle}>Remove question</button>
           </div>
@@ -1045,7 +1045,7 @@ function AddedQuestionChip({ preset, field, selectedProductId, query }: { preset
         <small style={{ color: "#64748b", fontWeight: 900 }}>added</small>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Link href={editProductUrl(selectedProductId, query, fieldId)} style={{ ...ghostStyle, minHeight: 34, padding: "6px 10px", fontSize: 13 }}>Edit</Link>
+        <Link prefetch={false} href={editProductUrl(selectedProductId, query, fieldId)} style={{ ...ghostStyle, minHeight: 34, padding: "6px 10px", fontSize: 13 }}>Edit</Link>
         <form action={deleteProductOptionAction} style={{ margin: 0 }}>
           <input type="hidden" name="productId" value={selectedProductId} />
           <input type="hidden" name="fieldId" value={fieldId} />
@@ -1921,7 +1921,7 @@ function BuildSlotRow({ slot, selectedProduct, query, components, materials }: {
   return (
     <tr style={{ borderTop: "1px solid #e5e7eb" }}>
       <td style={{ padding: "13px 10px", fontWeight: 900, color: "#2563eb", width: 170 }}>
-        <Link href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ color: "#2563eb", textDecoration: "underline" }}>{slot.label}</Link>
+        <Link prefetch={false} href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ color: "#2563eb", textDecoration: "underline" }}>{slot.label}</Link>
       </td>
       <td style={{ padding: "13px 10px" }}>
         <div style={{ display: "grid", gap: 4 }}>
@@ -1936,7 +1936,7 @@ function BuildSlotRow({ slot, selectedProduct, query, components, materials }: {
       </td>
       <td style={{ padding: "13px 10px", textAlign: "right" }}>
         <div style={{ display: "inline-flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap" }}>
-          <Link href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={isDone ? ghostStyle : blueButtonStyle}>{isDone ? "Change" : `+ ${slot.chooseLabel}`}</Link>
+          <Link prefetch={false} href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={isDone ? ghostStyle : blueButtonStyle}>{isDone ? "Change" : `+ ${slot.chooseLabel}`}</Link>
           {selected ? (
             <form action={deleteProductComponentAction}>
               <input type="hidden" name="productId" value={selectedProduct.id} />
@@ -1962,7 +1962,7 @@ function ProductPartListSummary({ selectedProduct, fields, components, materials
           {slots.map((slot) => {
             const selected = selectedComponentForSlot(components, slot);
             return (
-              <Link key={slot.key} href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ display: "grid", gridTemplateColumns: "22px 1fr", gap: 8, alignItems: "start", color: "inherit", textDecoration: "none", borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
+              <Link prefetch={false} key={slot.key} href={productBuilderUrl(selectedProduct.id, query, slot.key)} style={{ display: "grid", gridTemplateColumns: "22px 1fr", gap: 8, alignItems: "start", color: "inherit", textDecoration: "none", borderTop: "1px solid #eef2f7", paddingTop: 8 }}>
                 <span style={selected ? greenChipStyle : plainChipStyle}>{selected ? "✓" : "+"}</span>
                 <span style={{ display: "grid", gap: 2 }}>
                   <strong>{slot.label}</strong>
@@ -1982,7 +1982,7 @@ function ProductPartListSummary({ selectedProduct, fields, components, materials
       <section style={whitePanelStyle}>
         <strong>{isSmallFormat ? "Quote choices" : "Quote questions"}</strong>
         <p style={{ ...mutedStyle, marginTop: 6 }}>{fields.length ? `${fields.length} choice${fields.length === 1 ? "" : "s"} ready for the quote page.` : isSmallFormat ? "Add Size, Sides, Cello, Pages, Copies, Numbering and Quantity as needed." : "Add Size, Print type, Laminate, Finishing and Quantity."}</p>
-        <Link href={productBuilderUrl(selectedProduct.id, query, "questions")} style={{ ...ghostStyle, marginTop: 10 }}>Manage questions</Link>
+        <Link prefetch={false} href={productBuilderUrl(selectedProduct.id, query, "questions")} style={{ ...ghostStyle, marginTop: 10 }}>Manage questions</Link>
       </section>
     </aside>
   );
@@ -2059,7 +2059,7 @@ function MaterialPickerForSlot({ selectedProduct, slot, materials, existing, que
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <span style={plainChipStyle}>{isPrintMethodPicker ? `${rows.length} roll stock option${rows.length === 1 ? "" : "s"}` : `${rows.length} matching material${rows.length === 1 ? "" : "s"}`}</span>
-            <Link href={closeHref} style={ghostStyle}>Close</Link>
+            <Link prefetch={false} href={closeHref} style={ghostStyle}>Close</Link>
           </div>
         </div>
         {isPrintMethodPicker ? (
@@ -2077,7 +2077,7 @@ function MaterialPickerForSlot({ selectedProduct, slot, materials, existing, que
         {rows.length === 0 ? (
           <div style={{ padding: 18 }}>
             <p style={mutedStyle}>{isPrintMethodPicker ? "No roll stock/material options found. You can still choose Direct print above, or add roll stock in Materials first." : "No applicable materials found for this part. Add or update stock in Materials first, then come back to choose it here."}</p>
-            <Link href="/materials" style={blueButtonStyle}>Go to Materials</Link>
+            <Link prefetch={false} href="/materials" style={blueButtonStyle}>Go to Materials</Link>
           </div>
         ) : (
           <div style={{ overflow: "auto", maxHeight: isPrintMethodPicker ? "calc(90vh - 246px)" : "calc(90vh - 128px)" }}>
@@ -2229,7 +2229,7 @@ function SupplierOrderingPreview({ materials }: { materials: any[] }) {
           <strong style={{ fontSize: 18 }}>Supplier pricing / ordering direction</strong>
           <p style={mutedStyle}>Material detail pages can become the ordering page: suppliers, prices, stock, and create purchase order.</p>
         </div>
-        <Link href="/materials" style={ghostStyle}>Open Materials</Link>
+        <Link prefetch={false} href="/materials" style={ghostStyle}>Open Materials</Link>
       </div>
       {supplierRows.length ? (
         <div style={{ display: "grid", gap: 8, marginTop: 12 }}>
@@ -2274,7 +2274,7 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
               <button type="submit" style={{ ...ghostStyle, borderColor: "#fecaca", background: "#fff1f3", color: "#b42318" }}>Remove product</button>
             </form>
           )}
-          <Link href="/quotes" style={{ ...ghostStyle, borderColor: "#334155", background: "#0f172a", color: "#fff" }}>Go to Quotes</Link>
+          <Link prefetch={false} href="/quotes" style={{ ...ghostStyle, borderColor: "#334155", background: "#0f172a", color: "#fff" }}>Go to Quotes</Link>
         </div>
       </div>
 
@@ -2308,7 +2308,7 @@ function ProductPartPickerBuilder({ selectedProduct, fields, components, materia
                     <td style={{ padding: "13px 10px" }}><strong>{fields.length ? `${fields.length} questions added` : "No questions yet"}</strong><div style={{ color: "#64748b", fontSize: 13 }}>{isSmallFormat ? "Size, sides, pages, copies, cello, binding, numbering and quantity." : "Size, print, laminate, ink, finishing and quantity."}</div></td>
                     <td style={{ padding: "13px 10px" }}>Shown on quote page</td>
                     <td style={{ padding: "13px 10px" }}>Staff selections</td>
-                    <td style={{ padding: "13px 10px", textAlign: "right" }}><Link href={productBuilderUrl(selectedProduct.id, query, "questions")} style={fields.length ? ghostStyle : blueButtonStyle}>{fields.length ? "Manage" : "+ Add questions"}</Link></td>
+                    <td style={{ padding: "13px 10px", textAlign: "right" }}><Link prefetch={false} href={productBuilderUrl(selectedProduct.id, query, "questions")} style={fields.length ? ghostStyle : blueButtonStyle}>{fields.length ? "Manage" : "+ Add questions"}</Link></td>
                   </tr>
                 </tbody>
               </table>
@@ -2557,7 +2557,7 @@ function WorkflowStepRail({ selectedProduct, query, activeStep, fields, componen
         const done = workflowStepComplete(step.key, fields, components);
         const active = step.key === activeStep;
         return (
-          <Link key={step.key} href={workflowUrl(selectedProduct.id, query, step.key)} style={{ textDecoration: "none", color: "inherit" }}>
+          <Link prefetch={false} key={step.key} href={workflowUrl(selectedProduct.id, query, step.key)} style={{ textDecoration: "none", color: "inherit" }}>
             <div style={{ border: `1px solid ${active ? theme.accent : done ? "#abefc6" : "#dfe7f2"}`, borderRadius: 18, padding: 14, background: active ? theme.accentSoft : done ? "#f6fef9" : "#fff", display: "grid", gridTemplateColumns: "auto minmax(0, 1fr)", gap: 12, alignItems: "center" }}>
               <span style={{ width: 38, height: 38, borderRadius: 14, display: "inline-flex", alignItems: "center", justifyContent: "center", fontWeight: 950, background: done ? "#dcfae6" : active ? `${step.accent}18` : "#f1f5f9", color: done ? "#067647" : active ? step.accent : "#475569" }}>{done ? "✓" : step.icon}</span>
               <div style={{ minWidth: 0 }}>
@@ -2584,7 +2584,7 @@ function WorkflowHeader({ selectedProduct, fields, components, activeStep, theme
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
         <span style={{ ...chipStyle, background: "rgba(255,255,255,0.12)", color: "#fff" }}>{doneCount}/6 steps done</span>
-        <Link href="/quotes" style={{ ...ghostStyle, background: "transparent", color: "#fff", borderColor: "rgba(255,255,255,0.28)" }}>Go to Quotes</Link>
+        <Link prefetch={false} href="/quotes" style={{ ...ghostStyle, background: "transparent", color: "#fff", borderColor: "rgba(255,255,255,0.28)" }}>Go to Quotes</Link>
       </div>
     </div>
   );
@@ -2596,8 +2596,8 @@ function WorkflowNavigation({ selectedProduct, query, currentStep }: { selectedP
   const next = signageWorkflowSteps[Math.min(signageWorkflowSteps.length - 1, index + 1)]?.key;
   return (
     <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-      {prev && prev !== currentStep ? <Link href={workflowUrl(selectedProduct.id, query, prev)} style={ghostStyle}>← Back</Link> : <span />}
-      {next && next !== currentStep ? <Link href={workflowUrl(selectedProduct.id, query, next)} style={blueButtonStyle}>Next →</Link> : null}
+      {prev && prev !== currentStep ? <Link prefetch={false} href={workflowUrl(selectedProduct.id, query, prev)} style={ghostStyle}>← Back</Link> : <span />}
+      {next && next !== currentStep ? <Link prefetch={false} href={workflowUrl(selectedProduct.id, query, next)} style={blueButtonStyle}>Next →</Link> : null}
     </div>
   );
 }
@@ -2820,8 +2820,8 @@ function ReviewStep({ selectedProduct, query, fields, components, materials }: {
         {summary.map((item) => <div key={item.label} style={{ ...whitePanelStyle, gridTemplateColumns: "180px minmax(0, 1fr)", display: "grid", gap: 12 }}><strong>{item.label}</strong><span style={mutedStyle}>{item.value}</span></div>)}
       </div>
       <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-        <Link href={workflowUrl(selectedProduct.id, query, "main_material")} style={ghostStyle}>Edit from step 1</Link>
-        <Link href="/quotes" style={blueButtonStyle}>Go to Quotes</Link>
+        <Link prefetch={false} href={workflowUrl(selectedProduct.id, query, "main_material")} style={ghostStyle}>Edit from step 1</Link>
+        <Link prefetch={false} href="/quotes" style={blueButtonStyle}>Go to Quotes</Link>
       </div>
     </section>
   );

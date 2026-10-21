@@ -44,7 +44,7 @@ function money(value: number): string {
 
 function ReadinessCard({ label, count, ready, href, action }: { label: string; count: number; ready: boolean; href: string; action: string }) {
   return (
-    <Link href={href} style={{ textDecoration: "none", color: "inherit", border: ready ? "1px solid #a7f3d0" : "1px solid #fed7aa", borderRadius: 14, padding: 14, background: ready ? "#f0fdf4" : "#fff7ed" }}>
+    <Link prefetch={false} href={href} style={{ textDecoration: "none", color: "inherit", border: ready ? "1px solid #a7f3d0" : "1px solid #fed7aa", borderRadius: 14, padding: 14, background: ready ? "#f0fdf4" : "#fff7ed" }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
         <strong>{label}</strong>
         <span style={{ display: "grid", placeItems: "center", minWidth: 28, height: 28, borderRadius: 999, background: ready ? "#047857" : "#c2410c", color: "#fff", fontWeight: 950, fontSize: 12 }}>{count}</span>
@@ -132,7 +132,7 @@ export default async function ManufacturingMethodsPage({ searchParams }: Props) 
               <div style={{ fontSize: 12, fontWeight: 950, color: "#0f766e", textTransform: "uppercase" }}>Test calculation</div>
               <h2 style={{ margin: "5px 0" }}>{width} × {height} mm · Qty {qty}</h2>
             </div>
-            <Link href="/manufacturing-methods" style={{ color: "#0f766e", fontWeight: 900 }}>Close preview</Link>
+            <Link prefetch={false} href="/manufacturing-methods" style={{ color: "#0f766e", fontWeight: 900 }}>Close preview</Link>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 10, marginTop: 14 }}>
             {[

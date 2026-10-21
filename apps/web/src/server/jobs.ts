@@ -1007,7 +1007,8 @@ export async function listJobProcessAssignmentsForTenant(
   input?: { jobId?: string; month?: string },
 ): Promise<JobProcessAssignmentRecord[]> {
   await ensureJobWorkspaceSchema();
-  await syncInheritedJobProcessDefaultsForTenant(tenantId, input?.jobId ?? null);
+  // Read paths must not perform tenant-wide assignment writes. Inherited
+  // defaults are materialised when jobs/defaults change.
   const params: unknown[] = [tenantId];
   const conditions = ["tenant_id = $1::uuid"];
   if (input?.jobId) {

@@ -67,6 +67,26 @@ export async function listSurveyRequestsForTenant(tenantId: string, options?: { 
   return result.rows;
 }
 
+export async function listSurveyClientLogosForTenant(tenantId: string): Promise<Array<{ surveyId: string; logoUrl: string | null }>> {
+  const result = await pool.query<{ surveyId: string; logoUrl: string | null }>(`
+    SELECT
+      survey.id AS "surveyId",
+      COALESCE(
+        NULLIF(enquiry.client_logo_url, ''),
+        NULLIF(customer.payload_json ->> 'logoUrl', '')
+      ) AS "logoUrl"
+    FROM app.survey_requests survey
+    LEFT JOIN app.enquiries enquiry
+      ON enquiry.tenant_id = survey.tenant_id
+     AND enquiry.id = survey.enquiry_id
+    LEFT JOIN app.customers customer
+      ON customer.tenant_id = survey.tenant_id
+     AND customer.id = survey.linked_customer_id
+    WHERE survey.tenant_id = $1::uuid
+  `, [tenantId]);
+  return result.rows;
+}
+
 export function surveyRequestsActivityFingerprint(records: Array<Pick<SurveyRequestRecord, "updatedAt">>): string {
   const latest = records.reduce((current, record) => {
     const timestamp = new Date(record.updatedAt).getTime();

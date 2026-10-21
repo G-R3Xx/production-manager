@@ -7,7 +7,7 @@ export function AutoRefreshWhenPending({ active }: { active: boolean }) {
   useEffect(() => {
     if (!active) return;
     requestAppActivityCheck();
-    const timer = window.setInterval(requestAppActivityCheck, 2_000);
+    const timer = window.setInterval(requestAppActivityCheck, 5_000);
     return () => window.clearInterval(timer);
   }, [active]);
   return null;

@@ -724,7 +724,7 @@ export function ProductProductionFlowBuilder({
           <h2 style={{ margin: "6px 0" }}>{isSmallFormat ? "Set up the stock and normal product defaults" : "Guided product builder"}</h2>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.55, maxWidth: 900 }}>{isSmallFormat ? "Start with the paper or card stock, then set the normal finished size, print and finishing defaults. Customer choices and the shared Production Method are configured immediately after this section." : "Choose the substrate, available quote options and the answers staff should see first. The shared Production Method is selected after the product itself is defined."}</p>
         </div>
-        <Link href={`/products/advanced?selected=${productId}`} style={{ textDecoration: "none", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", fontWeight: 900 }}>Advanced raw setup</Link>
+        <Link prefetch={false} href={`/products/advanced?selected=${productId}`} style={{ textDecoration: "none", color: "#475569", border: "1px solid #cbd5e1", borderRadius: 11, padding: "9px 12px", fontWeight: 900 }}>Advanced raw setup</Link>
       </div>
     </section>
 

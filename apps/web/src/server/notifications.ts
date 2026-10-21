@@ -2,7 +2,7 @@ import "server-only";
 
 import { createHash } from "node:crypto";
 import { pool } from "@production-manager/db";
-import { relationHasColumns } from "@/server/schema-readiness";
+import { relationHasColumns, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export type AppNotificationRecord = {
   id: string;
@@ -119,6 +119,8 @@ type AppPulseSource = {
   sql: string;
 };
 
+export type AppPulseScope = "dashboard" | "calendar" | "enquiries" | "production" | "all";
+
 function directPulseSource(key: string, relation: string): AppPulseSource {
   return {
     key,
@@ -192,12 +194,40 @@ const APP_PULSE_SOURCES: AppPulseSource[] = [
   directPulseSource("purchase_orders", "purchasing.purchase_orders"),
 ];
 
+const APP_PULSE_SCOPE_KEYS: Record<Exclude<AppPulseScope, "all">, Set<string>> = {
+  dashboard: new Set([
+    "enquiries", "surveys", "jobs", "job_process_assignments", "job_tasks",
+    "quotes", "quote_lines", "artwork_approvals", "artwork_pages",
+    "production_jobs", "production_items", "production_steps",
+  ]),
+  calendar: new Set([
+    "jobs", "job_process_assignments", "job_tasks", "production_jobs",
+    "production_items", "production_steps",
+  ]),
+  enquiries: new Set(["enquiries", "surveys", "quotes"]),
+  production: new Set([
+    "jobs", "quotes", "quote_lines", "artwork_approvals", "artwork_pages",
+    "production_jobs", "production_items", "production_steps",
+  ]),
+};
+
+function sourcesForScope(sources: AppPulseSource[], scope: AppPulseScope): AppPulseSource[] {
+  if (scope === "all") return sources;
+  const keys = APP_PULSE_SCOPE_KEYS[scope];
+  return sources.filter((source) => keys.has(source.key));
+}
+
 const APP_PULSE_RELATION_CACHE_MS = 60_000;
 let cachedPulseSources: AppPulseSource[] | null = null;
 let cachedPulseSourcesUntil = 0;
 
 async function availableAppPulseSources(): Promise<AppPulseSource[]> {
   if (cachedPulseSources && cachedPulseSourcesUntil > Date.now()) return cachedPulseSources;
+  if (!runtimeSchemaFallbackEnabled()) {
+    cachedPulseSources = APP_PULSE_SOURCES;
+    cachedPulseSourcesUntil = Date.now() + APP_PULSE_RELATION_CACHE_MS;
+    return cachedPulseSources;
+  }
   const relations = Array.from(new Set(APP_PULSE_SOURCES.flatMap((source) => source.relations)));
   const result = await pool.query<{ relation: string }>(`
     SELECT relation_name AS relation
@@ -230,12 +260,12 @@ const APP_PULSE_VALUE_CACHE_MS = 4_000;
 type AppPulseCacheEntry = { value: string; expiresAt: number; pending?: Promise<string> };
 const appPulseValueCache = new Map<string, AppPulseCacheEntry>();
 
-async function computeAppActivityPulseForTenant(tenantId: string): Promise<string> {
+async function computeAppActivityPulseForTenant(tenantId: string, scope: AppPulseScope): Promise<string> {
   let sources: AppPulseSource[];
   try {
-    sources = await availableAppPulseSources();
+    sources = sourcesForScope(await availableAppPulseSources(), scope);
   } catch {
-    sources = APP_PULSE_SOURCES.slice(0, 1);
+    sources = sourcesForScope(APP_PULSE_SOURCES, scope).slice(0, 1);
   }
   if (!sources.length) return "";
 
@@ -253,23 +283,24 @@ async function computeAppActivityPulseForTenant(tenantId: string): Promise<strin
   }
 }
 
-export async function getAppActivityPulseForTenant(tenantId: string): Promise<string> {
+export async function getAppActivityPulseForTenant(tenantId: string, scope: AppPulseScope = "all"): Promise<string> {
   const now = Date.now();
-  const cached = appPulseValueCache.get(tenantId);
+  const cacheKey = `${tenantId}:${scope}`;
+  const cached = appPulseValueCache.get(cacheKey);
   if (cached && cached.expiresAt > now && !cached.pending) return cached.value;
   if (cached?.pending) return cached.pending;
 
-  const pending = computeAppActivityPulseForTenant(tenantId)
+  const pending = computeAppActivityPulseForTenant(tenantId, scope)
     .then((value) => {
-      appPulseValueCache.set(tenantId, { value, expiresAt: Date.now() + APP_PULSE_VALUE_CACHE_MS });
+      appPulseValueCache.set(cacheKey, { value, expiresAt: Date.now() + APP_PULSE_VALUE_CACHE_MS });
       return value;
     })
     .catch((error) => {
-      appPulseValueCache.delete(tenantId);
+      appPulseValueCache.delete(cacheKey);
       throw error;
     });
 
-  appPulseValueCache.set(tenantId, { value: cached?.value ?? "", expiresAt: 0, pending });
+  appPulseValueCache.set(cacheKey, { value: cached?.value ?? "", expiresAt: 0, pending });
   return pending;
 }
 

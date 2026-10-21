@@ -261,7 +261,7 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
               );
             })}
           </div>
-          {!visibleMaterials.length ? <div style={{ marginTop: 12, padding: 14, borderRadius: 12, background: "#fff7ed", color: "#9a3412" }}>No materials match this search. <Link href="/materials" style={{ color: "inherit", fontWeight: 900 }}>Add or edit materials →</Link></div> : null}
+          {!visibleMaterials.length ? <div style={{ marginTop: 12, padding: 14, borderRadius: 12, background: "#fff7ed", color: "#9a3412" }}>No materials match this search. <Link prefetch={false} href="/materials" style={{ color: "inherit", fontWeight: 900 }}>Add or edit materials →</Link></div> : null}
         </section>
       ) : null}
 
@@ -308,7 +308,7 @@ export function ManufacturingMethodBuilder({ action, materials, processes, recip
             </div>
           ) : (
             <div style={{ padding: 16, borderRadius: 13, border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412" }}>
-              <strong>No processes are available.</strong> Create simple steps such as Direct print, Trim, Laminate, Eyelets or Install first. <Link href="/processes" style={{ color: "inherit", fontWeight: 950 }}>Open Process Library →</Link>
+              <strong>No processes are available.</strong> Create simple steps such as Direct print, Trim, Laminate, Eyelets or Install first. <Link prefetch={false} href="/processes" style={{ color: "inherit", fontWeight: 950 }}>Open Process Library →</Link>
             </div>
           )}
         </section>

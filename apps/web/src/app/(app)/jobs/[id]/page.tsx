@@ -7,7 +7,7 @@ import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { getQuoteDraftById, getArtworkApprovalById } from "@/server/quotes";
 import { getProductionJobById } from "@/server/production";
-import { listUsersForTenant } from "@/server/users";
+import { listActiveStaffOptionsForTenant } from "@/server/users";
 import { createJobTaskAction, createQuoteFromJobEnquiryAction, updateJobMetaAction, updateJobTaskAction } from "../actions";
 import { createQuoteFromCompletedSurveyAction } from "../../surveys/actions";
 import { JobProcessAssignments } from "./JobProcessAssignments";
@@ -64,7 +64,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const [tasks, processAssignments, staff, enquiry, survey, quote, artwork, production] = await Promise.all([
     listJobTasksForTenant(activeTenant.tenantId, { jobId: job.id }),
     listJobProcessAssignmentsForTenant(activeTenant.tenantId, { jobId: job.id }),
-    listUsersForTenant(activeTenant.tenantId),
+    listActiveStaffOptionsForTenant(activeTenant.tenantId),
     job.enquiryId ? getEnquiryById(activeTenant.tenantId, job.enquiryId) : Promise.resolve(null),
     job.surveyRequestId ? getSurveyRequestById(activeTenant.tenantId, job.surveyRequestId) : Promise.resolve(null),
     job.quoteId ? getQuoteDraftById(activeTenant.tenantId, job.quoteId) : Promise.resolve(null),
@@ -76,7 +76,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
   const stageTone = tone(job.currentStage);
   const canInvoice = ["owner", "manager", "accounts"].includes(activeTenant.tenantRole);
   const quoteCanInvoice = Boolean(quote && ["accepted", "converted"].includes(String(quote.status).toLowerCase()));
-  const activeStaff = staff.filter((row) => row.membershipStatus === "active");
+  const activeStaff = staff;
   const manualTasks = tasks.filter((task) => !task.isSystem);
   const staffById = new Map(activeStaff.map((row) => [row.userProfileId, row]));
   const stageMeta = jobStageMeta(job.currentStage);
@@ -114,15 +114,15 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
         </div>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
           {job.currentStage === "invoice_required" && canInvoice && quoteCanInvoice ? (
-            <Link href={`/jobs/${job.id}/invoice`} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>Create invoice →</Link>
+            <Link prefetch={false} href={`/jobs/${job.id}/invoice`} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>Create invoice →</Link>
           ) : job.currentStage.includes("quote") ? (
-            quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</Link> :
+            quoteAction.kind === "link" ? <Link prefetch={false} href={quoteAction.href} style={{ minHeight: 52, display: "inline-flex", alignItems: "center", padding: "0 22px", borderRadius: 14, background: "#155eef", color: "#fff", fontSize: 17, fontWeight: 950, textDecoration: "none", boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</Link> :
             <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}>
               <input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />
               {quoteAction.kind === "survey" ? <input type="hidden" name="jobId" value={job.id} /> : null}
               <button type="submit" style={{ ...button, minHeight: 52, background: "#155eef", padding: "0 22px", borderRadius: 14, fontSize: 17, boxShadow: "0 10px 22px rgba(21,94,239,.22)" }}>{quoteAction.label} →</button>
             </form>
-          ) : <Link href={job.currentHref} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>Open current stage</Link>}
+          ) : <Link prefetch={false} href={job.currentHref} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#155eef", color: "#fff", fontWeight: 950, textDecoration: "none" }}>Open current stage</Link>}
           {stageLinks.map((item) => item.external ? <a key={item.label} href={item.href} target="_blank" rel="noreferrer" style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</a> : <Link prefetch={false} key={item.label} href={item.href} style={{ minHeight: 42, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#fff", border: "1px solid #d0d5dd", color: "#344054", fontWeight: 900, textDecoration: "none" }}>{item.label}</Link>)}
         </div>
       </section>
@@ -139,7 +139,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
           <section style={card}>
             <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 14 }}>
               <div><p style={{ margin: 0, fontSize: 12, fontWeight: 950, color: "#4f46e5", textTransform: "uppercase" }}>Extra tasks + milestones</p><h2 style={{ margin: "4px 0 0" }}>Additional job actions</h2></div>
-              <Link href="/calendar" style={{ color: "#155eef", fontWeight: 900, textDecoration: "none" }}>Open calendar →</Link>
+              <Link prefetch={false} href="/calendar" style={{ color: "#155eef", fontWeight: 900, textDecoration: "none" }}>Open calendar →</Link>
             </div>
             <div style={{ display: "grid", gap: 10 }}>
               {manualTasks.map((task) => {
@@ -151,7 +151,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
                       <span style={{ alignSelf: "start", borderRadius: 999, padding: "4px 8px", background: "#fff", color: taskTone.fg, border: `1px solid ${taskTone.border}`, fontSize: 11, fontWeight: 950 }}>{task.status.replaceAll("_", " ")}</span>
                     </summary>
                     {task.stage.includes("quote") && task.status !== "completed" ? <div style={{ padding: "0 13px 13px", display: "flex", justifyContent: "flex-end" }}>
-                      {quoteAction.kind === "link" ? <Link href={quoteAction.href} style={{ minHeight: 38, display: "inline-flex", alignItems: "center", padding: "0 13px", borderRadius: 10, background: "#155eef", color: "#fff", fontWeight: 900, textDecoration: "none" }}>{quoteAction.label} →</Link> : <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}><input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />{quoteAction.kind === "survey" ? <input type="hidden" name="jobId" value={job.id} /> : null}<button type="submit" style={{ ...button, minHeight: 38, background: "#155eef" }}>{quoteAction.label} →</button></form>}
+                      {quoteAction.kind === "link" ? <Link prefetch={false} href={quoteAction.href} style={{ minHeight: 38, display: "inline-flex", alignItems: "center", padding: "0 13px", borderRadius: 10, background: "#155eef", color: "#fff", fontWeight: 900, textDecoration: "none" }}>{quoteAction.label} →</Link> : <form action={quoteAction.kind === "survey" ? createQuoteFromCompletedSurveyAction : createQuoteFromJobEnquiryAction}><input type="hidden" name={quoteAction.kind === "survey" ? "surveyId" : "jobId"} value={quoteAction.kind === "survey" ? survey!.id : job.id} />{quoteAction.kind === "survey" ? <input type="hidden" name="jobId" value={job.id} /> : null}<button type="submit" style={{ ...button, minHeight: 38, background: "#155eef" }}>{quoteAction.label} →</button></form>}
                     </div> : null}
                     <form action={updateJobTaskAction} style={{ borderTop: `1px solid ${taskTone.border}`, background: "#fff", padding: 14, display: "grid", gap: 12 }}>
                       <input type="hidden" name="jobId" value={job.id} /><input type="hidden" name="taskId" value={task.id} />
@@ -193,7 +193,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
           <section style={card}>
             <p style={{ margin: 0, fontSize: 12, fontWeight: 950, color: "#4f46e5", textTransform: "uppercase" }}>Timeline</p><h2 style={{ margin: "4px 0 14px" }}>Job history</h2>
             <div style={{ display: "grid", gap: 0 }}>
-              {timeline.map((item, index) => <div key={item.key} style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: 12, minHeight: 64 }}><div style={{ display: "grid", justifyItems: "center" }}><span style={{ marginTop: 4, width: 10, height: 10, borderRadius: 999, background: item.tone === "green" ? "#12b76a" : item.tone === "orange" ? "#f79009" : item.tone === "purple" ? "#7f56d9" : item.tone === "blue" ? "#2e90fa" : "#98a2b3" }} />{index < timeline.length - 1 ? <span style={{ width: 2, minHeight: 46, background: "#e4e7ec" }} /> : null}</div><div>{item.href ? <Link href={item.href} style={{ fontWeight: 950, color: "#101828", textDecoration: "none" }}>{item.title}</Link> : <strong>{item.title}</strong>}<p style={{ margin: "3px 0 0", color: "#667085", fontSize: 13 }}>{item.detail}{item.at ? ` · ${fmtDateTime(item.at)}` : ""}</p></div></div>)}
+              {timeline.map((item, index) => <div key={item.key} style={{ display: "grid", gridTemplateColumns: "18px 1fr", gap: 12, minHeight: 64 }}><div style={{ display: "grid", justifyItems: "center" }}><span style={{ marginTop: 4, width: 10, height: 10, borderRadius: 999, background: item.tone === "green" ? "#12b76a" : item.tone === "orange" ? "#f79009" : item.tone === "purple" ? "#7f56d9" : item.tone === "blue" ? "#2e90fa" : "#98a2b3" }} />{index < timeline.length - 1 ? <span style={{ width: 2, minHeight: 46, background: "#e4e7ec" }} /> : null}</div><div>{item.href ? <Link prefetch={false} href={item.href} style={{ fontWeight: 950, color: "#101828", textDecoration: "none" }}>{item.title}</Link> : <strong>{item.title}</strong>}<p style={{ margin: "3px 0 0", color: "#667085", fontSize: 13 }}>{item.detail}{item.at ? ` · ${fmtDateTime(item.at)}` : ""}</p></div></div>)}
             </div>
           </section>
         </div>
@@ -207,7 +207,7 @@ export default async function JobWorkspacePage({ params, searchParams }: PagePro
               <label style={label}>Job owner<select name="ownerProfileId" defaultValue={job.ownerProfileId ?? ""} style={input}><option value="">Unassigned</option>{activeStaff.map((person) => <option key={person.userProfileId} value={person.userProfileId}>{person.fullName} ({person.shortName})</option>)}</select></label>
               <label style={label}>Overall due date<input type="date" name="dueDate" defaultValue={job.dueDate ?? ""} style={input} /></label>
               <label style={label}>Priority<select name="priority" defaultValue={job.priority || "normal"} style={input}><option value="low">Low</option><option value="normal">Normal</option><option value="high">High</option><option value="urgent">Urgent</option></select></label>
-              <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, padding: 11, background: "#f8fafc" }}><span style={{ display: "block", color: "#667085", fontSize: 11, fontWeight: 900, textTransform: "uppercase" }}>Invoice status</span><strong style={{ display: "block", marginTop: 3 }}>{(job.invoiceStatus || "not_invoiced").replaceAll("_", " ")}</strong>{canInvoice && quoteCanInvoice ? <Link href={`/jobs/${job.id}/invoice`} style={{ display: "inline-block", marginTop: 6, color: "#155eef", fontWeight: 900, fontSize: 12, textDecoration: "none" }}>Open invoicing →</Link> : null}</div>
+              <div style={{ border: "1px solid #e4e7ec", borderRadius: 12, padding: 11, background: "#f8fafc" }}><span style={{ display: "block", color: "#667085", fontSize: 11, fontWeight: 900, textTransform: "uppercase" }}>Invoice status</span><strong style={{ display: "block", marginTop: 3 }}>{(job.invoiceStatus || "not_invoiced").replaceAll("_", " ")}</strong>{canInvoice && quoteCanInvoice ? <Link prefetch={false} href={`/jobs/${job.id}/invoice`} style={{ display: "inline-block", marginTop: 6, color: "#155eef", fontWeight: 900, fontSize: 12, textDecoration: "none" }}>Open invoicing →</Link> : null}</div>
               <button type="submit" style={button}>Save job details</button>
             </form>
           </section>

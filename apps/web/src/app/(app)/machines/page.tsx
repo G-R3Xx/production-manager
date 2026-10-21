@@ -178,8 +178,8 @@ export default async function MachinesPage() {
           Store facts about each machine here: speed, capacity, setup and operating costs. To decide which machine performs Direct print, Laminate, Trim or another action, assign it once under <b>Processes</b>.
         </p>
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <Link href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Machines</Link>
-          <Link href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Shop operations</Link>
+          <Link prefetch={false} href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Machines</Link>
+          <Link prefetch={false} href="/labour" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Shop operations</Link>
         </div>
       </header>
 
@@ -261,7 +261,7 @@ export default async function MachinesPage() {
               </div>
 
               <div style={{ marginTop: 12, paddingTop: 11, borderTop: "1px solid #e2e8f0" }}>
-                <Link href="/processes" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Machine assignments are managed in Processes →</Link>
+                <Link prefetch={false} href="/processes" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Machine assignments are managed in Processes →</Link>
               </div>
             </article>
           );

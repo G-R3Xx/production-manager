@@ -3,11 +3,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
+import { getEnquiryById } from "@/server/enquiries";
 import { createQuoteFromCompletedSurveyAction, createSurveyRequestAction, deleteSurveyRequestAction, restoreSurveyRequestAction, updateSurveyRequestAction } from "./actions";
-import { listSurveyRequestsForTenant, surveyRequestsActivityFingerprint } from "@/server/surveys";
+import { listSurveyClientLogosForTenant, listSurveyRequestsForTenant, surveyRequestsActivityFingerprint } from "@/server/surveys";
 import { SurveyStatusAutoRefresh } from "./SurveyStatusAutoRefresh";
-import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
 
 
@@ -168,20 +167,18 @@ export default async function SurveysPage({ searchParams }: PageProps) {
   const fromEnquiry = readParam(params, "fromEnquiry");
   const selectedSurveyId = readParam(params, "selected");
   const filter = readParam(params, "filter");
-  const [allSurveyRequests, enquiry, clients, allEnquiries] = await Promise.all([
+  const [allSurveyRequests, enquiry, surveyLogos] = await Promise.all([
     listSurveyRequestsForTenant(activeTenant.tenantId, { includeDeleted: true }),
     fromEnquiry ? getEnquiryById(activeTenant.tenantId, fromEnquiry) : Promise.resolve(null),
-    listCustomersForTenant(activeTenant.tenantId),
-    listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
+    listSurveyClientLogosForTenant(activeTenant.tenantId),
   ]);
   const surveyFingerprint = surveyRequestsActivityFingerprint(allSurveyRequests);
   const deletedCount = allSurveyRequests.filter((survey) => survey.status === "deleted").length;
   const surveyRequests = filter === "deleted"
     ? allSurveyRequests.filter((survey) => survey.status === "deleted")
     : allSurveyRequests.filter((survey) => survey.status !== "deleted");
-  const customerById = new Map(clients.map((client) => [client.id, client]));
-  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
-  const sourceClientLogoUrl = enquiry?.clientLogoUrl || customerLogoUrl(enquiry?.linkedCustomerId ? customerById.get(enquiry.linkedCustomerId) : null);
+  const surveyLogoById = new Map(surveyLogos.map((item) => [item.surveyId, item.logoUrl]));
+  const sourceClientLogoUrl = enquiry?.clientLogoUrl ?? null;
 
   return (
     <div style={{ maxWidth: 1680, margin: "0 auto", display: "grid", gap: 16 }}>
@@ -226,8 +223,8 @@ export default async function SurveysPage({ searchParams }: PageProps) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted survey requests" : "Current survey requests"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <Link href="/surveys" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</Link>
-              <Link href="/surveys?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
+              <Link prefetch={false} href="/surveys" style={{ color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 800, textDecoration: "none" }}>Active</Link>
+              <Link prefetch={false} href="/surveys?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
               <span style={{ fontSize: 13, color: "#667085" }}>{surveyRequests.length} shown</span>
             </div>
           </div>
@@ -238,8 +235,7 @@ export default async function SurveysPage({ searchParams }: PageProps) {
               const workflowStatus = getSurveyWorkflowStatus(survey);
               const hasInstallJob = Boolean(survey.installSchedulerJobId || survey.installSchedulerJobUrl);
               const hasCompletedSurvey = survey.installSchedulerSyncStatus === "completed" || survey.status === "completed";
-              const surveySourceEnquiry = survey.enquiryId ? enquiryById.get(survey.enquiryId) : null;
-              const surveyLogoUrl = surveySourceEnquiry?.clientLogoUrl || customerLogoUrl(survey.linkedCustomerId ? customerById.get(survey.linkedCustomerId) : null);
+              const surveyLogoUrl = surveyLogoById.get(survey.id) ?? null;
               return (
                 <article key={`${survey.id}:${survey.updatedAt}`} style={{ border: isOpen ? "2px solid #155eef" : "1px solid #e5e7eb", borderRadius: 16, padding: 16, display: "grid", gap: 12, background: isOpen ? "#f8fbff" : "#fff" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
@@ -284,13 +280,13 @@ export default async function SurveysPage({ searchParams }: PageProps) {
                   <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                     {survey.status !== "deleted" ? (
                       <>
-                        <Link href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
+                        <Link prefetch={false} href={`/surveys?selected=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 800 }}>Open / edit survey details</Link>
                         {hasCompletedSurvey ? (
                           <form action={createQuoteFromCompletedSurveyAction} style={{ margin: 0 }}>
                             <input type="hidden" name="surveyId" value={survey.id} />
                             <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer" }}>Create quote + surveyed sign lines</button>
                           </form>
-                        ) : <Link href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#344054", color: "#fff", fontWeight: 800 }}>Create quote from survey notes</Link>}
+                        ) : <Link prefetch={false} href={`/quotes?fromSurvey=${survey.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#344054", color: "#fff", fontWeight: 800 }}>Create quote from survey notes</Link>}
                         <form action={deleteSurveyRequestAction} style={{ margin: 0 }}>
                           <input type="hidden" name="surveyId" value={survey.id} />
                           <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", fontWeight: 800, cursor: "pointer" }}>Delete</button>

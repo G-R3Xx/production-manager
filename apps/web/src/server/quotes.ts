@@ -48,7 +48,7 @@ export type QuoteDraftRecord = {
 };
 
 export type QuoteDraftSummaryRecord = Pick<QuoteDraftRecord,
-  "id" | "tenantId" | "enquiryId" | "linkedCustomerId" | "clientName" |
+  "id" | "tenantId" | "enquiryId" | "linkedCustomerId" | "quoteNumber" | "clientName" |
   "jobName" | "contactName" | "phone" | "status" | "discountPercent" |
   "createdAt" | "updatedAt"
 >;
@@ -558,6 +558,7 @@ export async function listQuoteDraftSummariesForTenant(
       tenant_id as "tenantId",
       enquiry_id as "enquiryId",
       linked_customer_id as "linkedCustomerId",
+      quote_number as "quoteNumber",
       client_name as "clientName",
       job_name as "jobName",
       contact_name as "contactName",
@@ -572,6 +573,25 @@ export async function listQuoteDraftSummariesForTenant(
       AND ($3::boolean OR COALESCE(notes,'') NOT LIKE 'WooCommerce order %')
     ORDER BY created_at DESC
   `, [tenantId, Boolean(options?.includeDeleted), Boolean(options?.includeWebsiteOrders)]);
+  return result.rows;
+}
+
+export type QuoteClientLogoSummary = { quoteId: string; logoUrl: string | null };
+
+export async function listQuoteClientLogoSummariesForTenant(tenantId: string, quoteIds: string[] = []): Promise<QuoteClientLogoSummary[]> {
+  const uniqueIds = Array.from(new Set(quoteIds.filter(Boolean)));
+  const result = await pool.query<QuoteClientLogoSummary>(`
+    SELECT
+      quote.id as "quoteId",
+      COALESCE(NULLIF(enquiry.client_logo_url, ''), NULLIF(customer.payload_json ->> 'logoUrl', '')) as "logoUrl"
+    FROM sales.quote_drafts quote
+    LEFT JOIN app.enquiries enquiry
+      ON enquiry.tenant_id = quote.tenant_id AND enquiry.id = quote.enquiry_id
+    LEFT JOIN app.customers customer
+      ON customer.tenant_id = quote.tenant_id AND customer.id = quote.linked_customer_id
+    WHERE quote.tenant_id = $1::uuid
+      AND (cardinality($2::uuid[]) = 0 OR quote.id = ANY($2::uuid[]))
+  `, [tenantId, uniqueIds]);
   return result.rows;
 }
 

@@ -3,6 +3,7 @@ import { cache } from "react";
 import { calculateProductionRecipeCost } from "@production-manager/domain";
 import { normalizeProductionFlowName, productionFlowPresets } from "@/lib/productionFlowPresets";
 import { ensureMaterialPricingColumns } from "@/server/materials";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 type DbClient = {
   query: (text: string, values?: unknown[]) => Promise<{ rows: any[] }>;
@@ -355,6 +356,7 @@ export async function setMachineActive(tenantId: string, id: string, active: boo
 let operationRecipeSchemaReady = false;
 async function ensureOperationRecipeColumns(): Promise<void> {
   if (!process.env.DATABASE_URL || operationRecipeSchemaReady) return;
+  if (!runtimeSchemaFallbackEnabled()) { operationRecipeSchemaReady = true; return; }
   await pool.query(`
     ALTER TABLE catalog.labour_operations
       ADD COLUMN IF NOT EXISTS consumable_material_id uuid REFERENCES catalog.materials(id) ON DELETE SET NULL,

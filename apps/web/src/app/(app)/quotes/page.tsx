@@ -5,9 +5,9 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { getEnquiryById, listEnquiryCorrespondenceForEnquiry, listEnquiryLogoSummariesForTenant } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
-import { listMaterialsForTenant } from "@/server/materials";
+import { listQuoteMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
-import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomersForTenant } from "@/server/customers";
+import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomerOptionsForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId, profitMultiplierForJobValue } from "@/server/company";
 import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
 import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
@@ -27,7 +27,6 @@ import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
 import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
 import { listLabourForTenant, listMachinesForTenant, listProcessesForTenant, listRecipesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
-import { getQuoteEntryLayoutForUser } from "@/server/users";
 import { QuoteSearchInput } from "./QuoteSearchInput";
 import { getQuoteVisualCategoryImages } from "@/server/quote-visuals";
 
@@ -43,7 +42,7 @@ export const preferredRegion = "syd1";
 // keep the quote workspace responsive while still reflecting admin changes
 // quickly. Quote drafts/lines remain uncached below.
 const cachedQuoteMaterials = unstable_cache(
-  (tenantId: string) => listMaterialsForTenant(tenantId),
+  (tenantId: string) => listQuoteMaterialsForTenant(tenantId),
   ["quotes-materials"],
   { revalidate: 30 }
 );
@@ -53,7 +52,7 @@ const cachedQuoteProducts = unstable_cache(
   { revalidate: 30 }
 );
 const cachedQuoteCustomers = unstable_cache(
-  (tenantId: string) => listCustomersForTenant(tenantId),
+  (tenantId: string) => listCustomerOptionsForTenant(tenantId),
   ["quotes-customers"],
   { revalidate: 30 }
 );
@@ -593,7 +592,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? listQuoteLines(selected) : Promise.resolve([]),
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
     selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
-    builderDataNeeded ? getQuoteEntryLayoutForUser(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve("list" as const),
+    Promise.resolve((activeTenant.quoteEntryLayout === "catalogue" ? "catalogue" : "list") as "catalogue" | "list"),
     builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId).catch(() => ({})) : Promise.resolve({})
   ]);
 
@@ -853,8 +852,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
             <h1 style={{ margin: "2px 0 0", fontSize: 30, letterSpacing: "-0.035em" }}>{filter === "deleted" ? "Deleted quotes" : "Quotes"}</h1>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <Link href="/quotes" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "0 12px", background: filter === "deleted" ? "transparent" : "#eff6ff", border: filter === "deleted" ? "1px solid #d0d5dd" : "1px solid #bfdbfe", color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</Link>
-            <Link href="/quotes?filter=deleted" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "0 12px", background: filter === "deleted" ? "#eff6ff" : "transparent", border: filter === "deleted" ? "1px solid #bfdbfe" : "1px solid #d0d5dd", color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</Link>
+            <Link prefetch={false} href="/quotes" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "0 12px", background: filter === "deleted" ? "transparent" : "#eff6ff", border: filter === "deleted" ? "1px solid #d0d5dd" : "1px solid #bfdbfe", color: filter === "deleted" ? "#667085" : "#155eef", fontWeight: 900, textDecoration: "none" }}>Active</Link>
+            <Link prefetch={false} href="/quotes?filter=deleted" style={{ minHeight: 36, display: "inline-flex", alignItems: "center", borderRadius: 999, padding: "0 12px", background: filter === "deleted" ? "#eff6ff" : "transparent", border: filter === "deleted" ? "1px solid #bfdbfe" : "1px solid #d0d5dd", color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedQuoteCount})</Link>
             <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "9px 12px", fontSize: 12, fontWeight: 950 }}>{quoteDrafts.length} quote{quoteDrafts.length === 1 ? "" : "s"}</span>
           </div>
         </div>
@@ -1121,7 +1120,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           </div>
                           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
                             <span style={{ borderRadius: 999, border: `1px solid ${needsAnyClientLink ? "#fdba74" : myobTone.border}`, background: "rgba(255,255,255,0.78)", color: needsAnyClientLink ? "#9a3412" : myobTone.fg, padding: "5px 9px", fontSize: 11, fontWeight: 950 }}>{needsPmClientLink ? quoteClientLinkMismatch ? "PM client mismatch" : "PM client link needed" : needsMyobLink ? "MYOB customer link needed" : myobTone.label}</span>
-                            {selectedProductionJob ? <Link href={`/production/${selectedProductionJob.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Job workspace →</Link> : null}
+                            {selectedProductionJob ? <Link prefetch={false} href={`/production/${selectedProductionJob.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Job workspace →</Link> : null}
                             {canPush && !needsAnyClientLink ? (
                               <form action={pushAcceptedQuoteToMyobOrderAction}>
                                 <input type="hidden" name="quoteId" value={selectedQuote.id} />
@@ -1140,7 +1139,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {!myobSetupRequested ? (
                               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
                                 <span style={{ fontSize: 12, color: "#667085" }}>A fallback MYOB sales income account may be needed for custom/quick quote lines.</span>
-                                <Link href={`/quotes?selected=${selectedQuote.id}&myobSetup=1`} style={{ ...buttonStyle, background: "#334155", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Load MYOB account setup</Link>
+                                <Link prefetch={false} href={`/quotes?selected=${selectedQuote.id}&myobSetup=1`} style={{ ...buttonStyle, background: "#334155", textDecoration: "none", display: "inline-flex", alignItems: "center" }}>Load MYOB account setup</Link>
                               </div>
                             ) : salesReferences.accounts.length ? (
                               <form action={saveMyobSalesDefaultsAction} style={{ display: "grid", gridTemplateColumns: "minmax(280px,1fr) auto", gap: 8, alignItems: "end" }}>
@@ -1179,7 +1178,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 )}
                                 {suggestedMyobCustomer ? <span style={{ fontSize: 12, color: "#9a3412" }}>Suggested match: <strong>{suggestedMyobCustomer.displayName}</strong></span> : null}
                               </label>
-                              {importedMyobCustomers.length ? <MyobSubmitButton label="Link customer" pendingLabel="Linking…" background="#475467" /> : <Link href="/integrations" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Import MYOB customers</Link>}
+                              {importedMyobCustomers.length ? <MyobSubmitButton label="Link customer" pendingLabel="Linking…" background="#475467" /> : <Link prefetch={false} href="/integrations" style={{ ...buttonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none" }}>Import MYOB customers</Link>}
                               {importedMyobCustomers.length && selectedQuote.status === "accepted" ? <MyobSubmitButton label="Link & create order" pendingLabel="Linking & creating…" background="#0f766e" name="sendNow" value="1" /> : null}
                             </form>
 
@@ -1466,14 +1465,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 </div>
                 <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
                   {selectedArtworkApproval ? (
-                    <Link href={artworkAdminUrl} style={{ ...buttonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", textDecoration: "none", background: "#6d28d9" }}>Open artwork approval</Link>
+                    <Link prefetch={false} href={artworkAdminUrl} style={{ ...buttonStyle, minHeight: 44, display: "inline-flex", alignItems: "center", textDecoration: "none", background: "#6d28d9" }}>Open artwork approval</Link>
                   ) : (
                     <form action={createArtworkApprovalAction}>
                       <input type="hidden" name="quoteId" value={selectedQuote.id} />
                       <button type="submit" style={{ ...buttonStyle, background: selectedQuote.status === "accepted" ? "#6d28d9" : "#334155" }}>{selectedQuote.status === "accepted" ? "Create artwork approval" : "Create artwork approval anyway"}</button>
                     </form>
                   )}
-                  <Link href={`/artwork-approvals?quote=${selectedQuote.id}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Go to Artwork Approvals</Link>
+                  <Link prefetch={false} href={`/artwork-approvals?quote=${selectedQuote.id}`} style={{ minHeight: 44, borderRadius: 14, border: "1px solid #ddd6fe", background: "#fff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Go to Artwork Approvals</Link>
                   {selectedProductionJob ? <a href={`/job-sheets/${selectedProductionJob.id}`} target="_blank" rel="noreferrer" style={{ minHeight: 44, borderRadius: 14, border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none" }}>Print job sheet</a> : selectedQuote.status === "accepted" ? <span style={{ minHeight: 44, borderRadius: 14, border: "1px solid #e4e7ec", background: "#f8fafc", color: "#667085", fontWeight: 850, display: "inline-flex", alignItems: "center", padding: "0 14px", fontSize: 12 }}>Job sheet available after approved artwork creates Production</span> : null}
                 </div>
                 </div>

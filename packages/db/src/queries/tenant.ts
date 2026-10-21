@@ -12,6 +12,7 @@ export type TenantMembershipRecord = {
   shortName: string;
   fullName: string;
   email: string;
+  quoteEntryLayout: string;
 };
 
 export async function getTenantMembershipsByAuthUserId(
@@ -27,7 +28,8 @@ export async function getTenantMembershipsByAuthUserId(
       userProfileId: userProfiles.id,
       shortName: userProfiles.shortName,
       fullName: userProfiles.fullName,
-      email: userProfiles.email
+      email: userProfiles.email,
+      quoteEntryLayout: memberships.quoteEntryLayout
     })
     .from(userProfiles)
     .innerJoin(memberships, sql`${memberships.userProfileId} = ${userProfiles.id}`)

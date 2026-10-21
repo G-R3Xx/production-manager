@@ -291,6 +291,24 @@ export async function listInvoiceLines(tenantId: string, invoiceId: string): Pro
   return result.rows;
 }
 
+export async function listInvoiceLinesForInvoices(tenantId: string, invoiceIds: string[]): Promise<Map<string, InvoiceLineRecord[]>> {
+  await ensureInvoiceWorkflowSchema();
+  const ids = Array.from(new Set(invoiceIds.filter(Boolean)));
+  if (!ids.length) return new Map();
+  const result = await pool.query<InvoiceLineRecord>(`
+    SELECT ${invoiceLineSelectSql()} FROM app.invoice_lines
+    WHERE tenant_id=$1::uuid AND invoice_id=ANY($2::uuid[])
+    ORDER BY invoice_id, sort_order, created_at
+  `, [tenantId, ids]);
+  const grouped = new Map<string, InvoiceLineRecord[]>();
+  for (const line of result.rows) {
+    const rows = grouped.get(line.invoiceId) ?? [];
+    rows.push(line);
+    grouped.set(line.invoiceId, rows);
+  }
+  return grouped;
+}
+
 function activeQuoteLines(lines: QuoteLineRecord[]): QuoteLineRecord[] {
   const hasExplicit = lines.some((line) => line.clientResponseStatus !== "pending");
   return hasExplicit ? lines.filter((line) => line.clientResponseStatus === "approved") : lines;

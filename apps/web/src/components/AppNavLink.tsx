@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useRef, useState, useTransition } from "react";
 import type { MouseEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 
@@ -15,12 +15,31 @@ export function AppNavLink({ href, label, emoji }: AppNavLinkProps) {
   const pathname = usePathname();
   const [isPending, startTransition] = useTransition();
   const [clicked, setClicked] = useState(false);
+  const prefetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isActive = pathname === href || (href !== "/dashboard" && pathname?.startsWith(`${href}/`));
   const showLoading = clicked && isPending;
 
   useEffect(() => {
     setClicked(false);
   }, [pathname]);
+
+  useEffect(() => () => {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+  }, []);
+
+  function schedulePrefetch() {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+    // Require a short hover intent before asking the server to render another
+    // route. Without this, simply moving the mouse down the sidebar can kick off
+    // several expensive RSC requests at once and compete with the page the user
+    // is actually trying to use.
+    prefetchTimerRef.current = setTimeout(() => router.prefetch(href), 220);
+  }
+
+  function cancelPrefetch() {
+    if (prefetchTimerRef.current) clearTimeout(prefetchTimerRef.current);
+    prefetchTimerRef.current = null;
+  }
 
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     if (
@@ -51,7 +70,8 @@ export function AppNavLink({ href, label, emoji }: AppNavLinkProps) {
     <a
       href={href}
       onClick={handleClick}
-      onMouseEnter={() => router.prefetch(href)}
+      onMouseEnter={schedulePrefetch}
+      onMouseLeave={cancelPrefetch}
       style={{
         position: "relative",
         display: "flex",

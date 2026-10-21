@@ -42,7 +42,7 @@ export default async function TaskAssignmentDefaultsPage({ searchParams }: PageP
   return (
     <main style={{ maxWidth: 1120, margin: "0 auto", display: "grid", gap: 18 }}>
       <header style={{ background: "#fff", border: "1px solid #e4e7ec", borderRadius: 20, padding: 24 }}>
-        <Link href="/settings" style={{ color: "#155eef", textDecoration: "none", fontWeight: 900 }}>← Settings</Link>
+        <Link prefetch={false} href="/settings" style={{ color: "#155eef", textDecoration: "none", fontWeight: 900 }}>← Settings</Link>
         <p style={{ margin: "18px 0 0", fontSize: 12, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".08em", color: "#4f46e5" }}>Automatic task routing</p>
         <h1 style={{ margin: "6px 0 8px", fontSize: 34, letterSpacing: "-.035em" }}>Default task assignments</h1>
         <p style={{ margin: 0, color: "#475467", lineHeight: 1.6, maxWidth: 880 }}>

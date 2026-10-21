@@ -48,9 +48,15 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
     }
   );
 
+  // Middleware is not an authorisation boundary; every protected page/API does
+  // its own verified session check. Its job here is to keep the SSR cookies
+  // fresh and provide friendly sign-in redirects. getSession() can read a fresh
+  // token locally and only contacts Auth when a refresh is actually required,
+  // whereas getUser() forces an Auth network round-trip on every navigation.
   const {
-    data: { user }
-  } = await supabase.auth.getUser();
+    data: { session }
+  } = await supabase.auth.getSession();
+  const user = session?.user ?? null;
 
   if (!user && isProtectedPath(request.nextUrl.pathname)) {
     const redirectUrl = request.nextUrl.clone();

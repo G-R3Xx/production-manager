@@ -2,6 +2,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { after } from "next/server";
 import { createNotificationForTenant } from "@/server/notifications";
 import { relationHasColumns, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
@@ -157,6 +158,29 @@ export async function reconcileEnquiryWorkflowStatusesForTenant(tenantId: string
         ))
       )
   `, [tenantId]);
+}
+
+const ENQUIRY_RECONCILE_GAP_MS = 30_000;
+const lastEnquiryReconcileScheduledAt = new Map<string, number>();
+
+export function scheduleEnquiryWorkflowStatusReconciliation(tenantId: string): void {
+  const now = Date.now();
+  const previous = lastEnquiryReconcileScheduledAt.get(tenantId) ?? 0;
+  if (now - previous < ENQUIRY_RECONCILE_GAP_MS) return;
+  lastEnquiryReconcileScheduledAt.set(tenantId, now);
+  after(async () => {
+    const startedAt = performance.now();
+    try {
+      await reconcileEnquiryWorkflowStatusesForTenant(tenantId);
+      console.info("[enquiry-reconcile]", {
+        tenantId,
+        elapsedMs: Math.round(performance.now() - startedAt),
+        vercelRegion: process.env.VERCEL_REGION ?? null,
+      });
+    } catch (error) {
+      console.error("[enquiry-reconcile] failed", { tenantId, error });
+    }
+  });
 }
 
 export async function getEnquiryById(tenantId: string, enquiryId: string): Promise<EnquiryRecord | null> {

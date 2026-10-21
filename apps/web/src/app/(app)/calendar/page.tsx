@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listUsersForTenant } from "@/server/users";
+import { listActiveStaffOptionsForTenant } from "@/server/users";
 import { listProductionCalendarStepsForTenant } from "@/server/production";
 import {
   JOB_PROCESS_KEYS,
@@ -54,21 +54,27 @@ export default async function CalendarPage({ searchParams }: PageProps) {
     listJobsForTenant(activeTenant.tenantId, { skipSync: true }),
     listJobTasksForTenant(activeTenant.tenantId),
     listJobProcessAssignmentsForTenant(activeTenant.tenantId),
-    listUsersForTenant(activeTenant.tenantId),
+    listActiveStaffOptionsForTenant(activeTenant.tenantId),
     listDashboardJobMetadataForTenant(activeTenant.tenantId),
     listProductionCalendarStepsForTenant(activeTenant.tenantId),
   ]);
 
-  const activeStaff = users.filter((person) => person.membershipStatus === "active");
+  const activeStaff = users;
   const metadataByJob = new Map(metadata.map((item) => [item.jobId, item]));
   const jobById = new Map(jobs.map((job) => [job.id, job]));
   const assignmentByJobProcess = new Map(processAssignments.map((assignment) => [`${assignment.jobId}:${assignment.processKey}`, assignment]));
+  const assignmentsByJob = new Map<string, typeof processAssignments>();
+  for (const assignment of processAssignments) {
+    const grouped = assignmentsByJob.get(assignment.jobId);
+    if (grouped) grouped.push(assignment);
+    else assignmentsByJob.set(assignment.jobId, [assignment]);
+  }
   const jobsWithProductionProcedures = new Set(productionSteps.map((step) => step.workflowJobId));
   const events: CalendarEvent[] = [];
 
   for (const job of jobs) {
     const currentProcess = jobProcessKeyForStage(job.currentStage);
-    const assignedProcessKeys = processAssignments.filter((assignment) => assignment.jobId === job.id).map((assignment) => assignment.processKey);
+    const assignedProcessKeys = (assignmentsByJob.get(job.id) ?? []).map((assignment) => assignment.processKey);
     const processKeys = new Set<JobProcessKey>(assignedProcessKeys);
     if (currentProcess) processKeys.add(currentProcess);
     const currentPosition = processPosition(currentProcess);

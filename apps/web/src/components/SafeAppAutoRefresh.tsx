@@ -18,10 +18,25 @@ const MIN_PULSE_CHECK_GAP_MS = 15_000;
 const FALLBACK_REFRESH_MS = 180_000;
 const INITIAL_PULSE_DELAY_MS = 8_000;
 
+type PulseScope = "dashboard" | "calendar" | "enquiries" | "production";
+
+function pulseScopeForPath(pathname: string | null): PulseScope | null {
+  if (!pathname) return null;
+  if (pathname.startsWith("/dashboard") || pathname.startsWith("/jobs/")) return "dashboard";
+  if (pathname.startsWith("/calendar")) return "calendar";
+  if (pathname.startsWith("/enquiries")) return "enquiries";
+  if (pathname.startsWith("/production")) return "production";
+  // Quotes, surveys and artwork have narrow record/status watchers of their own.
+  // Master-data/settings pages should refresh as part of their own mutations,
+  // not continuously scan the whole workflow database in the background.
+  return null;
+}
+
 export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
   const router = useRouter();
   const pathname = usePathname();
   const isProductionBoard = pathname?.startsWith("/production/board") ?? false;
+  const pulseScope = pulseScopeForPath(pathname);
   const refreshingRef = useRef(false);
   const checkingRef = useRef(false);
   const pulseRef = useRef<string>(initialPulse);
@@ -40,9 +55,20 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
   }, [initialPulse]);
 
   useEffect(() => {
+    // Pulse values from different scopes are intentionally different hashes.
+    // Establish a fresh baseline when navigation changes the scope instead of
+    // interpreting that as workflow activity and refreshing immediately.
+    pulseRef.current = "";
+    hasBaselineRef.current = false;
+    pendingRefreshRef.current = false;
+    lastCheckAtRef.current = 0;
+  }, [pulseScope]);
+
+  useEffect(() => {
     const removeFormTracking = installAutoRefreshFormTracking();
 
     async function checkPulse() {
+      if (!pulseScope) return;
       const now = Date.now();
       if (document.visibilityState !== "visible" || refreshingRef.current || checkingRef.current) return;
       if (now - lastCheckAtRef.current < MIN_PULSE_CHECK_GAP_MS) return;
@@ -50,7 +76,7 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
       checkingRef.current = true;
 
       try {
-        const response = await fetch("/api/app-pulse", {
+        const response = await fetch(`/api/app-pulse?scope=${encodeURIComponent(pulseScope)}`, {
           cache: "no-store",
           credentials: "same-origin",
           headers: { "Cache-Control": "no-cache" },
@@ -99,15 +125,15 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
 
     // Let the requested page paint first; the global change detector is not
     // part of the critical navigation path.
-    const initialTimer = window.setTimeout(() => void checkPulse(), INITIAL_PULSE_DELAY_MS);
-    const timer = isProductionBoard ? null : window.setInterval(() => void checkPulse(), PULSE_INTERVAL_MS);
+    const initialTimer = pulseScope ? window.setTimeout(() => void checkPulse(), INITIAL_PULSE_DELAY_MS) : null;
+    const timer = pulseScope && !isProductionBoard ? window.setInterval(() => void checkPulse(), PULSE_INTERVAL_MS) : null;
     window.addEventListener("focus", checkWhenVisible);
     window.addEventListener("pageshow", checkWhenVisible);
     window.addEventListener(APP_ACTIVITY_CHECK_EVENT, checkFromActivityEvent);
     document.addEventListener("visibilitychange", checkWhenVisible);
 
     return () => {
-      window.clearTimeout(initialTimer);
+      if (initialTimer !== null) window.clearTimeout(initialTimer);
       if (timer !== null) window.clearInterval(timer);
       window.removeEventListener("focus", checkWhenVisible);
       window.removeEventListener("pageshow", checkWhenVisible);
@@ -115,7 +141,7 @@ export function SafeAppAutoRefresh({ initialPulse }: { initialPulse: string }) {
       document.removeEventListener("visibilitychange", checkWhenVisible);
       removeFormTracking();
     };
-  }, [isProductionBoard, router]);
+  }, [isProductionBoard, pulseScope, router]);
 
   return null;
 }

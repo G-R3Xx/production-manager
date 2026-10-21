@@ -137,6 +137,40 @@ export async function listCustomersForTenant(tenantId: string, options?: { inclu
   return options?.includeDeleted ? rows : rows.filter((row) => !isDeletedCustomer(row));
 }
 
+export async function listCustomerOptionsForTenant(tenantId: string): Promise<CustomerRecord[]> {
+  // Quoting/enquiry entry only needs a small subset of the customer payload.
+  // Avoid shipping notes, structured addresses and other potentially large MYOB
+  // payload fields on every workflow page load.
+  const result = await pool.query<Omit<CustomerRecord, "payloadJson"> & { payloadJson: unknown }>(`
+    SELECT
+      id,
+      tenant_id as "tenantId",
+      myob_uid as "myobUid",
+      display_name as "displayName",
+      company_name as "companyName",
+      first_name as "firstName",
+      last_name as "lastName",
+      email,
+      phone,
+      is_active as "isActive",
+      jsonb_strip_nulls(jsonb_build_object(
+        'logoUrl', NULLIF(payload_json ->> 'logoUrl', ''),
+        'defaultSiteAddress', NULLIF(payload_json ->> 'defaultSiteAddress', ''),
+        'billingAddress', NULLIF(payload_json ->> 'billingAddress', ''),
+        'myobItemPriceLevel', NULLIF(payload_json ->> 'myobItemPriceLevel', ''),
+        'myobPriceLevelName', NULLIF(payload_json ->> 'myobPriceLevelName', ''),
+        'myobPriceLevelNames', payload_json -> 'myobPriceLevelNames'
+      )) as "payloadJson",
+      created_at as "createdAt",
+      updated_at as "updatedAt"
+    FROM app.customers
+    WHERE tenant_id = $1::uuid
+      AND COALESCE(payload_json ->> 'deletedAt', '') = ''
+    ORDER BY display_name ASC
+  `, [tenantId]);
+  return result.rows.map((row) => ({ ...row, payloadJson: parseJsonObject(row.payloadJson) }));
+}
+
 export async function listCustomerLogoSummariesForTenant(
   tenantId: string
 ): Promise<Array<Pick<CustomerRecord, "id" | "displayName" | "companyName" | "payloadJson">>> {

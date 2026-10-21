@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { ReactNode, Suspense } from "react";
 import { RouteTransitionOverlay } from "@/components/RouteTransitionOverlay";
 
+export const preferredRegion = "syd1";
+
 export const metadata: Metadata = {
   title: "Production Manager",
   description: "Production Manager SaaS platform",

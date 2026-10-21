@@ -36,7 +36,7 @@ export default async function WordPressIntegrationPage({ searchParams }: Props) 
         <h1 style={{ margin: "7px 0", fontSize: 38 }}>WordPress & WooCommerce</h1>
         <p style={{ margin: 0, color: "#64748b", maxWidth: 800, lineHeight: 1.6 }}>Production Manager owns products, production methods and pricing. WordPress pulls the published catalogue and sends completed WooCommerce orders back with their exact configuration.</p>
       </div>
-      <Link href="/settings" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>← Settings</Link>
+      <Link prefetch={false} href="/settings" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>← Settings</Link>
     </header>
 
     {message ? <div style={{ padding: 14, borderRadius: 14, background: "#ecfdf5", border: "1px solid #a7f3d0", color: "#065f46", fontWeight: 850 }}>{message}</div> : null}
@@ -73,7 +73,7 @@ export default async function WordPressIntegrationPage({ searchParams }: Props) 
           <div><b>Last catalogue pull:</b> {connection?.lastCatalogPullAt ? new Date(connection.lastCatalogPullAt).toLocaleString("en-AU") : "Not yet"}</div>
           <div><b>Last order received:</b> {connection?.lastOrderReceivedAt ? new Date(connection.lastOrderReceivedAt).toLocaleString("en-AU") : "Not yet"}</div>
         </div>
-        <Link href="/products" style={{ marginTop: 18, display: "inline-block", color: "#6d28d9", fontWeight: 900 }}>Manage website products →</Link>
+        <Link prefetch={false} href="/products" style={{ marginTop: 18, display: "inline-block", color: "#6d28d9", fontWeight: 900 }}>Manage website products →</Link>
       </div>
     </section>
 

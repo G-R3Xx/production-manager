@@ -15,7 +15,7 @@ type AppLayoutProps = {
 
 export const preferredRegion = "syd1";
 
-const APP_VERSION = "V26.10.21.02";
+const APP_VERSION = "V26.10.21.03";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -86,7 +86,7 @@ export default async function AppLayout({ children }: AppLayoutProps) {
           <div style={{ fontSize: 11, fontWeight: 900, color: "#64748b", letterSpacing: "0.05em", textTransform: "uppercase", textAlign: "center" }}>
             {APP_VERSION}
           </div>
-          <Link href="/dashboard" style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
+          <Link href="/dashboard" prefetch={false} style={{ display: "block", textDecoration: "none" }} aria-label="Production Manager home">
             <img
               src="/brand/production-manager-logo.svg"
               alt="Production Manager"

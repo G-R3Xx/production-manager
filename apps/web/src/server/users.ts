@@ -149,6 +149,25 @@ async function queryUsersForTenant(tenantId: string) {
   );
 }
 
+export type ActiveStaffOption = {
+  userProfileId: string;
+  fullName: string;
+  shortName: string | null;
+  tenantRole: string;
+};
+
+export async function listActiveStaffOptionsForTenant(tenantId: string): Promise<ActiveStaffOption[]> {
+  if (!process.env.DATABASE_URL) return [];
+  const result = await pool.query<ActiveStaffOption>(`
+    SELECT up.id AS "userProfileId", up.full_name AS "fullName", up.short_name AS "shortName", membership.tenant_role AS "tenantRole"
+    FROM app.memberships membership
+    INNER JOIN app.user_profiles up ON up.id = membership.user_profile_id
+    WHERE membership.tenant_id = $1::uuid AND membership.status = 'active'
+    ORDER BY up.full_name ASC, up.email ASC
+  `, [tenantId]);
+  return result.rows;
+}
+
 export async function listUsersForTenant(tenantId: string): Promise<TenantUserRecord[]> {
   if (!process.env.DATABASE_URL) {
     return [];

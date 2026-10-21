@@ -1,18 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
-
-const PREFETCH_ROUTES = [
-  "/enquiries",
-  "/surveys",
-  "/quotes",
-  "/artwork-approvals",
-  "/production",
-  "/clients",
-  "/materials",
-  "/dashboard"
-];
+import { usePathname, useSearchParams } from "next/navigation";
 
 function shouldShowForLink(anchor: HTMLAnchorElement): boolean {
   const href = anchor.getAttribute("href") || "";
@@ -32,7 +21,6 @@ function shouldShowForLink(anchor: HTMLAnchorElement): boolean {
 export function RouteTransitionOverlay() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const router = useRouter();
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState("Loading your workspace…");
   const delayTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -57,18 +45,6 @@ export function RouteTransitionOverlay() {
     clearTimers();
     setVisible(false);
   }, [pathname, searchKey]);
-
-  useEffect(() => {
-    const idle = window.requestIdleCallback ?? ((callback: IdleRequestCallback) => window.setTimeout(() => callback({ didTimeout: false, timeRemaining: () => 0 }), 700));
-    const cancelIdle = window.cancelIdleCallback ?? ((id: number) => window.clearTimeout(id));
-    const idleId = idle(() => {
-      PREFETCH_ROUTES.forEach((route, index) => {
-        window.setTimeout(() => router.prefetch(route), index * 90);
-      });
-    });
-
-    return () => cancelIdle(idleId as number);
-  }, [router]);
 
   useEffect(() => {
     function handleCustomLoading(event: Event) {

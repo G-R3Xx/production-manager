@@ -423,7 +423,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
             <div style={{ display: "grid", gap: 12 }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <strong>{filteredMaterials.length} result{filteredMaterials.length === 1 ? "" : "s"}</strong>
-                <Link href="/materials" style={{ color: "#2563eb", fontWeight: 800 }}>Clear search</Link>
+                <Link prefetch={false} href="/materials" style={{ color: "#2563eb", fontWeight: 800 }}>Clear search</Link>
               </div>
               {filteredMaterials.map((material) => (
                 <MaterialCard key={material.id} material={material} suppliers={suppliers} />

@@ -48,7 +48,7 @@ export default async function DataResetPage({ searchParams }: { searchParams?: P
   return (
     <main style={{ display: "grid", gap: 20, maxWidth: 1080 }}>
       <header style={{ display: "grid", gap: 8 }}>
-        <Link href="/settings" style={{ color: "#475569", fontWeight: 850, textDecoration: "none", width: "fit-content" }}>← Settings</Link>
+        <Link prefetch={false} href="/settings" style={{ color: "#475569", fontWeight: 850, textDecoration: "none", width: "fit-content" }}>← Settings</Link>
         <div style={{ fontSize: 12, fontWeight: 950, color: "#b42318", textTransform: "uppercase", letterSpacing: ".08em" }}>Danger zone</div>
         <h1 style={{ margin: 0, fontSize: 38 }}>Reset workflow test data</h1>
         <p style={{ margin: 0, color: "#64748b", lineHeight: 1.6, maxWidth: 900 }}>

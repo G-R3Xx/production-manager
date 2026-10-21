@@ -48,7 +48,7 @@ export default async function ProductsPage({ searchParams }: Props) {
         <p style={{ margin: 0, color: "#64748b", maxWidth: 790, lineHeight: 1.6 }}>Create a reusable product for fast quoting and clear production instructions. Website publishing is optional and stays out of the normal workflow.</p>
       </div>
       <div style={{ display: "flex", gap: 9 }}>
-        <Link href="/products/advanced" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>Advanced product tools</Link>
+        <Link prefetch={false} href="/products/advanced" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 12, padding: "10px 14px", color: "#334155", fontWeight: 850 }}>Advanced product tools</Link>
       </div>
     </header>
 
@@ -101,7 +101,7 @@ export default async function ProductsPage({ searchParams }: Props) {
 
     <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
       {products.map(product => <article key={product.id} style={{ ...card, display: "grid", minWidth: 0, overflow: "hidden" }}>
-        <Link href={`/products/${product.id}`} style={{ padding: 14, textDecoration: "none", color: "inherit", display: "grid", gap: 9, minWidth: 0 }}>
+        <Link prefetch={false} href={`/products/${product.id}`} style={{ padding: 14, textDecoration: "none", color: "inherit", display: "grid", gap: 9, minWidth: 0 }}>
           <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
             <div style={{ minWidth: 0 }}><div style={{ fontSize: 11, color: "#64748b", fontWeight: 850 }}>{product.sku || "No SKU"}</div><h2 style={{ margin: "4px 0 0", fontSize: 18, lineHeight: 1.2, overflowWrap: "anywhere" }}>{product.name}</h2></div>
             <span style={{ borderRadius: 999, padding: "5px 8px", fontSize: 10, fontWeight: 950, background: product.status === "active" ? "#dcfce7" : product.status === "draft" ? "#fef3c7" : "#e2e8f0", color: product.status === "active" ? "#166534" : "#475569" }}>{product.status === "deleted" ? "removed" : product.status}</span>

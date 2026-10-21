@@ -12,6 +12,7 @@ import {
 } from "./actions";
 import {
   getMyobConnectionByTenantId,
+  getMyobIntegrationLocalCounts,
   getMyobOauthTokenByTenantId,
   listExternalMappingsByTenantId,
   listSyncRunsByTenantId,
@@ -19,10 +20,6 @@ import {
   type SyncRunRecord
 } from "@/server/integrations";
 import { getRequiredSessionUser } from "@/server/auth/session";
-import { listCustomersForTenant } from "@/server/customers";
-import { listProductsForTenant } from "@/server/products";
-import { listSuppliersForTenant } from "@/server/suppliers";
-import { listMaterialsForTenant } from "@/server/materials";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 
 function cardStyle() {
@@ -82,15 +79,12 @@ export default async function IntegrationsPage({
     );
   }
 
-  const [connection, tokenRecord, mappings, syncRuns, localCustomers, localProducts, localSuppliers, localMaterials] = await Promise.all([
+  const [connection, tokenRecord, mappings, syncRuns, localCounts] = await Promise.all([
     getMyobConnectionByTenantId(activeTenant.tenantId),
     getMyobOauthTokenByTenantId(activeTenant.tenantId),
-    listExternalMappingsByTenantId(activeTenant.tenantId),
-    listSyncRunsByTenantId(activeTenant.tenantId),
-    listCustomersForTenant(activeTenant.tenantId),
-    listProductsForTenant(activeTenant.tenantId),
-    listSuppliersForTenant(activeTenant.tenantId),
-    listMaterialsForTenant(activeTenant.tenantId)
+    listExternalMappingsByTenantId(activeTenant.tenantId, 250),
+    listSyncRunsByTenantId(activeTenant.tenantId, 50),
+    getMyobIntegrationLocalCounts(activeTenant.tenantId)
   ]);
 
   return (
@@ -211,7 +205,7 @@ export default async function IntegrationsPage({
         </div>
 
         <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-          <Link href="/auth/myob/start" style={{ textDecoration: "none" }}>
+          <Link prefetch={false} href="/auth/myob/start" style={{ textDecoration: "none" }}>
             <span style={{ display: "inline-flex", alignItems: "center", minHeight: 44, borderRadius: 12, border: "none", background: "#2563eb", color: "#fff", fontWeight: 700, padding: "0 16px", cursor: "pointer" }}>
               Start MYOB OAuth
             </span>
@@ -245,7 +239,7 @@ export default async function IntegrationsPage({
 
           <form action={pushProductionManagerMaterialsToMyobAction}>
             <button type="submit" style={{ minHeight: 44, borderRadius: 12, border: "none", background: "#0f766e", color: "#fff", fontWeight: 800, padding: "0 16px", cursor: "pointer" }}>
-              Sync all Materials to MYOB ({localMaterials.filter((row) => row.active).length})
+              Sync all Materials to MYOB ({localCounts.activeMaterials})
             </button>
           </form>
 
@@ -340,15 +334,15 @@ export default async function IntegrationsPage({
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 12, marginTop: 12 }}>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
             <div style={{ fontWeight: 700 }}>Local customers</div>
-            <div style={{ color: "#667085", marginTop: 6 }}>{localCustomers.length}</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localCounts.customers}</div>
           </div>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
             <div style={{ fontWeight: 700 }}>Local suppliers</div>
-            <div style={{ color: "#667085", marginTop: 6 }}>{localSuppliers.length}</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localCounts.suppliers}</div>
           </div>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
             <div style={{ fontWeight: 700 }}>Local materials</div>
-            <div style={{ color: "#667085", marginTop: 6 }}>{localMaterials.length}</div>
+            <div style={{ color: "#667085", marginTop: 6 }}>{localCounts.materials}</div>
           </div>
           <div style={{ border: "1px solid #e5e7eb", borderRadius: 12, padding: 12 }}>
             <div style={{ fontWeight: 700 }}>Customer mappings</div>

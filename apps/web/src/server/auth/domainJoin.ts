@@ -77,9 +77,14 @@ function normaliseRole(value: string | null | undefined): TenantRoleValue {
   return VALID_TENANT_ROLES.includes(cleaned) ? cleaned : "staff";
 }
 
-export async function ensureTenantDomainAccessTable(): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+let tenantDomainAccessSchemaReady = false;
+let tenantDomainAccessSchemaPromise: Promise<void> | null = null;
 
+export async function ensureTenantDomainAccessTable(): Promise<void> {
+  if (!process.env.DATABASE_URL || tenantDomainAccessSchemaReady) return;
+  if (tenantDomainAccessSchemaPromise) return tenantDomainAccessSchemaPromise;
+
+  tenantDomainAccessSchemaPromise = (async () => {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS app.tenant_domain_access (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -101,6 +106,12 @@ export async function ensureTenantDomainAccessTable(): Promise<void> {
   `);
 
   await seedTenderEdgeDomainAccessIfPossible();
+  tenantDomainAccessSchemaReady = true;
+  })().catch((error) => {
+    tenantDomainAccessSchemaPromise = null;
+    throw error;
+  });
+  return tenantDomainAccessSchemaPromise;
 }
 
 async function seedTenderEdgeDomainAccessIfPossible(): Promise<void> {

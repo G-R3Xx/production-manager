@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { unstable_cache } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { defaultSignageSizePresets, defaultSmallSizePresets, getCompanySettingsByTenantId, PM_MYOB_PRICE_LEVELS, type QuoteSizePreset } from "@/server/company";
@@ -24,6 +25,12 @@ function factorPercent(value: string | number | null | undefined): string {
   return String(Math.round((Number.isFinite(factor) ? factor : 1) * 10000) / 100);
 }
 
+const cachedMyobPriceLevelNames = unstable_cache(
+  (tenantId: string) => fetchMyobPriceLevelNamesForTenant(tenantId),
+  ["company-myob-price-level-names"],
+  { revalidate: 60 * 60 }
+);
+
 function sizePresetText(presets: QuoteSizePreset[] | null | undefined, fallback: QuoteSizePreset[]): string {
   const list = presets && presets.length > 0 ? presets : fallback;
   return list.map((preset) => `${preset.label} | ${preset.width} | ${preset.height}`).join("\n");
@@ -40,7 +47,7 @@ export default async function CompanyPage({ searchParams }: CompanyPageProps) {
   const [settings, teamDomainAccess, myobPriceLevelNames] = await Promise.all([
     getCompanySettingsByTenantId(activeTenant.tenantId),
     getTenantDomainAccessSettingsByTenantId(activeTenant.tenantId),
-    fetchMyobPriceLevelNamesForTenant(activeTenant.tenantId).catch(() => ({
+    cachedMyobPriceLevelNames(activeTenant.tenantId).catch(() => ({
       "Level A": "Level A", "Level B": "Level B", "Level C": "Level C", "Level D": "Level D", "Level E": "Level E", "Level F": "Level F"
     }))
   ]);

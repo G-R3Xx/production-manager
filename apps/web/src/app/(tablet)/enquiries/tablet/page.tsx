@@ -74,7 +74,7 @@ export default async function TabletEnquiriesPage({ searchParams }: TabletEnquir
             </div>
           </div>
 
-          <Link
+          <Link prefetch={false}
             href="/enquiries"
             style={{
               minHeight: 48,

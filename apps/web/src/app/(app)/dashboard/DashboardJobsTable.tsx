@@ -181,7 +181,7 @@ export function DashboardJobsTable({ rows, staff, todayKey, initialStage = "", i
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 11 }}>{row.assigneeLabel}</td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: "#475467", fontSize: 12, textTransform: "capitalize" }}>{row.dispatchType?.replaceAll("_", " ") || "—"}</td>
                 <td style={{ padding: 10, borderRight: "1px solid #edf1f6", color: row.myobOrderNumber ? "#067647" : "#667085", fontSize: 12, fontWeight: 800 }}>{row.myobOrderNumber || "—"}</td>
-                <td style={{ padding: 10, textAlign: "center" }}><Link href={`/jobs/${row.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Open →</Link></td>
+                <td style={{ padding: 10, textAlign: "center" }}><Link prefetch={false} href={`/jobs/${row.id}`} style={{ color: "#155eef", fontSize: 12, fontWeight: 950, textDecoration: "none" }}>Open →</Link></td>
               </tr>;
             })}</tbody>
           </table>

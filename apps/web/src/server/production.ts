@@ -792,30 +792,31 @@ export async function listProductionJobStepSummariesForTenant(tenantId: string):
     stepsDone: string;
     stepsTotal: string;
   }>(`
+    WITH step_summary AS (
+      SELECT
+        step.job_id,
+        count(*)::text AS "stepsTotal",
+        count(*) FILTER (WHERE step.status = 'done')::text AS "stepsDone",
+        (array_agg(step.label ORDER BY step.sort_order ASC, step.created_at ASC)
+          FILTER (WHERE step.status <> 'done'))[1] AS "currentStep"
+      FROM production.production_steps step
+      INNER JOIN production.production_jobs scoped_job ON scoped_job.id = step.job_id
+      WHERE scoped_job.tenant_id = $1::uuid
+      GROUP BY step.job_id
+    )
     SELECT
-      pj.id as "jobId",
-      COALESCE(
-        (
-          SELECT ps.label
-          FROM production.production_steps ps
-          WHERE ps.job_id = pj.id AND ps.status <> 'done'
-          ORDER BY ps.sort_order ASC, ps.created_at ASC
-          LIMIT 1
-        ),
-        CASE
-          WHEN EXISTS (SELECT 1 FROM production.production_steps ps WHERE ps.job_id = pj.id) THEN 'All steps complete'
-          ELSE 'No production steps'
-        END
-      ) as "currentStep",
-      (SELECT count(*) FROM production.production_steps ps WHERE ps.job_id = pj.id AND ps.status = 'done')::text as "stepsDone",
-      (SELECT count(*) FROM production.production_steps ps WHERE ps.job_id = pj.id)::text as "stepsTotal"
-    FROM production.production_jobs pj
-    WHERE pj.tenant_id = $1::uuid
+      job.id as "jobId",
+      COALESCE(summary."currentStep", CASE WHEN COALESCE(summary."stepsTotal", '0') <> '0' THEN 'All steps complete' ELSE 'No production steps' END) as "currentStep",
+      COALESCE(summary."stepsDone", '0') as "stepsDone",
+      COALESCE(summary."stepsTotal", '0') as "stepsTotal"
+    FROM production.production_jobs job
+    LEFT JOIN step_summary summary ON summary.job_id = job.id
+    WHERE job.tenant_id = $1::uuid
   `, [tenantId]);
 
   return result.rows.map((row) => ({
     jobId: row.jobId,
-    currentStep: row.currentStep || "No production steps",
+    currentStep: row.currentStep ?? "No production steps",
     stepsDone: Number(row.stepsDone) || 0,
     stepsTotal: Number(row.stepsTotal) || 0
   }));
@@ -1047,8 +1048,8 @@ async function ensureRipSetupSteps(input: { productionJobId?: string | null; ten
 
 export async function listProductionCalendarStepsForTenant(tenantId: string): Promise<ProductionCalendarStepRecord[]> {
   await ensureProductionTables();
-  await ensureRipSetupSteps({ tenantId });
-  await syncInheritedProductionStepAssignments({ tenantId });
+  // Calendar rendering is read-only. Legacy step repair/default propagation is
+  // handled by production/job synchronisation, never during a GET.
   const result = await pool.query<ProductionCalendarStepRecord>(`
     SELECT
       step.id,
@@ -1082,8 +1083,6 @@ export async function listProductionCalendarStepsForTenant(tenantId: string): Pr
 
 export async function listProductionStepsForJob(jobId: string): Promise<ProductionStepRecord[]> {
   await ensureProductionTables();
-  await ensureRipSetupSteps({ productionJobId: jobId });
-  await syncInheritedProductionStepAssignments({ productionJobId: jobId });
   const result = await pool.query<ProductionStepRecord>(`
     SELECT
       id,
@@ -1570,6 +1569,8 @@ async function syncProductionItemsAndSteps(jobId: string): Promise<void> {
       steps.map((step) => cleanSearchText(step))
     ]);
   }
+  await ensureRipSetupSteps({ productionJobId: jobId });
+  await syncInheritedProductionStepAssignments({ productionJobId: jobId });
 }
 
 export async function createProductionJobFromArtworkApprovalForTenant(tenantId: string, approvalId: string, triggeredBy?: string | null): Promise<{ id: string } | null> {
@@ -1772,6 +1773,8 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
       `, [jobId, itemId, label, cleanSearchText(label).replace(/\s+/g, "_"), index * 100 + stepIndex + 1]);
     }
   }
+  await ensureRipSetupSteps({ productionJobId: jobId });
+  await syncInheritedProductionStepAssignments({ productionJobId: jobId });
   await pool.query(`UPDATE production.production_jobs SET status=$2::varchar,updated_at=now() WHERE id=$1::uuid`, [
     jobId, artworkFileCount > 0 ? "ready_to_start" : "waiting_on_files"
   ]);

@@ -293,7 +293,9 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
   }, [materials]);
   useEffect(() => {
     const refreshIfClean = () => { if (dirtyCountRef.current === 0) router.refresh(); };
-    const timer = window.setInterval(refreshIfClean, 60_000);
+    // Realtime + focus are enough for this admin grid. A forced full RSC refresh
+    // every 60 seconds was repeatedly reloading the complete materials/supplier
+    // dataset while managers were simply reading the page.
     window.addEventListener("focus", refreshIfClean);
 
     let channel: ReturnType<ReturnType<typeof getSupabaseBrowserClient>["channel"]> | null = null;
@@ -305,11 +307,10 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         .on("postgres_changes", { event: "*", schema: "app", table: "suppliers", filter: `tenant_id=eq.${tenantId}` }, refreshIfClean)
         .subscribe();
     } catch {
-      // The focus/interval refresh remains as a safe fallback if Realtime is unavailable.
+      // Focus refresh remains as a safe fallback if Realtime is unavailable.
     }
 
     return () => {
-      window.clearInterval(timer);
       window.removeEventListener("focus", refreshIfClean);
       if (channel) void getSupabaseBrowserClient().removeChannel(channel);
     };

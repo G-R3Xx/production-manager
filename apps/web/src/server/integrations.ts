@@ -339,7 +339,8 @@ export async function disconnectMyobConnectionByTenantId(
 }
 
 export async function listExternalMappingsByTenantId(
-  tenantId: string
+  tenantId: string,
+  limit = 250
 ): Promise<ExternalMappingRecord[]> {
   const result = await pool.query<
     Omit<ExternalMappingRecord, "payloadJson"> & { payloadJson: unknown }
@@ -360,8 +361,9 @@ export async function listExternalMappingsByTenantId(
       FROM integration.external_mappings
       WHERE tenant_id = $1::uuid
       ORDER BY created_at DESC
+      LIMIT $2::integer
     `,
-    [tenantId]
+    [tenantId, Math.max(1, Math.min(1000, limit))]
   );
 
   return result.rows.map((row) => ({
@@ -374,7 +376,8 @@ export async function listExternalMappingsByTenantId(
 }
 
 export async function listSyncRunsByTenantId(
-  tenantId: string
+  tenantId: string,
+  limit = 50
 ): Promise<SyncRunRecord[]> {
   const result = await pool.query<
     Omit<SyncRunRecord, "summaryJson"> & { summaryJson: unknown }
@@ -395,8 +398,9 @@ export async function listSyncRunsByTenantId(
       FROM integration.sync_runs
       WHERE tenant_id = $1::uuid
       ORDER BY created_at DESC
+      LIMIT $2::integer
     `,
-    [tenantId]
+    [tenantId, Math.max(1, Math.min(250, limit))]
   );
 
   return result.rows.map((row) => ({
@@ -407,6 +411,39 @@ export async function listSyncRunsByTenantId(
     updatedAt: toIsoOrNull(row.updatedAt) ?? "",
     summaryJson: parseJsonObject(row.summaryJson)
   }));
+}
+
+export type MyobIntegrationLocalCounts = {
+  customers: number;
+  suppliers: number;
+  materials: number;
+  activeMaterials: number;
+  products: number;
+};
+
+export async function getMyobIntegrationLocalCounts(tenantId: string): Promise<MyobIntegrationLocalCounts> {
+  const result = await pool.query<{
+    customers: string;
+    suppliers: string;
+    materials: string;
+    activeMaterials: string;
+    products: string;
+  }>(`
+    SELECT
+      (SELECT count(*) FROM app.customers WHERE tenant_id=$1::uuid)::text AS customers,
+      (SELECT count(*) FROM app.suppliers WHERE tenant_id=$1::uuid)::text AS suppliers,
+      (SELECT count(*) FROM catalog.materials WHERE tenant_id=$1::uuid)::text AS materials,
+      (SELECT count(*) FROM catalog.materials WHERE tenant_id=$1::uuid AND active=true)::text AS "activeMaterials",
+      (SELECT count(*) FROM catalog.products WHERE tenant_id=$1::uuid)::text AS products
+  `, [tenantId]);
+  const row = result.rows[0];
+  return {
+    customers: Number(row?.customers ?? 0),
+    suppliers: Number(row?.suppliers ?? 0),
+    materials: Number(row?.materials ?? 0),
+    activeMaterials: Number(row?.activeMaterials ?? 0),
+    products: Number(row?.products ?? 0),
+  };
 }
 
 export async function createSyncRunForTenant(

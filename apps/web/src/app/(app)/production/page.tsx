@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { after } from "next/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
@@ -31,11 +32,9 @@ import { PrintReadyUploadInputs } from "./PrintReadyUploadInputs";
 import { OpenFullscreenBoardButton } from "./OpenFullscreenBoardButton";
 import { ProductionStepToggle } from "./ProductionStepToggle";
 import { ProductionStepAssignmentEditor } from "./ProductionStepAssignmentEditor";
-import { getQuoteDraftById, listQuoteDraftsForTenant } from "@/server/quotes";
-import { customerLogoUrl, getCustomerById, listCustomersForTenant } from "@/server/customers";
-import { getEnquiryById, listEnquiriesForTenant } from "@/server/enquiries";
+import { getQuoteDraftById, listQuoteClientLogoSummariesForTenant } from "@/server/quotes";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
-import { listUsersForTenant } from "@/server/users";
+import { listActiveStaffOptionsForTenant } from "@/server/users";
 import { pushAcceptedQuoteToMyobOrderForTenant } from "@/server/myob-sync";
 
 type PageProps = {
@@ -677,41 +676,36 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
 
   let allJobs: ProductionJobRecord[] = [];
   let approvedArtwork: Awaited<ReturnType<typeof listApprovedArtworkReadyForProduction>> = [];
-  let quoteDrafts: Awaited<ReturnType<typeof listQuoteDraftsForTenant>> = [];
-  let clients: Awaited<ReturnType<typeof listCustomersForTenant>> = [];
-  let allEnquiries: Awaited<ReturnType<typeof listEnquiriesForTenant>> = [];
+  let quoteLogos: Awaited<ReturnType<typeof listQuoteClientLogoSummariesForTenant>> = [];
   let stepSummaries: Awaited<ReturnType<typeof listProductionJobStepSummariesForTenant>> = [];
   let selectedJob: ProductionJobRecord | null = null;
   let items: ProductionItemRecord[] = [];
   let steps: ProductionStepRecord[] = [];
   let selectedQuote = null as Awaited<ReturnType<typeof getQuoteDraftById>>;
   let selectedJobLogoUrl: string | null = null;
-  let productionStaff: Awaited<ReturnType<typeof listUsersForTenant>> = [];
+  let productionStaff: Awaited<ReturnType<typeof listActiveStaffOptionsForTenant>> = [];
 
   if (detailOnly && selectedParam) {
     selectedJob = await getProductionJobById(tenantId, selectedParam);
     if (selectedJob) {
-      const [loadedItems, loadedSteps, loadedQuote, selectedCustomer, loadedStaff] = await Promise.all([
+      const [loadedItems, loadedSteps, loadedQuote, selectedLogos, loadedStaff] = await Promise.all([
         listProductionItemsForJob(selectedJob.id),
         listProductionStepsForJob(selectedJob.id),
         getQuoteDraftById(tenantId, selectedJob.quoteId),
-        selectedJob.linkedCustomerId ? getCustomerById(tenantId, selectedJob.linkedCustomerId) : Promise.resolve(null),
-        listUsersForTenant(tenantId),
+        listQuoteClientLogoSummariesForTenant(tenantId, [selectedJob.quoteId]),
+        listActiveStaffOptionsForTenant(tenantId),
       ]);
       items = loadedItems;
       steps = loadedSteps;
       selectedQuote = loadedQuote;
-      productionStaff = loadedStaff.filter((person) => person.membershipStatus === "active");
-      const selectedEnquiry = selectedQuote?.enquiryId ? await getEnquiryById(tenantId, selectedQuote.enquiryId) : null;
-      selectedJobLogoUrl = selectedEnquiry?.clientLogoUrl || customerLogoUrl(selectedCustomer);
+      productionStaff = loadedStaff;
+      selectedJobLogoUrl = selectedLogos[0]?.logoUrl ?? null;
     }
   } else {
-    [allJobs, approvedArtwork, quoteDrafts, clients, allEnquiries, stepSummaries] = await Promise.all([
+    [allJobs, approvedArtwork, quoteLogos, stepSummaries] = await Promise.all([
       listProductionJobsForTenant(tenantId, { includeDeleted: true }),
       listApprovedArtworkReadyForProduction(tenantId),
-      listQuoteDraftsForTenant(tenantId, { includeDeleted: true }),
-      listCustomersForTenant(tenantId),
-      listEnquiriesForTenant(tenantId, { includeDeleted: true }),
+      listQuoteClientLogoSummariesForTenant(tenantId),
       listProductionJobStepSummariesForTenant(tenantId)
     ]);
     selectedJob = selectedParam ? allJobs.find((job) => job.id === selectedParam) ?? null : null;
@@ -724,9 +718,10 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
     }
   }
 
-  // Accepted quotes should always have an MYOB Item Order. The Quote page already
-  // backfills older accepted quotes; do the same from the Job Workspace so staff
-  // never have to visit Quotes just to repair a missing MYOB order.
+  // Accepted quotes should always have an MYOB Item Order. This is a legacy
+  // backfill safety net only: never make Production wait on remote MYOB during a
+  // page GET. Queue it after the response and let the existing status refresh
+  // surface the result on the next pass.
   if (selectedJob && selectedQuote) {
     const orderState = String(selectedQuote.myobOrderStatus ?? "").trim().toLowerCase();
     const shouldBackfillAcceptedOrder = Boolean(
@@ -735,12 +730,14 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
       && (orderState === "" || orderState === "not_synced" || orderState === "ready_to_sync" || orderState === "synced")
     );
     if (shouldBackfillAcceptedOrder) {
-      try {
-        await pushAcceptedQuoteToMyobOrderForTenant(tenantId, selectedQuote.id);
-      } catch (autoSyncError) {
-        console.error("Production job MYOB Order backfill failed", autoSyncError);
-      }
-      selectedQuote = await getQuoteDraftById(tenantId, selectedQuote.id);
+      const quoteId = selectedQuote.id;
+      after(async () => {
+        try {
+          await pushAcceptedQuoteToMyobOrderForTenant(tenantId, quoteId);
+        } catch (autoSyncError) {
+          console.error("Production job MYOB Order backfill failed", autoSyncError);
+        }
+      });
     }
   }
 
@@ -752,16 +749,9 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
       ? allJobs.filter((job) => job.status === "completed")
       : allJobs.filter((job) => job.status !== "deleted" && job.status !== "completed");
   const selectedJobMissing = Boolean(selectedParam && !selectedJob);
-  const customerById = new Map(clients.map((client) => [client.id, client]));
-  const quoteById = new Map(quoteDrafts.map((quote) => [quote.id, quote]));
-  const enquiryById = new Map(allEnquiries.map((item) => [item.id, item]));
-  const logoForQuoteId = (quoteId: string | null | undefined) => {
-    const quote = quoteId ? quoteById.get(quoteId) : null;
-    const sourceEnquiry = quote?.enquiryId ? enquiryById.get(quote.enquiryId) : null;
-    return sourceEnquiry?.clientLogoUrl || customerLogoUrl(quote?.linkedCustomerId ? customerById.get(quote.linkedCustomerId) : null);
-  };
-  const logoForJob = (job: ProductionJobRecord | null | undefined) =>
-    logoForQuoteId(job?.quoteId) || customerLogoUrl(job?.linkedCustomerId ? customerById.get(job.linkedCustomerId) : null);
+  const logoByQuoteId = new Map(quoteLogos.map((item) => [item.quoteId, item.logoUrl]));
+  const logoForQuoteId = (quoteId: string | null | undefined) => quoteId ? (logoByQuoteId.get(quoteId) ?? null) : null;
+  const logoForJob = (job: ProductionJobRecord | null | undefined) => logoForQuoteId(job?.quoteId);
   if (!selectedJobLogoUrl) selectedJobLogoUrl = logoForJob(selectedJob);
   const stepSummaryByJobId = new Map(stepSummaries.map((summary) => [summary.jobId, summary]));
   const complete = pageCompletion(selectedJob ? items.flatMap((item) => visibleStepsForItem(item, steps)) : steps);
@@ -804,9 +794,9 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
               <p style={{ margin: "4px 0 0", color: "#667085", fontSize: 13 }}>Current step and due date at a glance. Click any row for the complete job.</p>
             </div>
             <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <Link href="/production" style={{ color: !filter ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Active</Link>
-              <Link href="/production?filter=completed" style={{ color: filter === "completed" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Completed ({completedJobCount})</Link>
-              <Link href="/production?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedJobCount})</Link>
+              <Link prefetch={false} href="/production" style={{ color: !filter ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Active</Link>
+              <Link prefetch={false} href="/production?filter=completed" style={{ color: filter === "completed" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Completed ({completedJobCount})</Link>
+              <Link prefetch={false} href="/production?filter=deleted" style={{ color: filter === "deleted" ? "#2563eb" : "#667085", fontWeight: 900, textDecoration: "none" }}>Deleted ({deletedJobCount})</Link>
               <span style={{ borderRadius: 999, background: "#eef4ff", color: "#3538cd", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>{jobs.length} job{jobs.length === 1 ? "" : "s"}</span>
             </div>
           </div>
@@ -872,7 +862,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
       {detailOnly && selectedJobMissing ? (
         <section style={{ ...cardStyle, borderColor: "#fed7aa", background: "#fff7ed", color: "#9a3412", display: "grid", gap: 10 }}>
           <strong>That production job could not be found.</strong>
-          <Link href="/production" style={{ color: "#9a3412", fontWeight: 950 }}>Return to current jobs</Link>
+          <Link prefetch={false} href="/production" style={{ color: "#9a3412", fontWeight: 950 }}>Return to current jobs</Link>
         </section>
       ) : null}
 
@@ -880,7 +870,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
         <section style={{ display: "grid", gap: 18 }}>
           {detailOnly ? (
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <Link href="/production" style={{ color: "#2563eb", fontWeight: 950, textDecoration: "none" }}>← All production jobs</Link>
+              <Link prefetch={false} href="/production" style={{ color: "#2563eb", fontWeight: 950, textDecoration: "none" }}>← All production jobs</Link>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <span style={{ borderRadius: 999, background: "#f8fafc", border: "1px solid #dbe4f0", padding: "7px 11px", color: "#344054", fontSize: 12, fontWeight: 900 }}>Current: {stepSummaryByJobId.get(selectedJob.id)?.currentStep ?? "No production steps"}</span>
                 <span style={{ borderRadius: 999, background: selectedJob.dueDate ? "#fff7ed" : "#f8fafc", border: `1px solid ${selectedJob.dueDate ? "#fed7aa" : "#dbe4f0"}`, padding: "7px 11px", color: selectedJob.dueDate ? "#9a3412" : "#667085", fontSize: 12, fontWeight: 900 }}>{selectedJob.dueDate ? `Due ${formatDate(selectedJob.dueDate)}` : "No due date set"}</span>

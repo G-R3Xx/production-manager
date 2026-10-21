@@ -20,7 +20,7 @@ export function ProductionSetupNav({ active }: { active: Section }) {
             Keep normal finishing simple: consumable + labour lives in a Shop Operation. Add machine costing only for equipment that genuinely has run cost, wear, ink, bits or capacity limits.
           </p>
         </div>
-        <Link href="/settings" style={backLink}>← Settings</Link>
+        <Link prefetch={false} href="/settings" style={backLink}>← Settings</Link>
       </div>
 
       <nav className="production-setup-flow" style={flowGrid} aria-label="Production setup flow">
@@ -30,7 +30,7 @@ export function ProductionSetupNav({ active }: { active: Section }) {
             <div key={step.section} style={{ display: "contents" }}>
               <Link
                 href={step.href}
-                prefetch
+                prefetch={false}
                 aria-current={selected ? "page" : undefined}
                 style={{ textDecoration: "none", minWidth: 0 }}
               >

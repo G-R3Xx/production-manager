@@ -1,7 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
-import { relationHasColumns } from "@/server/schema-readiness";
+import { runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export const quoteVisualCategoryKeys = [
   "signage",
@@ -44,10 +44,13 @@ export async function ensureQuoteVisualSettingsColumns(): Promise<void> {
   if (!process.env.DATABASE_URL || quoteVisualSettingsSchemaReady) return;
   if (quoteVisualSettingsSchemaPromise) return quoteVisualSettingsSchemaPromise;
   quoteVisualSettingsSchemaPromise = (async () => {
-    // Quote visuals are optional UI data, but the selected-quote page reads them.
-    // Verify this new column against the live production schema instead of relying
-    // on the global migration-trust shortcut, otherwise an unapplied migration
-    // can turn opening an old quote into a Server Component 500.
+    // Production trusts migration 056. Avoid information_schema on every cold
+    // selected-quote/materials serverless instance. Local/fallback environments
+    // retain the self-healing column check below.
+    if (!runtimeSchemaFallbackEnabled()) {
+      quoteVisualSettingsSchemaReady = true;
+      return;
+    }
     const result = await pool.query<{ columnCount: string }>(`
       SELECT count(DISTINCT column_name)::text AS "columnCount"
       FROM information_schema.columns

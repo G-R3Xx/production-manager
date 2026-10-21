@@ -1,7 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
-import { relationHasColumns } from "@/server/schema-readiness";
+import { relationHasColumns, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
 
 export type MaterialRecord = {
   id: string;
@@ -90,10 +90,14 @@ async function ensureMaterialVisualColumns(): Promise<void> {
   if (!process.env.DATABASE_URL || materialVisualSchemaReady) return;
   if (materialVisualSchemaPromise) return materialVisualSchemaPromise;
   materialVisualSchemaPromise = (async () => {
-    // These columns are optional presentation data, but quote pages read materials
-    // when an existing quote is opened. Check the live schema even in production
-    // so a deploy cannot crash old quotes just because migration 052 has not yet
-    // been applied by the deployment pipeline.
+    // Production trusts checked-in migrations. Avoid an information_schema round
+    // trip on the first Materials/Quotes request in every serverless instance.
+    // Local development (or PM_RUNTIME_SCHEMA_FALLBACK=1) retains the legacy
+    // self-healing schema check for older databases.
+    if (!runtimeSchemaFallbackEnabled()) {
+      materialVisualSchemaReady = true;
+      return;
+    }
     const result = await pool.query<{ columnCount: string }>(`
       SELECT count(DISTINCT column_name)::text AS "columnCount"
       FROM information_schema.columns
@@ -210,6 +214,71 @@ function presentMaterialType(value: string): string {
     default:
       return value;
   }
+}
+
+/**
+ * Lightweight active-material read model for quote builders. Quote configuration
+ * never needs MYOB payload blobs or archived materials, and loading those on every
+ * quote workspace open adds avoidable transfer/JSON parsing cost.
+ */
+export async function listQuoteMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {
+  await ensureMaterialPricingColumns();
+  await ensureMaterialVisualColumns().catch(() => undefined);
+  const result = await pool.query<MaterialRecord>(`
+    SELECT
+      m.id,
+      m.tenant_id AS "tenantId",
+      m.supplier_id AS "supplierId",
+      m.source_product_id AS "sourceProductId",
+      s.display_name AS "supplierName",
+      NULL::text AS "sourceProductName",
+      m.name,
+      m.customer_facing_name AS "customerFacingName",
+      m.sku,
+      CASE
+        WHEN m.material_type IS NOT NULL THEN m.material_type::text
+        ELSE m.type::text
+      END AS "materialType",
+      m.material_group AS "materialGroup",
+      m.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      m.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
+      COALESCE(m.reverse_printable, false) AS "reversePrintable",
+      COALESCE(m.used_for_backing, false) AS "usedForBacking",
+      COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
+      m.stock_uom AS "stockUom",
+      m.purchase_uom AS "purchaseUom",
+      m.stock_quantity::text AS "stockQuantity",
+      m.purchase_cost::text AS "purchaseCost",
+      COALESCE(m.cost_json ->> 'wastagePercent', '0') AS "wastagePercent",
+      m.width_mm::text AS "widthMm",
+      m.length_mm::text AS "lengthMm",
+      m.roll_width_mm::text AS "rollWidthMm",
+      m.gsm::text AS gsm,
+      m.notes,
+      COALESCE(to_jsonb(m) ->> 'quote_image_url', m.cost_json ->> 'quoteImageUrl') AS "quoteImageUrl",
+      COALESCE(to_jsonb(m) ->> 'quote_image_storage_path', m.cost_json ->> 'quoteImageStoragePath') AS "quoteImageStoragePath",
+      COALESCE(to_jsonb(m) ->> 'quote_visual_category', m.cost_json ->> 'quoteVisualCategory') AS "quoteVisualCategory",
+      '{}'::jsonb AS "costJson",
+      NULL::text AS "myobUid",
+      NULL::text AS "myobDisplayId",
+      NULL::text AS "myobSyncState",
+      '{}'::jsonb AS "myobPayloadJson",
+      true AS active,
+      m.created_at AS "createdAt",
+      m.updated_at AS "updatedAt"
+    FROM catalog.materials m
+    LEFT JOIN app.suppliers s ON s.id = m.supplier_id
+    WHERE m.tenant_id = $1::uuid
+      AND m.active = true
+    ORDER BY m.name ASC, m.created_at DESC
+  `, [tenantId]);
+
+  return result.rows.map((row) => ({
+    ...row,
+    materialType: presentMaterialType(row.materialType),
+    costJson: row.costJson && typeof row.costJson === "object" ? row.costJson : {},
+    myobPayloadJson: {}
+  }));
 }
 
 export async function listMaterialsForTenant(tenantId: string): Promise<MaterialRecord[]> {

@@ -3,8 +3,8 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listEnquiriesForTenant, listRecentEnquiryCorrespondenceForTenant, reconcileEnquiryWorkflowStatusesForTenant } from "@/server/enquiries";
-import { customerLogoUrl, listCustomersForTenant } from "@/server/customers";
+import { listEnquiriesForTenant, listRecentEnquiryCorrespondenceForTenant, scheduleEnquiryWorkflowStatusReconciliation } from "@/server/enquiries";
+import { customerLogoUrl, listCustomerOptionsForTenant } from "@/server/customers";
 import { attachEnquiryCorrespondenceAction, createSurveyFromEnquiryAction, deleteEnquiryAction, restoreEnquiryAction } from "./actions";
 import { EnquiryCorrespondenceDropzone } from "./EnquiryCorrespondenceDropzone";
 import { EnquiryCorrespondencePreview } from "./EnquiryCorrespondencePreview";
@@ -44,10 +44,10 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   const error = readParam(params, "error");
   const filter = readParam(params, "filter");
   const selectedEnquiry = readParam(params, "selectedEnquiry");
-  await reconcileEnquiryWorkflowStatusesForTenant(activeTenant.tenantId);
+  scheduleEnquiryWorkflowStatusReconciliation(activeTenant.tenantId);
   const [allEnquiries, clients, correspondence] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listCustomersForTenant(activeTenant.tenantId),
+    listCustomerOptionsForTenant(activeTenant.tenantId),
     listRecentEnquiryCorrespondenceForTenant(activeTenant.tenantId, 5)
   ]);
   const deletedCount = allEnquiries.filter((enquiry) => enquiry.status === "deleted").length;
@@ -81,7 +81,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
           <h1 style={{ margin: 0 }}>Quick intake first</h1>
           <p style={{ margin: 0, color: "#475467", lineHeight: 1.6 }}>Capture the client, a rough requirement, and decide the next step later. This does not need to tie to MYOB immediately.</p>
         </div>
-        <Link
+        <Link prefetch={false}
           href="/enquiries/tablet"
           style={{
             minHeight: 48,
@@ -109,9 +109,9 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
             <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : filter === "completed" ? "Completed enquiries" : "Current enquiries"}</h2>
             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <Link href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</Link>
-              <Link href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</Link>
-              <Link href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
+              <Link prefetch={false} href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</Link>
+              <Link prefetch={false} href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</Link>
+              <Link prefetch={false} href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
               <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} shown</span>
             </div>
           </div>
@@ -178,10 +178,10 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
                             <input type="hidden" name="enquiryId" value={enquiry.id} />
                             <button type="submit" style={{ minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", background: "#fff", color: "#111827", fontWeight: 800, cursor: "pointer" }}>Create site survey request</button>
                           </form>
-                          <Link href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
+                          <Link prefetch={false} href={`/surveys?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, border: "1px solid #d0d5dd", color: "#111827", fontWeight: 700 }}>Open survey form</Link>
                         </>
                       ) : null}
-                      {enquiry.status !== "deleted" && enquiry.status !== "converted" ? <Link href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
+                      {enquiry.status !== "deleted" && enquiry.status !== "converted" ? <Link prefetch={false} href={`/quotes?fromEnquiry=${enquiry.id}`} style={{ textDecoration: "none", minHeight: 40, display: "inline-flex", alignItems: "center", padding: "0 14px", borderRadius: 12, background: "#111827", color: "#fff", fontWeight: 800 }}>Create quote</Link> : null}
                       {enquiry.status === "deleted" ? (
                         <form action={restoreEnquiryAction} style={{ margin: 0 }}>
                           <input type="hidden" name="enquiryId" value={enquiry.id} />

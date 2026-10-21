@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { claimAppRefresh, pageHasUnsavedEdits } from "@/lib/auto-refresh-client";
 
-const STATUS_POLL_MS = 6_000;
+const STATUS_POLL_MS = 10_000;
 
 export function QuoteStatusAutoRefresh({ quoteId, fingerprint }: { quoteId: string; fingerprint: string }) {
   const router = useRouter();
