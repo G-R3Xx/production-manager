@@ -1834,7 +1834,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const needsInkStep = resolvedPrintMethod === "direct_print" || resolvedPrintMethod === "roll_stock";
   const noPrintSelected = needsInkStep && ink === "none";
   const availableInkChoices = resolvedPrintMethod === "roll_stock" ? inkChoices : inkChoices.filter((choice) => choice.key !== "none");
-  const printed = resolvedPrintMethod !== "" && resolvedPrintMethod !== "no_print" && !noPrintSelected;
+  // Direct/roll printing is not actually a printed job until an ink choice has been made.
+  // Previously a roll-stock substrate was treated as printed immediately, which added
+  // automatic print/setup labour before size, quantity or ink had been selected. That
+  // made different materials appear to have the same base price (with only markup
+  // changing the displayed amount).
+  const printed = resolvedPrintMethod === "cut_vinyl"
+    ? true
+    : needsInkStep
+      ? Boolean(ink && ink !== "none")
+      : resolvedPrintMethod !== "" && resolvedPrintMethod !== "no_print";
   const backingApplicable = printed && canChooseReversePrint && printDirection === "reverse";
   const needsMediaStep = isRollStockBase || resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl";
   const needsAdditionalMediaCost = !isRollStockBase && (resolvedPrintMethod === "roll_stock" || resolvedPrintMethod === "cut_vinyl");
@@ -2663,6 +2672,18 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const autoUnitPrice = useMyobPlanPricing ? (myobPlanUnitPrice ?? 0) : (rawCost * effectivePricingMultiplier);
   const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
+  const wizardPriceReady = presentation !== "wizard" || (
+    flowType === "service"
+      ? (serviceType === "access_equipment" ? quoteQuantityEntered && numberValue(accessEquipmentDailyCharge, 0) > 0 : quoteQuantityEntered)
+      : flowType === "component"
+        ? quoteQuantityEntered
+        : (width > 0 && height > 0 && quoteQuantityEntered)
+  );
+  const wizardPriceLabel = wizardPriceReady
+    ? (quoteQuantityEntered ? `${money(unitPrice)} each · Qty ${usage(quantityNumber)} · ${money(lineTotal)} total` : `${money(unitPrice)} each · Qty required`)
+    : flowType === "signage" && (!width || !height)
+      ? "Price calculated after finished size + quantity"
+      : "Price calculated after quantity";
   const selectedMediaName = isRollStockBase ? "" : customerMaterialName(selectedMedia);
   const selectedBackingName = backingApplicable ? (backingId === "none" ? "None" : selectedBackingGroup?.label ?? customerMaterialName(selectedBacking)) : "";
   const selectedLaminateName = laminateId === "none" ? "None" : customerMaterialName(selectedLaminate);
@@ -3983,7 +4004,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
               <section style={{ minHeight: 330, display: "grid", alignContent: "start", gap: 14 }}><div><div style={{ color: "#64748b", fontSize: 11, fontWeight: 950, textTransform: "uppercase", letterSpacing: ".06em" }}>Build quote line</div><h2 style={{ margin: "3px 0 0", color: "#0f172a", fontSize: 26 }}>{allStepLabels[step] ?? step.replaceAll("_", " ")}</h2></div>{renderWizardStep(step)}</section>
               <div style={{ position: "sticky", bottom: 0, zIndex: 3, margin: "0 -18px -18px", padding: "12px 18px", borderTop: "1px solid #e2e8f0", background: "rgba(255,255,255,.97)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
                 <button type="button" disabled={safeWizardIndex === 0} onClick={() => setWizardIndex((current) => Math.max(0, current - 1))} style={{ ...ghostButton, minHeight: 42, opacity: safeWizardIndex === 0 ? .4 : 1 }}>← Back</button>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: "#0f172a" }}>{quoteQuantityEntered ? `${money(unitPrice)} each · Qty ${usage(quantityNumber)} · ${money(lineTotal)} total` : `${money(unitPrice)} each · Qty required`}</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave || isSaving} style={{ ...primaryButton, minHeight: 42, opacity: canSave && !isSaving ? 1 : .45, cursor: canSave && !isSaving ? "pointer" : "not-allowed" }}>{isSaving ? "Saving…" : canSave ? (editingLine ? "Save quote line" : "Add quote line") : "Complete required fields"}</button>}</div>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}><strong style={{ color: wizardPriceReady ? "#0f172a" : "#64748b" }}>{wizardPriceLabel}</strong>{!atLast ? <button type="button" disabled={!stepComplete} onClick={() => setWizardIndex((current) => Math.min(allSignageSteps.length - 1, current + 1))} style={{ ...primaryButton, minHeight: 42, opacity: stepComplete ? 1 : .45, cursor: stepComplete ? "pointer" : "not-allowed" }}>Continue →</button> : <button type="submit" disabled={!canSave || isSaving} style={{ ...primaryButton, minHeight: 42, opacity: canSave && !isSaving ? 1 : .45, cursor: canSave && !isSaving ? "pointer" : "not-allowed" }}>{isSaving ? "Saving…" : canSave ? (editingLine ? "Save quote line" : "Add quote line") : "Complete required fields"}</button>}</div>
               </div>
             </div>;
           })() : allSignageSteps.map((step, index) => (
