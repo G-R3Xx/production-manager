@@ -167,7 +167,7 @@ export async function importMyobSuppliersAction() {
 export async function pushProductionManagerMaterialsToMyobAction() {
   const tenantId = await requireReadyTenant();
   const materials = await listMaterialsForTenant(tenantId);
-  const activeMaterials = materials.filter((row) => row.active);
+  const activeMaterials = materials.filter((row) => row.active && !row.stockSourceMaterialId);
   let materialCount = 0;
   const failures: string[] = [];
 
@@ -204,7 +204,7 @@ export async function pushProductionManagerMasterDataToMyobAction() {
   ]);
   const activeCustomers = customers.filter((row) => row.isActive && !isDeletedCustomer(row));
   const activeSuppliers = suppliers.filter((row) => row.isActive);
-  const activeMaterials = materials.filter((row) => row.active);
+  const activeMaterials = materials.filter((row) => row.active && !row.stockSourceMaterialId);
   let customerCount=0, supplierCount=0, materialCount=0;
   const failures:string[]=[];
   for (const row of activeCustomers) {

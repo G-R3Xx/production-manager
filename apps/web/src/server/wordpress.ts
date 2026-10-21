@@ -749,21 +749,22 @@ async function pricingMaterialsForDefinition(
 
   const result = await pool.query<WebsitePricingMaterial>(`
     SELECT
-      id::text,
-      name,
-      customer_facing_name AS "customerFacingName",
-      COALESCE(material_type::text, type::text) AS "materialType",
-      stock_uom AS "stockUom",
-      purchase_uom AS "purchaseUom",
-      stock_quantity::text AS "stockQuantity",
-      COALESCE((cost_json ->> 'purchaseCost')::numeric, purchase_cost, 0)::text AS "purchaseCost",
-      width_mm::text AS "widthMm",
-      length_mm::text AS "lengthMm",
-      roll_width_mm::text AS "rollWidthMm",
-      minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
-      roll_billing_increment_metres::text AS "rollBillingIncrementMetres"
-    FROM catalog.materials
-    WHERE tenant_id = $1::uuid AND id = ANY($2::uuid[])
+      m.id::text,
+      m.name,
+      m.customer_facing_name AS "customerFacingName",
+      COALESCE(root.material_type::text, root.type::text) AS "materialType",
+      root.stock_uom AS "stockUom",
+      root.purchase_uom AS "purchaseUom",
+      root.stock_quantity::text AS "stockQuantity",
+      COALESCE((root.cost_json ->> 'purchaseCost')::numeric, root.purchase_cost, 0)::text AS "purchaseCost",
+      root.width_mm::text AS "widthMm",
+      root.length_mm::text AS "lengthMm",
+      root.roll_width_mm::text AS "rollWidthMm",
+      root.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      root.roll_billing_increment_metres::text AS "rollBillingIncrementMetres"
+    FROM catalog.materials m
+    JOIN catalog.materials root ON root.id=COALESCE(m.stock_source_material_id,m.id) AND root.tenant_id=m.tenant_id
+    WHERE m.tenant_id = $1::uuid AND m.id = ANY($2::uuid[])
   `, [tenantId, materialIds]);
   return result.rows;
 }

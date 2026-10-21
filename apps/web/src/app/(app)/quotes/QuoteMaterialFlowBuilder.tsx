@@ -23,6 +23,7 @@ export type QuoteMaterial = {
   purchaseUom?: string | null;
   stockQuantity?: string | null;
   purchaseCost?: string | null;
+  salesMarkupMultiplier?: string | null;
   wastagePercent?: string | null;
   widthMm?: string | null;
   lengthMm?: string | null;
@@ -1213,6 +1214,7 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
     purchaseUom: material.purchaseUom ?? null,
     stockQuantity: material.stockQuantity ?? null,
     purchaseCost: material.purchaseCost ?? null,
+    salesMarkupMultiplier: material.salesMarkupMultiplier ?? null,
     wastagePercent: material.wastagePercent ?? null,
     widthMm: material.widthMm ?? null,
     lengthMm: material.lengthMm ?? null,
@@ -1480,9 +1482,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const [wizardIndex, setWizardIndex] = useState(0);
   const standardMarkupMultiplier = multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const standardAccessEquipmentMarkupMultiplier = multiplierValue(pricingSettings?.accessEquipmentMarkupMultiplier, standardMarkupMultiplier);
+  const initialMaterialSalesMarkup = initialSnapshot?.materialSnapshots?.main?.salesMarkupMultiplier
+    ?? initialSnapshot?.materialSnapshots?.smallStock?.salesMarkupMultiplier
+    ?? null;
+  const initialMaterialMarkupMultiplier = initialMaterialSalesMarkup != null && Number(initialMaterialSalesMarkup) > 0
+    ? Number(initialMaterialSalesMarkup)
+    : null;
   const initialStandardMarkupMultiplier = initialSnapshot?.flowType === "service" && initialSnapshot?.serviceType === "access_equipment"
     ? standardAccessEquipmentMarkupMultiplier
-    : standardMarkupMultiplier;
+    : initialMaterialMarkupMultiplier ?? standardMarkupMultiplier;
   const initialSavedMarkupMultiplier = multiplierValue(initialSnapshot?.pricingSnapshot?.markupMultiplier, initialStandardMarkupMultiplier);
   const materialPool = useMemo(() => {
     const restoredMaterials = materialsFromSnapshot(initialSnapshot);
@@ -1605,9 +1613,17 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const [manualUnitPrice, setManualUnitPrice] = useState(editingLine?.unitPrice ?? snapshotString(initialSnapshot, "manualUnitPrice", "0.00"));
   const [lineNotes, setLineNotes] = useState(editingLine?.notes ?? snapshotString(initialSnapshot, "notes"));
 
+  const selectedMarkupMaterial = flowType === "small_format" || flowType === "plan_printing" || flowType === "poster_printing"
+    ? materialPool.find((material) => material.id === smallStockId)
+    : flowType === "signage"
+      ? materialPool.find((material) => material.id === mainMaterialChoiceId)
+      : undefined;
+  const selectedMaterialMarkupMultiplier = selectedMarkupMaterial?.salesMarkupMultiplier != null && Number(selectedMarkupMaterial.salesMarkupMultiplier) > 0
+    ? Number(selectedMarkupMaterial.salesMarkupMultiplier)
+    : null;
   const lineStandardMarkupMultiplier = flowType === "service" && serviceType === "access_equipment"
     ? standardAccessEquipmentMarkupMultiplier
-    : standardMarkupMultiplier;
+    : selectedMaterialMarkupMultiplier ?? standardMarkupMultiplier;
   const lineMarkupMultiplier = canOverrideMarkup
     ? multiplierValue(lineMarkupInput, lineStandardMarkupMultiplier)
     : initialSnapshot?.pricingSnapshot?.markupMultiplier != null
@@ -4015,7 +4031,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
                   />
                 </label>
                 <span style={{ color: Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? "#9a3412" : "#667085", fontSize: 11, fontWeight: 850 }}>
-                  {Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? "Manager override" : `Standard ×${lineStandardMarkupMultiplier.toFixed(2)}`}
+                  {Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? "Manager override" : selectedMaterialMarkupMultiplier != null ? `Material ×${lineStandardMarkupMultiplier.toFixed(2)}` : `Standard ×${lineStandardMarkupMultiplier.toFixed(2)}`}
                 </span>
                 {Math.abs(lineMarkupMultiplier - lineStandardMarkupMultiplier) > 0.000001 ? (
                   <button type="button" onClick={() => { setLineMarkupInput(lineStandardMarkupMultiplier.toFixed(2)); setMarkupTouched(false); setUnitPriceOverridden(false); }} style={{ border: 0, background: "transparent", color: "#155eef", fontSize: 11, fontWeight: 900, padding: 0, cursor: "pointer", textDecoration: "underline" }}>Use standard</button>

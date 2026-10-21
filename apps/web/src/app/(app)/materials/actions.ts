@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { createMaterial, listMaterialsForTenant, saveMaterialPriceManagerChanges, setMaterialActive, setMaterialQuoteImage, updateMaterial, type MaterialPriceManagerChange } from "@/server/materials";
+import { createMaterial, listMaterialsForTenant, resolvePhysicalMaterialId, saveMaterialPriceManagerChanges, setMaterialActive, setMaterialQuoteImage, updateMaterial, type MaterialPriceManagerChange } from "@/server/materials";
 import { listSuppliersForTenant } from "@/server/suppliers";
 import { bulkApplyMaterialSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
@@ -47,7 +47,7 @@ async function uploadQuoteImageIfPresent(tenantId: string, scope: string, formDa
 }
 
 function materialInput(tenantId:string,formData:FormData,name:string,image:UploadedQuoteImage){return{
-  tenantId,supplierId:readString(formData,'supplierId')||null,sourceProductId:null,name,
+  tenantId,supplierId:readString(formData,'supplierId')||null,sourceProductId:null,stockSourceMaterialId:readString(formData,'stockSourceMaterialId')||null,salesMarkupMultiplier:readOptionalNumeric(formData,'salesMarkupMultiplier'),name,
   customerFacingName:readString(formData,'customerFacingName')||null,sku:readString(formData,'sku')||null,
   materialType:readString(formData,'materialType')||'sheet_media',materialGroup:readString(formData,'materialGroup')||null,
   minimumBillableSheetFraction:readOptionalNumeric(formData,'minimumBillableSheetFraction'),rollBillingIncrementMetres:readOptionalNumeric(formData,'rollBillingIncrementMetres'),
@@ -69,9 +69,11 @@ export async function createMaterialAction(formData:FormData){
   }catch(error){console.error('Create material failed',error);saveError=getErrorMessage(error);}
   if(saveError||!created)redirect(`/materials?error=${encodeURIComponent(saveError||"Could not create material")}`);
   if(!created) throw new Error("Material was not created.");
-  const queued=await queueMyobMasterDataSync(active.tenantId,"material",created.id);
+  const requestedStockSource=readString(formData,'stockSourceMaterialId')||null;
+  const syncMaterialId=requestedStockSource?await resolvePhysicalMaterialId(active.tenantId,requestedStockSource):created.id;
+  const queued=await queueMyobMasterDataSync(active.tenantId,"material",syncMaterialId);
   revalidatePath('/materials');revalidatePath('/quotes');
-  redirect(`/materials?message=${encodeURIComponent(queued?"Material created · MYOB sync queued":"Material created")}`);
+  redirect(`/materials?message=${encodeURIComponent(queued?(requestedStockSource?"Sales variant created · physical stock MYOB sync queued":"Material created · MYOB sync queued"):(requestedStockSource?"Sales variant created":"Material created"))}`);
 }
 
 export async function updateMaterialAction(formData:FormData){
@@ -87,9 +89,10 @@ export async function updateMaterialAction(formData:FormData){
     await updateMaterial({id:materialId,...materialInput(active.tenantId,formData,name,image)});
   }catch(error){console.error('Update material failed',error);saveError=getErrorMessage(error);}
   if(saveError)redirect(`/materials?error=${encodeURIComponent(saveError)}`);
-  const queued=await queueMyobMasterDataSync(active.tenantId,"material",materialId);
+  const syncMaterialId=await resolvePhysicalMaterialId(active.tenantId,materialId);
+  const queued=await queueMyobMasterDataSync(active.tenantId,"material",syncMaterialId);
   revalidatePath('/materials');revalidatePath('/quotes');
-  redirect(`/materials?message=${encodeURIComponent(queued?"Material updated · MYOB sync queued":"Material updated")}`);
+  redirect(`/materials?message=${encodeURIComponent(queued?(syncMaterialId!==materialId?"Sales variant updated · physical stock MYOB sync queued":"Material updated · MYOB sync queued"):(syncMaterialId!==materialId?"Sales variant updated":"Material updated"))}`);
 }
 
 export async function saveMaterialPriceManagerQuoteImageAction(formData: FormData) {
@@ -136,7 +139,7 @@ export async function saveQuoteVisualCategoryImageAction(formData:FormData){
 
 
 export async function setMaterialActiveAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');const nextActive=readString(formData,'active')==='true';if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');try{await setMaterialActive(active.tenantId,materialId,nextActive);}catch(error){redirect(`/materials?error=${encodeURIComponent(getErrorMessage(error))}`);}redirect(nextActive?'/materials?message=Material%20restored':'/materials?message=Material%20deleted');}
-export async function syncMaterialToMyobAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');let result:{number?:string|null}|null=null;let errorMessage="";try{result=await runMyobMasterDataSyncNow(active.tenantId,"material",materialId);}catch(error){errorMessage=getErrorMessage(error);}redirect(`/materials?${errorMessage?`error=${encodeURIComponent(errorMessage)}`:`message=${encodeURIComponent(`Material synced to MYOB item ${result?.number??"linked"}`)}`}`);}
+export async function syncMaterialToMyobAction(formData:FormData){const active=await tenant();const materialId=readString(formData,'materialId');if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');let result:{number?:string|null}|null=null;let errorMessage="";try{const physicalId=await resolvePhysicalMaterialId(active.tenantId,materialId);result=await runMyobMasterDataSyncNow(active.tenantId,"material",physicalId);}catch(error){errorMessage=getErrorMessage(error);}redirect(`/materials?${errorMessage?`error=${encodeURIComponent(errorMessage)}`:`message=${encodeURIComponent(`Physical stock synced to MYOB item ${result?.number??"linked"}`)}`}`);}
 
 function canManageMaterialPrices(role: string): boolean {
   return role === "owner" || role === "manager";

@@ -50,6 +50,7 @@ export type SnapshotMaterial = {
   purchaseUom?: string | null;
   stockQuantity?: string | null;
   purchaseCost?: string | null;
+  salesMarkupMultiplier?: string | null;
   wastagePercent?: string | null;
   widthMm?: string | null;
   lengthMm?: string | null;

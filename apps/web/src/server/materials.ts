@@ -10,6 +10,9 @@ export type MaterialRecord = {
   sourceProductId: string | null;
   supplierName: string | null;
   sourceProductName: string | null;
+  stockSourceMaterialId: string | null;
+  stockSourceName: string | null;
+  salesMarkupMultiplier: string | null;
   name: string;
   customerFacingName: string | null;
   sku: string | null;
@@ -52,6 +55,8 @@ export type CreateMaterialInput = {
   tenantId: string;
   supplierId: string | null;
   sourceProductId: string | null;
+  stockSourceMaterialId: string | null;
+  salesMarkupMultiplier: string | null;
   name: string;
   customerFacingName: string | null;
   sku: string | null;
@@ -129,7 +134,8 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
       "material_group", "minimum_billable_sheet_fraction", "roll_billing_increment_metres",
       "reverse_printable", "used_for_backing", "customer_facing_name", "myob_uid",
       "myob_display_id", "myob_sync_state", "myob_payload_json", "quote_image_url",
-      "quote_image_storage_path", "quote_visual_category"
+      "quote_image_storage_path", "quote_visual_category", "stock_source_material_id",
+      "sales_markup_multiplier"
     ])) {
       materialPricingSchemaReady = true;
       return;
@@ -149,7 +155,9 @@ export async function ensureMaterialPricingColumns(): Promise<void> {
       ADD COLUMN IF NOT EXISTS myob_payload_json jsonb NOT NULL DEFAULT '{}'::jsonb,
       ADD COLUMN IF NOT EXISTS quote_image_url text,
       ADD COLUMN IF NOT EXISTS quote_image_storage_path text,
-      ADD COLUMN IF NOT EXISTS quote_visual_category varchar(40)
+      ADD COLUMN IF NOT EXISTS quote_visual_category varchar(40),
+      ADD COLUMN IF NOT EXISTS stock_source_material_id uuid REFERENCES catalog.materials(id) ON DELETE RESTRICT,
+      ADD COLUMN IF NOT EXISTS sales_markup_multiplier numeric(8,4)
   `);
     materialPricingSchemaReady = true;
   })().catch((error) => {
@@ -228,32 +236,35 @@ export async function listQuoteMaterialsForTenant(tenantId: string): Promise<Mat
     SELECT
       m.id,
       m.tenant_id AS "tenantId",
-      m.supplier_id AS "supplierId",
-      m.source_product_id AS "sourceProductId",
+      stock.supplier_id AS "supplierId",
+      stock.source_product_id AS "sourceProductId",
       s.display_name AS "supplierName",
       NULL::text AS "sourceProductName",
+      m.stock_source_material_id AS "stockSourceMaterialId",
+      CASE WHEN m.stock_source_material_id IS NULL THEN NULL ELSE stock.name END AS "stockSourceName",
+      m.sales_markup_multiplier::text AS "salesMarkupMultiplier",
       m.name,
       m.customer_facing_name AS "customerFacingName",
-      m.sku,
+      stock.sku,
       CASE
-        WHEN m.material_type IS NOT NULL THEN m.material_type::text
-        ELSE m.type::text
+        WHEN stock.material_type IS NOT NULL THEN stock.material_type::text
+        ELSE stock.type::text
       END AS "materialType",
-      m.material_group AS "materialGroup",
-      m.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
-      m.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
-      COALESCE(m.reverse_printable, false) AS "reversePrintable",
-      COALESCE(m.used_for_backing, false) AS "usedForBacking",
+      COALESCE(m.material_group, stock.material_group) AS "materialGroup",
+      stock.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      stock.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
+      COALESCE(m.reverse_printable, stock.reverse_printable, false) AS "reversePrintable",
+      COALESCE(m.used_for_backing, stock.used_for_backing, false) AS "usedForBacking",
       COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
-      m.stock_uom AS "stockUom",
-      m.purchase_uom AS "purchaseUom",
-      m.stock_quantity::text AS "stockQuantity",
-      m.purchase_cost::text AS "purchaseCost",
-      COALESCE(m.cost_json ->> 'wastagePercent', '0') AS "wastagePercent",
-      m.width_mm::text AS "widthMm",
-      m.length_mm::text AS "lengthMm",
-      m.roll_width_mm::text AS "rollWidthMm",
-      m.gsm::text AS gsm,
+      stock.stock_uom AS "stockUom",
+      stock.purchase_uom AS "purchaseUom",
+      stock.stock_quantity::text AS "stockQuantity",
+      stock.purchase_cost::text AS "purchaseCost",
+      COALESCE(m.cost_json ->> 'wastagePercent', stock.cost_json ->> 'wastagePercent', '0') AS "wastagePercent",
+      stock.width_mm::text AS "widthMm",
+      stock.length_mm::text AS "lengthMm",
+      stock.roll_width_mm::text AS "rollWidthMm",
+      stock.gsm::text AS gsm,
       m.notes,
       COALESCE(to_jsonb(m) ->> 'quote_image_url', m.cost_json ->> 'quoteImageUrl') AS "quoteImageUrl",
       COALESCE(to_jsonb(m) ->> 'quote_image_storage_path', m.cost_json ->> 'quoteImageStoragePath') AS "quoteImageStoragePath",
@@ -267,9 +278,13 @@ export async function listQuoteMaterialsForTenant(tenantId: string): Promise<Mat
       m.created_at AS "createdAt",
       m.updated_at AS "updatedAt"
     FROM catalog.materials m
-    LEFT JOIN app.suppliers s ON s.id = m.supplier_id
+    JOIN catalog.materials stock
+      ON stock.id = COALESCE(m.stock_source_material_id, m.id)
+     AND stock.tenant_id = m.tenant_id
+    LEFT JOIN app.suppliers s ON s.id = stock.supplier_id
     WHERE m.tenant_id = $1::uuid
       AND m.active = true
+      AND stock.active = true
     ORDER BY m.name ASC, m.created_at DESC
   `, [tenantId]);
 
@@ -288,47 +303,53 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
     SELECT
       m.id,
       m.tenant_id AS "tenantId",
-      m.supplier_id AS "supplierId",
-      m.source_product_id AS "sourceProductId",
+      stock.supplier_id AS "supplierId",
+      stock.source_product_id AS "sourceProductId",
       s.display_name AS "supplierName",
       p.name AS "sourceProductName",
+      m.stock_source_material_id AS "stockSourceMaterialId",
+      CASE WHEN m.stock_source_material_id IS NULL THEN NULL ELSE stock.name END AS "stockSourceName",
+      m.sales_markup_multiplier::text AS "salesMarkupMultiplier",
       m.name,
       m.customer_facing_name AS "customerFacingName",
-      m.sku,
+      stock.sku,
       CASE
-        WHEN m.material_type IS NOT NULL THEN m.material_type::text
-        ELSE m.type::text
+        WHEN stock.material_type IS NOT NULL THEN stock.material_type::text
+        ELSE stock.type::text
       END AS "materialType",
-      m.material_group AS "materialGroup",
-      m.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
-      m.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
-      COALESCE(m.reverse_printable, false) AS "reversePrintable",
-      COALESCE(m.used_for_backing, false) AS "usedForBacking",
+      COALESCE(m.material_group, stock.material_group) AS "materialGroup",
+      stock.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      stock.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
+      COALESCE(m.reverse_printable, stock.reverse_printable, false) AS "reversePrintable",
+      COALESCE(m.used_for_backing, stock.used_for_backing, false) AS "usedForBacking",
       COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
-      m.stock_uom AS "stockUom",
-      m.purchase_uom AS "purchaseUom",
-      m.stock_quantity::text AS "stockQuantity",
-      m.purchase_cost::text AS "purchaseCost",
-      COALESCE(m.cost_json ->> 'wastagePercent', '0') AS "wastagePercent",
-      m.width_mm::text AS "widthMm",
-      m.length_mm::text AS "lengthMm",
-      m.roll_width_mm::text AS "rollWidthMm",
-      m.gsm::text AS gsm,
+      stock.stock_uom AS "stockUom",
+      stock.purchase_uom AS "purchaseUom",
+      stock.stock_quantity::text AS "stockQuantity",
+      stock.purchase_cost::text AS "purchaseCost",
+      COALESCE(m.cost_json ->> 'wastagePercent', stock.cost_json ->> 'wastagePercent', '0') AS "wastagePercent",
+      stock.width_mm::text AS "widthMm",
+      stock.length_mm::text AS "lengthMm",
+      stock.roll_width_mm::text AS "rollWidthMm",
+      stock.gsm::text AS gsm,
       m.notes,
       COALESCE(to_jsonb(m) ->> 'quote_image_url', m.cost_json ->> 'quoteImageUrl') AS "quoteImageUrl",
       COALESCE(to_jsonb(m) ->> 'quote_image_storage_path', m.cost_json ->> 'quoteImageStoragePath') AS "quoteImageStoragePath",
       COALESCE(to_jsonb(m) ->> 'quote_visual_category', m.cost_json ->> 'quoteVisualCategory') AS "quoteVisualCategory",
       m.cost_json AS "costJson",
-      m.myob_uid AS "myobUid",
-      m.myob_display_id AS "myobDisplayId",
-      m.myob_sync_state AS "myobSyncState",
-      m.myob_payload_json AS "myobPayloadJson",
+      stock.myob_uid AS "myobUid",
+      stock.myob_display_id AS "myobDisplayId",
+      stock.myob_sync_state AS "myobSyncState",
+      stock.myob_payload_json AS "myobPayloadJson",
       m.active,
       m.created_at AS "createdAt",
       m.updated_at AS "updatedAt"
     FROM catalog.materials m
-    LEFT JOIN app.suppliers s ON s.id = m.supplier_id
-    LEFT JOIN catalog.products p ON p.id = m.source_product_id
+    JOIN catalog.materials stock
+      ON stock.id = COALESCE(m.stock_source_material_id, m.id)
+     AND stock.tenant_id = m.tenant_id
+    LEFT JOIN app.suppliers s ON s.id = stock.supplier_id
+    LEFT JOIN catalog.products p ON p.id = stock.source_product_id
     WHERE m.tenant_id = $1::uuid
     ORDER BY m.name ASC, m.created_at DESC
   `, [tenantId]);
@@ -356,6 +377,7 @@ export async function getDashboardMaterialSummary(tenantId: string): Promise<{
       FROM catalog.materials
       WHERE tenant_id = $1::uuid
         AND active = true
+        AND stock_source_material_id IS NULL
         AND stock_quantity > 0
         AND stock_quantity <= 2
       ORDER BY stock_quantity ASC, updated_at DESC
@@ -369,171 +391,243 @@ export async function getDashboardMaterialSummary(tenantId: string): Promise<{
   };
 }
 
+type PhysicalStockMaterial = {
+  id: string;
+  supplierId: string | null;
+  sourceProductId: string | null;
+  sku: string | null;
+  materialType: string;
+  materialGroup: string | null;
+  minimumBillableSheetFraction: string | null;
+  rollBillingIncrementMetres: string | null;
+  reversePrintable: boolean;
+  usedForBacking: boolean;
+  stockUom: string;
+  purchaseUom: string;
+  stockQuantity: string;
+  purchaseCost: string;
+  widthMm: string | null;
+  lengthMm: string | null;
+  rollWidthMm: string | null;
+  gsm: string | null;
+};
+
+async function getPhysicalStockMaterial(tenantId: string, materialId: string): Promise<PhysicalStockMaterial | null> {
+  const result = await pool.query<PhysicalStockMaterial>(`
+    SELECT
+      root.id,
+      root.supplier_id AS "supplierId",
+      root.source_product_id AS "sourceProductId",
+      root.sku,
+      COALESCE(root.material_type::text, root.type::text) AS "materialType",
+      root.material_group AS "materialGroup",
+      root.minimum_billable_sheet_fraction::text AS "minimumBillableSheetFraction",
+      root.roll_billing_increment_metres::text AS "rollBillingIncrementMetres",
+      COALESCE(root.reverse_printable,false) AS "reversePrintable",
+      COALESCE(root.used_for_backing,false) AS "usedForBacking",
+      root.stock_uom AS "stockUom",
+      root.purchase_uom AS "purchaseUom",
+      root.stock_quantity::text AS "stockQuantity",
+      root.purchase_cost::text AS "purchaseCost",
+      root.width_mm::text AS "widthMm",
+      root.length_mm::text AS "lengthMm",
+      root.roll_width_mm::text AS "rollWidthMm",
+      root.gsm::text AS gsm
+    FROM catalog.materials selected
+    JOIN catalog.materials root
+      ON root.id = COALESCE(selected.stock_source_material_id, selected.id)
+     AND root.tenant_id = selected.tenant_id
+    WHERE selected.tenant_id = $1::uuid
+      AND selected.id = $2::uuid
+      AND root.active = true
+    LIMIT 1
+  `, [tenantId, materialId]);
+  return result.rows[0] ?? null;
+}
+
+export async function resolvePhysicalMaterialId(tenantId: string, materialId: string): Promise<string> {
+  const stock = await getPhysicalStockMaterial(tenantId, materialId);
+  if (!stock) throw new Error("The selected physical stock material could not be found.");
+  return stock.id;
+}
+
+async function normalizeSharedStockInput(input: CreateMaterialInput | UpdateMaterialInput): Promise<CreateMaterialInput | UpdateMaterialInput> {
+  if (!input.stockSourceMaterialId) return input;
+  if ("id" in input && input.id === input.stockSourceMaterialId) throw new Error("A material cannot share stock with itself.");
+  if ("id" in input) {
+    const dependants = await pool.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count FROM catalog.materials
+      WHERE tenant_id=$1::uuid AND stock_source_material_id=$2::uuid
+    `,[input.tenantId,input.id]);
+    if (Number(dependants.rows[0]?.count ?? 0) > 0) {
+      throw new Error("This material is already the physical stock source for sales variants. Move those variants before making it a sales variant itself.");
+    }
+  }
+  const stock = await getPhysicalStockMaterial(input.tenantId, input.stockSourceMaterialId);
+  if (!stock) throw new Error("The selected shared stock source is no longer available.");
+  if ("id" in input && input.id === stock.id) throw new Error("A material cannot share stock with itself.");
+  return {
+    ...input,
+    stockSourceMaterialId: stock.id,
+    supplierId: stock.supplierId,
+    sourceProductId: stock.sourceProductId,
+    sku: stock.sku,
+    materialType: stock.materialType,
+    materialGroup: stock.materialGroup ?? input.materialGroup,
+    minimumBillableSheetFraction: stock.minimumBillableSheetFraction,
+    rollBillingIncrementMetres: stock.rollBillingIncrementMetres,
+    reversePrintable: stock.reversePrintable,
+    usedForBacking: stock.usedForBacking,
+    stockUom: stock.stockUom,
+    purchaseUom: stock.purchaseUom,
+    stockQuantity: stock.stockQuantity,
+    purchaseCost: stock.purchaseCost,
+    widthMm: stock.widthMm,
+    lengthMm: stock.lengthMm,
+    rollWidthMm: stock.rollWidthMm,
+    gsm: stock.gsm
+  };
+}
+
 export async function createMaterial(input: CreateMaterialInput): Promise<{ id: string }> {
   await ensureMaterialPricingColumns();
+  const saved = await normalizeSharedStockInput(input) as CreateMaterialInput;
 
   const result = await pool.query<{ id: string }>(`
     INSERT INTO catalog.materials (
-      tenant_id,
-      supplier_id,
-      source_product_id,
-      name,
-      customer_facing_name,
-      sku,
-      type,
-      material_type,
-      material_group,
-      minimum_billable_sheet_fraction,
-      roll_billing_increment_metres,
-      reverse_printable,
-      used_for_backing,
-      stock_uom,
-      purchase_uom,
-      stock_quantity,
-      purchase_cost,
-      cost_json,
-      width_mm,
-      length_mm,
-      roll_width_mm,
-      gsm,
-      notes,
-      quote_image_url,
-      quote_image_storage_path,
-      quote_visual_category,
-      active,
-      created_at,
-      updated_at
+      tenant_id, supplier_id, source_product_id, stock_source_material_id, sales_markup_multiplier,
+      name, customer_facing_name, sku, type, material_type, material_group,
+      minimum_billable_sheet_fraction, roll_billing_increment_metres, reverse_printable, used_for_backing,
+      stock_uom, purchase_uom, stock_quantity, purchase_cost, cost_json,
+      width_mm, length_mm, roll_width_mm, gsm, notes,
+      quote_image_url, quote_image_storage_path, quote_visual_category,
+      active, created_at, updated_at
     ) VALUES (
-      $1::uuid,
-      $2::uuid,
-      $3::uuid,
-      $4::varchar,
-      $5::varchar,
-      $6::varchar,
-      $7::material_type,
-      $8::varchar,
-      $9::varchar,
-      $10::numeric,
-      $11::numeric,
-      $12::boolean,
-      $13::boolean,
-      $14::varchar,
-      $15::varchar,
-      $16::numeric,
-      $17::numeric,
-      jsonb_build_object('purchaseCost',$17::numeric,'wastagePercent',$18::numeric,'showAsInstallationOption',$24::boolean),
-      $19::numeric,
-      $20::numeric,
-      $21::numeric,
-      $22::numeric,
-      $23::varchar,
-      $25::text,
-      $26::text,
-      $27::varchar,
-      true,
-      now(),
-      now()
+      $1::uuid,$2::uuid,$3::uuid,$4::uuid,$5::numeric,
+      $6::varchar,$7::varchar,$8::varchar,$9::material_type,$10::varchar,$11::varchar,
+      $12::numeric,$13::numeric,$14::boolean,$15::boolean,
+      $16::varchar,$17::varchar,$18::numeric,$19::numeric,
+      jsonb_build_object('purchaseCost',$19::numeric,'wastagePercent',$20::numeric,'showAsInstallationOption',$26::boolean),
+      $21::numeric,$22::numeric,$23::numeric,$24::numeric,$25::varchar,
+      $27::text,$28::text,$29::varchar,
+      true,now(),now()
     )
     RETURNING id
   `, [
-    input.tenantId,
-    input.supplierId,
-    input.sourceProductId,
-    input.name,
-    input.customerFacingName,
-    input.sku,
-    toLegacyMaterialType(input.materialType),
-    normalizeMaterialType(input.materialType),
-    input.materialGroup,
-    input.minimumBillableSheetFraction,
-    input.rollBillingIncrementMetres,
-    input.reversePrintable,
-    input.usedForBacking,
-    input.stockUom,
-    input.purchaseUom,
-    input.stockQuantity,
-    input.purchaseCost,
-    input.wastagePercent,
-    input.widthMm,
-    input.lengthMm,
-    input.rollWidthMm,
-    input.gsm,
-    input.notes,
-    input.showAsInstallationOption,
-    input.quoteImageUrl,
-    input.quoteImageStoragePath,
-    input.quoteVisualCategory
+    saved.tenantId,
+    saved.supplierId,
+    saved.sourceProductId,
+    saved.stockSourceMaterialId,
+    saved.salesMarkupMultiplier,
+    saved.name,
+    saved.customerFacingName,
+    saved.sku,
+    toLegacyMaterialType(saved.materialType),
+    normalizeMaterialType(saved.materialType),
+    saved.materialGroup,
+    saved.minimumBillableSheetFraction,
+    saved.rollBillingIncrementMetres,
+    saved.reversePrintable,
+    saved.usedForBacking,
+    saved.stockUom,
+    saved.purchaseUom,
+    saved.stockQuantity,
+    saved.purchaseCost,
+    saved.wastagePercent,
+    saved.widthMm,
+    saved.lengthMm,
+    saved.rollWidthMm,
+    saved.gsm,
+    saved.notes,
+    saved.showAsInstallationOption,
+    saved.quoteImageUrl,
+    saved.quoteImageStoragePath,
+    saved.quoteVisualCategory
   ]);
   return result.rows[0];
 }
 
 export async function updateMaterial(input: UpdateMaterialInput): Promise<void> {
   await ensureMaterialPricingColumns();
+  const saved = await normalizeSharedStockInput(input) as UpdateMaterialInput;
 
   await pool.query(`
     UPDATE catalog.materials
     SET
-      supplier_id = $3::uuid,
-      source_product_id = $4::uuid,
-      name = $5::varchar,
-      customer_facing_name = $6::varchar,
-      sku = $7::varchar,
-      type = $8::material_type,
-      material_type = $9::varchar,
-      material_group = $10::varchar,
-      minimum_billable_sheet_fraction = $11::numeric,
-      roll_billing_increment_metres = $12::numeric,
-      reverse_printable = $13::boolean,
-      used_for_backing = $14::boolean,
-      stock_uom = $15::varchar,
-      purchase_uom = $16::varchar,
-      stock_quantity = $17::numeric,
-      purchase_cost = $18::numeric,
-      cost_json = COALESCE(cost_json, '{}'::jsonb) || jsonb_build_object('purchaseCost', $18::numeric, 'wastagePercent', $19::numeric, 'showAsInstallationOption', $25::boolean),
-      width_mm = $20::numeric,
-      length_mm = $21::numeric,
-      roll_width_mm = $22::numeric,
-      gsm = $23::numeric,
-      notes = $24::varchar,
-      quote_image_url = $26::text,
-      quote_image_storage_path = $27::text,
-      quote_visual_category = $28::varchar,
-      updated_at = now()
-    WHERE id = $1::uuid
-      AND tenant_id = $2::uuid
+      supplier_id=$3::uuid,
+      source_product_id=$4::uuid,
+      stock_source_material_id=$5::uuid,
+      sales_markup_multiplier=$6::numeric,
+      name=$7::varchar,
+      customer_facing_name=$8::varchar,
+      sku=$9::varchar,
+      type=$10::material_type,
+      material_type=$11::varchar,
+      material_group=$12::varchar,
+      minimum_billable_sheet_fraction=$13::numeric,
+      roll_billing_increment_metres=$14::numeric,
+      reverse_printable=$15::boolean,
+      used_for_backing=$16::boolean,
+      stock_uom=$17::varchar,
+      purchase_uom=$18::varchar,
+      stock_quantity=$19::numeric,
+      purchase_cost=$20::numeric,
+      cost_json=COALESCE(cost_json,'{}'::jsonb) || jsonb_build_object('purchaseCost',$20::numeric,'wastagePercent',$21::numeric,'showAsInstallationOption',$27::boolean),
+      width_mm=$22::numeric,
+      length_mm=$23::numeric,
+      roll_width_mm=$24::numeric,
+      gsm=$25::numeric,
+      notes=$26::varchar,
+      quote_image_url=$28::text,
+      quote_image_storage_path=$29::text,
+      quote_visual_category=$30::varchar,
+      updated_at=now()
+    WHERE id=$1::uuid AND tenant_id=$2::uuid
   `, [
-    input.id,
-    input.tenantId,
-    input.supplierId,
-    input.sourceProductId,
-    input.name,
-    input.customerFacingName,
-    input.sku,
-    toLegacyMaterialType(input.materialType),
-    normalizeMaterialType(input.materialType),
-    input.materialGroup,
-    input.minimumBillableSheetFraction,
-    input.rollBillingIncrementMetres,
-    input.reversePrintable,
-    input.usedForBacking,
-    input.stockUom,
-    input.purchaseUom,
-    input.stockQuantity,
-    input.purchaseCost,
-    input.wastagePercent,
-    input.widthMm,
-    input.lengthMm,
-    input.rollWidthMm,
-    input.gsm,
-    input.notes,
-    input.showAsInstallationOption,
-    input.quoteImageUrl,
-    input.quoteImageStoragePath,
-    input.quoteVisualCategory
+    saved.id,
+    saved.tenantId,
+    saved.supplierId,
+    saved.sourceProductId,
+    saved.stockSourceMaterialId,
+    saved.salesMarkupMultiplier,
+    saved.name,
+    saved.customerFacingName,
+    saved.sku,
+    toLegacyMaterialType(saved.materialType),
+    normalizeMaterialType(saved.materialType),
+    saved.materialGroup,
+    saved.minimumBillableSheetFraction,
+    saved.rollBillingIncrementMetres,
+    saved.reversePrintable,
+    saved.usedForBacking,
+    saved.stockUom,
+    saved.purchaseUom,
+    saved.stockQuantity,
+    saved.purchaseCost,
+    saved.wastagePercent,
+    saved.widthMm,
+    saved.lengthMm,
+    saved.rollWidthMm,
+    saved.gsm,
+    saved.notes,
+    saved.showAsInstallationOption,
+    saved.quoteImageUrl,
+    saved.quoteImageStoragePath,
+    saved.quoteVisualCategory
   ]);
 }
 
 export async function setMaterialActive(tenantId: string, materialId: string, active: boolean): Promise<void> {
+  if (!active) {
+    const variants = await pool.query<{ count: string }>(`
+      SELECT COUNT(*)::text AS count
+      FROM catalog.materials
+      WHERE tenant_id=$1::uuid AND stock_source_material_id=$2::uuid AND active=true
+    `,[tenantId,materialId]);
+    if (Number(variants.rows[0]?.count ?? 0) > 0) {
+      throw new Error("This physical stock item still has active sales variants. Move or deactivate those variants first.");
+    }
+  }
   await pool.query(`
     UPDATE catalog.materials
     SET active = $3::boolean,

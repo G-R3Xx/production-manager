@@ -139,7 +139,9 @@ function searchTextFor(material: MaterialSummary): string {
     material.stockUom,
     material.purchaseUom,
     material.gsm,
-    material.notes
+    material.notes,
+    material.stockSourceName,
+    material.salesMarkupMultiplier
   ]
     .filter(Boolean)
     .join(" ")
@@ -215,7 +217,7 @@ const pillStyle: CSSProperties = { display: "inline-flex", alignItems: "center",
 const mutedTextStyle: CSSProperties = { color: "#667085", fontSize: 13, lineHeight: 1.45 };
 const groupCardStyle: CSSProperties = { display: "grid", gap: 8, border: "1px solid #dbeafe", borderRadius: 16, padding: 14, textDecoration: "none", color: "inherit", background: "#f8fbff" };
 
-function MaterialCard({ material, suppliers }: { material: MaterialSummary; suppliers: Awaited<ReturnType<typeof listSuppliersForTenant>> }) {
+function MaterialCard({ material, suppliers, stockSources }: { material: MaterialSummary; suppliers: Awaited<ReturnType<typeof listSuppliersForTenant>>; stockSources: MaterialSummary[] }) {
   return (
     <article style={{ border: "1px solid #e5e7eb", borderRadius: 16, padding: 16, background: material.active ? "#fafafa" : "#f9fafb", display: "grid", gap: 12, opacity: material.active ? 1 : 0.78 }}>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
@@ -224,7 +226,8 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
           {material.customerFacingName ? <div style={{ marginTop: 3, color: "#0f766e", fontSize: 13, fontWeight: 750 }}>Client sees: {material.customerFacingName}</div> : null}
           {material.reversePrintable ? <div style={{ marginTop: 3, color: "#155e75", fontSize: 12, fontWeight: 800 }}>Reverse printable</div> : null}
           {material.usedForBacking ? <div style={{ marginTop: 3, color: "#7c3aed", fontSize: 12, fontWeight: 800 }}>Used for backing</div> : null}
-          <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{formatMaterialType(material.materialType)} · Stock {material.stockQuantity ?? "0"} {material.stockUom ?? "units"} · Cost ${material.purchaseCost ?? "0"}/{material.purchaseUom ?? "unit"}</div>
+          {material.stockSourceMaterialId ? <div style={{ marginTop: 3, color: "#3730a3", fontSize: 12, fontWeight: 850 }}>Sales variant · shares stock with {material.stockSourceName ?? "physical stock item"}</div> : null}
+          <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{formatMaterialType(material.materialType)} · Stock {material.stockQuantity ?? "0"} {material.stockUom ?? "units"} · Cost ${material.purchaseCost ?? "0"}/{material.purchaseUom ?? "unit"}{material.salesMarkupMultiplier ? ` · Sales markup ×${material.salesMarkupMultiplier}` : ""}</div>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
           <span style={pillStyle}>{groupLabel(materialGroupFor(material))}</span>
@@ -244,7 +247,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
       {String(material.myobSyncState ?? material.myobPayloadJson?.myobSyncStatus ?? "") === "error" && material.myobPayloadJson?.myobSyncError ? <div style={{ ...mutedTextStyle, color: "#b42318" }}>{String(material.myobPayloadJson.myobSyncError)}</div> : null}
       {material.active ? <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <form action={syncMaterialToMyobAction}><input type="hidden" name="materialId" value={material.id} /><button type="submit" style={{ ...secondaryButtonStyle, color: "#0f766e", borderColor: "#0f766e" }}>Sync to MYOB</button></form>
-        {material.supplierId ? <form action={startPurchaseOrderAction}><input type="hidden" name="supplierId" value={material.supplierId} /><input type="hidden" name="materialId" value={material.id} /><button type="submit" style={secondaryButtonStyle}>New PO for this material</button></form> : <span style={{ ...mutedTextStyle, alignSelf: "center" }}>Set a supplier to start a PO from this material.</span>}
+        {material.supplierId ? <form action={startPurchaseOrderAction}><input type="hidden" name="supplierId" value={material.supplierId} /><input type="hidden" name="materialId" value={material.stockSourceMaterialId ?? material.id} /><button type="submit" style={secondaryButtonStyle}>{material.stockSourceMaterialId ? "New PO for shared stock" : "New PO for this material"}</button></form> : <span style={{ ...mutedTextStyle, alignSelf: "center" }}>Set a supplier to start a PO from this material.</span>}
       </div> : null}
       <div style={mutedTextStyle}>Dimensions: {material.widthMm ?? "—"}w × {material.lengthMm ?? "—"}l mm · Roll width {material.rollWidthMm ?? "—"} mm · GSM/Thickness {material.gsm ?? "—"}</div>
       {(material.quoteVisualCategory || material.quoteImageUrl) ? <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>{material.quoteImageUrl ? <img src={material.quoteImageUrl} alt="" style={{ width: 88, height: 62, objectFit: "contain", borderRadius: 9, border: "1px solid #e2e8f0", background: "#f8fafc" }} /> : null}<span style={mutedTextStyle}>Quote wizard: {material.quoteVisualCategory ? formatMaterialType(material.quoteVisualCategory) : "automatic category"}{material.quoteImageUrl ? " · custom image" : " · category fallback image"}</span></div> : null}
@@ -256,7 +259,7 @@ function MaterialCard({ material, suppliers }: { material: MaterialSummary; supp
 
       <details style={{ border: "1px solid #e5e7eb", borderRadius: 14, background: "#fff", padding: 12 }}>
         <summary style={{ cursor: "pointer", fontWeight: 800 }}>Edit material</summary>
-        <EditMaterialForm suppliers={suppliers} material={material} />
+        <EditMaterialForm suppliers={suppliers} stockSources={stockSources} material={material} />
       </details>
     </article>
   );
@@ -284,6 +287,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
 
   const hasPendingMyobSync = materials.some((material) => ["pending", "syncing"].includes(String(material.myobSyncState ?? material.myobPayloadJson?.myobSyncStatus ?? "")));
   const activeMaterials = materials.filter((material) => material.active);
+  const stockSources = materials.filter((material) => material.active && !material.stockSourceMaterialId);
   const rollMaterials = materials.filter((material) => isRollType(material.materialType));
   const sheetMaterials = materials.filter((material) => isSheetType(material.materialType));
   const groupCounts: Record<MaterialGroup, number> = {
@@ -331,7 +335,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
         <>
           <MaterialPriceManager
             tenantId={activeTenant.tenantId}
-            materials={materials.map((material) => ({
+            materials={materials.filter((material) => !material.stockSourceMaterialId).map((material) => ({
               id: material.id,
               name: material.name,
               customerFacingName: material.customerFacingName,
@@ -369,7 +373,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
       <section style={{ display: "grid", gridTemplateColumns: "minmax(320px, 0.95fr) minmax(0, 1.25fr)", gap: 16, alignItems: "start" }}>
         <details open={!canManagePrices} style={{ ...cardStyle, display: "grid", gap: 16 }}>
           <summary style={{ cursor: "pointer", fontSize: 22, fontWeight: 800 }}>Create material</summary>
-          <CreateMaterialForm suppliers={suppliers} />
+          <CreateMaterialForm suppliers={suppliers} stockSources={stockSources} />
         </details>
 
         <section style={{ ...cardStyle, display: "grid", gap: 14 }}>
@@ -426,7 +430,7 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
                 <Link prefetch={false} href="/materials" style={{ color: "#2563eb", fontWeight: 800 }}>Clear search</Link>
               </div>
               {filteredMaterials.map((material) => (
-                <MaterialCard key={material.id} material={material} suppliers={suppliers} />
+                <MaterialCard key={material.id} material={material} suppliers={suppliers} stockSources={stockSources} />
               ))}
             </div>
           )}

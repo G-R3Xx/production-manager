@@ -101,6 +101,7 @@ export type QuoteMaterial = {
   purchaseUom?: string | null;
   stockQuantity?: string | null;
   purchaseCost?: string | null;
+  salesMarkupMultiplier?: string | null;
   wastagePercent?: string | null;
   widthMm?: string | null;
   lengthMm?: string | null;
@@ -1452,7 +1453,12 @@ export function calculateQuoteProductPricing(
   costingResources?: QuoteCostingResources
 ): QuoteProductPricing {
   const profile = normalizedSmallFormatProfile(product);
-  const markupMultiplier = profile ? 1 + profile.overheadPercent / 100 : multiplierValue(pricingSettings?.markupMultiplier, 1.5);
+  const firstMaterialId = product?.components?.flatMap((component) => [component.materialId, ...(component.stockUsage?.autoMaterialIds ?? [])]).find(Boolean) ?? null;
+  const primaryMaterial = firstMaterialId ? materialFor(materials, firstMaterialId) : undefined;
+  const materialMarkupMultiplier = primaryMaterial?.salesMarkupMultiplier != null && Number(primaryMaterial.salesMarkupMultiplier) > 0
+    ? Number(primaryMaterial.salesMarkupMultiplier)
+    : null;
+  const markupMultiplier = profile ? 1 + profile.overheadPercent / 100 : materialMarkupMultiplier ?? multiplierValue(pricingSettings?.markupMultiplier, 1.5);
   const profitMultiplier = profile ? 1 + profile.profitPercent / 100 : multiplierValue(pricingSettings?.profitMultiplier, 1.2);
   const sellMultiplier = markupMultiplier * profitMultiplier;
   const priceLevelFactor = Math.max(0, numberValue(pricingSettings?.priceLevelFactor, 1));

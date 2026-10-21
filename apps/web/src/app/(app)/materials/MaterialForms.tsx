@@ -13,6 +13,10 @@ type SupplierOption = {
 type MaterialFormRecord = {
   id: string;
   supplierId: string | null;
+  supplierName?: string | null;
+  stockSourceMaterialId: string | null;
+  stockSourceName: string | null;
+  salesMarkupMultiplier: string | null;
   name: string;
   customerFacingName: string | null;
   sku: string | null;
@@ -37,6 +41,11 @@ type MaterialFormRecord = {
   quoteImageStoragePath: string | null;
   quoteVisualCategory: string | null;
 };
+
+
+type StockSourceOption = Pick<MaterialFormRecord,
+  "id" | "name" | "sku" | "supplierName" | "stockQuantity" | "stockUom" | "purchaseCost" | "purchaseUom" | "materialType" | "stockSourceMaterialId"
+>;
 
 type MaterialGroupValue = "signage" | "plan-printing" | "poster-printing" | "small-format" | "shared";
 
@@ -294,26 +303,55 @@ function UnitSelect({ name, defaultValue, options }: { name: string; defaultValu
   );
 }
 
-function CommonTopFields({ suppliers, material }: { suppliers: SupplierOption[]; material?: MaterialFormRecord }) {
+function CommonTopFields({ suppliers, material, sharedStock }: { suppliers: SupplierOption[]; material?: MaterialFormRecord; sharedStock: boolean }) {
   return (
     <>
       <div style={gridStyle}>
-        <Field label="Internal stock name" helper="Your supplier / production name. Staff can still use this to identify the exact stock.">
-          <input name="name" required defaultValue={material?.name ?? ""} placeholder="eg PERSPEX CC 4.5mm Clear 2440 × 1220" style={inputStyle} />
+        <Field label="Internal / sell name" helper="The name staff select when quoting. Sales variants can have different names while sharing one physical stock item.">
+          <input name="name" required defaultValue={material?.name ?? ""} placeholder="eg MasterTac 2 Year" style={inputStyle} />
         </Field>
-        <Field label="Customer-facing name" helper="Shown to clients on quotes, website product options and MYOB order/invoice descriptions. Give interchangeable roll widths or parent-sheet sizes the same customer-facing name (eg Frosted, or 3mm Clear Acrylic). Products can then auto-select the best fitting / lowest-cost stock size. Leave blank to use the internal stock name.">
-          <input name="customerFacingName" defaultValue={material?.customerFacingName ?? ""} placeholder="eg Clear Acrylic 4.5mm" style={inputStyle} />
+        <Field label="Customer-facing name" helper="Shown to clients on quotes and documents. Leave blank to use the internal / sell name.">
+          <input name="customerFacingName" defaultValue={material?.customerFacingName ?? ""} placeholder="eg 2 Year Vinyl" style={inputStyle} />
         </Field>
       </div>
-      <div style={gridStyle}>
+      {!sharedStock ? <div style={gridStyle}>
         <Field label="Supplier">
           <SupplierSelect suppliers={suppliers} defaultValue={material?.supplierId ?? ""} />
         </Field>
         <Field label="Supplier SKU">
-          <input name="sku" defaultValue={material?.sku ?? ""} placeholder="eg ACM-3-WHT" style={inputStyle} />
+          <input name="sku" defaultValue={material?.sku ?? ""} placeholder="eg MT-1234" style={inputStyle} />
+        </Field>
+      </div> : null}
+    </>
+  );
+}
+
+function SharedStockFields({ stockSources, material, value, onChange }: { stockSources: StockSourceOption[]; material?: MaterialFormRecord; value: string; onChange: (value: string) => void }) {
+  const selected = stockSources.find((item) => item.id === value);
+  return (
+    <div style={{ border: "1px solid #a5b4fc", background: "#f5f7ff", borderRadius: 14, padding: 14, display: "grid", gap: 12 }}>
+      <div>
+        <div style={{ fontWeight: 900, color: "#3730a3" }}>Shared stock / sales variant</div>
+        <p style={{ ...helperStyle, marginTop: 4 }}>Use this when several sell names are actually the same supplier SKU. Supplier, SKU, purchase cost, dimensions and stock-on-hand come from the selected physical stock item.</p>
+      </div>
+      <div style={gridStyle}>
+        <Field label="Physical stock source" helper="Leave as its own stock item for normal materials. Choose another material to make this a sales variant.">
+          <select name="stockSourceMaterialId" value={value} onChange={(event) => onChange(event.target.value)} style={inputStyle}>
+            <option value="">This material is its own physical stock item</option>
+            {stockSources.filter((item) => item.id !== material?.id).map((item) => <option key={item.id} value={item.id}>{item.name}{item.sku ? ` · ${item.sku}` : ""}</option>)}
+          </select>
+        </Field>
+        <Field label="Sales markup multiplier" helper="Optional material-specific markup. Leave blank to use the company/global markup. Example: 1.65 means cost × 1.65 before profit.">
+          <input name="salesMarkupMultiplier" defaultValue={material?.salesMarkupMultiplier ?? ""} type="number" min="0.01" step="0.01" inputMode="decimal" placeholder="Use global markup" style={inputStyle} />
         </Field>
       </div>
-    </>
+      {selected ? <div style={{ borderRadius: 11, background: "#fff", border: "1px solid #c7d2fe", padding: 11, color: "#475467", fontSize: 13, lineHeight: 1.55 }}>
+        <strong style={{ color: "#312e81" }}>Shared inventory:</strong> {selected.name}
+        {selected.sku ? ` · SKU ${selected.sku}` : ""}
+        {selected.supplierName ? ` · ${selected.supplierName}` : ""}
+        <br />Stock {selected.stockQuantity ?? "0"} {selected.stockUom ?? "units"} · Purchase ${selected.purchaseCost ?? "0"}/{selected.purchaseUom ?? "unit"}. Purchasing and MYOB inventory stay on this physical item.
+      </div> : null}
+    </div>
   );
 }
 
@@ -486,22 +524,31 @@ function QuoteImageField({ material }: { material?: MaterialFormRecord }) {
   );
 }
 
-function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: SupplierOption[]; material?: MaterialFormRecord; submitLabel: string }) {
+function MaterialFormBody({ suppliers, stockSources, material, submitLabel }: { suppliers: SupplierOption[]; stockSources: StockSourceOption[]; material?: MaterialFormRecord; submitLabel: string }) {
   const initialKind = useMemo(() => normaliseMaterialKind(material?.materialType), [material?.materialType]);
   const initialGroup = useMemo(() => normaliseMaterialGroup(material?.materialGroup, initialKind), [material?.materialGroup, initialKind]);
   const [kind, setKind] = useState<MaterialKind>(initialKind);
   const [group, setGroup] = useState<MaterialGroupValue>(initialGroup);
+  const [stockSourceMaterialId, setStockSourceMaterialId] = useState(material?.stockSourceMaterialId ?? "");
+  const sharedStock = Boolean(stockSourceMaterialId);
 
   return (
     <>
       {material ? <input type="hidden" name="materialId" value={material.id} /> : null}
-      <CommonTopFields suppliers={suppliers} material={material} />
-      <div style={gridStyle}>
-        <GroupSelect value={group} onChange={setGroup} />
-        <TypeSelect value={kind} onChange={setKind} />
-      </div>
-      <GroupHint group={group} />
-      <TypeHint kind={kind} />
+      <CommonTopFields suppliers={suppliers} material={material} sharedStock={sharedStock} />
+      <SharedStockFields stockSources={stockSources} material={material} value={stockSourceMaterialId} onChange={setStockSourceMaterialId} />
+      {sharedStock ? <>
+        <input type="hidden" name="materialGroup" value={group} />
+        <input type="hidden" name="materialType" value={kind} />
+      </> : null}
+      {!sharedStock ? <>
+        <div style={gridStyle}>
+          <GroupSelect value={group} onChange={setGroup} />
+          <TypeSelect value={kind} onChange={setKind} />
+        </div>
+        <GroupHint group={group} />
+        <TypeHint kind={kind} />
+      </> : null}
       <div style={gridStyle}>
         <Field label="Quote wizard category" helper="Assign signage stock to a visual category. Choose Other sheet only when it does not belong to Acrylic, ACM, Corflute, PVC/Foam or Vinyl/Roll stock.">
           <select name="quoteVisualCategory" defaultValue={material?.quoteVisualCategory ?? ""} style={inputStyle}>
@@ -512,7 +559,7 @@ function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: Sup
           <QuoteImageField material={material} />
         </Field>
       </div>
-      <ParameterFields kind={kind} material={material} />
+      {!sharedStock ? <ParameterFields kind={kind} material={material} /> : null}
       <Field label="Wastage allowance %" helper="Added to the real material usage before markup and profit. Example: vinyl stock at 20% wastage charges 1.2 × the calculated stock cost.">
         <input name="wastagePercent" defaultValue={material?.wastagePercent ?? "0"} type="number" min="0" max="500" step="0.01" inputMode="decimal" placeholder="eg 20" style={inputStyle} />
       </Field>
@@ -536,18 +583,18 @@ function MaterialFormBody({ suppliers, material, submitLabel }: { suppliers: Sup
   );
 }
 
-export function CreateMaterialForm({ suppliers }: { suppliers: SupplierOption[] }) {
+export function CreateMaterialForm({ suppliers, stockSources }: { suppliers: SupplierOption[]; stockSources: StockSourceOption[] }) {
   return (
     <form action={createMaterialAction} encType="multipart/form-data" style={{ display: "grid", gap: 14, marginTop: 16 }}>
-      <MaterialFormBody suppliers={suppliers} submitLabel="Create material" />
+      <MaterialFormBody suppliers={suppliers} stockSources={stockSources} submitLabel="Create material" />
     </form>
   );
 }
 
-export function EditMaterialForm({ suppliers, material }: { suppliers: SupplierOption[]; material: MaterialFormRecord }) {
+export function EditMaterialForm({ suppliers, stockSources, material }: { suppliers: SupplierOption[]; stockSources: StockSourceOption[]; material: MaterialFormRecord }) {
   return (
     <form action={updateMaterialAction} encType="multipart/form-data" style={{ display: "grid", gap: 14, marginTop: 14 }}>
-      <MaterialFormBody suppliers={suppliers} material={material} submitLabel="Save material changes" />
+      <MaterialFormBody suppliers={suppliers} stockSources={stockSources} material={material} submitLabel="Save material changes" />
     </form>
   );
 }

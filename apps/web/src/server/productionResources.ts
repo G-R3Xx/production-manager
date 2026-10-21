@@ -1057,19 +1057,20 @@ export async function previewRecipeCost(
         wastage_percent: string;
       }>(`
         SELECT
-          type::text,
-          width_mm,
-          length_mm,
-          roll_width_mm,
-          minimum_billable_sheet_fraction,
-          roll_billing_increment_metres,
-          purchase_uom,
-          stock_uom,
-          stock_quantity::text,
-          COALESCE((cost_json ->> 'purchaseCost')::numeric, purchase_cost, 0)::text AS purchase_cost,
-          COALESCE((cost_json ->> 'wastagePercent')::numeric, 0)::text AS wastage_percent
-        FROM catalog.materials
-        WHERE tenant_id = $1::uuid AND id = $2::uuid
+          root.type::text,
+          root.width_mm,
+          root.length_mm,
+          root.roll_width_mm,
+          root.minimum_billable_sheet_fraction,
+          root.roll_billing_increment_metres,
+          root.purchase_uom,
+          root.stock_uom,
+          root.stock_quantity::text,
+          COALESCE((root.cost_json ->> 'purchaseCost')::numeric, root.purchase_cost, 0)::text AS purchase_cost,
+          COALESCE((selected.cost_json ->> 'wastagePercent')::numeric, (root.cost_json ->> 'wastagePercent')::numeric, 0)::text AS wastage_percent
+        FROM catalog.materials selected
+        JOIN catalog.materials root ON root.id=COALESCE(selected.stock_source_material_id,selected.id) AND root.tenant_id=selected.tenant_id
+        WHERE selected.tenant_id = $1::uuid AND selected.id = $2::uuid
       `, [tenantId, recipe.materialId])
     : { rows: [] };
 

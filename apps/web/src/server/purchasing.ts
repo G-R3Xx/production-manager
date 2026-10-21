@@ -245,10 +245,14 @@ export async function createPurchaseOrder(tenantId: string, input: {
   `,[tenantId,poNumber,input.supplierId,input.shipToAddress??null,input.notes??null]);
   const id=result.rows[0].id;
   if (input.materialId) {
-    const material = await pool.query<{ purchaseCost:string }>(`
-      SELECT purchase_cost::text AS "purchaseCost" FROM catalog.materials WHERE tenant_id=$1::uuid AND id=$2::uuid LIMIT 1
+    const material = await pool.query<{ materialId:string; purchaseCost:string }>(`
+      SELECT root.id::text AS "materialId", root.purchase_cost::text AS "purchaseCost"
+      FROM catalog.materials selected
+      JOIN catalog.materials root ON root.id=COALESCE(selected.stock_source_material_id,selected.id) AND root.tenant_id=selected.tenant_id
+      WHERE selected.tenant_id=$1::uuid AND selected.id=$2::uuid LIMIT 1
     `,[tenantId,input.materialId]);
-    await addPurchaseOrderLine(tenantId,id,{materialId:input.materialId,quantity:"1",unitCost:material.rows[0]?.purchaseCost??"0"});
+    const physical=material.rows[0];
+    if (physical) await addPurchaseOrderLine(tenantId,id,{materialId:physical.materialId,quantity:"1",unitCost:physical.purchaseCost??"0"});
   }
   return { id, poNumber };
 }
@@ -323,6 +327,7 @@ export async function listPurchasableMaterialsForSupplier(tenantId:string,suppli
     FROM catalog.materials
     WHERE tenant_id=$1::uuid
       AND active=true
+      AND stock_source_material_id IS NULL
       AND (supplier_id IS NULL OR supplier_id=$2::uuid)
     ORDER BY name ASC
   `,[tenantId,supplierId]);

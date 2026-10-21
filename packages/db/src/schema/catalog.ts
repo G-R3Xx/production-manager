@@ -136,6 +136,8 @@ export const materials = catalogSchema.table("materials", {
   myobSyncState: varchar("myob_sync_state", { length: 30 }),
   myobPayloadJson: jsonb("myob_payload_json").notNull().default({}),
   supplierId: uuid("supplier_id"),
+  stockSourceMaterialId: uuid("stock_source_material_id"),
+  salesMarkupMultiplier: numeric("sales_markup_multiplier", { precision: 8, scale: 4 }),
   stockUom: varchar("stock_uom", { length: 20 }).notNull(),
   purchaseUom: varchar("purchase_uom", { length: 20 }).notNull(),
   purchaseToStockFactor: numeric("purchase_to_stock_factor", {
