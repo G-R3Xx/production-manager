@@ -44,6 +44,8 @@ export type LabourRecord = {
   department: string;
   machineId: string | null;
   machineName: string | null;
+  labourUserProfileId: string | null;
+  labourUserName: string | null;
   hourlyRate: string;
   calculationBasis: string;
   calculationValue: string;
@@ -79,7 +81,7 @@ export type RecipeRecord = {
 };
 
 type MachineInput = Omit<MachineRecord, "id" | "active" | "processIds"> & { tenantId: string };
-type LabourInput = Omit<LabourRecord, "id" | "active" | "consumableMaterialName" | "machineName"> & { tenantId: string };
+type LabourInput = Omit<LabourRecord, "id" | "active" | "consumableMaterialName" | "machineName" | "labourUserName" | "hourlyRate"> & { tenantId: string };
 type ProcessInput = {
   tenantId: string;
   name: string;
@@ -362,6 +364,7 @@ async function ensureOperationRecipeColumns(): Promise<void> {
   await pool.query(`
     ALTER TABLE catalog.labour_operations
       ADD COLUMN IF NOT EXISTS machine_id uuid REFERENCES catalog.machines(id) ON DELETE SET NULL,
+      ADD COLUMN IF NOT EXISTS labour_user_profile_id uuid REFERENCES app.user_profiles(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS consumable_material_id uuid REFERENCES catalog.materials(id) ON DELETE SET NULL,
       ADD COLUMN IF NOT EXISTS consumable_quantity numeric(12,4) NOT NULL DEFAULT 0,
       ADD COLUMN IF NOT EXISTS consumable_basis varchar(40) NOT NULL DEFAULT 'per_operation_unit'
@@ -378,7 +381,9 @@ async function loadLabourForTenant(tenantId: string): Promise<LabourRecord[]> {
       l.department,
       l.machine_id::text AS "machineId",
       mach.name AS "machineName",
-      l.hourly_rate::text AS "hourlyRate",
+      l.labour_user_profile_id::text AS "labourUserProfileId",
+      up.full_name AS "labourUserName",
+      COALESCE(membership.quote_labour_rate, ts.quote_labour_rate, 66)::text AS "hourlyRate",
       l.calculation_basis AS "calculationBasis",
       l.calculation_value::text AS "calculationValue",
       l.minimum_minutes::text AS "minimumMinutes",
@@ -390,6 +395,12 @@ async function loadLabourForTenant(tenantId: string): Promise<LabourRecord[]> {
     FROM catalog.labour_operations l
     LEFT JOIN catalog.materials m ON m.id = l.consumable_material_id
     LEFT JOIN catalog.machines mach ON mach.id = l.machine_id
+    LEFT JOIN app.user_profiles up ON up.id = l.labour_user_profile_id
+    LEFT JOIN app.memberships membership
+      ON membership.tenant_id = l.tenant_id
+     AND membership.user_profile_id = l.labour_user_profile_id
+     AND membership.status = 'active'
+    LEFT JOIN app.tenant_settings ts ON ts.tenant_id = l.tenant_id
     WHERE l.tenant_id = $1::uuid
     ORDER BY l.active DESC, l.name
   `, [tenantId]);
@@ -474,22 +485,30 @@ async function loadProcessSetupResourcesForTenant(tenantId: string): Promise<Pro
         SELECT jsonb_agg(to_jsonb(labour_row) ORDER BY labour_row.active DESC, labour_row.name)
         FROM (
           SELECT
-            id::text AS id,
-            name,
-            department,
-            machine_id::text AS "machineId",
-            (SELECT mm.name FROM catalog.machines mm WHERE mm.id = catalog.labour_operations.machine_id) AS "machineName",
-            hourly_rate::text AS "hourlyRate",
-            calculation_basis AS "calculationBasis",
-            calculation_value::text AS "calculationValue",
-            minimum_minutes::text AS "minimumMinutes",
-            consumable_material_id::text AS "consumableMaterialId",
-            (SELECT m.name FROM catalog.materials m WHERE m.id = catalog.labour_operations.consumable_material_id) AS "consumableMaterialName",
-            consumable_quantity::text AS "consumableQuantity",
-            consumable_basis AS "consumableBasis",
-            active
-          FROM catalog.labour_operations
-          WHERE tenant_id = $1::uuid
+            lo.id::text AS id,
+            lo.name,
+            lo.department,
+            lo.machine_id::text AS "machineId",
+            (SELECT mm.name FROM catalog.machines mm WHERE mm.id = lo.machine_id) AS "machineName",
+            lo.labour_user_profile_id::text AS "labourUserProfileId",
+            up.full_name AS "labourUserName",
+            COALESCE(membership.quote_labour_rate, ts.quote_labour_rate, 66)::text AS "hourlyRate",
+            lo.calculation_basis AS "calculationBasis",
+            lo.calculation_value::text AS "calculationValue",
+            lo.minimum_minutes::text AS "minimumMinutes",
+            lo.consumable_material_id::text AS "consumableMaterialId",
+            (SELECT m.name FROM catalog.materials m WHERE m.id = lo.consumable_material_id) AS "consumableMaterialName",
+            lo.consumable_quantity::text AS "consumableQuantity",
+            lo.consumable_basis AS "consumableBasis",
+            lo.active
+          FROM catalog.labour_operations lo
+          LEFT JOIN app.user_profiles up ON up.id = lo.labour_user_profile_id
+          LEFT JOIN app.memberships membership
+            ON membership.tenant_id = lo.tenant_id
+           AND membership.user_profile_id = lo.labour_user_profile_id
+           AND membership.status = 'active'
+          LEFT JOIN app.tenant_settings ts ON ts.tenant_id = lo.tenant_id
+          WHERE lo.tenant_id = $1::uuid
         ) labour_row
       ), '[]'::jsonb) AS labour
   `, [tenantId]);
@@ -522,6 +541,7 @@ export async function createLabour(input: LabourInput): Promise<{ id: string }> 
       name,
       department,
       machine_id,
+      labour_user_profile_id,
       hourly_rate,
       calculation_basis,
       calculation_value,
@@ -529,14 +549,14 @@ export async function createLabour(input: LabourInput): Promise<{ id: string }> 
       consumable_material_id,
       consumable_quantity,
       consumable_basis
-    ) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::uuid, $5::numeric, $6, $7::numeric, $8::numeric, NULLIF($9, '')::uuid, $10::numeric, $11)
+    ) VALUES ($1::uuid, $2, $3, NULLIF($4, '')::uuid, NULLIF($5, '')::uuid, 0, $6, $7::numeric, $8::numeric, NULLIF($9, '')::uuid, $10::numeric, $11)
     RETURNING id::text
   `, [
     input.tenantId,
     input.name,
     input.department,
     input.machineId ?? "",
-    input.hourlyRate,
+    input.labourUserProfileId ?? "",
     input.calculationBasis,
     input.calculationValue,
     input.minimumMinutes,
@@ -553,7 +573,8 @@ export async function updateLabour(input: LabourInput & { id: string }): Promise
     SET name = $3,
         department = $4,
         machine_id = NULLIF($5, '')::uuid,
-        hourly_rate = $6::numeric,
+        labour_user_profile_id = NULLIF($6, '')::uuid,
+        hourly_rate = 0,
         calculation_basis = $7,
         calculation_value = $8::numeric,
         minimum_minutes = $9::numeric,
@@ -568,7 +589,7 @@ export async function updateLabour(input: LabourInput & { id: string }): Promise
     input.name,
     input.department,
     input.machineId ?? "",
-    input.hourlyRate,
+    input.labourUserProfileId ?? "",
     input.calculationBasis,
     input.calculationValue,
     input.minimumMinutes,

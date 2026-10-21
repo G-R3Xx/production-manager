@@ -177,7 +177,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       </td>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
                         <input form={`staff-${row.membershipId}`} name="quoteLabourRate" defaultValue={row.quoteLabourRate ?? ""} disabled={!canEdit} type="number" min="0" step="0.01" placeholder="Global rate" style={{ width: 110, minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 10px", fontWeight: 800 }} />
-                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>Blank uses company rate.</div>
+                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>Blank uses company rate. Operations can select this staff rate as their labour source.</div>
                       </td>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
                         <select

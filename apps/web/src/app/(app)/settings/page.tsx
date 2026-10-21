@@ -11,7 +11,7 @@ const groups = [
     { href: "/suppliers", title: "Suppliers", body: "Supplier records used by materials and purchasing.", icon: "◫" }
   ]},
   { title: "Production setup", items: [
-    { href: "/operations", title: "Operations & labour", body: "One manufacturing-cost source: machine + labour + consumable. Machines are configured separately only for equipment rates and capacity.", icon: "⚙" }
+    { href: "/operations", title: "Operations & labour", body: "Operation time + optional equipment + Staff/Company labour rate + consumable. Machines contain equipment cost only.", icon: "⚙" }
   ]},
   { title: "Connections", items: [
     { href: "/integrations", title: "MYOB & services", body: "MYOB, Install Scheduler and operational connections.", icon: "↔" },

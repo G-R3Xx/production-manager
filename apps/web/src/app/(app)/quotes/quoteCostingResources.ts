@@ -273,7 +273,9 @@ export function labourCostingDetails(
       const cutsPerStack = Math.max(0, metrics.guillotineCutsPerStack ?? value);
       const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
       const runMinutes = cutsPerMinute > 0 ? stacks * cutsPerStack / cutsPerMinute : 0;
-      hours = (Math.max(0, metrics.guillotineSetupMinutes ?? 0) + runMinutes) / 60;
+      // Machine setup time belongs to equipment cost only. Labour setup must be
+      // represented by the Operation's own time/minimum rule.
+      hours = runMinutes / 60;
     }
   } else if (labour.calculationBasis === "per_sqm_hours") hours = areaLine * value;
   else if (labour.calculationBasis === "per_sheet_hours") hours = sheets * value;
@@ -300,7 +302,7 @@ export function guillotineCostingDetails(labour: QuoteCostingLabour | null, metr
   const cutsPerStack = Math.max(0, metrics.guillotineCutsPerStack ?? n(labour.calculationValue, 0));
   const maxStackSheets = Math.max(0, metrics.guillotineMaxStackSheets ?? 0);
   const cutsPerMinute = Math.max(0, metrics.guillotineCutsPerMinute ?? 0);
-  const setupMinutes = Math.max(0, metrics.guillotineSetupMinutes ?? 0);
+  const setupMinutes = 0; // equipment setup is priced by the Machine, not labour
   const overrideMinutes = Math.max(0, metrics.guillotineMinutesOverride ?? 0);
   const stacks = sheets > 0 && maxStackSheets > 0 ? Math.ceil(sheets / maxStackSheets) : 0;
   const totalCuts = stacks * cutsPerStack;

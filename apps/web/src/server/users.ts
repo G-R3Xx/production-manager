@@ -154,12 +154,19 @@ export type ActiveStaffOption = {
   fullName: string;
   shortName: string | null;
   tenantRole: string;
+  quoteLabourRate: string | null;
 };
 
 export async function listActiveStaffOptionsForTenant(tenantId: string): Promise<ActiveStaffOption[]> {
   if (!process.env.DATABASE_URL) return [];
+  await ensureStaffPricingColumn();
   const result = await pool.query<ActiveStaffOption>(`
-    SELECT up.id AS "userProfileId", up.full_name AS "fullName", up.short_name AS "shortName", membership.tenant_role AS "tenantRole"
+    SELECT
+      up.id AS "userProfileId",
+      up.full_name AS "fullName",
+      up.short_name AS "shortName",
+      membership.tenant_role AS "tenantRole",
+      membership.quote_labour_rate::text AS "quoteLabourRate"
     FROM app.memberships membership
     INNER JOIN app.user_profiles up ON up.id = membership.user_profile_id
     WHERE membership.tenant_id = $1::uuid AND membership.status = 'active'

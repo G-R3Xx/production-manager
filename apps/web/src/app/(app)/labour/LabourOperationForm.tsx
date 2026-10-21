@@ -10,7 +10,7 @@ type LabourFormValues = {
   name: string;
   department: string;
   machineId?: string;
-  hourlyRate: string;
+  labourUserProfileId?: string;
   calculationBasis: LabourBasis;
   calculationValue: string;
   minimumMinutes: string;
@@ -20,6 +20,7 @@ type LabourFormValues = {
 };
 
 type MachineOption = { id: string; name: string; active: boolean; };
+type StaffRateOption = { userProfileId: string; fullName: string; shortName?: string | null; quoteLabourRate: string | null; };
 
 type MaterialOption = {
   id: string;
@@ -187,18 +188,22 @@ export function LabourOperationForm({
   mode = "create",
   initialValues,
   materials = [],
-  machines = []
+  machines = [],
+  staff = [],
+  defaultLabourRate = "66"
 }: {
   mode?: "create" | "edit";
   initialValues?: LabourFormValues;
   materials?: MaterialOption[];
   machines?: MachineOption[];
+  staff?: StaffRateOption[];
+  defaultLabourRate?: string;
 }) {
   const initialBasis = initialValues?.calculationBasis ?? "fixed_minutes";
   const [name, setName] = useState(initialValues?.name ?? "");
   const [department, setDepartment] = useState(initialValues?.department ?? "signage");
   const [machineId, setMachineId] = useState(initialValues?.machineId ?? "");
-  const [hourlyRate, setHourlyRate] = useState(initialValues?.hourlyRate ?? "120");
+  const [labourUserProfileId, setLabourUserProfileId] = useState(initialValues?.labourUserProfileId ?? "");
   const [basis, setBasis] = useState<LabourBasis>(initialBasis);
   const [minutes, setMinutes] = useState(
     cleanNumber(storedLabourValueToMinutes(initialBasis, initialValues?.calculationValue ?? "15"), 2)
@@ -209,7 +214,9 @@ export function LabourOperationForm({
   const [consumableBasis, setConsumableBasis] = useState(initialValues?.consumableBasis ?? "per_operation_unit");
 
   const basisDetails = LABOUR_BASIS_OPTIONS.find((option) => option.value === basis) ?? LABOUR_BASIS_OPTIONS[0]!;
-  const rate = Math.max(0, Number(hourlyRate) || 0);
+  const selectedStaff = staff.find((item) => item.userProfileId === labourUserProfileId) ?? null;
+  const rate = Math.max(0, Number(selectedStaff?.quoteLabourRate ?? defaultLabourRate) || 0);
+  const labourSourceName = selectedStaff?.fullName ?? "Factory default";
   const minutesNumber = Math.max(0, Number(minutes) || 0);
   const minimumNumber = Math.max(0, Number(minimumMinutes) || 0);
 
@@ -419,25 +426,23 @@ export function LabourOperationForm({
       <section className={styles.formSection}>
         <div className={styles.stepNumber}>3</div>
         <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>How much labour does it take?</h3>
-          <p className={styles.helpText}>Set the labour rate and then choose the simple basis below. If this operation uses a machine, its machine cost is added once from the machine selected above. Labour is charged here and nowhere else.</p>
-          <label className={styles.rateField}>
-            Hourly rate
-            <div className={styles.moneyInputWrap}>
-              <span>$</span>
-              <input
-                required
-                name="hourlyRate"
-                type="number"
-                min="0"
-                step="0.01"
-                value={hourlyRate}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setHourlyRate(event.target.value)}
-                className={styles.moneyInput}
-              />
-              <span>/ hour</span>
-            </div>
-            <span className={styles.fieldHint}>At {money(rate)}/hr, one minute costs {money(rate / 60)}.</span>
+          <h3 className={styles.sectionTitle}>Who supplies the labour rate?</h3>
+          <p className={styles.helpText}>Labour rates live in Staff, not on machines or operations. Choose the normal staff member for this work, or use the company factory rate.</p>
+          <label className={styles.fieldLabel}>
+            Labour rate source
+            <select
+              name="labourUserProfileId"
+              value={labourUserProfileId}
+              onChange={(event: ChangeEvent<HTMLSelectElement>) => setLabourUserProfileId(event.target.value)}
+              className={styles.input}
+            >
+              <option value="">Factory default · {money(Math.max(0, Number(defaultLabourRate) || 0))}/hr</option>
+              {staff.map((item) => {
+                const staffRate = Math.max(0, Number(item.quoteLabourRate ?? defaultLabourRate) || 0);
+                return <option key={item.userProfileId} value={item.userProfileId}>{item.fullName} · {money(staffRate)}/hr{item.quoteLabourRate == null ? " (factory rate)" : ""}</option>;
+              })}
+            </select>
+            <span className={styles.fieldHint}>{labourSourceName}: {money(rate)}/hr · one labour minute costs {money(rate / 60)}. Change staff rates under Staff; change the factory fallback under Company settings.</span>
           </label>
         </div>
       </section>
@@ -541,7 +546,7 @@ export function LabourOperationForm({
         <button type="submit" className={styles.primaryButton}>
           {mode === "edit" ? "Save operation" : "Add operation"}
         </button>
-        <span className={styles.saveHint}>This operation is the single manufacturing-cost source used by quoting.</span>
+        <span className={styles.saveHint}>Machine = equipment cost. Staff = labour rate. Operation = time/rule that brings them together once.</span>
       </div>
     </form>
   );

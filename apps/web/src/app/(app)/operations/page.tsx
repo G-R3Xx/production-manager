@@ -9,6 +9,8 @@ import { LabourOperationForm } from "../labour/LabourOperationForm";
 import { labourBasisLabel, labourBasisUnit, storedLabourValueToMinutes, type LabourBasis } from "../labour/labourConfig";
 import styles from "../labour/labour.module.css";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
+import { listActiveStaffOptionsForTenant, type ActiveStaffOption } from "@/server/users";
+import { getCompanySettingsByTenantId } from "@/server/company";
 
 const DEPARTMENT_LABELS: Record<string, string> = {
   signage: "Signage",
@@ -62,7 +64,7 @@ type LabourMaterialOption = {
   lengthMm: string | null;
 };
 
-function LabourOperationCard({ row, materials, machines }: { row: LabourRecord; materials: LabourMaterialOption[]; machines: MachineRecord[] }) {
+function LabourOperationCard({ row, materials, machines, staff, defaultLabourRate }: { row: LabourRecord; materials: LabourMaterialOption[]; machines: MachineRecord[]; staff: ActiveStaffOption[]; defaultLabourRate: string }) {
   const summary = operationSummary(row);
 
   return (
@@ -91,8 +93,8 @@ function LabourOperationCard({ row, materials, machines }: { row: LabourRecord; 
           <strong>{row.machineName ?? "None"}</strong>
         </div>
         <div className={styles.summaryItem}>
-          <span>Labour rate</span>
-          <strong>{summary.rate > 0 ? `${money(summary.rate)}/hr` : "No labour charge"}</strong>
+          <span>Labour source</span>
+          <strong>{row.labourUserName ?? "Factory default"} · {summary.rate > 0 ? `${money(summary.rate)}/hr` : "No labour charge"}</strong>
         </div>
         <div className={styles.summaryItem}>
           <span>Time rule</span>
@@ -126,7 +128,7 @@ function LabourOperationCard({ row, materials, machines }: { row: LabourRecord; 
               name: row.name,
               department: row.department,
               machineId: row.machineId ?? "",
-              hourlyRate: row.hourlyRate,
+              labourUserProfileId: row.labourUserProfileId ?? "",
               calculationBasis: row.calculationBasis as LabourBasis,
               calculationValue: row.calculationValue,
               minimumMinutes: row.minimumMinutes,
@@ -136,6 +138,8 @@ function LabourOperationCard({ row, materials, machines }: { row: LabourRecord; 
             }}
             materials={materials}
             machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))}
+            staff={staff}
+            defaultLabourRate={defaultLabourRate}
           />
         </div>
       </details>
@@ -153,11 +157,14 @@ export default async function LabourPage({
   if (!tenant) redirect("/bootstrap");
 
   const params = searchParams ? await searchParams : {};
-  const [rows, allMaterials, machines] = await Promise.all([
+  const [rows, allMaterials, machines, staff, companySettings] = await Promise.all([
     listLabourForTenant(tenant.tenantId),
     listMaterialsForTenant(tenant.tenantId),
-    listMachinesForTenant(tenant.tenantId)
+    listMachinesForTenant(tenant.tenantId),
+    listActiveStaffOptionsForTenant(tenant.tenantId),
+    getCompanySettingsByTenantId(tenant.tenantId)
   ]);
+  const defaultLabourRate = companySettings?.quoteLabourRate ?? "66";
   const materials: LabourMaterialOption[] = allMaterials
     .filter((material) => material.active && ["consumable", "item", "finishing", "fixing", "hardware", "binding"].includes(String(material.materialType).toLowerCase()))
     .map((material) => ({
@@ -181,7 +188,7 @@ export default async function LabourPage({
         <div className={styles.eyebrow}>Production setup · pricing</div>
         <h1 className={styles.title}>Operations &amp; labour</h1>
         <p className={styles.subtitle}>
-          One operation is one manufacturing charge. Link its optional machine, labour rule and consumable here. Processes and Production Methods no longer add pricing.
+          One operation combines equipment time, labour time and optional consumables once. Machines contain equipment cost only; labour rates come only from Staff / Company settings.
         </p>
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <Link prefetch={false} href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Machines</Link>
@@ -197,7 +204,7 @@ export default async function LabourPage({
         <div>
           <h2>One operation = one manufacturing charge</h2>
           <p>
-            Example: Direct Print can link the printer plus operator time. Lamination can link the laminator plus labour. Eyelets can carry both the eyelet consumable and fitting time. Nothing else should charge that same work again.
+            Example: Direct Print links the printer for equipment cost and a staff/factory labour rate for operator time. The Operation owns the time rule; the Machine never owns labour. Nothing else should charge that same work again.
           </p>
         </div>
       </section>
@@ -209,7 +216,7 @@ export default async function LabourPage({
             <p>Build the complete manufacturing cost in one place: optional machine + labour + consumable. The quote builder uses this operation directly.</p>
           </div>
         </div>
-        <LabourOperationForm materials={materials} machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))} />
+        <LabourOperationForm materials={materials} machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))} staff={staff} defaultLabourRate={defaultLabourRate} />
       </section>
 
       <section className={styles.operationList}>
@@ -221,7 +228,7 @@ export default async function LabourPage({
           <span className={styles.countPill}>{activeRows.length} active</span>
         </div>
 
-        {activeRows.length ? activeRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} machines={machines} />) : (
+        {activeRows.length ? activeRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} machines={machines} staff={staff} defaultLabourRate={defaultLabourRate} />) : (
           <div className={styles.emptyState}>
             <div>
               <strong>No shop operations yet</strong>
@@ -235,7 +242,7 @@ export default async function LabourPage({
         <details className={styles.archivedSection}>
           <summary>Archived operations ({archivedRows.length})</summary>
           <div className={styles.operationList}>
-            {archivedRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} machines={machines} />)}
+            {archivedRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} machines={machines} staff={staff} defaultLabourRate={defaultLabourRate} />)}
           </div>
         </details>
       ) : null}

@@ -10,7 +10,7 @@ import {
   uuid,
   varchar
 } from "drizzle-orm/pg-core";
-import { tenants } from "./app";
+import { tenants, userProfiles } from "./app";
 
 export const catalogSchema = pgSchema("catalog");
 
@@ -181,6 +181,9 @@ export const labourOperations = catalogSchema.table("labour_operations", {
   name: varchar("name", { length: 200 }).notNull(),
   department: varchar("department", { length: 50 }).notNull().default("general"),
   machineId: uuid("machine_id").references(() => machines.id, { onDelete: "set null" }),
+  labourUserProfileId: uuid("labour_user_profile_id").references(() => userProfiles.id, { onDelete: "set null" }),
+  // Legacy column retained for database compatibility only. Quoting resolves labour rates
+  // from app.memberships.quote_labour_rate or the tenant factory rate.
   hourlyRate: numeric("hourly_rate", { precision: 12, scale: 2 }).notNull().default("0"),
   calculationBasis: varchar("calculation_basis", { length: 40 }).notNull().default("fixed_minutes"),
   calculationValue: numeric("calculation_value", { precision: 12, scale: 4 }).notNull().default("0"),

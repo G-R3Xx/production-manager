@@ -4,7 +4,7 @@ import type { CSSProperties } from "react";
 type Section = "operations" | "machines";
 
 const steps: Array<{ section: Section; href: string; number: string; label: string; body: string }> = [
-  { section: "operations", href: "/operations", number: "1", label: "Operations & labour", body: "The single manufacturing-cost source: optional machine + labour + consumable." },
+  { section: "operations", href: "/operations", number: "1", label: "Operations & labour", body: "Operation time + optional equipment + Staff/Company labour rate + consumable." },
   { section: "machines", href: "/machines", number: "2", label: "Machines", body: "Equipment rates, speed, setup, ink/click costs and physical limits." }
 ];
 
@@ -16,7 +16,7 @@ export function ProductionSetupNav({ active }: { active: Section }) {
           <div style={eyebrow}>Settings · Production costing</div>
           <h1 style={{ margin: "5px 0 4px", fontSize: 34 }}>Production costing</h1>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.5, maxWidth: 820 }}>
-            Keep pricing simple: a quote charges Materials + Operations + Extras + Services. An Operation may include one machine and its labour rule. Processes and Production Methods are no longer separate pricing layers.
+            Keep pricing simple: Materials + Operations + Extras + Services. Machines carry equipment cost only. Staff / Company settings carry labour rates. Operations define when and how long each is used.
           </p>
         </div>
         <Link prefetch={false} href="/settings" style={backLink}>← Settings</Link>

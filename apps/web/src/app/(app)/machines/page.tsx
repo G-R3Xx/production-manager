@@ -88,7 +88,7 @@ function MachineFields({ machine }: { machine?: any }) {
             </select>
           </label>
           <label>
-            Setup time (min)
+            Equipment setup time (min)
             <input name="setupMinutes" type="number" step="0.01" defaultValue={machine?.setupMinutes ?? ""} style={input} />
           </label>
           <label>
@@ -97,7 +97,7 @@ function MachineFields({ machine }: { machine?: any }) {
           </label>
         </div>
         <p style={{ margin: "9px 0 0", fontSize: 12, color: "#64748b" }}>
-          For a guillotine, use <b>cuts per minute</b> and enter the largest safe paper stack. Leave stack capacity at 0 for other machines.
+          Setup time and hourly cost here are equipment costs only — never operator labour. For a guillotine, use <b>cuts per minute</b> and enter the largest safe paper stack. Leave stack capacity at 0 for other machines.
         </p>
       </div>
 
@@ -105,7 +105,7 @@ function MachineFields({ machine }: { machine?: any }) {
         <div style={groupTitle}>Costing</div>
         <div className="machine-grid machine-grid-costing">
           <label>
-            Machine $/hr
+            Equipment cost $/hr
             <input name="hourlyCost" type="number" step="0.01" defaultValue={machine?.hourlyCost ?? ""} style={input} />
           </label>
           <label>
@@ -245,7 +245,7 @@ export default async function MachinesPage() {
                   <span className="machine-metric-value">{r.speedValue} {r.speedUom.replaceAll("_", " ")}</span>
                 </div>
                 <div className="machine-metric">
-                  <span className="machine-metric-label">Machine cost</span>
+                  <span className="machine-metric-label">Equipment cost</span>
                   <span className="machine-metric-value">${r.hourlyCost}/hr · {r.setupMinutes} min setup</span>
                 </div>
                 <div className="machine-metric">

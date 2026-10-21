@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition, type FormEvent } from "rea
 import { useRouter } from "next/navigation";
 import { saveQuoteLineFast } from "./saveQuoteLineClient";
 import { availableQuoteChoices, quoteChoiceValue } from "./quoteOptionDependencies";
-import { labourForProcess, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
+import { labourCostingDetails, labourForProcess, selectMachineForProcess, type QuoteCostingResources } from "./quoteCostingResources";
 
 export type QuoteChoice = {
   id?: string | null;
@@ -1339,8 +1339,7 @@ export function calculateQuoteProductPricing(
     answers,
     componentRows: componentBreakdown,
     quoteQuantity,
-    materials,
-    fallbackLabourRate: numberValue(pricingSettings?.labourRate, 66)
+    materials
   }) : null;
   const productionResources = productionResourceBreakdownFor(product, costingResources, answers, componentBreakdown, quoteQuantity, materials);
   const filteredProductionRows = profileAdjustments
@@ -1414,9 +1413,8 @@ function smallFormatProfileAdjustments(input: {
   componentRows: CostBreakdownItem[];
   quoteQuantity: number;
   materials: QuoteMaterial[];
-  fallbackLabourRate: number;
 }): { rows: CostBreakdownItem[]; warnings: string[]; suppressMachineInk: boolean; suppressPrintLabour: boolean } {
-  const { product, profile, resources, answers, componentRows, quoteQuantity, materials, fallbackLabourRate } = input;
+  const { product, profile, resources, answers, componentRows, quoteQuantity, materials } = input;
   const quantity = Math.max(1, quoteQuantity || 1);
   const dimensions = primaryProductDimensions(product, answers);
   const areaSqmPerUnit = dimensions ? dimensions.widthMm * dimensions.heightMm / 1_000_000 : 0;
@@ -1456,10 +1454,11 @@ function smallFormatProfileAdjustments(input: {
   const requiredWidthMm = parentWidth > 0 && parentLength > 0 ? Math.min(parentWidth, parentLength) : dimensions ? Math.min(dimensions.widthMm, dimensions.heightMm) : 0;
   const sides = smallFormatSides(product, answers, profile);
   const mode = smallFormatPrintMode(product, answers, profile);
+  const operationMetrics = { quantity, areaSqmPerUnit, sheetsPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: 2 };
   const machineSelection = selectMachineForProcess(
     resources,
     printAliases,
-    { quantity, areaSqmPerUnit, sheetsPerLine, requiredWidthMm, sides, a4FacesPerParentSheet: 2 },
+    operationMetrics,
     product.department,
     printOperation?.machineId ?? null,
     null
@@ -1488,43 +1487,20 @@ function smallFormatProfileAdjustments(input: {
   }
 
   const labour = printOperation;
-  const hourlyRate = Math.max(0, numberValue(labour?.hourlyRate, fallbackLabourRate));
-  if (profile.printSetupMinutes > 0 && hourlyRate > 0) {
-    const lineCost = profile.printSetupMinutes / 60 * hourlyRate;
+  const labourDetails = labourCostingDetails(labour, operationMetrics);
+  if (labourDetails && labourDetails.lineMinutes > 0 && labourDetails.hourlyRate > 0) {
     rows.push(costBreakdownItem({
-      componentLabel: "Print setup labour",
-      materialName: labour?.name ?? "Small format labour",
-      basis: "Fixed setup time",
-      amount: profile.printSetupMinutes / quantity,
+      componentLabel: "Print labour",
+      materialName: labour?.name ?? "Factory labour",
+      basis: "Operation labour rule",
+      amount: labourDetails.lineMinutes / quantity,
       unit: "min",
-      rate: hourlyRate / 60,
-      cost: lineCost / quantity,
-      note: `${formatUsage(profile.printSetupMinutes)} minutes once per quote line · ${formatMoney(hourlyRate)}/hr`
+      rate: labourDetails.hourlyRate / 60,
+      cost: labourDetails.lineCost / quantity,
+      note: `${formatUsage(labourDetails.lineMinutes)} total labour minutes from Operations · ${formatMoney(labourDetails.hourlyRate)}/hr from Staff / Company settings`
     }));
-  }
-
-  if (profile.operatorAttendancePercent > 0 && machine && hourlyRate > 0) {
-    const speed = Math.max(0, numberValue(machine.speedValue, 0));
-    let runHours = 0;
-    if (speed > 0) {
-      if (machine.speedUom === "a4_faces_per_minute") runHours = (sheetsPerLine * sides * 2) / speed / 60;
-      else if (machine.speedUom === "sheets_per_hour") runHours = sheetsPerLine / speed;
-      else if (machine.speedUom === "linear_metres_per_hour") runHours = 0;
-      else runHours = areaSqmPerUnit * quantity * sides / speed;
-    }
-    const attendedHours = runHours * profile.operatorAttendancePercent / 100;
-    if (attendedHours > 0) {
-      rows.push(costBreakdownItem({
-        componentLabel: "Printer attendance",
-        materialName: labour?.name ?? "Small format labour",
-        basis: `${formatUsage(profile.operatorAttendancePercent)}% of print runtime`,
-        amount: attendedHours * 60 / quantity,
-        unit: "min",
-        rate: hourlyRate / 60,
-        cost: attendedHours * hourlyRate / quantity,
-        note: `${formatUsage(runHours * 60)} min machine runtime × ${formatUsage(profile.operatorAttendancePercent)}% · ${formatMoney(hourlyRate)}/hr`
-      }));
-    }
+  } else if (!labour && (profile.printSetupMinutes > 0 || profile.operatorAttendancePercent > 0)) {
+    warnings.push("This product has legacy print-labour profile values, but no matching Print Operation. Add/rename the Print Operation instead; product profiles no longer create labour charges.");
   }
 
   return { rows, warnings, suppressMachineInk: profile.useMachineClickRate, suppressPrintLabour: true };

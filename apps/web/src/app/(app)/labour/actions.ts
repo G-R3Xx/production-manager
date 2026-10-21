@@ -34,7 +34,7 @@ function labourInput(formData: FormData, tenantId: string) {
     name: stringValue(formData, "name"),
     department: stringValue(formData, "department") || "general",
     machineId: stringValue(formData, "machineId") || null,
-    hourlyRate: String(Math.max(0, numericValue(formData, "hourlyRate"))),
+    labourUserProfileId: stringValue(formData, "labourUserProfileId") || null,
     calculationBasis,
     calculationValue: storedCalculationValue(formData, calculationBasis),
     minimumMinutes: String(Math.max(0, numericValue(formData, "minimumMinutes"))),

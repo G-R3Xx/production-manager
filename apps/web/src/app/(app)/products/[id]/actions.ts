@@ -1559,8 +1559,9 @@ export async function saveSmallFormatCostingProfileAction(formData: FormData) {
     enabled: formData.get("smallFormatCostingEnabled") === "on",
     useMachineClickRate: formData.get("useMachineClickRate") === "on",
     wasteSheets: num("wasteSheets", 0),
-    printSetupMinutes: num("printSetupMinutes", 0),
-    operatorAttendancePercent: Math.min(100, num("operatorAttendancePercent", 0)),
+    // Labour time/rates belong to Operations + Staff/Company settings only.
+    printSetupMinutes: 0,
+    operatorAttendancePercent: 0,
     overheadPercent: num("overheadPercent", 0),
     profitPercent: num("profitPercent", 0),
     defaultPrintSides: read(formData, "defaultPrintSides") === "2" ? 2 : 1,
