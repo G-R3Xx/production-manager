@@ -1,4 +1,4 @@
--- V26.10.21.09
+-- V26.10.21.10
 -- Operations own labour TIME, while Staff / Company settings own labour RATES.
 -- Machines remain equipment-cost-only.
 
