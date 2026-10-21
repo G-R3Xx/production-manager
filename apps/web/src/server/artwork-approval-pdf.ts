@@ -461,6 +461,7 @@ function drawSpecificationPanel(items: ArtworkSpecificationItem[], x: number, y:
       }
     } else {
       const value = wrappedTextOps(item.value, x + iconW + 7, top - 23, 28, { size: 6.8, bold: true, grey: 0.07, leading: 8.2, maxLines: 3 });
+      content += value.content;
       if (item.detail) {
         const detailY = Math.max(bottom + 5, value.endY - 1);
         content += wrappedTextOps(item.detail, x + iconW + 7, detailY, 34, { size: 5.4, grey: 0.42, leading: 6.5, maxLines: 2 }).content;
