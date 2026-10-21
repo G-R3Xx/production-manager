@@ -20,6 +20,7 @@ type MaterialManagerSource = {
   purchaseCost: string;
   wastagePercent: string;
   showAsInstallationOption: boolean;
+  reversePrintable: boolean;
   widthMm: string | null;
   lengthMm: string | null;
   rollWidthMm: string | null;
@@ -54,6 +55,7 @@ type GridRow = {
   purchaseCost: string;
   wastagePercent: string;
   showAsInstallationOption: boolean;
+  reversePrintable: boolean;
   widthMm: string;
   lengthMm: string;
   rollWidthMm: string;
@@ -209,6 +211,7 @@ function rowsFromMaterials(materials: MaterialManagerSource[]): GridRow[] {
     purchaseCost: String(material.purchaseCost ?? ""),
     wastagePercent: String(material.wastagePercent ?? "0"),
     showAsInstallationOption: material.showAsInstallationOption === true,
+    reversePrintable: material.reversePrintable === true,
     widthMm: material.widthMm ?? "",
     lengthMm: material.lengthMm ?? "",
     rollWidthMm: material.rollWidthMm ?? "",
@@ -351,10 +354,13 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         else if (value === "RESTORE") next.active = true;
         else if (value === "KEEP") next.active = row.savedState === "active";
       }
-      if (field === "materialType" && !row.id) {
-        const uoms = defaultUoms(String(value));
-        next.purchaseUom = uoms.purchaseUom;
-        next.stockUom = uoms.stockUom;
+      if (field === "materialType") {
+        if (!row.id) {
+          const uoms = defaultUoms(String(value));
+          next.purchaseUom = uoms.purchaseUom;
+          next.stockUom = uoms.stockUom;
+        }
+        if (canonicalType(String(value)) !== "roll_media") next.reversePrintable = false;
       }
       return next;
     }));
@@ -368,7 +374,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     const key = `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setRows((current) => [...current, {
       key, id: null, action: "ADD", materialGroup: group, materialType, name: "", customerFacingName: "", supplierName: "", sku: "",
-      purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
+      purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, reversePrintable: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
       priceCheckedAt: todayLocal(), active: true, savedState: "active", quoteImageUrl: null, quoteImageStoragePath: null, quoteVisualCategory: "", minimumBillableSheetFraction: "", rollBillingIncrementMetres: ""
     }]);
     setSection(currentSection.key);
@@ -416,6 +422,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       purchaseCost: row.purchaseCost,
       wastagePercent: row.wastagePercent,
       showAsInstallationOption: row.showAsInstallationOption,
+      reversePrintable: row.reversePrintable,
       widthMm: row.widthMm || null,
       lengthMm: row.lengthMm || null,
       rollWidthMm: row.rollWidthMm || null,
@@ -566,7 +573,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 2060, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
-              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Billing increment", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
+              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Billing increment", "Reverse printable", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
                 padding: "9px 8px",
                 borderBottom: "1px solid #e4e7ec",
                 whiteSpace: "nowrap",
@@ -630,6 +637,9 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                       <option value="1">1m</option>
                     </select>
                   ) : <span style={{ color: "#98a2b3", fontWeight: 700, paddingLeft: 8 }}>—</span>}
+                </td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 125, textAlign: "center" }}>
+                  {canonicalType(row.materialType) === "roll_media" ? <input type="checkbox" checked={row.reversePrintable} onChange={(event) => updateRow(row.key, "reversePrintable", event.target.checked)} title="Allow this clear roll media to be reverse printed for viewing through the face" /> : <span style={{ color: "#98a2b3", fontWeight: 700 }}>—</span>}
                 </td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "center" }}><input type="checkbox" checked={row.showAsInstallationOption} onChange={(event) => updateRow(row.key, "showAsInstallationOption", event.target.checked)} title="Show this material as a selectable item on Install quote lines" /></td>
                 <td style={{ padding: "5px 10px", borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "right", fontWeight: 850, color: "#0f766e", whiteSpace: "nowrap" }}>{money.format(unitCost(row))}</td>

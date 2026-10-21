@@ -687,6 +687,7 @@ export type MaterialPriceManagerChange = {
   purchaseCost: string;
   wastagePercent: string;
   showAsInstallationOption: boolean;
+  reversePrintable: boolean;
   widthMm: string | null;
   lengthMm: string | null;
   rollWidthMm: string | null;
@@ -801,6 +802,7 @@ export async function saveMaterialPriceManagerChanges(
       const purchaseCost = cleanMaterialManagerNumber(rawChange.purchaseCost) ?? "0";
       const wastagePercent = String(Math.max(0, Number(cleanMaterialManagerNumber(rawChange.wastagePercent) ?? "0") || 0));
       const showAsInstallationOption = rawChange.showAsInstallationOption === true;
+      const reversePrintable = rawChange.reversePrintable === true && materialType === "roll_media";
       const widthMm = cleanMaterialManagerNumber(rawChange.widthMm, true);
       const lengthMm = cleanMaterialManagerNumber(rawChange.lengthMm, true);
       const rollWidthMm = cleanMaterialManagerNumber(rawChange.rollWidthMm, true);
@@ -820,14 +822,14 @@ export async function saveMaterialPriceManagerChanges(
             stock_uom,purchase_uom,stock_quantity,purchase_cost,width_mm,length_mm,roll_width_mm,gsm,quote_visual_category,notes,cost_json,active,created_at,updated_at
           ) VALUES (
             $1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,
-            $21::numeric,$22::numeric,false,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$20::varchar,null,
+            $21::numeric,$22::numeric,$23::boolean,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$20::varchar,null,
             jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'priceManagerSource','in-app')
               || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END
               || CASE WHEN $20::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteVisualCategory',$20::text) END,
             true,now(),now()
           )
           RETURNING id
-        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres]);
+        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres, reversePrintable]);
         const id = created.rows[0]?.id;
         if (!id) throw new Error(`Could not add material '${name}'.`);
         createdIds.push(id);
@@ -845,6 +847,7 @@ export async function saveMaterialPriceManagerChanges(
             material_group=$9::varchar,
             minimum_billable_sheet_fraction=$22::numeric,
             roll_billing_increment_metres=$23::numeric,
+            reverse_printable=$24::boolean,
             stock_uom=$10::varchar,
             purchase_uom=$11::varchar,
             stock_quantity=$12::numeric,
@@ -861,7 +864,7 @@ export async function saveMaterialPriceManagerChanges(
             updated_at=now()
         WHERE tenant_id=$1::uuid AND id=$2::uuid
         RETURNING id
-      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres]);
+      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres, reversePrintable]);
       if (!result.rows[0]?.id) throw new Error(`Material '${name}' no longer exists.`);
       updatedIds.push(rawChange.id);
 
