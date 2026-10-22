@@ -1,16 +1,71 @@
 "use client";
 
-import { useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRef, useState, type FormEvent, type ReactNode } from "react";
+
+type CardSnapshot = Record<string, string>;
+
+const cardFields = ["name", "type", "speed", "equipment", "capacity", "print"] as const;
+
+function formString(formData: FormData, key: string): string {
+  return String(formData.get(key) ?? "").trim();
+}
+
+function optimisticCardValues(formData: FormData): CardSnapshot {
+  const maxStackSheets = Number(formString(formData, "maxStackSheets") || "0");
+  const maxWidthMm = formString(formData, "maxWidthMm");
+  const speedValue = formString(formData, "speedValue") || "0";
+  const speedUom = formString(formData, "speedUom").replaceAll("_", " ") || "sqm per hour";
+  const hourlyCost = formString(formData, "hourlyCost") || "0";
+  const setupMinutes = formString(formData, "setupMinutes") || "0";
+  const inkCostPerSqm = formString(formData, "inkCostPerSqm") || "0";
+  const colourImpressionCost = formString(formData, "colourImpressionCost") || "0";
+  const monoImpressionCost = formString(formData, "monoImpressionCost") || "0";
+
+  return {
+    name: formString(formData, "name"),
+    type: formString(formData, "machineType") || "other",
+    speed: `${speedValue} ${speedUom}`,
+    equipment: `$${hourlyCost}/hr · ${setupMinutes} min setup`,
+    capacity: maxStackSheets > 0
+      ? `${maxStackSheets} sheets per stack`
+      : maxWidthMm
+        ? `${maxWidthMm} mm max width`
+        : "No capacity limit set",
+    print: `Ink $${inkCostPerSqm}/m² · Colour $${colourImpressionCost}/side · Mono $${monoImpressionCost}/side`,
+  };
+}
+
+function machineCard(machineId: string): HTMLElement | null {
+  return document.querySelector<HTMLElement>(`[data-machine-card-id="${CSS.escape(machineId)}"]`);
+}
+
+function captureCard(machineId: string): CardSnapshot {
+  const root = machineCard(machineId);
+  const snapshot: CardSnapshot = {};
+  if (!root) return snapshot;
+  for (const field of cardFields) {
+    snapshot[field] = root.querySelector<HTMLElement>(`[data-machine-field="${field}"]`)?.textContent ?? "";
+  }
+  return snapshot;
+}
+
+function applyCard(machineId: string, values: CardSnapshot): void {
+  const root = machineCard(machineId);
+  if (!root) return;
+  for (const field of cardFields) {
+    const value = values[field];
+    if (value === undefined) continue;
+    const node = root.querySelector<HTMLElement>(`[data-machine-field="${field}"]`);
+    if (node) node.textContent = value;
+  }
+}
 
 export function MachineEditForm({ machineId, tenantId, children }: { machineId: string; tenantId: string; children: ReactNode }) {
-  const router = useRouter();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
-  const [, startRefresh] = useTransition();
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -18,7 +73,14 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
 
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const nextValues = optimisticCardValues(formData);
+    const previousValues = captureCard(machineId);
     const requestStartedAt = performance.now();
+
+    // Editing equipment should feel instant. Update the visible card and close the
+    // editor immediately; the authenticated database save continues in the background.
+    applyCard(machineId, nextValues);
+    if (detailsRef.current) detailsRef.current.open = false;
     setPending(true);
     setStatus("idle");
     setMessage("");
@@ -44,14 +106,9 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
         throw new Error(payload.error || "Machine could not be saved.");
       }
 
-      const savedName = String(payload.machine?.name ?? formData.get("name") ?? "").trim();
-      const nameNode = document.querySelector<HTMLElement>(`[data-machine-name-id="${CSS.escape(machineId)}"]`);
-      if (nameNode && savedName) nameNode.textContent = savedName;
-
       formRef.current?.removeAttribute("data-production-manager-unsaved");
       setStatus("success");
-      setMessage(payload.message || `${savedName || "Machine"} saved`);
-      if (detailsRef.current) detailsRef.current.open = false;
+      setMessage(payload.message || `${nextValues.name || "Machine"} saved`);
 
       console.info("[machine-save-client]", {
         machineId,
@@ -61,10 +118,10 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
         dbElapsedMs: payload.dbElapsedMs ?? null,
         runtimeRegion: payload.runtimeRegion ?? null,
       });
-
-      // Reconcile the server-rendered machine list after the UI has already updated.
-      startRefresh(() => router.refresh());
     } catch (error) {
+      // A failed optimistic save must never leave the screen claiming values that
+      // were not persisted. Restore the previous card and reopen the editor.
+      applyCard(machineId, previousValues);
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Machine could not be saved.");
       if (detailsRef.current) detailsRef.current.open = true;
@@ -76,7 +133,7 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
   return <div style={{ display: "grid", gap: 5, justifyItems: "end" }}>
     <details ref={detailsRef}>
       <summary style={{ listStyle: "none", cursor: "pointer", border: "1px solid #94a3b8", borderRadius: 9, padding: "8px 10px", fontWeight: 800 }}>
-        {pending ? "Saving…" : "Edit"}
+        Edit
       </summary>
       <div
         style={{

@@ -20,6 +20,7 @@ export async function updateSession(request: NextRequest): Promise<NextResponse>
   if (
     (request.headers.has("next-action") && request.nextUrl.pathname.startsWith("/quotes"))
     || request.nextUrl.pathname === "/api/quotes/line"
+    || (request.method === "PATCH" && request.nextUrl.pathname.startsWith("/api/machines/"))
   ) {
     return NextResponse.next({ request });
   }

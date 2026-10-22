@@ -218,11 +218,11 @@ export default async function MachinesPage() {
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(360px,1fr))", gap: 14 }}>
         {rows.map((r: any) => {
           return (
-            <article key={r.id} style={{ ...card, opacity: r.active ? 1 : 0.62, position: "relative" }}>
+            <article key={r.id} data-machine-card-id={r.id} style={{ ...card, opacity: r.active ? 1 : 0.62, position: "relative" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
                 <div>
-                  <h3 data-machine-name-id={r.id} style={{ margin: "0 0 6px", fontSize: 22 }}>{r.name}</h3>
-                  <div style={{ color: "#64748b", textTransform: "capitalize" }}>{r.machineType}</div>
+                  <h3 data-machine-field="name" style={{ margin: "0 0 6px", fontSize: 22 }}>{r.name}</h3>
+                  <div data-machine-field="type" style={{ color: "#64748b", textTransform: "capitalize" }}>{r.machineType}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
                   <MachineEditForm machineId={r.id} tenantId={t.tenantId}>
@@ -241,19 +241,19 @@ export default async function MachinesPage() {
               <div className="machine-metrics" style={{ marginTop: 14 }}>
                 <div className="machine-metric">
                   <span className="machine-metric-label">Speed</span>
-                  <span className="machine-metric-value">{r.speedValue} {r.speedUom.replaceAll("_", " ")}</span>
+                  <span data-machine-field="speed" className="machine-metric-value">{r.speedValue} {r.speedUom.replaceAll("_", " ")}</span>
                 </div>
                 <div className="machine-metric">
                   <span className="machine-metric-label">Equipment cost</span>
-                  <span className="machine-metric-value">${r.hourlyCost}/hr · {r.setupMinutes} min setup</span>
+                  <span data-machine-field="equipment" className="machine-metric-value">${r.hourlyCost}/hr · {r.setupMinutes} min setup</span>
                 </div>
                 <div className="machine-metric">
                   <span className="machine-metric-label">Capacity</span>
-                  <span className="machine-metric-value">{Number(r.maxStackSheets) > 0 ? `${r.maxStackSheets} sheets per stack` : r.maxWidthMm ? `${r.maxWidthMm} mm max width` : "No capacity limit set"}</span>
+                  <span data-machine-field="capacity" className="machine-metric-value">{Number(r.maxStackSheets) > 0 ? `${r.maxStackSheets} sheets per stack` : r.maxWidthMm ? `${r.maxWidthMm} mm max width` : "No capacity limit set"}</span>
                 </div>
                 <div className="machine-metric">
                   <span className="machine-metric-label">Print costing</span>
-                  <span className="machine-metric-value">
+                  <span data-machine-field="print" className="machine-metric-value">
                     Ink ${r.inkCostPerSqm}/m² · Colour ${r.colourImpressionCost}/side · Mono ${r.monoImpressionCost}/side
                   </span>
                 </div>
