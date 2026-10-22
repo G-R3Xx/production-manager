@@ -68,7 +68,16 @@ export function RouteTransitionOverlay() {
     function handleSubmit(event: SubmitEvent) {
       const target = event.target as HTMLFormElement | null;
       if (!target || target.dataset.noGlobalLoader === "true") return;
-      startLoading("Saving your changes…", 0);
+
+      // This listener runs in capture phase so React/client submit handlers have not
+      // had a chance to call preventDefault() yet. Starting the global loader here
+      // traps client-managed forms (machine editor, inline saves, etc.) behind an
+      // overlay even though they never navigate. Defer one task so the submit can
+      // finish propagating, then only show the route loader for a real/native submit.
+      window.setTimeout(() => {
+        if (event.defaultPrevented || target.dataset.noGlobalLoader === "true") return;
+        startLoading("Saving your changes…", 0);
+      }, 0);
     }
 
     function handlePageShow() {

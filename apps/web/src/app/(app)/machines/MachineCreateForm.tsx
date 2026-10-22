@@ -38,7 +38,7 @@ export function MachineCreateForm({ tenantId, children }: { tenantId: string; ch
   }
 
   return (
-    <form onSubmit={handleSubmit} style={{ display: "grid", gap: 12, marginTop: 16 }}>
+    <form data-no-global-loader="true" onSubmit={handleSubmit} style={{ display: "grid", gap: 12, marginTop: 16 }}>
       {children}
       {error ? <div style={{ color: "#b42318", fontWeight: 800 }}>{error}</div> : null}
       {message ? <div style={{ color: "#15803d", fontWeight: 800 }}>{message}</div> : null}

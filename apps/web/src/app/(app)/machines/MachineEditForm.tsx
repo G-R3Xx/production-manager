@@ -124,6 +124,7 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
         <div style={{ width: "min(980px,calc(100vw - 40px))", maxHeight: "calc(100vh - 40px)", overflowY: "auto", overscrollBehavior: "contain", border: "1px solid #dbe4f0", borderRadius: 16, background: "#fff", boxShadow: "0 20px 60px rgba(15,23,42,.28)" }}>
         <form
           ref={formRef}
+          data-no-global-loader="true"
           onSubmit={handleSubmit}
           style={{ display: "grid", gap: 12, padding: 18 }}
         >
