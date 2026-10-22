@@ -76,8 +76,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           <div>
             <h1 style={{ margin: 0, fontSize: 36, letterSpacing: "-0.04em" }}>Registered staff access</h1>
             <p style={{ margin: "10px 0 0", color: "#475467", lineHeight: 1.6, maxWidth: 760 }}>
-              Review everyone who has joined <strong>{activeTenant.tenantName}</strong>, change their role, or disable access without deleting their history.
+              Review everyone who has joined <strong>{activeTenant.tenantName}</strong>, edit their names and role, or disable access without deleting their history.
             </p>
+            <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>Short names appear in staff assignments. Name changes apply wherever this staff profile is used.</p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <span style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "8px 12px", fontWeight: 900 }}>{summary.activeUsers} active</span>
@@ -132,11 +133,29 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                   return (
                     <tr key={row.membershipId} style={{ background: isDisabled ? "#f8fafc" : "#ffffff" }}>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <div style={{ fontWeight: 950, color: "#0f172a" }}>{row.fullName || row.email}</div>
-                        <div style={{ marginTop: 5, color: "#64748b", fontSize: 13 }}>
-                          Short name: <strong>{row.shortName || "—"}</strong>
-                          {isCurrentUser ? <span style={{ marginLeft: 8, color: "#2563eb", fontWeight: 900 }}>(you)</span> : null}
-                        </div>
+                        {canEdit ? (
+                          <div style={{ display: "grid", gap: 9, minWidth: 210 }}>
+                            <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#64748b", fontWeight: 800 }}>
+                              Full name
+                              <input form={`staff-${row.membershipId}`} name="fullName" defaultValue={row.fullName} required maxLength={200}
+                                style={{ width: "100%", boxSizing: "border-box", minHeight: 40, borderRadius: 10, border: "1px solid #cbd5e1", padding: "0 10px", color: "#0f172a", fontWeight: 800 }} />
+                            </label>
+                            <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#64748b", fontWeight: 800 }}>
+                              Short name
+                              <input form={`staff-${row.membershipId}`} name="shortName" defaultValue={row.shortName} required maxLength={50} placeholder="e.g. Glen"
+                                style={{ width: "100%", boxSizing: "border-box", minHeight: 40, borderRadius: 10, border: "1px solid #cbd5e1", padding: "0 10px", color: "#0f172a", fontWeight: 800 }} />
+                            </label>
+                            {isCurrentUser ? <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 900 }}>(you)</span> : null}
+                          </div>
+                        ) : (
+                          <>
+                            <div style={{ fontWeight: 950, color: "#0f172a" }}>{row.fullName || row.email}</div>
+                            <div style={{ marginTop: 5, color: "#64748b", fontSize: 13 }}>
+                              Short name: <strong>{row.shortName || "—"}</strong>
+                              {isCurrentUser ? <span style={{ marginLeft: 8, color: "#2563eb", fontWeight: 900 }}>(you)</span> : null}
+                            </div>
+                          </>
+                        )}
                       </td>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
                         <div style={{ fontWeight: 800, color: "#334155" }}>{row.email}</div>

@@ -1,7 +1,9 @@
 "use client";
 
-import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { Profiler, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { machineValuesFromFormData, updateMachineRpc } from "./machineRpc";
+
+import { useMachineTiming } from "./machineTiming";
 
 type CardSnapshot = Record<string, string>;
 
@@ -55,6 +57,7 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
   const [pending, setPending] = useState(false);
+  const timing = useMachineTiming(pending);
   const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
 
@@ -62,33 +65,39 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
     event.preventDefault();
     if (pending) return;
 
+    const trace = timing.begin("edit", event.timeStamp);
+    trace.detail("routerRefresh", "not requested");
     const form = event.currentTarget;
     const formData = new FormData(form);
+    const values = machineValuesFromFormData(formData);
+    if (!values.name) {
+      setStatus("error");
+      setMessage("Machine name is required.");
+      trace.finish("validation-error");
+      return;
+    }
     const nextValues = optimisticCardValues(formData);
     const previousValues = captureCard(machineId);
-    const requestStartedAt = performance.now();
+    trace.mark("formRead");
 
     // Editing equipment should feel instant. Update the visible card and close the
     // editor immediately; the authenticated database save continues in the background.
     applyCard(machineId, nextValues);
     if (detailsRef.current) detailsRef.current.open = false;
+    trace.mark("modalClosed");
+    trace.paint("modalClosedFrameOpportunity");
     setPending(true);
     setStatus("idle");
     setMessage("");
 
     try {
-      const values = machineValuesFromFormData(formData);
-      await updateMachineRpc(tenantId, machineId, values);
+      await updateMachineRpc(tenantId, machineId, values, trace);
 
       formRef.current?.removeAttribute("data-production-manager-unsaved");
       setStatus("success");
       setMessage(`${nextValues.name || "Machine"} saved`);
 
-      console.info("[machine-save-client]", {
-        machineId,
-        requestElapsedMs: Math.round(performance.now() - requestStartedAt),
-        transport: "supabase-rpc",
-      });
+      trace.finish("success");
     } catch (error) {
       // A failed optimistic save must never leave the screen claiming values that
       // were not persisted. Restore the previous card and reopen the editor.
@@ -96,14 +105,16 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
       setStatus("error");
       setMessage(error instanceof Error ? error.message : "Machine could not be saved.");
       if (detailsRef.current) detailsRef.current.open = true;
+      trace.mark("rollbackAndModalReopened");
+      trace.finish("error");
     } finally {
       setPending(false);
     }
   }
 
-  return <div style={{ display: "grid", gap: 5, justifyItems: "end" }}>
+  return <Profiler id="machine-edit" onRender={timing.onRender}><div style={{ display: "grid", gap: 5, justifyItems: "end" }}>
     <details ref={detailsRef}>
-      <summary style={{ listStyle: "none", cursor: "pointer", border: "1px solid #94a3b8", borderRadius: 9, padding: "8px 10px", fontWeight: 800 }}>
+      <summary onClick={(event) => { if (pending) event.preventDefault(); }} aria-disabled={pending} style={{ listStyle: "none", cursor: "pointer", border: "1px solid #94a3b8", borderRadius: 9, padding: "8px 10px", fontWeight: 800 }}>
         Edit
       </summary>
       <div
@@ -123,8 +134,10 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
       >
         <div style={{ width: "min(980px,calc(100vw - 40px))", maxHeight: "calc(100vh - 40px)", overflowY: "auto", overscrollBehavior: "contain", border: "1px solid #dbe4f0", borderRadius: 16, background: "#fff", boxShadow: "0 20px 60px rgba(15,23,42,.28)" }}>
         <form
-          ref={formRef}
           data-no-global-loader="true"
+          onClickCapture={(event) => { if ((event.target as Element).closest("button[type=submit], button:not([type])")) timing.interaction.current = event.timeStamp; }}
+          onKeyDownCapture={(event) => { if (event.key === "Enter") timing.interaction.current = event.timeStamp; }}
+          ref={formRef}
           onSubmit={handleSubmit}
           style={{ display: "grid", gap: 12, padding: 18 }}
         >
@@ -143,5 +156,5 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
     </details>
     {pending ? <span style={{ color: "#2563eb", fontSize: 11, fontWeight: 900 }}>Saving…</span> : null}
     {!pending && status === "success" ? <span style={{ color: "#15803d", fontSize: 11, fontWeight: 900 }}>{message}</span> : null}
-  </div>;
+  </div></Profiler>;
 }

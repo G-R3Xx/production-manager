@@ -1,6 +1,7 @@
 import "server-only";
 
 import { pool } from "@production-manager/db";
+import { staffProfileNamesSchema } from "@/lib/staff-profile";
 import { relationHasColumns } from "@/server/schema-readiness";
 
 export type TenantRoleValue = "owner" | "manager" | "staff" | "sales" | "installer" | "accounts";
@@ -232,6 +233,8 @@ export async function getTenantStaffSummary(tenantId: string): Promise<TenantSta
 export async function updateTenantUserMembershipByAdmin(input: {
   tenantId: string;
   membershipId: string;
+  fullName: string;
+  shortName: string;
   requesterUserProfileId: string;
   requesterTenantRole: string;
   tenantRole: string;
@@ -239,7 +242,11 @@ export async function updateTenantUserMembershipByAdmin(input: {
   quoteLabourRate?: string | null;
   quoteEntryLayout?: string | null;
 }): Promise<void> {
-  if (!process.env.DATABASE_URL) return;
+  if (!process.env.DATABASE_URL) throw new Error("Staff changes cannot be saved because the database is not configured.");
+
+  const parsedNames = staffProfileNamesSchema.safeParse(input);
+  if (!parsedNames.success) throw new Error(parsedNames.error.issues[0]?.message ?? "Please check the staff names.");
+  const { fullName, shortName } = parsedNames.data;
 
   await ensureStaffPricingColumn();
 
@@ -357,6 +364,15 @@ export async function updateTenantUserMembershipByAdmin(input: {
           AND tenant_id = $4
       `,
       [input.membershipId, nextRole, nextStatus, input.tenantId, quoteLabourRate, nextQuoteEntryLayout]
+    );
+
+    // Update the profile only after the tenant membership and admin checks above.
+    // Both changes commit together; profile IDs and all assignments stay intact.
+    await client.query(
+      `UPDATE app.user_profiles
+       SET full_name = $2, short_name = $3, updated_at = NOW()
+       WHERE id = $1`,
+      [target.userProfileId, fullName, shortName]
     );
 
     await client.query("COMMIT");

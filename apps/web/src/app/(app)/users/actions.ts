@@ -1,12 +1,14 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+import { staffProfileNamesSchema } from "@/lib/staff-profile";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { updateTenantUserMembershipByAdmin } from "@/server/users";
 
-const updateStaffSchema = z.object({
+const updateStaffSchema = staffProfileNamesSchema.extend({
   membershipId: z.string().uuid("Missing staff member."),
   tenantRole: z.enum(["owner", "manager", "staff", "sales", "installer", "accounts"]),
   membershipStatus: z.enum(["active", "invited", "disabled"]),
@@ -24,6 +26,8 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
 
   const parsed = updateStaffSchema.safeParse({
     membershipId: String(formData.get("membershipId") || ""),
+    fullName: String(formData.get("fullName") || ""),
+    shortName: String(formData.get("shortName") || ""),
     tenantRole: String(formData.get("tenantRole") || "staff"),
     membershipStatus: String(formData.get("membershipStatus") || "active"),
     quoteLabourRate: String(formData.get("quoteLabourRate") || ""),
@@ -39,6 +43,8 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
     await updateTenantUserMembershipByAdmin({
       tenantId: activeTenant.tenantId,
       membershipId: parsed.data.membershipId,
+      fullName: parsed.data.fullName,
+      shortName: parsed.data.shortName,
       requesterUserProfileId: activeTenant.userProfileId,
       requesterTenantRole: activeTenant.tenantRole,
       tenantRole: parsed.data.tenantRole,
@@ -51,5 +57,7 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
     redirect(`/users?error=${encodeURIComponent(message)}`);
   }
 
+  // Staff names appear throughout assignments, calendars and job screens.
+  revalidatePath("/", "layout");
   redirect("/users?message=Staff%20member%20updated");
 }

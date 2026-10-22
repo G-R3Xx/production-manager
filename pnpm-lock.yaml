@@ -1387,7 +1387,7 @@ packages:
     resolution: {integrity: sha512-FdW9r/jQZhSeohs1Z3sI1yxFQNFvMcnmfuj4WBMUTxOrAyLMaTcE1aAMBiTlbMNaXvBCQuVi0R7hd8udDSP7ug==}
 
   pantoner@1.1.2:
-    resolution: {tarball: https://registry.npmjs.org/pantoner/-/pantoner-1.1.2.tgz}
+    resolution: {integrity: sha512-SUgz33HOBE/uqKVhT2w4qxSDpUpgz5jnxhXXFZft61Lozt6DuIfNWqahRogq3jDxkgbEBz9LbfX1pq86AJHygQ==, tarball: https://registry.npmjs.org/pantoner/-/pantoner-1.1.2.tgz}
 
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}

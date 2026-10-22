@@ -1,0 +1,91 @@
+{
+  "environment": "Local Chromium / React dev; simulated Supabase and router, not live infrastructure",
+  "results": [
+    {
+      "case": "baseline: overlay outlives successful save",
+      "blockingElapsedMs": 18342.29999999993,
+      "rpcNetworkMs": 159.5
+    },
+    {
+      "case": "fixed: immediate edit UI with slow simulated RPC",
+      "trace": {
+        "version": "V26.10.22.04",
+        "operation": "edit",
+        "outcome": "success",
+        "marksMs": {
+          "handlerStarted": 8.199999999953434,
+          "formRead": 9.199999999953434,
+          "modalClosed": 9.29999999993015,
+          "rpcStarted": 9.5,
+          "clientReady": 9.5,
+          "pendingReactCommit": 17.699999999953434,
+          "modalClosedFrameOpportunity": 26,
+          "pendingFrameOpportunity": 26,
+          "rpcResolved": 1530.6999999999534,
+          "settledReactCommit": 1533.5999999999767,
+          "settledFrameOpportunity": 1559.5,
+          "reportFrame": 1576.1999999999534
+        },
+        "reactRenders": [
+          {
+            "phase": "update",
+            "atMs": 17.699999999953434,
+            "durationMs": 0.6000000000931323
+          },
+          {
+            "phase": "update",
+            "atMs": 1533.5999999999767,
+            "durationMs": 0.30000000004656613
+          }
+        ],
+        "reactRenderNote": "Profiler durations require a development/profiling build; commit/frame timings also work in production.",
+        "routerRefresh": "not requested",
+        "rpcDurationMs": 1521.3999999999069,
+        "database": {
+          "functionMs": 3,
+          "authorizationMs": 1,
+          "beforeWriteMs": 0,
+          "writeMs": 2
+        },
+        "network": [
+          {
+            "kind": "supabase-rpc",
+            "startMs": 10.099999999976717,
+            "durationMs": 1518.2999999999302,
+            "requestStartMs": null,
+            "ttfbMs": null,
+            "downloadMs": null
+          }
+        ]
+      }
+    },
+    {
+      "case": "failed edit: card restored, values retained, editor reopened",
+      "passed": true
+    },
+    {
+      "case": "empty name: no RPC or global overlay",
+      "passed": true
+    },
+    {
+      "case": "create: local feedback, reset and refresh requested",
+      "passed": true
+    },
+    {
+      "case": "duplicate: RPC and refresh requested",
+      "passed": true
+    },
+    {
+      "case": "linked delete error: card restored and error visible",
+      "passed": true
+    },
+    {
+      "case": "successful delete: hidden without refresh",
+      "passed": true
+    },
+    {
+      "case": "ordinary forms retain global loading overlay",
+      "passed": true
+    }
+  ]
+}

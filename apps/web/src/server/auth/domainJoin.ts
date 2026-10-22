@@ -60,7 +60,8 @@ function titleCase(value: string): string {
 
 function deriveFullName(email: string, suppliedName?: string | null): string {
   const cleaned = String(suppliedName ?? "").trim();
-  if (cleaned) return cleaned.slice(0, 200);
+  // Some providers supply the email as the display name. Do not copy it into names.
+  if (cleaned && !cleaned.includes("@")) return cleaned.slice(0, 200);
 
   const localPart = email.split("@")[0] ?? "Team Member";
   return titleCase(localPart) || "Team Member";
@@ -355,8 +356,8 @@ export async function ensureDomainAutoJoinForAuthUser(input: {
           VALUES ($1, $2, $3, $4)
           ON CONFLICT (auth_user_id)
           DO UPDATE SET
-            full_name = COALESCE(NULLIF(EXCLUDED.full_name, ''), app.user_profiles.full_name),
-            short_name = COALESCE(NULLIF(app.user_profiles.short_name, ''), EXCLUDED.short_name),
+            full_name = COALESCE(NULLIF(btrim(app.user_profiles.full_name), ''), EXCLUDED.full_name),
+            short_name = COALESCE(NULLIF(btrim(app.user_profiles.short_name), ''), EXCLUDED.short_name),
             email = EXCLUDED.email,
             updated_at = NOW()
           RETURNING id
