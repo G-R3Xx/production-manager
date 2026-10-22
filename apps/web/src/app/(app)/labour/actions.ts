@@ -50,9 +50,9 @@ export async function createLabourAction(formData: FormData) {
   if (!tenant) redirect("/bootstrap");
 
   const values = labourInput(formData, tenant.tenantId);
-  if (!values.name) redirect("/operations?error=Operation%20name%20is%20required");
+  if (!values.name) redirect("/operations?error=Production%20Step%20name%20is%20required");
   await createLabour(values);
-  redirect("/operations?message=Operation%20created");
+  redirect("/operations?message=Production%20Step%20created");
 }
 
 export async function updateLabourAction(formData: FormData) {
@@ -62,9 +62,9 @@ export async function updateLabourAction(formData: FormData) {
 
   const values = labourInput(formData, tenant.tenantId);
   const id = stringValue(formData, "id");
-  if (!id || !values.name) redirect("/operations?error=Operation%20name%20is%20required");
+  if (!id || !values.name) redirect("/operations?error=Production%20Step%20name%20is%20required");
   await updateLabour({ ...values, id });
-  redirect("/operations?message=Operation%20updated");
+  redirect("/operations?message=Production%20Step%20updated");
 }
 
 export async function setLabourActiveAction(formData: FormData) {

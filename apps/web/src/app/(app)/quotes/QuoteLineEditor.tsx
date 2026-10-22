@@ -949,7 +949,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
             <section style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 7 }}>
               <input type="hidden" name="productPricingMode" value="current_price" />
               <strong>Saved product uses the simplified costing model</strong>
-              <small style={{ color: "#64748b", lineHeight: 1.5 }}>Materials remain product choices. Manufacturing cost comes from the matching Operations (machine + labour + consumable) when quoted; no Production Method pricing is copied.</small>
+              <small style={{ color: "#64748b", lineHeight: 1.5 }}>Materials remain product choices. Manufacturing cost comes from the matching Production Steps (equipment + labour + consumable) when quoted; no Production Method pricing is copied.</small>
             </section>
           ) : (
             <section style={{ border: "1px solid #dfe7f2", borderRadius: 14, padding: 12, background: "#fff", display: "grid", gap: 9 }}>

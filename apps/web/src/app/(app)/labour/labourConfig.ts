@@ -22,8 +22,8 @@ export const LABOUR_BASIS_OPTIONS: LabourBasisOption[] = [
     value: "fixed_minutes",
     label: "One fixed time",
     shortLabel: "fixed job",
-    description: "Charge the same amount of time whenever this operation is used. Best for setup, file checks and packing.",
-    inputLabel: "Minutes for the whole operation",
+    description: "Charge the same amount of time whenever this Production Step is used. Best for setup, file checks and packing.",
+    inputLabel: "Minutes for the whole step",
     unitLabel: "per use",
     exampleQuantity: 1,
     exampleQuantityLabel: "each use"
@@ -60,10 +60,10 @@ export const LABOUR_BASIS_OPTIONS: LabourBasisOption[] = [
   },
   {
     value: "per_item_hours",
-    label: "Time per operation unit / item",
+    label: "Time per Production Step unit / item",
     shortLabel: "unit",
-    description: "Time grows with the operation quantity. Best for eyelets, spiral binding, book taping, drilling and individual assembly.",
-    inputLabel: "Minutes per operation unit",
+    description: "Time grows with the step quantity. Best for eyelets, spiral binding, book taping, drilling and individual assembly.",
+    inputLabel: "Minutes per step unit",
     unitLabel: "per unit",
     exampleQuantity: 10,
     exampleQuantityLabel: "10 items"

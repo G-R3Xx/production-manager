@@ -173,7 +173,7 @@ function previewUnitLabel(basis: LabourBasis): string {
   if (basis === "per_sqm_hours") return "1 m²";
   if (basis === "per_sheet_hours") return "1 sheet";
   if (basis === "per_linear_metre_hours") return "1 linear metre";
-  if (basis === "per_item_hours") return "1 operation unit";
+  if (basis === "per_item_hours") return "1 Production Step unit";
   return "Calculated on quote";
 }
 
@@ -181,7 +181,7 @@ function materialBasisLabel(basis: string): string {
   if (basis === "per_linear_metre") return "linear metre";
   if (basis === "per_sqm") return "m²";
   if (basis === "per_finished_item") return "finished item";
-  return "operation unit";
+  return "Production Step unit";
 }
 
 export function LabourOperationForm({
@@ -216,7 +216,6 @@ export function LabourOperationForm({
   const basisDetails = LABOUR_BASIS_OPTIONS.find((option) => option.value === basis) ?? LABOUR_BASIS_OPTIONS[0]!;
   const selectedStaff = staff.find((item) => item.userProfileId === labourUserProfileId) ?? null;
   const rate = Math.max(0, Number(selectedStaff?.quoteLabourRate ?? defaultLabourRate) || 0);
-  const labourSourceName = selectedStaff?.fullName ?? "Factory default";
   const minutesNumber = Math.max(0, Number(minutes) || 0);
   const minimumNumber = Math.max(0, Number(minimumMinutes) || 0);
 
@@ -240,7 +239,7 @@ export function LabourOperationForm({
         totalCost: null as number | null,
         totalLabel: "Calculated on quote",
         sampleDetail: selectedMachine
-          ? `${selectedMachine.name} setup + runtime and labour are calculated together on the quote. Markup and profit are applied later.`
+          ? `${selectedMachine.name} equipment cost and operator labour are calculated separately inside this Production Step. Markup and profit are applied later.`
           : "Raw shop cost only — markup, profit and client pricing are applied later on the quote."
       };
     }
@@ -280,7 +279,7 @@ export function LabourOperationForm({
     const sampleMinutes = Math.max(sampleRawMinutes, minimumNumber);
     const sampleLabourCost = sampleMinutes / 60 * rate;
     let sampleDetail = selectedMachine
-      ? `${selectedMachine.name} machine cost is added from its setup + runtime when the quote dimensions are known. The amount above is labour/consumable only.`
+      ? `${selectedMachine.name} equipment cost is added from its setup + runtime when the quote dimensions are known. The amount above is labour/consumable only.`
       : "Raw shop cost only — markup, profit and client pricing are applied later on the quote.";
 
     if (selectedConsumable && materialCost !== null && basis !== "fixed_minutes" && sampleQuantity > 1) {
@@ -300,7 +299,7 @@ export function LabourOperationForm({
       totalLabel: totalCost === null
         ? "Calculated on quote"
         : selectedMachine
-          ? `${money(totalCost)} + machine`
+          ? `${money(totalCost)} + equipment`
           : money(totalCost),
       sampleDetail
     };
@@ -320,74 +319,45 @@ export function LabourOperationForm({
       {initialValues?.id ? <input type="hidden" name="id" value={initialValues.id} /> : null}
 
       {mode === "create" ? (
-        <div className={styles.templateSection}>
-          <div>
-            <div className={styles.stepEyebrow}>Quick start</div>
-            <h3 className={styles.sectionTitle}>Start with a common operation</h3>
-            <p className={styles.helpText}>Choose a starting point, then adjust it below. Nothing is saved until you select Add operation.</p>
-          </div>
+        <details className={styles.templateSection}>
+          <summary style={{ cursor: "pointer", fontWeight: 900, color: "#334155" }}>Quick-start presets</summary>
+          <p className={styles.helpText}>Optional: choose a common Production Step as a starting point, then adjust the fields below.</p>
           <div className={styles.templateGrid}>
             {TEMPLATES.map((template) => (
-              <button
-                key={template.label}
-                type="button"
-                className={styles.templateButton}
-                onClick={() => applyTemplate(template)}
-              >
-                <strong>{template.label}</strong>
-                <span>{template.description}</span>
+              <button key={template.label} type="button" className={styles.templateButton} onClick={() => applyTemplate(template)}>
+                <strong>{template.label}</strong><span>{template.description}</span>
               </button>
             ))}
           </div>
-        </div>
+        </details>
       ) : null}
 
       <section className={styles.formSection}>
         <div className={styles.stepNumber}>1</div>
         <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>What operation is this?</h3>
-          <p className={styles.helpText}>Give it the name staff recognise. This one operation can carry its consumable and labour rule together.</p>
+          <h3 className={styles.sectionTitle}>Production Step</h3>
+          <p className={styles.helpText}>Name the work staff recognise, then optionally choose the equipment it uses.</p>
           <div className={styles.twoColumnGrid}>
             <label className={styles.fieldLabel}>
-              Operation name
-              <input
-                required
-                name="name"
-                value={name}
-                onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)}
-                className={styles.input}
-                placeholder="e.g. Mount vinyl to panel"
-              />
+              Step name
+              <input required name="name" value={name} onChange={(event: ChangeEvent<HTMLInputElement>) => setName(event.target.value)} className={styles.input} placeholder="e.g. Direct Print" />
             </label>
             <label className={styles.fieldLabel}>
               Work area
-              <select
-                name="department"
-                value={department}
-                onChange={(event: ChangeEvent<HTMLSelectElement>) => setDepartment(event.target.value)}
-                className={styles.input}
-              >
-                {DEPARTMENTS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
+              <select name="department" value={department} onChange={(event: ChangeEvent<HTMLSelectElement>) => setDepartment(event.target.value)} className={styles.input}>
+                {DEPARTMENTS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
               </select>
-              <span className={styles.fieldHint}>This only helps organise the list; it does not change the price.</span>
             </label>
           </div>
-          <label className={styles.fieldLabel} style={{ marginTop: 14 }}>
-            Machine (optional)
-            <select
-              name="machineId"
-              value={machineId}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => setMachineId(event.target.value)}
-              className={styles.input}
-            >
-              <option value="">No machine cost</option>
+          <label className={styles.fieldLabel}>
+            Machine / equipment <span style={{ color: "#94a3b8", fontWeight: 600 }}>(optional)</span>
+            <select name="machineId" value={machineId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setMachineId(event.target.value)} className={styles.input}>
+              <option value="">No equipment cost</option>
               {machines.filter((machine) => machine.active || machine.id === machineId).map((machine) => (
                 <option key={machine.id} value={machine.id}>{machine.name}{machine.active ? "" : " · archived"}</option>
               ))}
             </select>
-            <span className={styles.fieldHint}>If selected, this operation charges that machine's setup + run cost once. Do not create a separate Process for the same work.</span>
+            <span className={styles.fieldHint}>Equipment only contributes its running/setup cost. It never contributes labour.</span>
           </label>
         </div>
       </section>
@@ -395,8 +365,54 @@ export function LabourOperationForm({
       <section className={styles.formSection}>
         <div className={styles.stepNumber}>2</div>
         <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>Does it use a material or consumable?</h3>
-          <p className={styles.helpText}>Optional. Link the item once and PM can consume it automatically whenever this operation is used.</p>
+          <h3 className={styles.sectionTitle}>Operator labour</h3>
+          <p className={styles.helpText}>Choose the normal labour rate and how operator time grows. This is the only labour charge for this Production Step.</p>
+          <div className={styles.twoColumnGrid}>
+            <label className={styles.fieldLabel}>
+              Labour rate
+              <select name="labourUserProfileId" value={labourUserProfileId} onChange={(event: ChangeEvent<HTMLSelectElement>) => setLabourUserProfileId(event.target.value)} className={styles.input}>
+                <option value="">Factory default · {money(Math.max(0, Number(defaultLabourRate) || 0))}/hr</option>
+                {staff.map((item) => {
+                  const staffRate = Math.max(0, Number(item.quoteLabourRate ?? defaultLabourRate) || 0);
+                  return <option key={item.userProfileId} value={item.userProfileId}>{item.fullName} · {money(staffRate)}/hr{item.quoteLabourRate == null ? " (factory rate)" : ""}</option>;
+                })}
+              </select>
+              <span className={styles.fieldHint}>Rates are maintained under Staff / Company settings.</span>
+            </label>
+            <label className={styles.fieldLabel}>
+              Operator time is calculated
+              <select name="calculationBasis" value={basis} onChange={(event: ChangeEvent<HTMLSelectElement>) => setBasis(event.target.value as LabourBasis)} className={styles.input}>
+                {LABOUR_BASIS_OPTIONS.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <span className={styles.fieldHint}>{basisDetails.description}</span>
+            </label>
+          </div>
+
+          <div className={styles.timeInputs}>
+            <label className={styles.fieldLabel}>
+              {basisDetails.inputLabel}
+              <div className={styles.unitInputWrap}>
+                <input required name="timeMinutes" type="number" min="0" step={basis === "guillotine_stacks" ? "1" : "0.01"} value={minutes} onChange={(event: ChangeEvent<HTMLInputElement>) => setMinutes(event.target.value)} className={styles.input} />
+                <span>{basis === "guillotine_stacks" ? "cuts" : "minutes"}</span>
+              </div>
+              {basis === "guillotine_stacks" ? <span className={styles.fieldHint}>The selected guillotine supplies cuts/minute and stack capacity from Manage equipment.</span> : null}
+            </label>
+            <label className={styles.fieldLabel}>
+              Minimum operator time
+              <div className={styles.unitInputWrap}>
+                <input name="minimumMinutes" type="number" min="0" step="0.01" value={minimumMinutes} onChange={(event: ChangeEvent<HTMLInputElement>) => setMinimumMinutes(event.target.value)} className={styles.input} />
+                <span>minutes</span>
+              </div>
+              <span className={styles.fieldHint}>Use 0 when no minimum is needed.</span>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <details style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 900, color: "#334155" }}>Optional consumable</summary>
+        <div className={styles.sectionContent} style={{ marginTop: 14 }}>
+          <p className={styles.helpText}>Use this only when the step automatically consumes something such as an eyelet, tape or binding item.</p>
           <div className={styles.twoColumnGrid}>
             <label className={styles.fieldLabel}>
               Consumable / material
@@ -410,143 +426,38 @@ export function LabourOperationForm({
               <input name="consumableQuantity" type="number" min="0" step="0.0001" value={consumableQuantity} onChange={(event) => setConsumableQuantity(event.target.value)} className={styles.input} disabled={!consumableMaterialId} />
             </label>
             <label className={styles.fieldLabel}>
-              Material usage basis
+              Usage basis
               <select name="consumableBasis" value={consumableBasis} onChange={(event) => setConsumableBasis(event.target.value)} className={styles.input} disabled={!consumableMaterialId}>
-                <option value="per_operation_unit">Per operation unit</option>
+                <option value="per_operation_unit">Per Production Step unit</option>
                 <option value="per_finished_item">Per finished item</option>
                 <option value="per_linear_metre">Per linear metre</option>
                 <option value="per_sqm">Per square metre</option>
               </select>
-              <span className={styles.fieldHint}>Examples: Eyelet = 1 per operation unit. Spiral = 1 per finished book. Edge tape = metres of tape per book edge.</span>
             </label>
           </div>
         </div>
-      </section>
+      </details>
 
-      <section className={styles.formSection}>
-        <div className={styles.stepNumber}>3</div>
-        <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>Who supplies the labour rate?</h3>
-          <p className={styles.helpText}>Labour rates live in Staff, not on machines or operations. Choose the normal staff member for this work, or use the company factory rate.</p>
-          <label className={styles.fieldLabel}>
-            Labour rate source
-            <select
-              name="labourUserProfileId"
-              value={labourUserProfileId}
-              onChange={(event: ChangeEvent<HTMLSelectElement>) => setLabourUserProfileId(event.target.value)}
-              className={styles.input}
-            >
-              <option value="">Factory default · {money(Math.max(0, Number(defaultLabourRate) || 0))}/hr</option>
-              {staff.map((item) => {
-                const staffRate = Math.max(0, Number(item.quoteLabourRate ?? defaultLabourRate) || 0);
-                return <option key={item.userProfileId} value={item.userProfileId}>{item.fullName} · {money(staffRate)}/hr{item.quoteLabourRate == null ? " (factory rate)" : ""}</option>;
-              })}
-            </select>
-            <span className={styles.fieldHint}>{labourSourceName}: {money(rate)}/hr · one labour minute costs {money(rate / 60)}. Change staff rates under Staff; change the factory fallback under Company settings.</span>
-          </label>
-        </div>
-      </section>
-
-      <section className={styles.formSection}>
-        <div className={styles.stepNumber}>4</div>
-        <div className={styles.sectionContent}>
-          <h3 className={styles.sectionTitle}>What makes the labour increase?</h3>
-          <p className={styles.helpText}>Keep it simple: fixed, per item, per metre, per m² or per sheet. Guillotine stack calculation is only for machine-style trimming.</p>
-          <div className={styles.basisGrid}>
-            {LABOUR_BASIS_OPTIONS.map((option) => (
-              <label key={option.value} className={`${styles.basisCard} ${basis === option.value ? styles.basisCardSelected : ""}`}>
-                <input
-                  type="radio"
-                  name="calculationBasis"
-                  value={option.value}
-                  checked={basis === option.value}
-                  onChange={() => setBasis(option.value)}
-                />
-                <strong>{option.label}</strong>
-                <span>{option.description}</span>
-              </label>
-            ))}
-          </div>
-
-          <div className={styles.timeInputs}>
-            <label className={styles.fieldLabel}>
-              {basisDetails.inputLabel}
-              <div className={styles.unitInputWrap}>
-                <input
-                  required
-                  name="timeMinutes"
-                  type="number"
-                  min="0"
-                  step={basis === "guillotine_stacks" ? "1" : "0.01"}
-                  value={minutes}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMinutes(event.target.value)}
-                  className={styles.input}
-                />
-                <span>{basis === "guillotine_stacks" ? "cuts" : "minutes"}</span>
-              </div>
-              {basis === "guillotine_stacks" ? <span className={styles.fieldHint}>Set the guillotine itself to “cuts per minute” and enter its maximum sheets per stack under Machines.</span> : null}
-            </label>
-            <label className={styles.fieldLabel}>
-              Minimum charge
-              <div className={styles.unitInputWrap}>
-                <input
-                  name="minimumMinutes"
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={minimumMinutes}
-                  onChange={(event: ChangeEvent<HTMLInputElement>) => setMinimumMinutes(event.target.value)}
-                  className={styles.input}
-                />
-                <span>minutes</span>
-              </div>
-              <span className={styles.fieldHint}>The total time will never fall below this amount. Use 0 when no minimum is needed.</span>
-            </label>
-          </div>
-        </div>
-      </section>
-
-      <section className={styles.previewCard} aria-live="polite">
-        <div className={styles.previewMain}>
-          <div className={styles.previewLabel}>Live raw cost example</div>
-          <strong className={styles.previewHeadline}>{liveExample.headline}</strong>
-          <div className={styles.previewBreakdown}>
-            <div className={styles.previewBreakdownRow}>
-              <div>
-                <span>Machine</span>
-                <small>{selectedMachine ? `${selectedMachine.name} setup + runtime` : "No machine linked."}</small>
-              </div>
-              <strong>{selectedMachine ? "Calculated on quote" : money(0)}</strong>
+      <details style={{ borderTop: "1px solid #e2e8f0", paddingTop: 16 }}>
+        <summary style={{ cursor: "pointer", fontWeight: 900, color: "#334155" }}>Show raw-cost preview</summary>
+        <section className={styles.previewCard} aria-live="polite" style={{ marginTop: 14 }}>
+          <div className={styles.previewMain}>
+            <div className={styles.previewLabel}>Production Step raw cost</div>
+            <strong className={styles.previewHeadline}>{liveExample.headline}</strong>
+            <div className={styles.previewBreakdown}>
+              <div className={styles.previewBreakdownRow}><div><span>Equipment</span><small>{selectedMachine ? `${selectedMachine.name} setup + runtime` : "No equipment linked."}</small></div><strong>{selectedMachine ? "Calculated on quote" : money(0)}</strong></div>
+              <div className={styles.previewBreakdownRow}><div><span>Labour</span><small>{liveExample.labourDetail}</small></div><strong>{liveExample.labourCost === null ? "Calculated on quote" : money(liveExample.labourCost)}</strong></div>
+              <div className={styles.previewBreakdownRow}><div><span>Consumable</span><small>{liveExample.materialDetail}</small></div><strong>{liveExample.materialCost === null ? "Calculated on quote" : money(liveExample.materialCost)}</strong></div>
             </div>
-            <div className={styles.previewBreakdownRow}>
-              <div>
-                <span>Labour</span>
-                <small>{liveExample.labourDetail}</small>
-              </div>
-              <strong>{liveExample.labourCost === null ? "Calculated on quote" : money(liveExample.labourCost)}</strong>
-            </div>
-            <div className={styles.previewBreakdownRow}>
-              <div>
-                <span>Consumable / material</span>
-                <small>{liveExample.materialDetail}</small>
-              </div>
-              <strong>{liveExample.materialCost === null ? "Calculated on quote" : money(liveExample.materialCost)}</strong>
-            </div>
+            <p className={styles.previewNote}>{liveExample.sampleDetail}</p>
           </div>
-          <p className={styles.previewNote}>{liveExample.sampleDetail}</p>
-        </div>
-        <div className={styles.previewTotal}>
-          <span>{selectedMachine ? "Known raw cost + machine" : "Total raw cost"}</span>
-          <strong>{liveExample.totalLabel}</strong>
-          <small>Before markup &amp; profit</small>
-        </div>
-      </section>
+          <div className={styles.previewTotal}><span>{selectedMachine ? "Known raw cost + equipment" : "Total raw cost"}</span><strong>{liveExample.totalLabel}</strong><small>Before markup &amp; profit</small></div>
+        </section>
+      </details>
 
       <div className={styles.formActions}>
-        <button type="submit" className={styles.primaryButton}>
-          {mode === "edit" ? "Save operation" : "Add operation"}
-        </button>
-        <span className={styles.saveHint}>Machine = equipment cost. Staff = labour rate. Operation = time/rule that brings them together once.</span>
+        <button type="submit" className={styles.primaryButton}>{mode === "edit" ? "Save Production Step" : "Add Production Step"}</button>
+        <span className={styles.saveHint}>One Production Step = one manufacturing charge.</span>
       </div>
     </form>
   );

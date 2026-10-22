@@ -11,7 +11,7 @@ export function ProductionSetupNav({ active: _active }: { active: Section }) {
           <div style={eyebrow}>Settings · Production costing</div>
           <h1 style={{ margin: "5px 0 4px", fontSize: 34 }}>Production costing</h1>
           <p style={{ margin: 0, color: "#64748b", lineHeight: 1.5, maxWidth: 920 }}>
-            Keep pricing simple: Materials + Operations + Extras + Services. Machines carry equipment cost only. Staff / Company settings carry labour rates. Operations define when and how long each is used.
+            Materials + Production Steps + Extras + Services. Production Steps are the only manufacturing-cost setup staff need to manage. Equipment is a supporting resource; labour rates live in Staff / Company settings.
           </p>
         </div>
         <Link prefetch={false} href="/settings" style={backLink}>← Settings</Link>

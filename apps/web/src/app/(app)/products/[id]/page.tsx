@@ -360,10 +360,10 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 12, fontWeight: 950, color: "#2563eb", textTransform: "uppercase", letterSpacing: ".08em" }}>3 · Costing</div>
-            <h2 style={{ margin: "6px 0" }}>Operations now control manufacturing cost</h2>
-            <p style={{ margin: 0, color: "#64748b", maxWidth: 850, lineHeight: 1.55 }}>Materials supply the stock cost. The quote builder then charges the matching Operations directly. Each Operation can include its machine, labour rule and consumable, so there is no separate Production Method or Process pricing layer.</p>
+            <h2 style={{ margin: "6px 0" }}>Production Steps control manufacturing cost</h2>
+            <p style={{ margin: 0, color: "#64748b", maxWidth: 850, lineHeight: 1.55 }}>Materials supply the stock cost. The quote builder then charges the matching Production Steps directly. Each Production Step can include its machine, labour rule and consumable, so there is no separate Production Method or Process pricing layer.</p>
           </div>
-          <Link prefetch={false} href="/operations" style={{ textDecoration: "none", border: "1px solid #bfdbfe", borderRadius: 11, padding: "9px 12px", color: "#1d4ed8", fontWeight: 900 }}>Open Operations &amp; labour →</Link>
+          <Link prefetch={false} href="/operations" style={{ textDecoration: "none", border: "1px solid #bfdbfe", borderRadius: 11, padding: "9px 12px", color: "#1d4ed8", fontWeight: 900 }}>Open Production Steps →</Link>
         </div>
       </section>
       <div style={{ order: 1 }}><ProductProductionFlowBuilder
@@ -430,8 +430,8 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           <div>
             <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>4 · Costing rules</div>
             <h2 style={{ margin:"6px 0" }}>Digital print costing profile</h2>
-            <p style={{ margin:"0 0 4px",color:"#64748b",maxWidth:900 }}>Small-format product rules now cover parent-sheet yield, spoilage, digital click charges, overhead and profit. All operator labour comes from the matching Operation so it cannot be charged twice.</p>
-            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Click rates come from Production Setup → Resources → Machines. For the supplied manager calculator method, set the small-format printer speed to <b>A4 faces per minute</b> (for example 100) and link it to this product's print process. Sheets/hour is also supported.</p>
+            <p style={{ margin:"0 0 4px",color:"#64748b",maxWidth:900 }}>Small-format product rules now cover parent-sheet yield, spoilage, digital click charges, overhead and profit. All operator labour comes from the matching Production Step so it cannot be charged twice.</p>
+            <p style={{ margin:0,color:"#64748b",fontSize:13 }}>Click rates come from Production Steps → Manage equipment. For the supplied manager calculator method, set the small-format printer speed to <b>A4 faces per minute</b> (for example 100) and link it to this product's Print Production Step. Sheets/hour is also supported.</p>
           </div>
           <span style={{ borderRadius:999,padding:"7px 10px",fontSize:12,fontWeight:950,background:smallFormatCostingProfile.enabled === true ? "#dcfce7" : "#f1f5f9",color:smallFormatCostingProfile.enabled === true ? "#166534" : "#475569" }}>{smallFormatCostingProfile.enabled === true ? "Active on quotes" : "Uses global pricing"}</span>
         </div>
@@ -493,7 +493,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           <div>
             <div style={{ fontSize:12,fontWeight:950,color:productSetupReady ? "#047857" : "#c2410c",textTransform:"uppercase",letterSpacing:".08em" }}>{product.department === "small_format" ? "5" : "4"} · Review and test</div>
             <h2 style={{ margin:"6px 0" }}>{productSetupReady ? "Ready for a quote test" : "Finish the required setup"}</h2>
-            <p style={{ margin:0,color:"#64748b",maxWidth:820,lineHeight:1.55 }}>Create a draft quote to verify the final customer price. The quote now reads material costs and the matching Operations directly, including each Operation’s linked machine and labour rule.</p>
+            <p style={{ margin:0,color:"#64748b",maxWidth:820,lineHeight:1.55 }}>Create a draft quote to verify the final customer price. The quote now reads material costs and the matching Production Steps directly, including each step’s linked machine and labour rule.</p>
           </div>
           {productSetupReady ? <Link prefetch={false} href={`/products/${product.id}?tab=pricing&width=${width}&height=${height}&quantity=${quantity}`} style={{ textDecoration:"none",borderRadius:11,background:"#0f766e",color:"#fff",padding:"12px 16px",fontWeight:950 }}>Open quote test →</Link> : null}
         </div>
@@ -501,7 +501,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           {[
             ["Material / stock", hasConfiguredBaseMaterial, hasConfiguredBaseMaterial ? "Configured" : "Choose stock above"],
             ["Quote choices", hasQuoteChoices, hasQuoteChoices ? `${fields.length} saved` : "Save product choices"],
-            ["Operations costing", true, "Configured centrally"]
+            ["Production Steps costing", true, "Configured centrally"]
           ].map(([label,ready,detail]) => <div key={String(label)} style={{ padding:13,borderRadius:12,background:"#fff",border:"1px solid #dbe4f0" }}><div style={{ display:"flex",justifyContent:"space-between",gap:8 }}><strong>{label}</strong><span style={{ color:ready ? "#15803d" : "#c2410c",fontWeight:950 }}>{ready ? "Ready" : "Needed"}</span></div><div style={{ marginTop:5,color:"#64748b",fontSize:12 }}>{detail}</div></div>)}
         </div>
       </section>
@@ -510,7 +510,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
     {tab === "pricing" ? <section style={{ display:"grid",gap:16 }}>
       <div style={card}>
         <h2 style={{ marginTop:0 }}>Quote pricing test</h2>
-        <p style={{ color:"#64748b",lineHeight:1.6 }}>Production Method estimates have been retired. Test this product through a draft Quote so the exact stock, Operations, machine costs, labour, overhead and profit are calculated through the same path staff will actually use.</p>
+        <p style={{ color:"#64748b",lineHeight:1.6 }}>Production Method estimates have been retired. Test this product through a draft Quote so the exact stock, Production Steps, equipment costs, labour, overhead and profit are calculated through the same path staff will actually use.</p>
         <Link prefetch={false} href="/quotes" style={{ display:"inline-block",textDecoration:"none",borderRadius:11,background:"#0f172a",color:"#fff",fontWeight:950,padding:"12px 16px" }}>Open Quotes →</Link>
       </div>
     </section> : null}
@@ -561,7 +561,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
         </section>
 
         <section style={card}>
-          <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Production costing</div><h2 style={{ margin:"6px 0" }}>Materials + Operations</h2><div style={{ color:"#64748b",lineHeight:1.55 }}>Manufacturing pricing is calculated directly from the quote choices. Operations own their machine + labour + consumable cost; workflow steps do not add a second charge.</div>
+          <div style={{ fontSize:12,fontWeight:950,color:"#0f766e",textTransform:"uppercase",letterSpacing:".08em" }}>Production costing</div><h2 style={{ margin:"6px 0" }}>Materials + Production Steps</h2><div style={{ color:"#64748b",lineHeight:1.55 }}>Manufacturing pricing is calculated directly from the quote choices. Production Steps own their equipment + labour + consumable cost; workflow steps do not add a second charge.</div>
         </section>
       </div>
 
@@ -571,7 +571,7 @@ export default async function ProductEditorPage({ params, searchParams }: Props)
           <h2 style={{ margin:"6px 0" }}>{fields.length ? "Ready to quote" : "Setup incomplete"}</h2>
           <div style={{ display:"grid",gap:8,marginTop:13 }}>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Product details</span><b>{product.name ? "Ready" : "Missing"}</b></div>
-            <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Operations costing</span><b>Centralised</b></div>
+            <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Production Steps costing</span><b>Centralised</b></div>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Quote choices</span><b>{fields.length ? "Ready" : "Not saved"}</b></div>
             <div style={{ display:"flex",justifyContent:"space-between",gap:10 }}><span>Website</span><b>{product.websiteEnabled ? "Published" : "Optional / off"}</b></div>
           </div>

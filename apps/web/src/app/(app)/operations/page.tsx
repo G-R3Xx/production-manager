@@ -2,14 +2,14 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listLabourForTenant, listMachinesForTenant, type LabourRecord, type MachineRecord } from "@/server/productionResources";
+import { listLabourForTenant, listMachinesForTenant, type LabourRecord } from "@/server/productionResources";
 import { listMaterialsForTenant } from "@/server/materials";
 import { setLabourActiveAction } from "../labour/actions";
 import { LabourOperationForm } from "../labour/LabourOperationForm";
-import { labourBasisLabel, labourBasisUnit, storedLabourValueToMinutes, type LabourBasis } from "../labour/labourConfig";
+import { labourBasisUnit, storedLabourValueToMinutes, type LabourBasis } from "../labour/labourConfig";
 import styles from "../labour/labour.module.css";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
-import { listActiveStaffOptionsForTenant, type ActiveStaffOption } from "@/server/users";
+import { listActiveStaffOptionsForTenant } from "@/server/users";
 import { getCompanySettingsByTenantId } from "@/server/company";
 
 const DEPARTMENT_LABELS: Record<string, string> = {
@@ -64,93 +64,67 @@ type LabourMaterialOption = {
   lengthMm: string | null;
 };
 
-function LabourOperationCard({ row, materials, machines, staff, defaultLabourRate }: { row: LabourRecord; materials: LabourMaterialOption[]; machines: MachineRecord[]; staff: ActiveStaffOption[]; defaultLabourRate: string }) {
+function ProductionStepRow({ row }: { row: LabourRecord }) {
   const summary = operationSummary(row);
+  const consumable = row.consumableMaterialName && Number(row.consumableQuantity) > 0
+    ? `${row.consumableMaterialName} × ${row.consumableQuantity}`
+    : "—";
 
   return (
-    <article className={`${styles.operationCard} ${row.active ? "" : styles.operationCardArchived}`}>
-      <div className={styles.operationTop}>
-        <div>
-          <h3>{row.name}</h3>
-          <div className={styles.operationMeta}>
-            <span className={styles.metaPill}>{DEPARTMENT_LABELS[row.department] ?? row.department.replaceAll("_", " ")}</span>
-            <span className={styles.metaPill}>{labourBasisLabel(row.calculationBasis)}</span>
-            {!row.active ? <span className={styles.metaPill}>Archived</span> : null}
-          </div>
-        </div>
-        <div className={styles.operationActions}>
+    <tr style={{ opacity: row.active ? 1 : 0.62 }}>
+      <td style={tableCell}>
+        <strong style={{ display: "block", color: "#0f172a" }}>{row.name}</strong>
+        <span style={subtle}>{DEPARTMENT_LABELS[row.department] ?? row.department.replaceAll("_", " ")}</span>
+      </td>
+      <td style={tableCell}><strong>{row.machineName ?? "—"}</strong></td>
+      <td style={tableCell}>
+        <strong>{row.labourUserName ?? "Factory default"}</strong>
+        <span style={subtle}>{summary.rate > 0 ? `${money(summary.rate)}/hr` : "No labour charge"}</span>
+      </td>
+      <td style={tableCell}>
+        <strong>{summary.timeText}</strong>
+        {summary.minimum > 0 ? <span style={subtle}>{number(summary.minimum)} min minimum</span> : null}
+      </td>
+      <td style={tableCell}><span>{consumable}</span></td>
+      <td style={{ ...tableCell, width: 190 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+          <Link prefetch={false} href={`/operations?edit=${row.id}`} style={editButton}>Edit</Link>
           <form action={setLabourActiveAction}>
             <input type="hidden" name="id" value={row.id} />
             <input type="hidden" name="active" value={row.active ? "false" : "true"} />
-            <button className={styles.archiveButton}>{row.active ? "Archive" : "Restore"}</button>
+            <button style={archiveButton}>{row.active ? "Archive" : "Restore"}</button>
           </form>
         </div>
-      </div>
+      </td>
+    </tr>
+  );
+}
 
-      <div className={styles.summaryLine}>
-        <div className={styles.summaryItem}>
-          <span>Machine</span>
-          <strong>{row.machineName ?? "None"}</strong>
-        </div>
-        <div className={styles.summaryItem}>
-          <span>Labour source</span>
-          <strong>{row.labourUserName ?? "Factory default"} · {summary.rate > 0 ? `${money(summary.rate)}/hr` : "No labour charge"}</strong>
-        </div>
-        <div className={styles.summaryItem}>
-          <span>Time rule</span>
-          <strong>{summary.timeText}</strong>
-        </div>
-        <div className={styles.summaryItem}>
-          <span>{row.calculationBasis === "guillotine_stacks" ? "Costing source" : row.calculationBasis === "fixed_minutes" ? "Labour cost per use" : "Base labour cost before minimum"}</span>
-          <strong>{row.calculationBasis === "guillotine_stacks" ? "Calculated on quote" : <>{money(summary.unitCost)}{row.calculationBasis === "fixed_minutes" ? " per use" : ` ${labourBasisUnit(row.calculationBasis)}`}</>}</strong>
-        </div>
-      </div>
+const tableCell = { padding: "14px 12px", borderBottom: "1px solid #e2e8f0", verticalAlign: "top", fontSize: 13 } as const;
+const subtle = { display: "block", marginTop: 3, color: "#64748b", fontSize: 12, fontWeight: 600 } as const;
+const editButton = { textDecoration: "none", cursor: "pointer", border: "1px solid #bfdbfe", borderRadius: 9, background: "#eff6ff", color: "#1d4ed8", padding: "7px 10px", fontWeight: 850, fontSize: 12 } as const;
+const archiveButton = { border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", color: "#475569", padding: "7px 10px", fontWeight: 800, fontSize: 12, cursor: "pointer" } as const;
 
-      {row.consumableMaterialName && Number(row.consumableQuantity) > 0 ? (
-        <p style={{ margin: "11px 0 0", color: "#0f766e", fontSize: 13, fontWeight: 800 }}>
-          Consumable: {row.consumableMaterialName} × {row.consumableQuantity} {row.consumableBasis === "per_finished_item" ? "per finished item" : row.consumableBasis === "per_linear_metre" ? "per linear metre" : row.consumableBasis === "per_sqm" ? "per m²" : "per operation unit"}
-        </p>
-      ) : null}
-
-      {summary.minimum > 0 ? (
-        <p style={{ margin: "11px 0 0", color: "#64748b", fontSize: 13 }}>
-          Minimum charge: <strong style={{ color: "#334155" }}>{number(summary.minimum)} minutes ({money(summary.minimum / 60 * summary.rate)})</strong>
-        </p>
-      ) : null}
-
-      <details className={styles.editDetails}>
-        <summary>Edit operation</summary>
-        <div className={styles.editPanel}>
-          <LabourOperationForm
-            mode="edit"
-            initialValues={{
-              id: row.id,
-              name: row.name,
-              department: row.department,
-              machineId: row.machineId ?? "",
-              labourUserProfileId: row.labourUserProfileId ?? "",
-              calculationBasis: row.calculationBasis as LabourBasis,
-              calculationValue: row.calculationValue,
-              minimumMinutes: row.minimumMinutes,
-              consumableMaterialId: row.consumableMaterialId ?? "",
-              consumableQuantity: row.consumableQuantity,
-              consumableBasis: row.consumableBasis
-            }}
-            materials={materials}
-            machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))}
-            staff={staff}
-            defaultLabourRate={defaultLabourRate}
-          />
-        </div>
-      </details>
-    </article>
+function ProductionStepTable({ rows }: { rows: LabourRecord[] }) {
+  if (!rows.length) return null;
+  return (
+    <div style={{ overflowX: "auto", border: "1px solid #dbe4f0", borderRadius: 16, background: "#fff" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
+        <thead>
+          <tr style={{ background: "#f8fafc", color: "#475569", textAlign: "left", fontSize: 11, textTransform: "uppercase", letterSpacing: ".055em" }}>
+            <th style={tableCell}>Production step</th><th style={tableCell}>Equipment</th><th style={tableCell}>Labour</th><th style={tableCell}>Operator time</th><th style={tableCell}>Consumable</th><th style={tableCell}>Actions</th>
+          </tr>
+        </thead>
+        <tbody>{rows.map((row) => <ProductionStepRow key={row.id} row={row} />)}</tbody>
+      </table>
+    </div>
   );
 }
 
 export default async function LabourPage({
   searchParams
 }: {
-  searchParams?: Promise<{ message?: string; error?: string }>;
+  searchParams?: Promise<{ message?: string; error?: string; edit?: string; new?: string }>;
 }) {
   const user = await getRequiredSessionUser();
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -180,70 +154,84 @@ export default async function LabourPage({
     }));
   const activeRows = rows.filter((row) => row.active);
   const archivedRows = rows.filter((row) => !row.active);
+  const editRow = params.edit ? rows.find((row) => row.id === params.edit) ?? null : null;
+  const createOpen = params.new === "1" || activeRows.length === 0;
 
   return (
     <main className={styles.page}>
       <ProductionSetupNav active="operations" />
-      <header className={styles.header}>
-        <div className={styles.eyebrow}>Production setup · pricing</div>
-        <h1 className={styles.title}>Operations &amp; labour</h1>
-        <p className={styles.subtitle}>
-          One operation combines equipment time, labour time and optional consumables once. Machines contain equipment cost only; labour rates come only from Staff / Company settings.
-        </p>
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <Link prefetch={false} href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Machines</Link>
-          <Link prefetch={false} href="/operations" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Operations &amp; labour</Link>
+
+      <header className={styles.header} style={{ display: "flex", justifyContent: "space-between", gap: 18, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <div className={styles.eyebrow}>Production costing</div>
+          <h1 className={styles.title}>Production Steps</h1>
+          <p className={styles.subtitle}>
+            Set up the work you actually do: Print, Laminate, Cut, Mount, Artwork, Folding and similar. Each step can use one piece of equipment, one labour rule and an optional consumable.
+          </p>
         </div>
+        <Link prefetch={false} href="/machines" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 11, background: "#fff", color: "#334155", padding: "10px 14px", fontWeight: 900 }}>Manage equipment →</Link>
       </header>
 
       {params.message ? <div className={styles.message}>{params.message}</div> : null}
       {params.error ? <div className={styles.error}>{params.error}</div> : null}
 
+      {editRow ? (
+        <section className={styles.card}>
+          <div className={styles.cardHeader}>
+            <div><h2>Edit Production Step</h2><p>{editRow.name}</p></div>
+            <Link prefetch={false} href="/operations" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 9, padding: "8px 11px", color: "#475569", fontWeight: 850 }}>Close</Link>
+          </div>
+          <LabourOperationForm
+            mode="edit"
+            initialValues={{ id: editRow.id, name: editRow.name, department: editRow.department, machineId: editRow.machineId ?? "", labourUserProfileId: editRow.labourUserProfileId ?? "", calculationBasis: editRow.calculationBasis as LabourBasis, calculationValue: editRow.calculationValue, minimumMinutes: editRow.minimumMinutes, consumableMaterialId: editRow.consumableMaterialId ?? "", consumableQuantity: editRow.consumableQuantity, consumableBasis: editRow.consumableBasis }}
+            materials={materials}
+            machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))}
+            staff={staff}
+            defaultLabourRate={defaultLabourRate}
+          />
+        </section>
+      ) : null}
+
+      {createOpen && !editRow ? (
+        <section className={styles.card}>
+          <div className={styles.cardHeader}>
+            <div><h2>Add Production Step</h2><p>Choose the equipment, operator time and optional consumable for this one manufacturing step.</p></div>
+            {activeRows.length ? <Link prefetch={false} href="/operations" style={{ textDecoration: "none", border: "1px solid #cbd5e1", borderRadius: 9, padding: "8px 11px", color: "#475569", fontWeight: 850 }}>Close</Link> : null}
+          </div>
+          <LabourOperationForm materials={materials} machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))} staff={staff} defaultLabourRate={defaultLabourRate} />
+        </section>
+      ) : null}
+
       <section className={styles.explainer}>
         <div className={styles.explainerIcon}>1×</div>
         <div>
-          <h2>One operation = one manufacturing charge</h2>
-          <p>
-            Example: Direct Print links the printer for equipment cost and a staff/factory labour rate for operator time. The Operation owns the time rule; the Machine never owns labour. Nothing else should charge that same work again.
-          </p>
+          <h2>One Production Step = one manufacturing charge</h2>
+          <p>Material is charged by Materials. Equipment cost and operator labour are brought together here once. Extras and Services stay separate.</p>
         </div>
-      </section>
-
-      <section className={styles.card}>
-        <div className={styles.cardHeader}>
-          <div>
-            <h2>Add an operation</h2>
-            <p>Build the complete manufacturing cost in one place: optional machine + labour + consumable. The quote builder uses this operation directly.</p>
-          </div>
-        </div>
-        <LabourOperationForm materials={materials} machines={machines.map((machine) => ({ id: machine.id, name: machine.name, active: machine.active }))} staff={staff} defaultLabourRate={defaultLabourRate} />
       </section>
 
       <section className={styles.operationList}>
         <div className={styles.listHeader}>
           <div>
-            <h2>Available operations</h2>
-            <p>These are the manufacturing pricing resources used directly by quotes.</p>
+            <h2>Production Steps</h2>
+            <p>{activeRows.length} active step{activeRows.length === 1 ? "" : "s"}. These are the only manufacturing-cost steps used by quoting.</p>
           </div>
-          <span className={styles.countPill}>{activeRows.length} active</span>
+          <Link prefetch={false} href="/operations?new=1" style={{ ...editButton, padding: "10px 14px", fontSize: 13, background: "#2563eb", color: "#fff", borderColor: "#2563eb" }}>＋ Add Production Step</Link>
         </div>
 
-        {activeRows.length ? activeRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} machines={machines} staff={staff} defaultLabourRate={defaultLabourRate} />) : (
+        {activeRows.length ? (
+          <ProductionStepTable rows={activeRows} />
+        ) : (
           <div className={styles.emptyState}>
-            <div>
-              <strong>No shop operations yet</strong>
-              <p>Add your first operation above.</p>
-            </div>
+            <div><strong>No Production Steps yet</strong><p>Add your first step above.</p></div>
           </div>
         )}
       </section>
 
       {archivedRows.length ? (
         <details className={styles.archivedSection}>
-          <summary>Archived operations ({archivedRows.length})</summary>
-          <div className={styles.operationList}>
-            {archivedRows.map((row) => <LabourOperationCard key={row.id} row={row} materials={materials} machines={machines} staff={staff} defaultLabourRate={defaultLabourRate} />)}
-          </div>
+          <summary>Archived Production Steps ({archivedRows.length})</summary>
+          <div style={{ marginTop: 12 }}><ProductionStepTable rows={archivedRows} /></div>
         </details>
       ) : null}
     </main>

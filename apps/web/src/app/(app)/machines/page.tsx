@@ -172,23 +172,22 @@ export default async function MachinesPage() {
 
       <ProductionSetupNav active="machines" />
       <header>
-        <div style={{ fontSize: 12, fontWeight: 900, color: "#0284c7", textTransform: "uppercase" }}>Resources · machines</div>
-        <h1 style={{ margin: "6px 0", fontSize: 36 }}>Machines</h1>
+        <div style={{ fontSize: 12, fontWeight: 900, color: "#0284c7", textTransform: "uppercase" }}>Production costing · equipment</div>
+        <h1 style={{ margin: "6px 0", fontSize: 36 }}>Manage equipment</h1>
         <p style={{ color: "#64748b", maxWidth: 980, lineHeight: 1.55 }}>
-          Store machine facts here: speed, capacity, setup and operating costs. Then link the machine directly to the relevant <b>Operation</b>. The quote charges that Operation once.
+          This is the supporting equipment list for Production Steps. Store equipment facts only: speed, capacity, setup and running costs. Labour never lives here.
         </p>
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <Link prefetch={false} href="/machines" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#dbeafe", color: "#1d4ed8", fontWeight: 900 }}>Machines</Link>
-          <Link prefetch={false} href="/operations" style={{ textDecoration: "none", borderRadius: 999, padding: "7px 11px", background: "#f1f5f9", color: "#475569", fontWeight: 900 }}>Operations &amp; labour</Link>
+        <div style={{ marginTop: 12 }}>
+          <Link prefetch={false} href="/operations" style={{ textDecoration: "none", border: "1px solid #bfdbfe", borderRadius: 10, padding: "9px 12px", background: "#eff6ff", color: "#1d4ed8", fontWeight: 900 }}>← Back to Production Steps</Link>
         </div>
       </header>
 
       <section style={card}>
         <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
           <div>
-            <h2 style={{ margin: 0 }}>Add machine</h2>
+            <h2 style={{ margin: 0 }}>Add equipment</h2>
             <p style={{ margin: "5px 0 0", color: "#64748b", fontSize: 13 }}>
-              Enter only the equipment facts and costs. After creating it, open Operations & labour and link it to the work it performs.
+              Enter only equipment facts and costs. Then choose it from the relevant Production Step.
             </p>
           </div>
         </div>
@@ -210,7 +209,7 @@ export default async function MachinesPage() {
                 padding: "0 20px",
               }}
             >
-              Create machine
+              Add equipment
             </button>
           </div>
         </form>
@@ -261,7 +260,7 @@ export default async function MachinesPage() {
               </div>
 
               <div style={{ marginTop: 12, paddingTop: 11, borderTop: "1px solid #e2e8f0" }}>
-                <Link prefetch={false} href="/operations" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Link machines directly to Operations →</Link>
+                <Link prefetch={false} href="/operations" style={{ color: "#2563eb", fontWeight: 850, fontSize: 12, textDecoration: "none" }}>Used by Production Steps →</Link>
               </div>
             </article>
           );

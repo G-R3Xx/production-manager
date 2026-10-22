@@ -1481,7 +1481,7 @@ function smallFormatProfileAdjustments(input: {
       }));
     } else if (sheetsPerLine > 0) {
       warnings.push(machine
-        ? `${machine.name}: ${mode === "mono" ? "mono" : "colour"} click rate is not set in Production Setup → Resources → Machines.`
+        ? `${machine.name}: ${mode === "mono" ? "mono" : "colour"} click rate is not set in Production Steps → Manage equipment.`
         : "Small-format click costing is enabled, but no compatible print machine is linked to this product's print process.");
     }
   }
@@ -1492,15 +1492,15 @@ function smallFormatProfileAdjustments(input: {
     rows.push(costBreakdownItem({
       componentLabel: "Print labour",
       materialName: labour?.name ?? "Factory labour",
-      basis: "Operation labour rule",
+      basis: "Production Step labour rule",
       amount: labourDetails.lineMinutes / quantity,
       unit: "min",
       rate: labourDetails.hourlyRate / 60,
       cost: labourDetails.lineCost / quantity,
-      note: `${formatUsage(labourDetails.lineMinutes)} total labour minutes from Operations · ${formatMoney(labourDetails.hourlyRate)}/hr from Staff / Company settings`
+      note: `${formatUsage(labourDetails.lineMinutes)} total labour minutes from Production Steps · ${formatMoney(labourDetails.hourlyRate)}/hr from Staff / Company settings`
     }));
   } else if (!labour && (profile.printSetupMinutes > 0 || profile.operatorAttendancePercent > 0)) {
-    warnings.push("This product has legacy print-labour profile values, but no matching Print Operation. Add/rename the Print Operation instead; product profiles no longer create labour charges.");
+    warnings.push("This product has legacy print-labour profile values, but no matching Print Production Step. Add/rename the Print Production Step instead; product profiles no longer create labour charges.");
   }
 
   return { rows, warnings, suppressMachineInk: profile.useMachineClickRate, suppressPrintLabour: true };
@@ -2134,7 +2134,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
               <small style={{ color: "#475569" }}>
                 {step.machineName} · {formatUsage(step.cutsPerMinute)} cuts/min · {formatUsage(step.setupMinutes)} min setup · labour rate from {step.labourName}
               </small>
-              {step.maxStackSheets <= 0 || step.cutsPerMinute <= 0 ? <small style={{ color: "#b42318", fontWeight: 850 }}>Complete the guillotine’s cuts-per-minute speed and maximum stack sheets under Production Setup → Machines.</small> : null}
+              {step.maxStackSheets <= 0 || step.cutsPerMinute <= 0 ? <small style={{ color: "#b42318", fontWeight: 850 }}>Complete the guillotine’s cuts-per-minute speed and maximum stack sheets under Production Steps → Manage equipment.</small> : null}
             </section>
           );
         })}

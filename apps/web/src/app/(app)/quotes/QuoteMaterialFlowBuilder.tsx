@@ -2283,7 +2283,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             rows.push({ label: "Eyelets", detail: effectiveEyeletMaterial.name, amount, unit: "each", rate: rate.rate, cost: amount * rate.rate, note: [eyeletPresetLabel, configuredEyeletMaterial ? "linked from Eyelet operation" : null, rate.note].filter(Boolean).join(" · ") || undefined });
           }
           if (eyeletMachineSelection?.machine && eyeletMachineSelection.machineCostPerUnit > 0) {
-            rows.push({ label: "Eyelet machine", detail: eyeletMachineSelection.machine.name, amount: 1, unit: "item", rate: eyeletMachineSelection.machineCostPerUnit, cost: eyeletMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+            rows.push({ label: "Eyelet machine", detail: eyeletMachineSelection.machine.name, amount: 1, unit: "item", rate: eyeletMachineSelection.machineCostPerUnit, cost: eyeletMachineSelection.machineCostPerUnit, note: "Equipment cost from Manage equipment" });
           }
           const eyeletMinutes = numberValue(finishingMinutes[item.key], 0);
           if (qty > 0 && eyeletMinutes > 0) {
@@ -2301,7 +2301,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         }
         const processMachine = item.key === "jingwei" ? jingweiMachineSelection : item.key === "print_vinyl_application" ? mountMachineSelection : null;
         if (processMachine?.machine && processMachine.machineCostPerUnit > 0) {
-          rows.push({ label: `${item.label} machine`, detail: processMachine.machine.name, amount: 1, unit: "item", rate: processMachine.machineCostPerUnit, cost: processMachine.machineCostPerUnit, note: "Machine cost from Machines settings" });
+          rows.push({ label: `${item.label} machine`, detail: processMachine.machine.name, amount: 1, unit: "item", rate: processMachine.machineCostPerUnit, cost: processMachine.machineCostPerUnit, note: "Equipment cost from Manage equipment" });
         }
         const aliases = signageFinishingProcessAliases[item.key];
         if (aliases) {
@@ -2414,7 +2414,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const amount = itemArea * sideMultiplier;
         rows.push({ label: "Coating / laminate", detail: selectedSmallCoating.name, amount, unit: "sqm", rate: rate.rate, cost: amount * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
         if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
-          rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+          rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Equipment cost from Manage equipment" });
         }
         const minutes = numberValue(laminateMinutes, 0);
         if (minutes > 0) {
@@ -2429,7 +2429,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
         if (item.key === "trim" && trimMachineSelection?.machine && trimMachineSelection.machineCostPerUnit > 0) {
-          rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+          rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Equipment cost from Manage equipment" });
         }
         const aliases = smallFinishingProcessAliases[item.key];
         if (aliases) {
@@ -2536,7 +2536,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         const amountPerFinishedItem = itemArea * sideMultiplier;
         rows.push({ label: "Cello / coating", detail: selectedSmallCoating.name, amount: amountPerFinishedItem, unit: "sqm", rate: rate.rate, cost: amountPerFinishedItem * rate.rate, note: [sides === "double" ? "double sided" : null, rate.note].filter(Boolean).join(" · ") || undefined });
         if (laminateMachineSelection?.machine && laminateMachineSelection.machineCostPerUnit > 0) {
-          rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+          rows.push({ label: "Coating machine", detail: laminateMachineSelection.machine.name, amount: 1, unit: "item", rate: laminateMachineSelection.machineCostPerUnit, cost: laminateMachineSelection.machineCostPerUnit, note: "Equipment cost from Manage equipment" });
         }
         const minutes = numberValue(laminateMinutes, 0);
         if (minutes > 0) {
@@ -2551,7 +2551,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       for (const item of smallFinishingOptions) {
         if (!smallFinishings.includes(item.key)) continue;
         if (item.key === "trim" && trimMachineSelection?.machine && trimMachineSelection.machineCostPerUnit > 0) {
-          rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Machine cost from Machines settings" });
+          rows.push({ label: "Trim / cut machine", detail: trimMachineSelection.machine.name, amount: 1, unit: "item", rate: trimMachineSelection.machineCostPerUnit, cost: trimMachineSelection.machineCostPerUnit, note: "Equipment cost from Manage equipment" });
         }
         const aliases = smallFinishingProcessAliases[item.key];
         if (aliases) {
@@ -3988,7 +3988,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
             <div style={{ borderRadius: 14, background: "#fff1f2", border: "1px solid #fecdd3", padding: "12px 14px", color: "#9f1239", display: "grid", gap: 4 }}>
               <strong>Machine width check</strong>
               {machineCompatibilityIssues.map((message) => <span key={message} style={{ fontSize: 12, lineHeight: 1.45 }}>{message}</span>)}
-              <span style={{ fontSize: 12 }}>Change the stock/orientation, or update the machine Max width in Production Setup → Resources → Machines before saving this line.</span>
+              <span style={{ fontSize: 12 }}>Change the stock/orientation, or update the machine Max width in Production Steps → Manage equipment before saving this line.</span>
             </div>
           ) : null}
           {presentation === "wizard" ? (() => {
