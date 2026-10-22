@@ -1,20 +1,77 @@
 "use client";
 
-import { useActionState, useEffect, useRef, type ReactNode } from "react";
-import { updateMachineInlineAction, type MachineSaveState } from "./actions";
-
-const initialState: MachineSaveState = { status: "idle", message: "", savedAt: 0 };
+import { useRef, useState, useTransition, type FormEvent, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 
 export function MachineEditForm({ machineId, tenantId, children }: { machineId: string; tenantId: string; children: ReactNode }) {
-  const [state, action, pending] = useActionState(updateMachineInlineAction, initialState);
+  const router = useRouter();
   const detailsRef = useRef<HTMLDetailsElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
+  const [pending, setPending] = useState(false);
+  const [status, setStatus] = useState<"idle" | "success" | "error">("idle");
+  const [message, setMessage] = useState("");
+  const [, startRefresh] = useTransition();
 
-  useEffect(() => {
-    if (!state.savedAt) return;
-    if (state.status === "error" && detailsRef.current) detailsRef.current.open = true;
-    if (state.status === "success") formRef.current?.removeAttribute("data-production-manager-unsaved");
-  }, [state.savedAt, state.status]);
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const requestStartedAt = performance.now();
+    setPending(true);
+    setStatus("idle");
+    setMessage("");
+
+    try {
+      const response = await fetch(`/api/machines/${encodeURIComponent(machineId)}`, {
+        method: "PATCH",
+        body: formData,
+        cache: "no-store",
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        machine?: { name?: string };
+        serverElapsedMs?: number;
+        authElapsedMs?: number;
+        dbElapsedMs?: number;
+        runtimeRegion?: string | null;
+      };
+
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Machine could not be saved.");
+      }
+
+      const savedName = String(payload.machine?.name ?? formData.get("name") ?? "").trim();
+      const nameNode = document.querySelector<HTMLElement>(`[data-machine-name-id="${CSS.escape(machineId)}"]`);
+      if (nameNode && savedName) nameNode.textContent = savedName;
+
+      formRef.current?.removeAttribute("data-production-manager-unsaved");
+      setStatus("success");
+      setMessage(payload.message || `${savedName || "Machine"} saved`);
+      if (detailsRef.current) detailsRef.current.open = false;
+
+      console.info("[machine-save-client]", {
+        machineId,
+        requestElapsedMs: Math.round(performance.now() - requestStartedAt),
+        serverElapsedMs: payload.serverElapsedMs ?? null,
+        authElapsedMs: payload.authElapsedMs ?? null,
+        dbElapsedMs: payload.dbElapsedMs ?? null,
+        runtimeRegion: payload.runtimeRegion ?? null,
+      });
+
+      // Reconcile the server-rendered machine list after the UI has already updated.
+      startRefresh(() => router.refresh());
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "Machine could not be saved.");
+      if (detailsRef.current) detailsRef.current.open = true;
+    } finally {
+      setPending(false);
+    }
+  }
 
   return <div style={{ display: "grid", gap: 5, justifyItems: "end" }}>
     <details ref={detailsRef}>
@@ -33,22 +90,19 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
           padding: 20,
         }}
         onClick={(event) => {
-          if (event.currentTarget === event.target && detailsRef.current) detailsRef.current.open = false;
+          if (event.currentTarget === event.target && detailsRef.current && !pending) detailsRef.current.open = false;
         }}
       >
         <div style={{ width: "min(980px,calc(100vw - 40px))", maxHeight: "calc(100vh - 40px)", overflowY: "auto", overscrollBehavior: "contain", border: "1px solid #dbe4f0", borderRadius: 16, background: "#fff", boxShadow: "0 20px 60px rgba(15,23,42,.28)" }}>
         <form
           ref={formRef}
-          action={action}
-          onSubmit={() => {
-            if (detailsRef.current) detailsRef.current.open = false;
-          }}
+          onSubmit={handleSubmit}
           style={{ display: "grid", gap: 12, padding: 18 }}
         >
           <input type="hidden" name="id" value={machineId} />
           <input type="hidden" name="tenantId" value={tenantId} />
           {children}
-          {state.status === "error" ? <div style={{ border: "1px solid #fecaca", borderRadius: 11, padding: 10, background: "#fef2f2", color: "#b42318", fontWeight: 800 }}>{state.message}</div> : null}
+          {status === "error" ? <div style={{ border: "1px solid #fecaca", borderRadius: 11, padding: 10, background: "#fef2f2", color: "#b42318", fontWeight: 800 }}>{message}</div> : null}
           <div style={{ position: "sticky", bottom: -18, margin: "2px -18px -18px", padding: "12px 18px", borderTop: "1px solid #e2e8f0", background: "rgba(255,255,255,.97)", backdropFilter: "blur(8px)", display: "flex", justifyContent: "flex-end", zIndex: 2 }}>
             <button disabled={pending} style={{ minHeight: 44, minWidth: 130, border: 0, borderRadius: 10, background: pending ? "#94a3b8" : "#2563eb", color: "#fff", fontWeight: 900, padding: "0 18px", cursor: pending ? "wait" : "pointer" }}>
               {pending ? "Saving…" : "Save changes"}
@@ -59,6 +113,6 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
       </div>
     </details>
     {pending ? <span style={{ color: "#2563eb", fontSize: 11, fontWeight: 900 }}>Saving…</span> : null}
-    {!pending && state.status === "success" ? <span style={{ color: "#15803d", fontSize: 11, fontWeight: 900 }}>{state.message}</span> : null}
+    {!pending && status === "success" ? <span style={{ color: "#15803d", fontSize: 11, fontWeight: 900 }}>{message}</span> : null}
   </div>;
 }

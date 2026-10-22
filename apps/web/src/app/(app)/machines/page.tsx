@@ -221,7 +221,7 @@ export default async function MachinesPage() {
             <article key={r.id} style={{ ...card, opacity: r.active ? 1 : 0.62, position: "relative" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
                 <div>
-                  <h3 style={{ margin: "0 0 6px", fontSize: 22 }}>{r.name}</h3>
+                  <h3 data-machine-name-id={r.id} style={{ margin: "0 0 6px", fontSize: 22 }}>{r.name}</h3>
                   <div style={{ color: "#64748b", textTransform: "capitalize" }}>{r.machineType}</div>
                 </div>
                 <div style={{ display: "flex", gap: 8 }}>
