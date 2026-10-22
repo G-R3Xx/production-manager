@@ -2,8 +2,9 @@ import { redirect } from "next/navigation";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listMachinesForTenant } from "@/server/productionResources";
-import { createMachineAction, setMachineActiveAction } from "./actions";
 import { MachineEditForm } from "./MachineEditForm";
+import { MachineActions } from "./MachineActions";
+import { MachineCreateForm } from "./MachineCreateForm";
 import Link from "next/link";
 import { ProductionSetupNav } from "@/components/ProductionSetupNav";
 
@@ -146,7 +147,7 @@ export default async function MachinesPage() {
   const t = await resolveActiveTenantForAuthUserId(u.id);
   if (!t) redirect("/bootstrap");
 
-  const rows = await listMachinesForTenant(t.tenantId);
+  const rows = (await listMachinesForTenant(t.tenantId)).filter((row) => row.active);
 
   return (
     <main style={{ display: "grid", gap: 20 }}>
@@ -192,49 +193,25 @@ export default async function MachinesPage() {
           </div>
         </div>
 
-        <form action={createMachineAction} style={{ display: "grid", gap: 12, marginTop: 16 }}>
+        <MachineCreateForm tenantId={t.tenantId}>
           <MachineFields />
-
-
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button
-              style={{
-                minHeight: 44,
-                minWidth: 150,
-                border: 0,
-                borderRadius: 10,
-                background: "#2563eb",
-                color: "#fff",
-                fontWeight: 900,
-                padding: "0 20px",
-              }}
-            >
-              Add equipment
-            </button>
-          </div>
-        </form>
+        </MachineCreateForm>
       </section>
 
       <section style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(360px,1fr))", gap: 14 }}>
         {rows.map((r: any) => {
           return (
-            <article key={r.id} data-machine-card-id={r.id} style={{ ...card, opacity: r.active ? 1 : 0.62, position: "relative" }}>
+            <article key={r.id} data-machine-card-id={r.id} style={{ ...card, position: "relative" }}>
               <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
                 <div>
                   <h3 data-machine-field="name" style={{ margin: "0 0 6px", fontSize: 22 }}>{r.name}</h3>
                   <div data-machine-field="type" style={{ color: "#64748b", textTransform: "capitalize" }}>{r.machineType}</div>
                 </div>
-                <div style={{ display: "flex", gap: 8 }}>
+                <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
                   <MachineEditForm machineId={r.id} tenantId={t.tenantId}>
                     <MachineFields machine={r} />
                   </MachineEditForm>
-                  <form action={setMachineActiveAction}>
-                    <input type="hidden" name="id" value={r.id} />
-                    <input type="hidden" name="active" value={r.active ? "false" : "true"} />
-                    <button style={{ border: "1px solid #cbd5e1", borderRadius: 9, background: "#fff", padding: "8px 10px" }}>
-                      {r.active ? "Archive" : "Restore"}
-                    </button>
-                  </form>
+                  <MachineActions tenantId={t.tenantId} machineId={r.id} machineName={r.name} />
                 </div>
               </div>
 

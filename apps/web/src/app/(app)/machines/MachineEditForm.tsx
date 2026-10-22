@@ -1,37 +1,28 @@
 "use client";
 
 import { useRef, useState, type FormEvent, type ReactNode } from "react";
+import { machineValuesFromFormData, updateMachineRpc } from "./machineRpc";
 
 type CardSnapshot = Record<string, string>;
 
 const cardFields = ["name", "type", "speed", "equipment", "capacity", "print"] as const;
 
-function formString(formData: FormData, key: string): string {
-  return String(formData.get(key) ?? "").trim();
-}
-
 function optimisticCardValues(formData: FormData): CardSnapshot {
-  const maxStackSheets = Number(formString(formData, "maxStackSheets") || "0");
-  const maxWidthMm = formString(formData, "maxWidthMm");
-  const speedValue = formString(formData, "speedValue") || "0";
-  const speedUom = formString(formData, "speedUom").replaceAll("_", " ") || "sqm per hour";
-  const hourlyCost = formString(formData, "hourlyCost") || "0";
-  const setupMinutes = formString(formData, "setupMinutes") || "0";
-  const inkCostPerSqm = formString(formData, "inkCostPerSqm") || "0";
-  const colourImpressionCost = formString(formData, "colourImpressionCost") || "0";
-  const monoImpressionCost = formString(formData, "monoImpressionCost") || "0";
+  const values = machineValuesFromFormData(formData);
+  const maxStackSheets = Number(values.maxStackSheets || "0");
+  const speedUom = values.speedUom.replaceAll("_", " ") || "sqm per hour";
 
   return {
-    name: formString(formData, "name"),
-    type: formString(formData, "machineType") || "other",
-    speed: `${speedValue} ${speedUom}`,
-    equipment: `$${hourlyCost}/hr · ${setupMinutes} min setup`,
+    name: values.name,
+    type: values.machineType || "other",
+    speed: `${values.speedValue} ${speedUom}`,
+    equipment: `$${values.hourlyCost}/hr · ${values.setupMinutes} min setup`,
     capacity: maxStackSheets > 0
       ? `${maxStackSheets} sheets per stack`
-      : maxWidthMm
-        ? `${maxWidthMm} mm max width`
+      : values.maxWidthMm
+        ? `${values.maxWidthMm} mm max width`
         : "No capacity limit set",
-    print: `Ink $${inkCostPerSqm}/m² · Colour $${colourImpressionCost}/side · Mono $${monoImpressionCost}/side`,
+    print: `Ink $${values.inkCostPerSqm}/m² · Colour $${values.colourImpressionCost}/side · Mono $${values.monoImpressionCost}/side`,
   };
 }
 
@@ -86,37 +77,17 @@ export function MachineEditForm({ machineId, tenantId, children }: { machineId: 
     setMessage("");
 
     try {
-      const response = await fetch(`/api/machines/${encodeURIComponent(machineId)}`, {
-        method: "PATCH",
-        body: formData,
-        cache: "no-store",
-      });
-      const payload = await response.json().catch(() => ({})) as {
-        ok?: boolean;
-        error?: string;
-        message?: string;
-        machine?: { name?: string };
-        serverElapsedMs?: number;
-        authElapsedMs?: number;
-        dbElapsedMs?: number;
-        runtimeRegion?: string | null;
-      };
-
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || "Machine could not be saved.");
-      }
+      const values = machineValuesFromFormData(formData);
+      await updateMachineRpc(tenantId, machineId, values);
 
       formRef.current?.removeAttribute("data-production-manager-unsaved");
       setStatus("success");
-      setMessage(payload.message || `${nextValues.name || "Machine"} saved`);
+      setMessage(`${nextValues.name || "Machine"} saved`);
 
       console.info("[machine-save-client]", {
         machineId,
         requestElapsedMs: Math.round(performance.now() - requestStartedAt),
-        serverElapsedMs: payload.serverElapsedMs ?? null,
-        authElapsedMs: payload.authElapsedMs ?? null,
-        dbElapsedMs: payload.dbElapsedMs ?? null,
-        runtimeRegion: payload.runtimeRegion ?? null,
+        transport: "supabase-rpc",
       });
     } catch (error) {
       // A failed optimistic save must never leave the screen claiming values that
