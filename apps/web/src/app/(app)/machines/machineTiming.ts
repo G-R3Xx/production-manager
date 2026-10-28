@@ -78,7 +78,7 @@ export function startMachineTrace(operation: string, eventTime?: number) {
                   : null,
               }));
             const report = {
-              version: "V26.10.22.05",
+              version: "V26.10.28.01",
               operation,
               outcome,
               marksMs: { ...marks },

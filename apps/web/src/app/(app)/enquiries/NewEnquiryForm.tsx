@@ -5,6 +5,7 @@ import { createEnquiryAction } from "./actions";
 import { buildCorrespondencePreviewForFile, type CorrespondencePreviewFields } from "./emailPreview";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { ClientLogoBadge } from "@/components/ClientLogoBadge";
+import { clientContactsForCustomer, type ClientContact } from "@/lib/client-contacts";
 
 type ClientOption = {
   id: string;
@@ -46,10 +47,6 @@ const inputStyle = { minHeight: 44, borderRadius: 12, border: "1px solid #d0d5dd
 const textareaStyle = { minHeight: 110, borderRadius: 12, border: "1px solid #d0d5dd", padding: "12px 14px", width: "100%", boxSizing: "border-box", fontFamily: "inherit" } as const;
 const buttonStyle = { minHeight: 44, borderRadius: 12, border: "none", background: "#111827", color: "#fff", fontWeight: 800, cursor: "pointer", padding: "0 16px" } as const;
 const dropStyle = { border: "1px dashed #b7c7e6", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 8 } as const;
-
-function contactNameForClient(client: ClientOption): string {
-  return [client.firstName, client.lastName].filter(Boolean).join(" ").trim();
-}
 
 function defaultSiteAddressForClient(client: ClientOption): string {
   const siteAddress = client.payloadJson?.defaultSiteAddress;
@@ -115,7 +112,9 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
   const inputRef = useRef<HTMLInputElement | null>(null);
   const cameraInputRef = useRef<HTMLInputElement | null>(null);
   const [selectedClientId, setSelectedClientId] = useState("");
+  const [selectedContactId, setSelectedContactId] = useState("");
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? null;
+  const availableContacts = clientContactsForCustomer(selectedClient);
   const savedClientLogoUrl = typeof selectedClient?.payloadJson?.logoUrl === "string"
     ? selectedClient.payloadJson.logoUrl.trim()
     : "";
@@ -140,22 +139,27 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
     ? { ...textareaStyle, minHeight: 140, borderRadius: 16, padding: "14px 16px", fontSize: 17 } as const
     : textareaStyle;
 
+  function applySelectedContact(contact: ClientContact | null) {
+    setSelectedContactId(contact?.id ?? "");
+    setContactName(contact?.name ?? "");
+    setPhone(contact?.phone ?? "");
+    setEmail(contact?.email ?? "");
+  }
+
   function applySelectedClient(nextClientId: string) {
     setSelectedClientId(nextClientId);
+    setSelectedContactId("");
     const client = clients.find((item) => item.id === nextClientId) ?? null;
     if (!client) {
       setClientName("");
-      setContactName("");
-      setPhone("");
-      setEmail("");
+      applySelectedContact(null);
       setSiteAddress("");
       return;
     }
 
     setClientName(client.displayName || "");
-    setContactName(contactNameForClient(client));
-    setPhone(client.phone || "");
-    setEmail(client.email || "");
+    const contacts = clientContactsForCustomer(client);
+    applySelectedContact(contacts.find((contact) => contact.isPrimary) ?? contacts[0] ?? null);
     setSiteAddress(defaultSiteAddressForClient(client));
   }
 
@@ -281,6 +285,21 @@ export function NewEnquiryForm({ clients, mode = "standard", returnTo = "/enquir
           <input type="file" name="clientLogoFile" accept="image/*" style={{ ...fieldStyle, minHeight: 38, paddingTop: 8, background: "#fff" }} />
           <input name="clientLogoUrl" placeholder="or paste client logo URL" style={{ ...fieldStyle, background: "#fff" }} />
         </section>
+      ) : null}
+      {selectedClient ? (
+        <label style={{ display: "grid", gap: 6 }}>
+          <strong style={{ fontSize: 13 }}>Contact person</strong>
+          <select name="linkedContactId" value={selectedContactId} onChange={(event) => {
+            const contact = availableContacts.find((item) => item.id === event.currentTarget.value) ?? null;
+            applySelectedContact(contact);
+          }} style={fieldStyle}>
+            <option value="">Other / enter contact manually</option>
+            {availableContacts.map((contact) => (
+              <option key={contact.id} value={contact.id}>{contact.name}{contact.isPrimary ? " (default)" : ""}</option>
+            ))}
+          </select>
+          {availableContacts.length === 0 ? <span style={{ fontSize: 12, color: "#667085" }}>No saved contacts yet. Add them under Clients or enter details below.</span> : null}
+        </label>
       ) : null}
       <input name="contactName" value={contactName} onChange={(event) => setContactName(event.currentTarget.value)} placeholder="Contact name" style={fieldStyle} />
       <div className={isTablet ? "tablet-enquiry-two-column" : undefined} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: isTablet ? 14 : 10 }}>

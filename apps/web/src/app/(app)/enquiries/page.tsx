@@ -47,7 +47,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
   scheduleEnquiryWorkflowStatusReconciliation(activeTenant.tenantId);
   const [allEnquiries, clients, correspondence] = await Promise.all([
     listEnquiriesForTenant(activeTenant.tenantId, { includeDeleted: true }),
-    listCustomerOptionsForTenant(activeTenant.tenantId),
+    listCustomerOptionsForTenant(activeTenant.tenantId, { includeContacts: true }),
     listRecentEnquiryCorrespondenceForTenant(activeTenant.tenantId, 5)
   ]);
   const deletedCount = allEnquiries.filter((enquiry) => enquiry.status === "deleted").length;
@@ -103,7 +103,7 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
       </section>
 
       <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <NewEnquiryForm clients={clients} />
+        <NewEnquiryForm clients={clients.filter((client) => client.isActive)} />
 
         <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>

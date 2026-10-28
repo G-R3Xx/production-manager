@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { clientContactsForCustomer } from "@/lib/client-contacts";
+import { ClientContactsEditor } from "./ClientContactsEditor";
 import { redirect } from "next/navigation";
 import { AUSTRALIAN_STATES, formatAustralianAbn, structuredAddressFromPayload, type StructuredAddress } from "@/lib/contact-address";
 import { getRequiredSessionUser } from "@/server/auth/session";
@@ -46,6 +48,7 @@ function clientMatches(client: CustomerRecord, q: string): boolean {
     client.companyName ?? "",
     client.email ?? "",
     client.phone ?? "",
+    ...clientContactsForCustomer(client).flatMap((contact) => [contact.name, contact.email, contact.phone]),
     client.payloadJson?.abn ?? "",
     client.payloadJson?.accountReference ?? "",
     client.payloadJson?.billingAddress ?? "",
@@ -186,9 +189,11 @@ function ClientEditor({ client, myobCustomers, priceLevelNames }: { client: Cust
           <div style={{ borderTop: "1px solid #bbf7d0", paddingTop: 9, color: "#475467", fontSize: 12, lineHeight: 1.5 }}>Permanent client discounts and quantity discount rules have been retired. Customer pricing now follows this single MYOB price level; one-off exceptions are applied on the quote instead.</div>
         </div>
 
+        <ClientContactsEditor key={client?.id ?? "new-client"} initialContacts={clientContactsForCustomer(client)} />
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 220px", gap: 12 }}>
-          <label style={{ display: "grid", gap: 6 }}><b>Email</b><input type="email" name="email" defaultValue={client?.email ?? ""} style={inputStyle} /></label>
-          <label style={{ display: "grid", gap: 6 }}><b>Phone</b><input name="phone" defaultValue={client?.phone ?? ""} style={inputStyle} /></label>
+          <label style={{ display: "grid", gap: 6 }}><b>Company / MYOB email</b><input type="email" name="email" defaultValue={client?.email ?? ""} style={inputStyle} /></label>
+          <label style={{ display: "grid", gap: 6 }}><b>Company / MYOB phone</b><input name="phone" defaultValue={client?.phone ?? ""} style={inputStyle} /></label>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

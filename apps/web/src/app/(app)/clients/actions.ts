@@ -4,6 +4,7 @@ import { Buffer } from "node:buffer";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase/server";
+import { validateClientContacts, type ClientContact } from "@/lib/client-contacts";
 import { formatStructuredAddress, normaliseStructuredAddress, type StructuredAddress } from "@/lib/contact-address";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
@@ -33,6 +34,16 @@ const clientSchema = z.object({
   logoUrl: z.string().url("Logo URL must be a valid URL.").optional().or(z.literal("")),
   myobPriceLevel: z.string().optional().or(z.literal(""))
 });
+
+function contactsFromForm(formData: FormData): ClientContact[] {
+  const value = formData.get("contactsJson");
+  if (typeof value !== "string") throw new Error("Contact details were not submitted.");
+  try {
+    return validateClientContacts(JSON.parse(value) as unknown);
+  } catch (error) {
+    throw new Error(error instanceof SyntaxError ? "Invalid contact details." : (error instanceof Error ? error.message : "Invalid contact details."));
+  }
+}
 
 function nullable(value: string | undefined): string | null {
   const trimmed = (value ?? "").trim();
@@ -156,8 +167,10 @@ export async function createClientAction(formData: FormData): Promise<void> {
     redirect(`/clients?error=${encodeURIComponent(message)}`);
   }
 
+  let contacts: ClientContact[] = [];
   let myobMapping: CustomerPayload = {};
   try {
+    contacts = contactsFromForm(formData);
     myobMapping = await requestedMyobMapping(activeTenant.tenantId, formData);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -173,7 +186,7 @@ export async function createClientAction(formData: FormData): Promise<void> {
     email: nullable(parsed.data.email),
     phone: nullable(parsed.data.phone),
     isActive: true,
-    payloadJson: { source: "manual", ...myobMapping }
+    payloadJson: { source: "manual", contacts, ...myobMapping }
   });
 
   let uploadedLogo: { logoUrl?: string; logoStoragePath?: string } = {};
@@ -184,7 +197,7 @@ export async function createClientAction(formData: FormData): Promise<void> {
     redirect(`/clients?error=${encodeURIComponent(message)}`);
   }
 
-  await updateCustomerPayloadForTenant(activeTenant.tenantId, created.id, { ...payloadFromParsed(parsed.data, uploadedLogo), ...myobMapping }, true);
+  await updateCustomerPayloadForTenant(activeTenant.tenantId, created.id, { ...payloadFromParsed(parsed.data, uploadedLogo), contacts, ...myobMapping }, true);
 
   const queued = await queueMyobMasterDataSync(activeTenant.tenantId, "customer", created.id);
   redirect(`/clients?selected=${created.id}&message=${encodeURIComponent(queued ? "Client created · MYOB sync queued" : "Client created")}`);
@@ -225,8 +238,10 @@ export async function updateClientAction(formData: FormData): Promise<void> {
   const existing = await getCustomerById(activeTenant.tenantId, customerId);
   if (!existing) redirect("/clients?error=Client%20was%20not%20found");
 
+  let contacts: ClientContact[] = [];
   let myobMapping: CustomerPayload = {};
   try {
+    contacts = contactsFromForm(formData);
     myobMapping = await requestedMyobMapping(activeTenant.tenantId, formData);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -260,6 +275,7 @@ export async function updateClientAction(formData: FormData): Promise<void> {
     email: nullable(parsed.data.email),
     phone: nullable(parsed.data.phone),
     payloadJson: {
+      contacts,
       ...payloadFromParsed(parsed.data, uploadedLogo.logoUrl ? uploadedLogo : { logoUrl: nullable(parsed.data.logoUrl) ?? existing.payloadJson.logoUrl, logoStoragePath: existing.payloadJson.logoStoragePath }),
       ...myobMapping,
       myobItemPriceLevel: desiredPriceLevel,

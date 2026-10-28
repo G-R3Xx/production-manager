@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { NewEnquiryForm } from "@/app/(app)/enquiries/NewEnquiryForm";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
-import { listCustomersForTenant } from "@/server/customers";
+import { listCustomerOptionsForTenant } from "@/server/customers";
 
 type TabletEnquiriesPageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -21,7 +21,7 @@ export default async function TabletEnquiriesPage({ searchParams }: TabletEnquir
   if (!activeTenant) redirect("/bootstrap");
 
   const [clients, params] = await Promise.all([
-    listCustomersForTenant(activeTenant.tenantId),
+    listCustomerOptionsForTenant(activeTenant.tenantId, { includeContacts: true }),
     searchParams ?? Promise.resolve({})
   ]);
   const message = readParam(params, "message");
@@ -107,7 +107,7 @@ export default async function TabletEnquiriesPage({ searchParams }: TabletEnquir
           </section>
         ) : null}
 
-        <NewEnquiryForm clients={clients} mode="tablet" returnTo="/enquiries/tablet" />
+        <NewEnquiryForm clients={clients.filter((client) => client.isActive)} mode="tablet" returnTo="/enquiries/tablet" />
 
         <p style={{ margin: "0 0 8px", textAlign: "center", color: "#94a3b8", fontSize: 12, fontWeight: 800 }}>
           V26.10.21.01

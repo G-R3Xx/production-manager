@@ -137,7 +137,7 @@ export async function listCustomersForTenant(tenantId: string, options?: { inclu
   return options?.includeDeleted ? rows : rows.filter((row) => !isDeletedCustomer(row));
 }
 
-export async function listCustomerOptionsForTenant(tenantId: string): Promise<CustomerRecord[]> {
+export async function listCustomerOptionsForTenant(tenantId: string, options?: { includeContacts?: boolean }): Promise<CustomerRecord[]> {
   // Quoting/enquiry entry only needs a small subset of the customer payload.
   // Avoid shipping notes, structured addresses and other potentially large MYOB
   // payload fields on every workflow page load.
@@ -160,6 +160,7 @@ export async function listCustomerOptionsForTenant(tenantId: string): Promise<Cu
         'myobItemPriceLevel', NULLIF(payload_json ->> 'myobItemPriceLevel', ''),
         'myobPriceLevelName', NULLIF(payload_json ->> 'myobPriceLevelName', ''),
         'myobPriceLevelNames', payload_json -> 'myobPriceLevelNames'
+        ${options?.includeContacts ? ", 'contacts', payload_json -> 'contacts'" : ""}
       )) as "payloadJson",
       created_at as "createdAt",
       updated_at as "updatedAt"

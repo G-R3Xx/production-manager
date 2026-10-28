@@ -8,6 +8,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createEnquiryCorrespondenceForTenant, createEnquiryForTenant, getEnquiryById, updateEnquiryClientLogoForTenant, updateEnquiryStatusForTenant } from "@/server/enquiries";
 import { getCustomerById, customerLogoUrl } from "@/server/customers";
+import { selectedClientContact } from "@/lib/client-contacts";
 import { createInstallSchedulerSurveyJob } from "@/server/installSchedulerBridge";
 import { createSurveyRequestForTenant, getLatestSurveyRequestForEnquiry, getSurveyRequestById } from "@/server/surveys";
 
@@ -83,6 +84,14 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
 
   const linkedCustomerId = nullable(formData.get("linkedCustomerId"));
   const linkedCustomer = linkedCustomerId ? await getCustomerById(activeTenant.tenantId, linkedCustomerId) : null;
+  if (linkedCustomerId && (!linkedCustomer || !linkedCustomer.isActive || linkedCustomer.payloadJson?.deletedAt)) {
+    redirect(enquiryRedirectUrl(returnTo, "error", "Please select an active client."));
+  }
+  const linkedContactId = nullable(formData.get("linkedContactId"));
+  const selectedContact = linkedContactId ? selectedClientContact(linkedCustomer, linkedContactId) : null;
+  if (linkedContactId && !selectedContact) {
+    redirect(enquiryRedirectUrl(returnTo, "error", "That contact does not belong to the selected client. Please select a contact again."));
+  }
   const clientName = String(formData.get("clientName") ?? "").trim() || linkedCustomer?.displayName || "";
   const requestSummary = String(formData.get("requestSummary") ?? "").trim();
   const siteSurveyChoice = String(formData.get("siteSurveyRequired") ?? "").trim().toLowerCase();
@@ -100,9 +109,11 @@ export async function createEnquiryAction(formData: FormData): Promise<void> {
     redirect(enquiryRedirectUrl(returnTo, "error", "Client logo URL must start with http or https"));
   }
 
-  const contactName = nullable(formData.get("contactName")) ?? ([linkedCustomer?.firstName, linkedCustomer?.lastName].filter(Boolean).join(" ") || null);
-  const email = nullable(formData.get("email")) ?? linkedCustomer?.email ?? null;
-  const phone = nullable(formData.get("phone")) ?? linkedCustomer?.phone ?? null;
+  // Snapshot the selected person's details onto the enquiry. Never fall back to
+  // another company person's email/phone if this contact has an empty field.
+  const contactName = nullable(formData.get("contactName")) ?? selectedContact?.name ?? null;
+  const email = nullable(formData.get("email")) ?? selectedContact?.email ?? null;
+  const phone = nullable(formData.get("phone")) ?? selectedContact?.phone ?? null;
   const siteAddress = nullable(formData.get("siteAddress")) ?? (typeof linkedCustomer?.payloadJson.defaultSiteAddress === "string" ? linkedCustomer.payloadJson.defaultSiteAddress.trim() || null : null);
   const notes = nullable(formData.get("notes"));
   let effectiveClientLogoUrl = pastedClientLogoUrl || customerLogoUrl(linkedCustomer) || null;
