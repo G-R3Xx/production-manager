@@ -49,6 +49,31 @@ const cardStyle = {
   boxShadow: "0 18px 45px rgba(15,23,42,0.06)"
 };
 
+const fieldStyle = {
+  display: "grid",
+  alignContent: "start",
+  gap: 7,
+  minWidth: 0,
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#475467"
+} as const;
+
+const inputStyle = {
+  width: "100%",
+  minWidth: 0,
+  minHeight: 42,
+  boxSizing: "border-box",
+  borderRadius: 11,
+  border: "1px solid #cbd5e1",
+  padding: "0 11px",
+  color: "#0f172a",
+  fontSize: 14,
+  fontWeight: 700
+} as const;
+
+const helpStyle = { color: "#64748b", fontSize: 12, fontWeight: 400, lineHeight: 1.4 } as const;
+
 export default async function UsersPage({ searchParams }: UsersPageProps) {
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -67,7 +92,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
   const canEdit = canManageStaff(activeTenant.tenantRole) && activeTenant.membershipStatus === "active";
 
   return (
-    <div style={{ maxWidth: 1180, margin: "0 auto", display: "grid", gap: 18 }}>
+    <div style={{ maxWidth: 1180, margin: "0 auto", display: "grid", gap: 18, minWidth: 0 }}>
       <section style={{ ...cardStyle, padding: 26 }}>
         <p style={{ margin: 0, fontSize: 12, fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", color: "#4f46e5" }}>
           Staff & roles
@@ -78,7 +103,9 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
             <p style={{ margin: "10px 0 0", color: "#475467", lineHeight: 1.6, maxWidth: 760 }}>
               Review everyone who has joined <strong>{activeTenant.tenantName}</strong>, edit their names and role, or disable access without deleting their history.
             </p>
-            <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>Short names appear in staff assignments. Name changes apply wherever this staff profile is used.</p>
+            <p style={{ margin: "6px 0 0", color: "#64748b", fontSize: 13 }}>
+              Short names appear in staff assignments. Internal quote cost access is controlled individually and is off by default.
+            </p>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <span style={{ border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "8px 12px", fontWeight: 900 }}>{summary.activeUsers} active</span>
@@ -90,13 +117,13 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
       </section>
 
       {message ? (
-        <section style={{ border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#166534", borderRadius: 16, padding: 14, fontWeight: 800 }}>
+        <section role="status" style={{ border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#166534", borderRadius: 16, padding: 14, fontWeight: 800 }}>
           {message}
         </section>
       ) : null}
 
       {error ? (
-        <section style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", borderRadius: 16, padding: 14, fontWeight: 800 }}>
+        <section role="alert" style={{ border: "1px solid #fecaca", background: "#fef2f2", color: "#991b1b", borderRadius: 16, padding: 14, fontWeight: 800 }}>
           {error}
         </section>
       ) : null}
@@ -107,150 +134,128 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
         </section>
       ) : null}
 
-      <section style={{ ...cardStyle, padding: 0, overflow: "hidden" }}>
+      {/* Independent staff cards replace the wide table: the cost permission and Save button
+          remain visible without sideways scrolling, even at laptop and mobile widths. */}
+      <section aria-label="Staff accounts" style={{ ...cardStyle, padding: 0, overflow: "hidden", minWidth: 0 }}>
         {users.length === 0 ? (
           <div style={{ padding: 24, color: "#475467" }}>No users found for this workspace yet.</div>
         ) : (
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1320 }}>
-              <thead>
-                <tr style={{ background: "#f8fafc", textAlign: "left" }}>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Staff member</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Google / email</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Role</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Status</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Labour $/hr</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Quote layout</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Cost breakdown</th>
-                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Joined</th>
-                  <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb", position: "sticky", right: 0, zIndex: 3, background: "#f8fafc", boxShadow: "-10px 0 18px -16px rgba(15, 23, 42, 0.55)", width: 82, minWidth: 82 }}>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((row) => {
-                  const isCurrentUser = row.userProfileId === activeTenant.userProfileId;
-                  const isDisabled = row.membershipStatus === "disabled";
+          <div style={{ display: "grid" }}>
+            {users.map((row, index) => {
+              const isCurrentUser = row.userProfileId === activeTenant.userProfileId;
+              const isDisabled = row.membershipStatus === "disabled";
+              const canEditRow = canEdit && (activeTenant.tenantRole === "owner" || row.tenantRole !== "owner");
 
-                  return (
-                    <tr key={row.membershipId} style={{ background: isDisabled ? "#f8fafc" : "#ffffff" }}>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        {canEdit ? (
-                          <div style={{ display: "grid", gap: 9, minWidth: 210 }}>
-                            <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#64748b", fontWeight: 800 }}>
-                              Full name
-                              <input form={`staff-${row.membershipId}`} name="fullName" defaultValue={row.fullName} required maxLength={200}
-                                style={{ width: "100%", boxSizing: "border-box", minHeight: 40, borderRadius: 10, border: "1px solid #cbd5e1", padding: "0 10px", color: "#0f172a", fontWeight: 800 }} />
-                            </label>
-                            <label style={{ display: "grid", gap: 4, fontSize: 12, color: "#64748b", fontWeight: 800 }}>
-                              Short name
-                              <input form={`staff-${row.membershipId}`} name="shortName" defaultValue={row.shortName} required maxLength={50} placeholder="e.g. Glen"
-                                style={{ width: "100%", boxSizing: "border-box", minHeight: 40, borderRadius: 10, border: "1px solid #cbd5e1", padding: "0 10px", color: "#0f172a", fontWeight: 800 }} />
-                            </label>
-                            {isCurrentUser ? <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 900 }}>(you)</span> : null}
-                          </div>
-                        ) : (
-                          <>
-                            <div style={{ fontWeight: 950, color: "#0f172a" }}>{row.fullName || row.email}</div>
-                            <div style={{ marginTop: 5, color: "#64748b", fontSize: 13 }}>
-                              Short name: <strong>{row.shortName || "—"}</strong>
-                              {isCurrentUser ? <span style={{ marginLeft: 8, color: "#2563eb", fontWeight: 900 }}>(you)</span> : null}
-                            </div>
-                          </>
-                        )}
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <div style={{ fontWeight: 800, color: "#334155" }}>{row.email}</div>
-                        <div style={{ marginTop: 7, display: "inline-flex", border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "5px 9px", fontSize: 12, fontWeight: 900 }}>
-                          {domainBadge(row.email)}
-                        </div>
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <form id={`staff-${row.membershipId}`} action={updateStaffMemberAction} style={{ display: "grid", gap: 8 }}>
-                          <input type="hidden" name="membershipId" value={row.membershipId} />
-                          <select
-                            name="tenantRole"
-                            defaultValue={row.tenantRole}
-                            disabled={!canEdit}
-                            style={{ minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 12px", fontWeight: 800, textTransform: "capitalize" }}
-                          >
-                            {TENANT_ROLE_OPTIONS.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        </form>
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <select
-                          form={`staff-${row.membershipId}`}
-                          name="membershipStatus"
-                          defaultValue={row.membershipStatus}
-                          disabled={!canEdit}
-                          style={{ minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 12px", fontWeight: 800 }}
-                        >
-                          {MEMBERSHIP_STATUS_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>
+              return (
+                <form
+                  key={row.membershipId}
+                  id={`staff-${row.membershipId}`}
+                  action={updateStaffMemberAction}
+                  style={{
+                    minWidth: 0,
+                    display: "grid",
+                    gap: 18,
+                    padding: "22px 24px",
+                    borderBottom: index === users.length - 1 ? "none" : "1px solid #e5e7eb",
+                    background: isDisabled ? "#f8fafc" : "#fff"
+                  }}
+                >
+                  <input type="hidden" name="membershipId" value={row.membershipId} />
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
+                    <div style={{ display: "grid", gap: 7, minWidth: 0, flex: "1 1 220px" }}>
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                        <strong style={{ color: "#0f172a", fontSize: 18 }}>{row.fullName || row.email}</strong>
+                        {isCurrentUser ? <span style={{ color: "#2563eb", fontSize: 12, fontWeight: 900 }}>(you)</span> : null}
+                        <span style={{ fontSize: 11, color: isDisabled ? "#991b1b" : "#475467", background: isDisabled ? "#fef2f2" : "#f1f5f9", borderRadius: 999, padding: "4px 8px", fontWeight: 800 }}>
                           {staffStatusLabel(row.membershipStatus)}
-                        </div>
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <input form={`staff-${row.membershipId}`} name="quoteLabourRate" defaultValue={row.quoteLabourRate ?? ""} disabled={!canEdit} type="number" min="0" step="0.01" placeholder="Global rate" style={{ width: 110, minHeight: 42, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 10px", fontWeight: 800 }} />
-                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12 }}>Blank uses company rate. Production Steps can select this staff rate as their labour source.</div>
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <select
-                          form={`staff-${row.membershipId}`}
-                          name="quoteEntryLayout"
-                          defaultValue={row.quoteEntryLayout ?? "list"}
-                          disabled={!canEdit}
-                          style={{ minHeight: 42, minWidth: 160, borderRadius: 12, border: "1px solid #cbd5e1", background: canEdit ? "#fff" : "#f8fafc", padding: "0 12px", fontWeight: 800 }}
-                        >
-                          {QUOTE_ENTRY_LAYOUT_OPTIONS.map((option) => (
-                            <option key={option.value} value={option.value}>{option.label}</option>
-                          ))}
-                        </select>
-                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12, maxWidth: 190 }}>
-                          {QUOTE_ENTRY_LAYOUT_OPTIONS.find((option) => option.value === row.quoteEntryLayout)?.description ?? QUOTE_ENTRY_LAYOUT_OPTIONS[0]?.description}
-                        </div>
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, color: "#334155" }}>
-                          <input form={`staff-${row.membershipId}`} name="quoteCostBreakdownEnabled" type="checkbox" defaultChecked={row.quoteCostBreakdownEnabled} disabled={!canEdit}
-                            style={{ width: 18, height: 18, accentColor: "#2563eb" }} />
-                          Show cost breakdown
-                        </label>
-                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12, maxWidth: 180 }}>Allow this person to view confidential itemised quote costs.</div>
-                      </td>
-                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", color: "#475467", fontSize: 13, verticalAlign: "top", lineHeight: 1.45 }}>
-                        <div>{formatDate(row.membershipCreatedAt)}</div>
-                        <div style={{ marginTop: 4, color: "#94a3b8" }}>Updated {formatDate(row.membershipUpdatedAt)}</div>
-                      </td>
-                      <td style={{ padding: 12, borderBottom: "1px solid #e5e7eb", verticalAlign: "top", position: "sticky", right: 0, zIndex: 2, background: isDisabled ? "#f8fafc" : "#ffffff", boxShadow: "-10px 0 18px -16px rgba(15, 23, 42, 0.55)", width: 82, minWidth: 82 }}>
-                        <button
-                          type="submit"
-                          form={`staff-${row.membershipId}`}
-                          disabled={!canEdit}
-                          style={{
-                            minHeight: 42,
-                            borderRadius: 13,
-                            border: canEdit ? "1px solid #1d4ed8" : "1px solid #cbd5e1",
-                            background: canEdit ? "#2563eb" : "#f8fafc",
-                            color: canEdit ? "#fff" : "#94a3b8",
-                            fontWeight: 950,
-                            padding: "0 16px",
-                            cursor: canEdit ? "pointer" : "not-allowed"
-                          }}
-                        >
-                          Save
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+                        <span style={{ color: "#475467", fontSize: 13, overflowWrap: "anywhere" }}>{row.email}</span>
+                        <span style={{ border: "1px solid #dbeafe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 999, padding: "4px 8px", fontSize: 11, fontWeight: 800 }}>
+                          {domainBadge(row.email)}
+                        </span>
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", gap: 16 }}>
+                      <label style={{ display: "flex", alignItems: "center", gap: 9, cursor: canEditRow ? "pointer" : "not-allowed", color: "#1e293b" }}>
+                        <input
+                          name="quoteCostBreakdownEnabled"
+                          type="checkbox"
+                          defaultChecked={row.quoteCostBreakdownEnabled}
+                          disabled={!canEditRow}
+                          style={{ width: 19, height: 19, margin: 0, flexShrink: 0, accentColor: "#2563eb", cursor: canEditRow ? "pointer" : "not-allowed" }}
+                        />
+                        <span style={{ display: "grid", gap: 2 }}>
+                          <strong style={{ fontSize: 13 }}>Show cost breakdown</strong>
+                          <span style={{ fontSize: 11, color: "#64748b" }}>Internal quote cost access</span>
+                        </span>
+                      </label>
+                      <button
+                        type="submit"
+                        disabled={!canEditRow}
+                        style={{ minHeight: 42, borderRadius: 12, border: canEditRow ? "1px solid #1d4ed8" : "1px solid #cbd5e1", background: canEditRow ? "#2563eb" : "#f8fafc", color: canEditRow ? "#fff" : "#94a3b8", fontWeight: 900, padding: "0 20px", cursor: canEditRow ? "pointer" : "not-allowed" }}
+                      >
+                        Save
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: "16px 18px", minWidth: 0 }}>
+                    <label style={fieldStyle}>
+                      Full name
+                      {canEditRow ? (
+                        <input name="fullName" defaultValue={row.fullName} required maxLength={200} style={inputStyle} />
+                      ) : (
+                        <span style={{ color: "#334155", fontSize: 14, fontWeight: 700 }}>{row.fullName || "—"}</span>
+                      )}
+                    </label>
+                    <label style={fieldStyle}>
+                      Short name
+                      {canEditRow ? (
+                        <input name="shortName" defaultValue={row.shortName} required maxLength={50} placeholder="e.g. Glen" style={inputStyle} />
+                      ) : (
+                        <span style={{ color: "#334155", fontSize: 14, fontWeight: 700 }}>{row.shortName || "—"}</span>
+                      )}
+                    </label>
+                    <label style={fieldStyle}>
+                      Role
+                      <select name="tenantRole" defaultValue={row.tenantRole} disabled={!canEditRow} style={{ ...inputStyle, background: canEditRow ? "#fff" : "#f8fafc" }}>
+                        {TENANT_ROLE_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={fieldStyle}>
+                      Status
+                      <select name="membershipStatus" defaultValue={row.membershipStatus} disabled={!canEditRow} style={{ ...inputStyle, background: canEditRow ? "#fff" : "#f8fafc" }}>
+                        {MEMBERSHIP_STATUS_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={fieldStyle}>
+                      Labour $/hr
+                      <input name="quoteLabourRate" defaultValue={row.quoteLabourRate ?? ""} disabled={!canEditRow} type="number" min="0" step="0.01" placeholder="Global rate" style={{ ...inputStyle, background: canEditRow ? "#fff" : "#f8fafc" }} />
+                      <span style={helpStyle}>Blank uses the company rate.</span>
+                    </label>
+                    <label style={fieldStyle}>
+                      Quote layout
+                      <select name="quoteEntryLayout" defaultValue={row.quoteEntryLayout ?? "list"} disabled={!canEditRow} style={{ ...inputStyle, background: canEditRow ? "#fff" : "#f8fafc" }}>
+                        {QUOTE_ENTRY_LAYOUT_OPTIONS.map((option) => (
+                          <option key={option.value} value={option.value}>{option.label}</option>
+                        ))}
+                      </select>
+                      <span style={helpStyle}>{QUOTE_ENTRY_LAYOUT_OPTIONS.find((option) => option.value === row.quoteEntryLayout)?.description ?? QUOTE_ENTRY_LAYOUT_OPTIONS[0]?.description}</span>
+                    </label>
+                  </div>
+                  <div style={{ display: "flex", gap: "6px 18px", flexWrap: "wrap", fontSize: 11, color: "#94a3b8" }}>
+                    <span>Joined {formatDate(row.membershipCreatedAt)}</span>
+                    <span>Updated {formatDate(row.membershipUpdatedAt)}</span>
+                  </div>
+                </form>
+              );
+            })}
           </div>
         )}
       </section>

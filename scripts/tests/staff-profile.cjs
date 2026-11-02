@@ -95,16 +95,36 @@ const assert=require('node:assert/strict');
   const browser=await chromium.launch(launch);
   try {
    const page=await browser.newPage({viewport:{width:1440,height:1100}});await page.setContent(html);
-   const ownRow=page.locator('tr').filter({has:page.locator(`input[value="${ownerMembership}"]`)});
+   const ownRow=page.locator('form').filter({has:page.locator(`input[value="${ownerMembership}"]`)});
    await ownRow.getByLabel('Full name',{exact:true}).fill('Glen Cloake');
    await ownRow.getByLabel('Short name',{exact:true}).fill('Glen');
-   const payload=await ownRow.getByRole('button',{name:'Save',exact:true}).evaluate(button=>Object.fromEntries(new FormData(button.form)));
+   const permission=ownRow.getByRole('checkbox',{name:/Show cost breakdown/});
+   assert.equal(await permission.count(),1);
+   assert.equal(await permission.isChecked(),false);
+   await permission.check();
+   const save=ownRow.getByRole('button',{name:'Save',exact:true});
+   const payload=await save.evaluate(button=>Object.fromEntries(new FormData(button.form)));
    assert.equal(payload.fullName,'Glen Cloake');assert.equal(payload.shortName,'Glen');assert.equal(payload.membershipId,ownerMembership);
    assert.equal(payload.tenantRole,'owner');assert.equal(payload.quoteEntryLayout,'catalogue');
+   assert.equal(payload.quoteCostBreakdownEnabled,'on');
+   await permission.uncheck();
+   const unchecked=await save.evaluate(button=>Object.fromEntries(new FormData(button.form)));
+   assert.equal('quoteCostBreakdownEnabled' in unchecked,false);
+   for (const width of [1060,390]) {
+    await page.setViewportSize({width,height:1100});
+    const cb=await permission.boundingBox();
+    const saveBox=await save.boundingBox();
+    assert(cb && saveBox,`Staff controls missing at ${width}px`);
+    assert(cb.x>=0 && cb.x+cb.width<=width,`Permission checkbox clipped at ${width}px`);
+    assert(saveBox.x>=0 && saveBox.x+saveBox.width<=width,`Save button clipped at ${width}px`);
+    const extraWidth=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
+    assert(extraWidth<=1,`Horizontal page overflow at ${width}px: ${extraWidth}`);
+   }
    global.__staffTestContext={...global.__staffTestContext,userProfileId:staff,tenantRole:'staff'};
    await page.setContent(app.renderToStaticMarkup(await app.UsersPage({})));
    assert.equal(await page.locator('input[name=fullName],input[name=shortName]').count(),0);
-   results.push('Rendered Staff page: external name inputs belong to the correct row Save form; non-admin view remains read-only');
+   assert.equal(await page.getByRole('checkbox',{name:/Show cost breakdown/}).first().isDisabled(),true);
+   results.push('Rendered Staff cards: permission visible without overflow at desktop/mobile sizes; checked/unchecked form submission, correct Save form; non-admin read-only');
   } finally {await browser.close();}
   console.log(JSON.stringify({environment:'Local PGlite + Chromium; mocked auth context/cache boundary; no live database',results},null,2));
  } finally {await db.close();await fs.rm(temporary,{recursive:true,force:true});}
