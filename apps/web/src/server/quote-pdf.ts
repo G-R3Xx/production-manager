@@ -3,6 +3,7 @@ import "server-only";
 import { inflateSync, deflateSync } from "node:zlib";
 import type { CompanySettingsRecord } from "@/server/company";
 import type { QuoteDraftRecord, QuoteLineRecord } from "@/server/quotes";
+import { groupQuoteLinesBySubJob, type QuoteSubJob } from "@/lib/quote-sub-jobs";
 
 const A4: [number, number] = [595.28, 841.89];
 const MAX_FETCH_BYTES = 5 * 1024 * 1024;
@@ -248,6 +249,7 @@ function buildPageContent(input:{
   clientLogo:EmbeddedImage|null;
   lineStart:number;
   lineEnd:number;
+  sectionLabels: Record<string, string>;
   context: QuotePdfContext;
 }):string{
   const [pageW,pageH]=A4;
@@ -341,8 +343,10 @@ function buildPageContent(input:{
     const qty=numberValue(line.quantity),unit=numberValue(line.unitPrice),total=numberValue(line.lineTotal);
     const boxY=y-lineH;
     out+=roundedRectOp(innerX,boxY,innerW,lineH-7,11,PDF_COLOURS.soft,PDF_COLOURS.line,0.75);
-    const titleLines=wrapText(title,58).slice(0,2);
-    titleLines.forEach((part,index)=>{out+=textRgbOp(part,innerX+12,y-20-index*12,9.4,true,PDF_COLOURS.ink);});
+    const sectionLabel=input.sectionLabels[line.id];
+    if(sectionLabel) out+=textRgbOp(`SUB JOB: ${sectionLabel}`.slice(0,79),innerX+12,y-12,7.4,true,PDF_COLOURS.blue);
+    const titleLines=wrapText(title,sectionLabel?53:58).slice(0,sectionLabel?1:2);
+    titleLines.forEach((part,index)=>{out+=textRgbOp(part,innerX+12,y-(sectionLabel?27:20)-index*12,9.4,true,PDF_COLOURS.ink);});
     out+=textRgbOp(money(total),innerRight-146,y-21,10.8,true,PDF_COLOURS.ink);
     out+=textRgbOp(`Qty ${qty.toFixed(2).replace(/\.00$/,"" )} · ${money(unit)} ea`,innerRight-194,y-39,8,false,PDF_COLOURS.muted);
     y-=lineH;
@@ -396,6 +400,7 @@ async function maybeEmbedImage(pdf: PdfBuilder, url: string | null | undefined):
 export async function buildQuotePdf(input:{
   quote:QuoteDraftRecord;
   lines:QuoteLineRecord[];
+  subJobs?:QuoteSubJob[];
   company:CompanySettingsRecord|null;
   companyLogoUrl?:string|null;
   fallbackLogoUrl?:string|null;
@@ -406,6 +411,13 @@ export async function buildQuotePdf(input:{
 }):Promise<QuotePdfResult>{
   const lines=input.lines.filter(line=>!line.clientRevisionExcluded&&line.clientResponseStatus!=="cancelled"&&record(line.configurationSnapshot)?.surveyNeedsConfiguration!==true);
   if(!lines.length)throw new Error("Quote PDF has no configured client-facing line items.");
+  const groups=groupQuoteLinesBySubJob(lines,input.subJobs??[]).filter(g=>g.lines.length);
+  const orderedLines=groups.flatMap(group=>group.lines);
+  const sectionLabels:Record<string,string>={};
+  if(input.subJobs?.length) for(const group of groups){
+    const first=group.lines[0];
+    if(first) sectionLabels[first.id]=`${group.title} | ${money(group.subtotal)} ex GST`;
+  }
   const pdf=new PdfBuilder(),catalogId=pdf.reserve(),pagesId=pdf.reserve(),fontId=pdf.reserve(),boldFontId=pdf.reserve();
   pdf.set(fontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
   pdf.set(boldFontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>");
@@ -415,7 +427,7 @@ export async function buildQuotePdf(input:{
   const firstCapacity=4,nextCapacity=4;
   const ranges:Array<[number,number]>=[];
   let start=0;
-  while(start<lines.length){const cap=start===0?firstCapacity:nextCapacity;ranges.push([start,Math.min(lines.length,start+cap)]);start+=cap;}
+  while(start<orderedLines.length){const cap=start===0?firstCapacity:nextCapacity;ranges.push([start,Math.min(orderedLines.length,start+cap)]);start+=cap;}
   const context: QuotePdfContext={
     clientLogoUrl:input.clientLogoUrl,
     clientAddress:input.clientAddress,
@@ -426,7 +438,7 @@ export async function buildQuotePdf(input:{
   ranges.forEach(([lineStart,lineEnd],pageIndex)=>{
     const xobjects=[logo?`/Logo ${logo.objectId} 0 R`:null,clientLogo?`/ClientLogo ${clientLogo.objectId} 0 R`:null].filter(Boolean).join(" ");
     const resources=`/Font << /F1 ${fontId} 0 R /F2 ${boldFontId} 0 R >>${xobjects?` /XObject << ${xobjects} >>`:""}`;
-    const content=buildPageContent({pageIndex,pageCount:ranges.length,quote:input.quote,lines,company:input.company,logo,clientLogo,lineStart,lineEnd,context});
+    const content=buildPageContent({pageIndex,pageCount:ranges.length,quote:input.quote,lines:orderedLines,sectionLabels,company:input.company,logo,clientLogo,lineStart,lineEnd,context});
     const stream=pdf.stream("",Buffer.from(content,"ascii"));
     pageIds.push(pdf.add(`<< /Type /Page /Parent ${pagesId} 0 R /MediaBox [0 0 ${A4[0]} ${A4[1]}] /Resources << ${resources} >> /Contents ${stream} 0 R >>`));
   });

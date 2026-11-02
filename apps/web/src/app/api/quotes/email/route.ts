@@ -15,6 +15,7 @@ import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 import { buildQuotePdf } from "@/server/quote-pdf";
+import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
 import { sendOutboundEmail } from "@/server/outbound-email";
 
 export const runtime = "nodejs";
@@ -112,6 +113,7 @@ export async function POST(request: Request) {
         quotePdf = await buildQuotePdf({
           quote,
           lines: initialLines,
+          subJobs: await listQuoteSubJobs(quoteId),
           company,
           companyLogoUrl: company?.companyLogoUrl || quoteEmailLogoUrl || null,
           fallbackLogoUrl: tenderEdgeHorizontalLogoUrl,

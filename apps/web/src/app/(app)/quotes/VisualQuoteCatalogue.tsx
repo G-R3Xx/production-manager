@@ -10,6 +10,7 @@ const QuoteMaterialFlowBuilder = lazy(() => import("./QuoteMaterialFlowBuilder")
 
 type Props = {
   quoteId: string;
+  subJobId?: string | null;
   products: QuoteProduct[];
   materials: QuoteMaterial[];
   myobMatrixItems?: MyobMatrixItem[];
@@ -68,6 +69,7 @@ function productGraphic(product: QuoteProduct) {
 
 export function VisualQuoteCatalogue({
   quoteId,
+  subJobId = null,
   products,
   materials,
   myobMatrixItems = [],
@@ -245,6 +247,7 @@ export function VisualQuoteCatalogue({
                   <QuoteLineBuilder
                     key={`saved-${modalMode.productId}`}
                     quoteId={quoteId}
+                    subJobId={subJobId}
                     products={products}
                     materials={materials}
                     pricingSettings={pricingSettings}
@@ -256,6 +259,7 @@ export function VisualQuoteCatalogue({
                   <QuoteMaterialFlowBuilder
                     key="quick-catalogue-builder"
                     quoteId={quoteId}
+                    subJobId={subJobId}
                     materials={materials}
                     myobMatrixItems={myobMatrixItems}
                     canOverrideMarkup={canOverrideMarkup}

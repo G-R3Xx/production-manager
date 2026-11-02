@@ -4,6 +4,7 @@ import { lazy, Suspense, useState } from "react";
 import type { QuoteProduct } from "./QuoteLineBuilder";
 import type { MyobMatrixItem, PricingSettings, QuoteMaterial } from "./QuoteMaterialFlowBuilder";
 import type { QuoteCostingResources } from "./quoteCostingResources";
+import type { QuoteSubJob } from "@/lib/quote-sub-jobs";
 
 const QuoteLineBuilder = lazy(() => import("./QuoteLineBuilder").then((module) => ({ default: module.QuoteLineBuilder })));
 const QuoteMaterialFlowBuilder = lazy(() => import("./QuoteMaterialFlowBuilder").then((module) => ({ default: module.QuoteMaterialFlowBuilder })));
@@ -13,6 +14,7 @@ type StartMode = "saved" | "quick";
 
 type QuoteLineStartBuilderProps = {
   quoteId: string;
+  subJobs?: QuoteSubJob[];
   products: QuoteProduct[];
   materials: QuoteMaterial[];
   myobMatrixItems?: MyobMatrixItem[];
@@ -38,6 +40,7 @@ const optionButton = (active: boolean) => ({
 
 export function QuoteLineStartBuilder({
   quoteId,
+  subJobs = [],
   products,
   materials,
   myobMatrixItems = [],
@@ -48,12 +51,25 @@ export function QuoteLineStartBuilder({
   categoryImages = {},
 }: QuoteLineStartBuilderProps) {
   const [mode, setMode] = useState<StartMode>("saved");
+  const [subJobId, setSubJobId] = useState("");
+  const sectionPicker = subJobs.length ? (
+    <label style={{ display: "grid", gap: 6, maxWidth: 480, fontSize: 13, fontWeight: 850, color: "#344054" }}>
+      Add line under Sub Job
+      <select value={subJobId} onChange={(event) => setSubJobId(event.target.value)} style={{ minHeight: 42, padding: "0 12px", borderRadius: 10, border: "1px solid #cbd5e1", background: "#fff" }}>
+        <option value="">General / Unassigned</option>
+        {subJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+      </select>
+    </label>
+  ) : null;
 
   if (quoteEntryLayout === "catalogue") {
     return (
+      <div style={{ display: "grid", gap: 12 }}>
+      {sectionPicker}
       <Suspense fallback={<div style={{ minHeight: 150, display: "grid", placeItems: "center", color: "#64748b", fontSize: 13, fontWeight: 800 }}>Loading visual catalogue…</div>}>
         <VisualQuoteCatalogue
           quoteId={quoteId}
+          subJobId={subJobId}
           products={products}
           materials={materials}
           myobMatrixItems={myobMatrixItems}
@@ -63,11 +79,13 @@ export function QuoteLineStartBuilder({
           categoryImages={categoryImages}
         />
       </Suspense>
+      </div>
     );
   }
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
+      {sectionPicker}
       <section style={{ display: "grid", gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 950, color: "#475467", textTransform: "uppercase", letterSpacing: "0.06em" }}>
           Start from
@@ -93,6 +111,7 @@ export function QuoteLineStartBuilder({
           {mode === "saved" ? (
             <QuoteLineBuilder
               quoteId={quoteId}
+              subJobId={subJobId}
               products={products}
               materials={materials}
               pricingSettings={pricingSettings}
@@ -101,6 +120,7 @@ export function QuoteLineStartBuilder({
           ) : (
             <QuoteMaterialFlowBuilder
               quoteId={quoteId}
+              subJobId={subJobId}
               materials={materials}
               myobMatrixItems={myobMatrixItems}
               canOverrideMarkup={canOverrideMarkup}

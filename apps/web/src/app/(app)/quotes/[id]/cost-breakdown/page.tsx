@@ -5,6 +5,8 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import { canViewQuoteCostBreakdown } from "@/server/users";
 import { getQuoteDraftById, listQuoteLines } from "@/server/quotes";
 import { buildQuoteCostReport, COST_CATEGORIES } from "@/lib/quote-cost-report";
+import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
+import { groupQuoteLinesBySubJob } from "@/lib/quote-sub-jobs";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -28,7 +30,9 @@ export default async function QuoteCostBreakdownPage({ params }: Props) {
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) notFound();
   const quote = await getQuoteDraftById(tenant.tenantId, id);
   if (!quote || quote.status === "deleted") notFound();
-  const lines = await listQuoteLines(quote.id);
+  const [lines, subJobs] = await Promise.all([listQuoteLines(quote.id), listQuoteSubJobs(quote.id)]);
+  const sectionGroups = groupQuoteLinesBySubJob(lines, subJobs);
+  const sectionByLine = new Map(sectionGroups.flatMap((group) => group.lines.map((line) => [line.id, group.title] as const)));
   const report = buildQuoteCostReport(lines);
 
   return (
@@ -61,6 +65,7 @@ export default async function QuoteCostBreakdownPage({ params }: Props) {
       {report.lines.length === 0 ? <p>No quote lines exist.</p> : report.lines.map((line, index) => (
         <section key={index} style={{ border: "1px solid #cbd5e1", padding: 14, marginBottom: 18 }}>
           <h3 style={{ fontSize: 17, margin: "0 0 8px" }}>{index + 1}. {line.name} {line.active ? "" : "(cancelled — excluded from totals)"}</h3>
+          {subJobs.length ? <p style={{ fontSize: 12, fontWeight: 800, color: "#1e40af", margin: "0 0 8px" }}>Sub Job: {sectionByLine.get(lines[index]?.id ?? "") ?? "General / Unassigned"}</p> : null}
           {line.machineSelections.length > 0 ? <p style={{ fontSize: 12 }}><b>Machines selected:</b> {line.machineSelections.join(", ")} (a machine charge is included only when recorded in the cost rows below)</p> : null}
           {line.optionSummary ? <p style={{ fontSize: 12, color: "#475569", overflowWrap: "anywhere" }}>{line.optionSummary}</p> : null}
           <p style={{ fontSize: 13 }}><b>Qty:</b> {decimal(line.qty)} · <b>Sell per unit:</b> {money(line.unitPrice)} · <b>Saved line revenue:</b> {money(line.revenue)} · <b>Pricing:</b> {line.pricingSource}</p>

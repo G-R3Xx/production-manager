@@ -173,6 +173,7 @@ type QuoteLineBuilderProps = {
   quoteId: string;
   products: QuoteProduct[];
   materials: QuoteMaterial[];
+  subJobId?: string | null;
   pricingSettings?: PricingSettings;
   costingResources?: QuoteCostingResources;
   initialProductId?: string | null;
@@ -1537,7 +1538,7 @@ function productDepartment(product: QuoteProduct): SavedProductDepartment | null
   return null;
 }
 
-export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings, costingResources, initialProductId = null, hideProductPicker = false }: QuoteLineBuilderProps) {
+export function QuoteLineBuilder({ quoteId, products, materials, subJobId = null, pricingSettings, costingResources, initialProductId = null, hideProductPicker = false }: QuoteLineBuilderProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -1833,6 +1834,7 @@ export function QuoteLineBuilder({ quoteId, products, materials, pricingSettings
   return (
     <form data-no-global-loader="true" onSubmit={handleFastSave} style={{ display: "grid", gap: 14 }}>
       <input type="hidden" name="quoteId" value={quoteId} />
+      <input type="hidden" name="subJobId" value={subJobId ?? ""} />
       <input type="hidden" name="productId" value={selectedProductId} />
       <input type="hidden" name="productName" value={selectedProduct?.name ?? "Saved product"} />
       <input type="hidden" name="optionSummary" value={autoSummary} />

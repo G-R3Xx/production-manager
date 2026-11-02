@@ -1,6 +1,9 @@
 export const dynamic = "force-dynamic";
 
 import { notFound } from "next/navigation";
+import { Fragment } from "react";
+import { groupQuoteLinesBySubJob } from "@/lib/quote-sub-jobs";
+import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
 import { getEnquiryById } from "@/server/enquiries";
@@ -333,8 +336,9 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
 
   await markQuoteViewedByToken(token);
 
-  const [allLines, companySettings, linkedClient, sourceSurvey] = await Promise.all([
+  const [allLines, subJobs, companySettings, linkedClient, sourceSurvey] = await Promise.all([
     listQuoteLines(quote.id),
+    listQuoteSubJobs(quote.id),
     getCompanySettingsByTenantId(quote.tenantId),
     getCustomerById(quote.tenantId, quote.linkedCustomerId),
     quote.surveyRequestId ? getSurveyRequestById(quote.tenantId, quote.surveyRequestId) : Promise.resolve(null)
@@ -346,6 +350,9 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
   // rendered back to the client, including while a revised quote is being prepared/resend.
   // clientRevisionExcluded additionally removes historical lines that have been taken out of scope.
   const lines = allLines.filter((line) => !line.clientRevisionExcluded && line.clientResponseStatus !== "cancelled" && !surveyLineStillNeedsConfiguration(line.configurationSnapshot));
+  const groups = groupQuoteLinesBySubJob(lines, subJobs).filter((group) => group.lines.length);
+  const orderedLines = groups.flatMap((group) => group.lines);
+  const sectionByLine = new Map(groups.flatMap((group) => group.lines.map((line) => [line.id, group] as const)));
   const subtotal = lines.reduce((sum, line) => sum + parseMoney(line.lineTotal), 0);
   const gst = subtotal * 0.1;
   const total = subtotal + gst;
@@ -475,11 +482,17 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
             <div style={{ borderTop: "1px solid #e4e7ec", paddingTop: 18, display: "grid", gap: 12 }}>
               <h2 style={{ margin: 0 }}>Quote details</h2>
           <div style={{ display: "grid", gap: 10 }}>
-            {lines.map((line) => {
+            {orderedLines.map((line, index) => {
+              const section = sectionByLine.get(line.id);
+              const previousSection = index ? sectionByLine.get(orderedLines[index - 1]!.id) : null;
+              const showHeading = subJobs.length > 0 && section && (index === 0 || section.id !== previousSection?.id);
               const clientLine = quoteLineForClient(line);
               return (
+                <Fragment key={line.id}>
+                {showHeading && section ? <div className="quote-print-line" style={{ padding: "12px 16px", borderRadius: 13, background: "#eff6ff", border: "1px solid #bfdbfe", display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap", color: "#1e40af" }}>
+                  <strong>{section.title}</strong><span style={{ fontWeight: 750, fontSize: 13 }}>Section subtotal: {formatMoney(section.subtotal)} ex GST</span>
+                </div> : null}
                 <div
-                  key={line.id}
                   className="quote-print-line quote-line-grid"
                   style={{
                     border: "1px solid #e4e7ec",
@@ -508,6 +521,7 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                     locked={lineResponsesLocked}
                   />
                 </div>
+                </Fragment>
               );
             })}
             {lines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>{allLines.length ? "There are no active items remaining on this quote." : "This quote has no saved line items yet."}</p> : null}

@@ -81,6 +81,7 @@ export type MyobMatrixItem = {
 type QuoteMaterialFlowBuilderProps = {
   quoteId: string;
   materials: QuoteMaterial[];
+  subJobId?: string | null;
   myobMatrixItems?: MyobMatrixItem[];
   pricingSettings?: PricingSettings;
   editingLine?: EditableQuoteLine | null;
@@ -1476,7 +1477,7 @@ function bestSheetMaterialForGroup(materials: QuoteMaterial[], widthMm: number, 
   )[0]?.material ?? materials[0];
 }
 
-export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources, presentation = "full", categoryImages = {} }: QuoteMaterialFlowBuilderProps) {
+export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, myobMatrixItems = [], pricingSettings, editingLine = null, canOverrideMarkup = false, costingResources, presentation = "full", categoryImages = {} }: QuoteMaterialFlowBuilderProps) {
   const router = useRouter();
   const [isSaving, setIsSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
@@ -3959,6 +3960,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     return (
       <form data-no-global-loader="true" data-production-manager-auto-refresh-protected="true" onSubmit={handleBuilderSubmit} onKeyDown={handleBuilderKeyDown} style={{ display: "grid", gap: 12 }}>
         <input type="hidden" name="quoteId" value={quoteId} />
+        <input type="hidden" name="subJobId" value={subJobId ?? ""} />
         {editingLine ? <input type="hidden" name="editingLineId" value={editingLine.id} /> : null}
         <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
         <input type="hidden" name="productName" value={editingLine?.productName || lineName} />

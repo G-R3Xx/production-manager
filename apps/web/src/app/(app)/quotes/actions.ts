@@ -41,6 +41,8 @@ import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, cu
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { sendOutboundEmail } from "@/server/outbound-email";
 import { buildQuotePdf } from "@/server/quote-pdf";
+import { createQuoteSubJob, renameQuoteSubJob, deleteQuoteSubJob, assignQuoteLineSubJob } from "@/server/quote-sub-jobs";
+import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
 import { getEnquiryById } from "@/server/enquiries";
 import { getSurveyRequestById } from "@/server/surveys";
 
@@ -51,6 +53,47 @@ async function requireTenant() {
     redirect("/bootstrap?error=Create%20or%20select%20a%20tenant%20first");
   }
   return activeTenant;
+}
+
+export async function createQuoteSubJobAction(formData: FormData): Promise<void> {
+  const tenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  if (!quoteId || !title || title.length > 200) redirect(`/quotes?selected=${encodeURIComponent(quoteId)}&error=Enter%20a%20sub%20job%20name%20(up%20to%20200%20characters)`);
+  const ok = await createQuoteSubJob(tenant.tenantId, quoteId, title);
+  if (!ok) redirect("/quotes?error=Quote%20not%20found");
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=Sub%20job%20created#sub-jobs`);
+}
+
+export async function renameQuoteSubJobAction(formData: FormData): Promise<void> {
+  const tenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const id = String(formData.get("subJobId") ?? "").trim();
+  const title = String(formData.get("title") ?? "").trim();
+  if (!title || title.length > 200) redirect(`/quotes?selected=${quoteId}&error=Enter%20a%20valid%20sub%20job%20name`);
+  if (!await renameQuoteSubJob(tenant.tenantId, quoteId, id, title)) redirect(`/quotes?selected=${quoteId}&error=Sub%20job%20not%20found`);
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=Sub%20job%20renamed#sub-jobs`);
+}
+
+export async function deleteQuoteSubJobAction(formData: FormData): Promise<void> {
+  const tenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const id = String(formData.get("subJobId") ?? "").trim();
+  if (!await deleteQuoteSubJob(tenant.tenantId, quoteId, id)) redirect(`/quotes?selected=${quoteId}&error=Sub%20job%20not%20found`);
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=Sub%20job%20removed%20(lines%20retained)#sub-jobs`);
+}
+
+export async function assignQuoteLineSubJobAction(formData: FormData): Promise<void> {
+  const tenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const lineId = String(formData.get("lineId") ?? "").trim();
+  const id = String(formData.get("subJobId") ?? "").trim();
+  if (!await assignQuoteLineSubJob(tenant.tenantId, quoteId, lineId, id || null)) redirect(`/quotes?selected=${quoteId}&error=Could%20not%20assign%20sub%20job`);
+  revalidatePath("/quotes");
+  redirect(`/quotes?selected=${quoteId}&message=Line%20moved%20to%20section#saved-lines`);
 }
 
 function nullable(value: FormDataEntryValue | null): string | null {
@@ -580,6 +623,13 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
     const quantity = String(formData.get("quantity") ?? "1").trim();
     const unitPrice = String(formData.get("unitPrice") ?? "0").trim();
     const configurationSnapshot = jsonObject(formData.get("configurationSnapshot"));
+    const sectionValue = String(formData.get("subJobId") ?? "").trim();
+    if (sectionValue && !validUuidOrNull(sectionValue)) {
+      return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Invalid sub job selection.", serverElapsedMs: Date.now() - startedAt, authElapsedMs, dbElapsedMs };
+    }
+    // Preserve section on edits and only use explicit, well-formed IDs.
+    if (sectionValue) configurationSnapshot.subJobId = sectionValue;
+    else delete configurationSnapshot.subJobId;
 
     if (!validUuidOrNull(quoteId)) {
       return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Select a quote first.", serverElapsedMs: Date.now() - startedAt, authElapsedMs, dbElapsedMs };
@@ -1222,6 +1272,7 @@ export async function emailQuoteAction(formData: FormData): Promise<void> {
       quotePdf = await buildQuotePdf({
         quote,
         lines: quoteLines,
+        subJobs: await listQuoteSubJobs(quoteId),
         company,
         // The public quote uses the configured company logo. Use that same
         // artwork in the PDF (Tender Edge's configured logo is the stacked

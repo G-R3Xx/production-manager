@@ -1045,7 +1045,9 @@ async function saveQuoteLineBundleForPrincipal(
   const dispatchLineId = input.dispatchLine ? (input.existingDispatchLineId || randomUUID()) : null;
   const accessEquipmentLineId = input.accessEquipmentLine ? (input.existingAccessEquipmentLineId || randomUUID()) : null;
 
-  const mainSnapshot = {
+  // This snapshot includes arbitrary persisted quote configuration fields (including
+  // subJobId). Keep the index signature so linked lines can inherit those fields.
+  const mainSnapshot: Record<string, unknown> = {
     ...(input.configurationSnapshot ?? {}),
     linkedDispatchLineId: dispatchLineId,
     linkedAccessEquipmentLineId: accessEquipmentLineId
@@ -1053,11 +1055,13 @@ async function saveQuoteLineBundleForPrincipal(
   const dispatchSnapshot = input.dispatchLine ? {
     ...(input.dispatchLine.configurationSnapshot ?? {}),
     parentLineId: mainLineId,
+    ...(typeof mainSnapshot.subJobId === "string" ? { subJobId: mainSnapshot.subJobId } : {}),
     linkedAccessEquipmentLineId: accessEquipmentLineId
   } : null;
   const accessSnapshot = input.accessEquipmentLine ? {
     ...(input.accessEquipmentLine.configurationSnapshot ?? {}),
-    parentLineId: dispatchLineId || mainLineId
+    parentLineId: dispatchLineId || mainLineId,
+    ...(typeof mainSnapshot.subJobId === "string" ? { subJobId: mainSnapshot.subJobId } : {})
   } : null;
 
   const deleteIds = [
@@ -1133,7 +1137,12 @@ async function saveQuoteLineBundleForPrincipal(
     target_quote AS (
       SELECT qd.id, qd.tenant_id
       FROM sales.quote_drafts qd
+      CROSS JOIN payload p
       WHERE qd.id = $2::uuid
+        AND (COALESCE(p."mainSnapshot" ->> 'subJobId', '') = '' OR EXISTS (
+          SELECT 1 FROM sales.quote_sub_jobs sj
+          WHERE sj.quote_id = qd.id AND sj.id::text = p."mainSnapshot" ->> 'subJobId'
+        ))
         AND (
           ($4::text = 'tenant' AND qd.tenant_id = $1::uuid)
           OR (

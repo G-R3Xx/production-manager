@@ -4,9 +4,11 @@ import { useEffect, useRef, useState, type ComponentType } from "react";
 import type { QuoteProduct } from "./QuoteLineBuilder";
 import type { MyobMatrixItem, PricingSettings, QuoteMaterial } from "./QuoteMaterialFlowBuilder";
 import type { QuoteCostingResources } from "./quoteCostingResources";
+import type { QuoteSubJob } from "@/lib/quote-sub-jobs";
 
 type Props = {
   quoteId: string;
+  subJobs?: QuoteSubJob[];
   products: QuoteProduct[];
   materials: QuoteMaterial[];
   myobMatrixItems?: MyobMatrixItem[];

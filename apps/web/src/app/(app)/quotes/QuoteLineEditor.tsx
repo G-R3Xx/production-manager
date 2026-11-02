@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { quoteLineSubJobId } from "@/lib/quote-sub-jobs";
 import { saveQuoteLineAsProductAction, updateQuoteLineAction } from "./actions";
 import { availableQuoteChoices, quoteChoiceValue, splitQuoteAnswerValues } from "./quoteOptionDependencies";
 import {
@@ -498,6 +499,7 @@ export function QuoteLineEditor({ quoteId, line, product, materials, myobMatrixI
         ) : null}
         <QuoteMaterialFlowBuilder
           quoteId={quoteId}
+          subJobId={quoteLineSubJobId(line.configurationSnapshot)}
           materials={materials}
           myobMatrixItems={myobMatrixItems}
           pricingSettings={pricingSettings}

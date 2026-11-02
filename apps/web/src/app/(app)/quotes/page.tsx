@@ -1,4 +1,7 @@
 import { isPassThroughQuoteLine } from "@/lib/dispatch-pricing";
+import { Fragment } from "react";
+import { groupQuoteLinesBySubJob } from "@/lib/quote-sub-jobs";
+import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
@@ -10,7 +13,7 @@ import { listQuoteMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomerOptionsForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId, profitMultiplierForJobValue } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction, createQuoteSubJobAction, renameQuoteSubJobAction, deleteQuoteSubJobAction, assignQuoteLineSubJobAction } from "./actions";
 import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
 import { DeferredQuoteLineEditor } from "./DeferredQuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftSummariesForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
@@ -572,6 +575,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     salesDefaults,
     costingSource,
     quoteLines,
+    quoteSubJobs,
     selectedArtworkApproval,
     selectedProductionJob,
     quoteEntryLayout,
@@ -592,6 +596,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
       ? cachedQuoteCostingResources(activeTenant.tenantId)
       : Promise.resolve([[], []] as const),
     selected ? listQuoteLines(selected) : Promise.resolve([]),
+    selected ? listQuoteSubJobs(selected) : Promise.resolve([]),
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
     selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
     Promise.resolve((activeTenant.quoteEntryLayout === "catalogue" ? "catalogue" : "list") as "catalogue" | "list"),
@@ -612,6 +617,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     });
   }
 
+  const quoteLineGroups = groupQuoteLinesBySubJob(quoteLines, quoteSubJobs);
+  const orderedQuoteLines = quoteLineGroups.flatMap((group) => group.lines);
+  const subJobByLineId = new Map(quoteLineGroups.flatMap((group) => group.lines.map((line) => [line.id, group] as const)));
   const selectedQuote = initialSelectedQuote;
   const clients = initialClients;
   const [costingMachines, costingLabour] = costingSource;
@@ -1215,6 +1223,37 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               </div>
 
               {selectedQuote.status !== "deleted" ? (
+                <section id="sub-jobs" style={{ display: "grid", gap: 12, border: "1px solid #dbe4f0", borderRadius: 18, padding: 16, background: "#f8fafc" }}>
+                  <div>
+                    <h3 style={{ margin: 0 }}>Sub Jobs <span style={{ color: "#667085", fontWeight: 650, fontSize: 13 }}>({quoteSubJobs.length})</span></h3>
+                    <p style={{ margin: "5px 0 0", color: "#667085", fontSize: 13 }}>Organise this quote into named sections, such as Vehicle 123 Wrap. Each section can contain any number of lines.</p>
+                  </div>
+                  <form action={createQuoteSubJobAction} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                    <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                    <input name="title" required maxLength={200} placeholder="New Sub Job name, e.g. Vehicle 123 Wrap" style={{ ...inputStyle, flex: "1 1 280px", minWidth: 0 }} />
+                    <button type="submit" style={{ ...buttonStyle, background: "#155eef" }}>+ Add Sub Job</button>
+                  </form>
+                  {quoteSubJobs.length ? <div style={{ display: "grid", gap: 7 }}>
+                    {quoteSubJobs.map((job) => (
+                      <div key={job.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 9, border: "1px solid #e2e8f0", borderRadius: 12, background: "#fff" }}>
+                        <form action={renameQuoteSubJobAction} style={{ display: "flex", flex: "1 1 240px", flexWrap: "wrap", gap: 8 }}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <input type="hidden" name="subJobId" value={job.id} />
+                          <input name="title" defaultValue={job.title} required maxLength={200} aria-label="Sub Job name" style={{ ...inputStyle, flex: "1 1 200px", minWidth: 0 }} />
+                          <button type="submit" style={{ ...buttonStyle, background: "#334155", padding: "0 12px" }}>Rename</button>
+                        </form>
+                        <form action={deleteQuoteSubJobAction}>
+                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                          <input type="hidden" name="subJobId" value={job.id} />
+                          <button type="submit" title="Remove section (keeps all its quote lines)" style={{ ...buttonStyle, background: "#fff1f2", color: "#b42318", border: "1px solid #fecaca" }}>Remove section</button>
+                        </form>
+                      </div>
+                    ))}
+                  </div> : null}
+                </section>
+              ) : null}
+
+              {selectedQuote.status !== "deleted" ? (
                 <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 0 }}>
                   <details data-production-manager-auto-refresh-protected="true" style={{ border: "2px solid #155eef", borderRadius: 18, background: "#fff", overflow: "hidden", boxShadow: "0 8px 24px rgba(21,94,239,0.10)" }}>
                     <summary style={{ listStyle: "none", cursor: "pointer", padding: "18px 20px", background: "linear-gradient(135deg,#155eef,#2563eb)", color: "#fff", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}><span style={{ fontSize: 18 }}>＋ Create quote line</span><span style={{ fontSize: 12, color: "#dbeafe", fontWeight: 800 }}>Choose a product, configure it and add pricing</span></summary>
@@ -1223,6 +1262,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       <DeferredQuoteLineStartBuilder
                         key="new-quote-line"
                         quoteId={selectedQuote.id}
+                        subJobs={quoteSubJobs}
                         products={savedQuoteProducts}
                         materials={activeMaterials}
                         myobMatrixItems={myobMatrixItems}
@@ -1258,7 +1298,10 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   <h3 style={{ margin: 0 }}>Quote lines <span style={{ color: "#667085", fontWeight: 750 }}>({quoteLines.length})</span></h3>
                   <p style={{ margin: 0, color: "#667085", fontSize: 13 }}>Open a line to review or edit it.{canOverrideQuoteMarkup ? " Managers and Owners can adjust markup on PM-calculated lines." : ""}</p>
                 </div>
-                {quoteLines.map((line) => {
+                {orderedQuoteLines.map((line, lineIndex) => {
+                  const section = subJobByLineId.get(line.id);
+                  const previousSection = lineIndex ? subJobByLineId.get(orderedQuoteLines[lineIndex - 1]!.id) : null;
+                  const showSectionHeading = quoteSubJobs.length > 0 && section && (lineIndex === 0 || section.id !== previousSection?.id);
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
                   const surveyReference = surveyLineReference(line.configurationSnapshot);
                   const surveyNeedsConfig = surveyLineNeedsConfiguration(line.configurationSnapshot);
@@ -1267,8 +1310,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   const lineSummary = staffLineSummary(displayedLineSummary(line.optionSummary, Boolean(surveyReference)), line.configurationSnapshot, line.quantity);
                   const lineSummaryItems = staffLineSummaryItems(lineSummary, line.productName);
                   return (
+                    <Fragment key={line.id}>
+                    {showSectionHeading && section ? <div style={{ marginTop: 9, padding: "10px 14px", background: "#eaf2ff", border: "1px solid #bfdbfe", borderRadius: 12, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                      <strong style={{ color: "#1e40af", fontSize: 15 }}>{section.title}</strong>
+                      <span style={{ color: "#1e40af", fontSize: 13 }}>{section.lines.length} line{section.lines.length === 1 ? "" : "s"} · {formatMoney(section.subtotal)} ex GST</span>
+                    </div> : null}
                     <details
-                      key={line.id}
                       id={`quote-line-${line.id}`}
                       data-production-manager-auto-refresh-protected="true"
                       open={focusLine === line.id ? true : undefined}
@@ -1367,6 +1414,17 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {canOverrideQuoteMarkup && !isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? (
                               <QuoteLineProfitEditor quoteId={selectedQuote.id} lineId={line.id} profitPercent={profitInfo.percent} standardProfitPercent={profitInfo.standardPercent} disabledReason={isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? "No profit on dispatch" : profitInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null} />
                             ) : null}
+                            {quoteSubJobs.length > 0 && !line.configurationSnapshot?.parentLineId ? (
+                              <form action={assignQuoteLineSubJobAction} style={{ display: "inline-flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
+                                <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                                <input type="hidden" name="lineId" value={line.id} />
+                                <select name="subJobId" aria-label={`Section for ${line.productName}`} defaultValue={section?.id ?? ""} style={{ minHeight: 34, maxWidth: 200, border: "1px solid #cbd5e1", borderRadius: 9, padding: "0 6px", background: "#fff" }}>
+                                  <option value="">General / Unassigned</option>
+                                  {quoteSubJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
+                                </select>
+                                <button type="submit" style={{ minHeight: 34, padding: "0 10px", border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontWeight: 850, borderRadius: 9, cursor: "pointer" }}>Move</button>
+                              </form>
+                            ) : null}
                             <form action={deleteQuoteLineAction} style={{ display: "inline-flex", margin: 0 }}>
                               <input type="hidden" name="quoteId" value={selectedQuote.id} />
                               <input type="hidden" name="lineId" value={line.id} />
@@ -1453,6 +1511,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         </form>
                       </div>
                     </details>
+                    </Fragment>
                   );
                 })}
                 {quoteLines.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No saved quote lines yet. Build a line above, then save it to the quote.</p> : null}
