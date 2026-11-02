@@ -5,8 +5,20 @@ const ts = require('/opt/nvm/versions/node/v22.16.0/lib/node_modules/typescript'
 const root = path.resolve(__dirname, '../..');
 const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
 const clientPage = read('apps/web/src/app/public/quotes/[token]/page.tsx');
+const internalEditor = read('apps/web/src/app/(app)/quotes/page.tsx');
 const pdfSource = read('apps/web/src/server/quote-pdf.ts');
 const quoteHelpers = read('apps/web/src/lib/quote-sub-jobs.ts');
+// The staff quote editor has a separate section heading from the public quote.
+// Its title bar must NOT duplicate totals already displayed after the lines.
+const internalHeading = internalEditor.match(/\{showSectionHeading && section \? <div[\s\S]*?<\/div> : null\}/)?.[0];
+assert.ok(internalHeading, 'The internal Sub Job heading still renders.');
+assert.match(internalHeading, /\{section\.title\}/);
+assert.doesNotMatch(internalHeading, /section\.lines\.length|formatMoney|subtotal|totalIncGst|ex GST|inc GST/);
+const internalTotals = internalEditor.match(/\{showSectionTotal && section \? <div[\s\S]*?<\/div> : null\}/)?.[0];
+assert.ok(internalTotals, 'The internal Sub Job total row still renders.');
+for (const field of ['subtotal', 'gst', 'totalIncGst']) {
+  assert.match(internalTotals, new RegExp(`formatMoney\\(section\\.${field}\\)`));
+}
 const sectionHeading = clientPage.match(/\{showHeading && section \? <div[\s\S]*?<\/div> : null\}/)?.[0];
 assert.ok(sectionHeading, 'The online Sub Job heading still renders.');
 assert.match(sectionHeading, /<strong>\{section\.title\}<\/strong>/);
@@ -40,5 +52,5 @@ new Function('exports', 'require', 'Buffer', transform(pdfSource, 'quote-pdf.ts'
   assert.doesNotMatch(pdf, /SUB JOB: Vehicle Wrap[^\n]* \| \$100/);
   assert.ok(pdf.includes('Total \\(inc GST\\)'), 'PDF grand total label is preserved.');
   assert.match(pdf, /\$110\.00/);
-  console.log('PASS: Public heading is title-only; separate GST subtotal remains; generated PDF heading is title-only and quote total is preserved.');
+  console.log('PASS: Internal + public headings are title-only; separate GST totals remain; generated PDF heading is title-only and quote total is preserved.');
 })().catch(error => {console.error(error);process.exitCode=1;});

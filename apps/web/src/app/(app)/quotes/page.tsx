@@ -1328,7 +1328,6 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <Fragment key={line.id}>
                     {showSectionHeading && section ? <div style={{ marginTop: 9, padding: "10px 14px", background: "#eaf2ff", border: "1px solid #bfdbfe", borderRadius: 12, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                       <strong style={{ color: "#1e40af", fontSize: 15 }}>{section.title}</strong>
-                      <span style={{ color: "#1e40af", fontSize: 13 }}>{section.lines.length} line{section.lines.length === 1 ? "" : "s"} · {formatMoney(section.subtotal)} ex GST · <strong>{formatMoney(section.totalIncGst)} inc GST</strong></span>
                     </div> : null}
                     <QuoteLineVisibility lineId={line.id}>
                     <details
