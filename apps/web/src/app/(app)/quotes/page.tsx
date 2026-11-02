@@ -13,7 +13,7 @@ import { listQuoteMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomerOptionsForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId, profitMultiplierForJobValue } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, deleteQuoteLineAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction, createQuoteSubJobAction, renameQuoteSubJobAction, deleteQuoteSubJobAction, assignQuoteLineSubJobAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction, createQuoteSubJobAction, renameQuoteSubJobAction, deleteQuoteSubJobAction } from "./actions";
 import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
 import { DeferredQuoteLineEditor } from "./DeferredQuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftSummariesForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
@@ -29,6 +29,7 @@ import { EmailRecipientModalForm } from "@/components/EmailRecipientModalForm";
 import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalModalForm";
 import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
 import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
+import { QuoteLineQuickActions, QuoteLineVisibility } from "./QuoteLineQuickActions";
 import { listLabourForTenant, listMachinesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
 import { QuoteSearchInput } from "./QuoteSearchInput";
@@ -1224,11 +1225,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
               </div>
 
               {selectedQuote.status !== "deleted" ? (
-                <section id="sub-jobs" style={{ display: "grid", gap: 12, border: "1px solid #dbe4f0", borderRadius: 18, padding: 16, background: "#f8fafc" }}>
-                  <div>
-                    <h3 style={{ margin: 0 }}>Sub Jobs <span style={{ color: "#667085", fontWeight: 650, fontSize: 13 }}>({quoteSubJobs.length})</span></h3>
-                    <p style={{ margin: "5px 0 0", color: "#667085", fontSize: 13 }}>Each section can have multiple quote lines. New lines automatically go into the most recently created section; rename or remove sections here without affecting line prices.</p>
-                  </div>
+                <details id="sub-jobs" style={{ border: "1px solid #dbe4f0", borderRadius: 14, padding: 12, background: "#f8fafc" }}>
+                  <summary style={{ cursor: "pointer", fontWeight: 800, color: "#475467" }}>Manage Sub Jobs ({quoteSubJobs.length})</summary>
+                  <div style={{ display: "grid", gap: 10, marginTop: 12 }}>
                   {quoteSubJobs.length ? <div style={{ display: "grid", gap: 7 }}>
                     {quoteSubJobs.map((job) => (
                       <div key={job.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 9, border: "1px solid #e2e8f0", borderRadius: 12, background: "#fff" }}>
@@ -1252,7 +1251,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       </div>
                     ))}
                   </div> : null}
-                </section>
+                  </div>
+                </details>
               ) : null}
 
               {selectedQuote.status !== "deleted" ? (
@@ -1330,6 +1330,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       <strong style={{ color: "#1e40af", fontSize: 15 }}>{section.title}</strong>
                       <span style={{ color: "#1e40af", fontSize: 13 }}>{section.lines.length} line{section.lines.length === 1 ? "" : "s"} · {formatMoney(section.subtotal)} ex GST · <strong>{formatMoney(section.totalIncGst)} inc GST</strong></span>
                     </div> : null}
+                    <QuoteLineVisibility lineId={line.id}>
                     <details
                       id={`quote-line-${line.id}`}
                       data-production-manager-auto-refresh-protected="true"
@@ -1429,42 +1430,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                             {canOverrideQuoteMarkup && !isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? (
                               <QuoteLineProfitEditor quoteId={selectedQuote.id} lineId={line.id} profitPercent={profitInfo.percent} standardProfitPercent={profitInfo.standardPercent} disabledReason={isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? "No profit on dispatch" : profitInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null} />
                             ) : null}
-                            {quoteSubJobs.length > 0 && !line.configurationSnapshot?.parentLineId ? (
-                              <form action={assignQuoteLineSubJobAction} style={{ display: "inline-flex", flexWrap: "wrap", gap: 5, alignItems: "center" }}>
-                                <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                                <input type="hidden" name="lineId" value={line.id} />
-                                <select name="subJobId" aria-label={`Section for ${line.productName}`} defaultValue={section?.id ?? ""} style={{ minHeight: 34, maxWidth: 200, border: "1px solid #cbd5e1", borderRadius: 9, padding: "0 6px", background: "#fff" }}>
-                                  <option value="">General / Unassigned</option>
-                                  {quoteSubJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
-                                </select>
-                                <button type="submit" style={{ minHeight: 34, padding: "0 10px", border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", fontWeight: 850, borderRadius: 9, cursor: "pointer" }}>Move</button>
-                              </form>
-                            ) : null}
-                            <form action={deleteQuoteLineAction} style={{ display: "inline-flex", margin: 0 }}>
-                              <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                              <input type="hidden" name="lineId" value={line.id} />
-                              <button
-                                type="submit"
-                                title="Delete quote line"
-                                aria-label={`Delete ${line.productName} quote line`}
-                                style={{
-                                  border: "1px solid #fca5a5",
-                                  background: "#fff1f2",
-                                  color: "#b42318",
-                                  borderRadius: 10,
-                                  minHeight: 34,
-                                  padding: "6px 11px",
-                                  fontSize: 12,
-                                  fontWeight: 950,
-                                  cursor: "pointer",
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: 6
-                                }}
-                              >
-                                <span aria-hidden="true" style={{ fontSize: 15, lineHeight: 1 }}>×</span> Delete line
-                              </button>
-                            </form>
+                            <QuoteLineQuickActions
+                              quoteId={selectedQuote.id}
+                              lineId={line.id}
+                              productName={line.productName}
+                              subJobs={quoteSubJobs.map((job) => ({ id: job.id, title: job.title }))}
+                              sectionId={section?.id ?? null}
+                              allowMove={!line.configurationSnapshot?.parentLineId}
+                            />
                             <span style={{ borderRadius: 999, background: "#eef4ff", color: "#155eef", padding: "7px 11px", fontSize: 12, fontWeight: 950 }}>View / edit</span>
                           </div>
                         </div>
@@ -1519,13 +1492,9 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           }}
                         />
 
-                        <form action={deleteQuoteLineAction} style={{ display: "flex", justifyContent: "flex-end" }}>
-                          <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                          <input type="hidden" name="lineId" value={line.id} />
-                          <button type="submit" style={{ border: "1px solid #fecaca", background: "#fff", color: "#b42318", borderRadius: 12, padding: "8px 10px", fontWeight: 900, cursor: "pointer" }}>Remove line</button>
-                        </form>
                       </div>
                     </details>
+                    </QuoteLineVisibility>
                     {showSectionTotal && section ? <div aria-label={`${section.title} sub quote total`} style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 12, alignItems: "center", padding: "11px 14px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 12, color: "#0f172a", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
                       <strong>{section.title} — Sub Job total</strong>
                       <span>Ex GST: <strong>{formatMoney(section.subtotal)}</strong></span>

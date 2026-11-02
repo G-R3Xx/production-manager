@@ -930,6 +930,43 @@ export async function addQuoteLine(quoteId: string, input: {
   return result.rows[0];
 }
 
+/** Remove one quote line and any linked dispatch/access-equipment children in
+ * one authorised database round-trip. Recursive links allow legacy parent
+ * references to be removed without leaving orphaned charge lines behind.
+ * Returns affected line IDs so the browser can hide them immediately.
+ */
+export async function deleteQuoteLineBundleForTenant(tenantId: string, quoteId: string, lineId: string): Promise<string[]> {
+  await ensureQuoteLineConfigurationColumn();
+  const result = await pool.query<{ id: string }>(`
+    WITH RECURSIVE owned AS (
+      SELECT id FROM sales.quote_drafts
+      WHERE tenant_id = $1::uuid AND id = $2::uuid
+    ), related(id) AS (
+      SELECT l.id FROM sales.quote_lines l
+      WHERE l.quote_id IN (SELECT id FROM owned) AND l.id = $3::uuid
+      UNION
+      SELECT linked.id FROM related r
+      JOIN sales.quote_lines parent ON parent.id = r.id AND parent.quote_id = $2::uuid
+      JOIN sales.quote_lines linked ON linked.quote_id = parent.quote_id
+        AND (
+          linked.id::text = parent.configuration_snapshot ->> 'linkedDispatchLineId'
+          OR linked.id::text = parent.configuration_snapshot ->> 'linkedAccessEquipmentLineId'
+          OR linked.configuration_snapshot ->> 'parentLineId' = parent.id::text
+        )
+    ), deleted AS (
+      DELETE FROM sales.quote_lines l
+      WHERE l.quote_id IN (SELECT id FROM owned) AND l.id IN (SELECT id FROM related)
+      RETURNING l.id::text AS id
+    ), touched AS (
+      UPDATE sales.quote_drafts SET updated_at = now()
+      WHERE id IN (SELECT id FROM owned) AND EXISTS (SELECT 1 FROM deleted)
+      RETURNING id
+    )
+    SELECT d.id FROM deleted d
+  `, [tenantId, quoteId, lineId]);
+  return result.rows.map((row) => row.id);
+}
+
 export async function deleteQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string): Promise<void> {
   await ensureQuoteLineConfigurationColumn();
   await pool.query(`
