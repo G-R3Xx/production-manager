@@ -900,6 +900,77 @@ export async function updateQuoteLinkedCustomerForTenant(tenantId: string, quote
   }
 }
 
+/**
+ * Recover the missing client link on an accepted quote without rewriting the
+ * accepted client-facing quote details or creating a new quote/production job.
+ * Lock the quote row while changing the link so an in-flight MYOB sync cannot
+ * create an Order for the wrong customer.
+ */
+export async function recoverAcceptedQuoteCustomerLinkForTenant(tenantId: string, quoteId: string, customerId: string): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const result = await client.query<{
+      enquiryId: string | null;
+      surveyRequestId: string | null;
+      myobOrderStatus: string | null;
+      myobOrderUid: string | null;
+      updatedAt: string;
+      status: string;
+    }>(`
+      SELECT enquiry_id as "enquiryId", survey_request_id as "surveyRequestId",
+        myob_order_status as "myobOrderStatus", myob_order_uid as "myobOrderUid",
+        updated_at as "updatedAt", status
+      FROM sales.quote_drafts
+      WHERE tenant_id=$1::uuid AND id=$2::uuid FOR UPDATE
+    `, [tenantId, quoteId]);
+    const quote = result.rows[0];
+    if (!quote) throw new Error("Quote not found.");
+    if (quote.status !== "accepted") throw new Error("Only accepted quotes can use MYOB link recovery.");
+    if (quote.myobOrderUid || quote.myobOrderStatus === "synced") {
+      throw new Error("This quote already has a MYOB Order. Its customer cannot be changed here.");
+    }
+    if (quote.myobOrderStatus === "syncing" && Date.now() - new Date(quote.updatedAt).getTime() < 10 * 60_000) {
+      throw new Error("MYOB Order creation is in progress. Wait for it to finish before changing the client.");
+    }
+    const customer = await client.query<{ id: string }>(`
+      SELECT id FROM app.customers WHERE tenant_id=$1::uuid AND id=$2::uuid AND is_active=true LIMIT 1
+    `, [tenantId, customerId]);
+    if (!customer.rowCount) throw new Error("The selected client is no longer active or available.");
+
+    await client.query(`
+      UPDATE sales.quote_drafts SET
+        linked_customer_id=$3::uuid,
+        myob_order_status='ready_to_sync',
+        myob_order_sync_error=NULL,
+        myob_order_payload_json=COALESCE(myob_order_payload_json,'{}'::jsonb) || jsonb_build_object(
+          'clientLinkConfirmed', true,
+          'linkedCustomerId', $3::text,
+          'localCustomerLinkedAt', now()::text,
+          'clientLinkMethod', 'accepted_quote_manual_recovery'
+        ),
+        updated_at=now()
+      WHERE tenant_id=$1::uuid AND id=$2::uuid
+    `, [tenantId, quoteId, customerId]);
+    // Link existing workflow records; keep the accepted quote's displayed
+    // client name/contact and historic pricing exactly as originally accepted.
+    if (quote.enquiryId) {
+      await client.query(`UPDATE app.enquiries SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, quote.enquiryId, customerId]);
+    }
+    if (quote.surveyRequestId) {
+      await client.query(`UPDATE app.survey_requests SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND id=$2::uuid`, [tenantId, quote.surveyRequestId, customerId]);
+    }
+    await client.query(`UPDATE app.jobs SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND quote_id=$2::uuid`, [tenantId, quoteId, customerId]);
+    await client.query(`UPDATE production.production_jobs SET linked_customer_id=$3::uuid,updated_at=now() WHERE tenant_id=$1::uuid AND quote_id=$2::uuid`, [tenantId, quoteId, customerId]);
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function addQuoteLine(quoteId: string, input: {
   productId?: string | null;
   productName: string;

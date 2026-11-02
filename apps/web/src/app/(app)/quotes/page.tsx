@@ -13,7 +13,7 @@ import { listQuoteMaterialsForTenant } from "@/server/materials";
 import { listQuoteProductsForTenant } from "@/server/products";
 import { customerLogoUrl, customerMyobPriceLevel, customerMyobPriceLevelName, listCustomerOptionsForTenant } from "@/server/customers";
 import { getCompanySettingsByTenantId, profitMultiplierForJobValue } from "@/server/company";
-import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction, createQuoteSubJobAction, renameQuoteSubJobAction, deleteQuoteSubJobAction } from "./actions";
+import { createArtworkApprovalAction, createQuoteClientInMyobAction, deleteQuoteDraftAction, emailQuoteAction, linkQuoteClientToMyobAction, linkQuoteToProductionManagerClientAction, recoverAcceptedQuoteClientAction, markQuoteAcceptedManuallyAction, markQuoteSentAction, pushAcceptedQuoteToMyobOrderAction, restoreQuoteDraftAction, saveMyobSalesDefaultsAction, updateQuoteJobNameAction, createQuoteSubJobAction, renameQuoteSubJobAction, deleteQuoteSubJobAction } from "./actions";
 import { DeferredQuoteLineStartBuilder } from "./DeferredQuoteLineStartBuilder";
 import { DeferredQuoteLineEditor } from "./DeferredQuoteLineEditor";
 import { getArtworkApprovalForQuote, getQuoteDraftById, listQuoteDraftSummariesForTenant, listQuoteLines, quoteActivityFingerprint } from "@/server/quotes";
@@ -766,6 +766,14 @@ export default async function QuotesPage({ searchParams }: PageProps) {
   const linkedClientMatchesQuote = Boolean(linkedClient && (!quoteClientName || [linkedClient.displayName, linkedClient.companyName]
     .some((value) => normalisedClientMatchName(value) === quoteClientName)));
   const quoteClientLinkMismatch = Boolean(selectedQuote && linkedClient && !linkedClientMatchesQuote);
+  // A manager can explicitly verify an accepted quote's linked client even
+  // when the quote shows a different trading name. Do not rewrite its history.
+  const acceptedClientLinkConfirmed = Boolean(selectedQuote?.myobOrderPayloadJson?.clientLinkConfirmed === true
+    && selectedQuote?.myobOrderPayloadJson?.linkedCustomerId === linkedClient?.id);
+  const acceptedQuoteNeedsClientRecovery = Boolean(selectedQuote?.status === "accepted"
+    && (!linkedClient || (quoteClientLinkMismatch && !acceptedClientLinkConfirmed))
+    && !selectedQuote?.myobOrderUid && selectedQuote?.myobOrderStatus !== "synced");
+
   const importedMyobCustomers = clients.filter((client) => client.isActive && Boolean(client.myobUid) && !client.myobUid.startsWith("manual-"));
   const linkedClientMyobUid = linkedClient
     ? (!linkedClient.myobUid.startsWith("manual-")
@@ -1013,6 +1021,40 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   ) : null}
                 </div>
 
+                {acceptedQuoteNeedsClientRecovery ? (
+                  <section id="quote-client-recovery" style={{ border: "1px solid #fdba74", borderRadius: 16, background: "#fff7ed", padding: 16, display: "grid", gap: 12 }}>
+                    <div style={{ display: "grid", gap: 5 }}>
+                      <strong style={{ color: "#9a3412", fontSize: 15 }}>MYOB Order blocked — link the accepted quote to a client</strong>
+                      <span style={{ fontSize: 13, color: "#7c2d12" }}>Accepted quote for <strong>{selectedQuote.clientName}</strong> has {linkedClient ? "a client-name mismatch" : "no Production Manager client link"}. Choose the correct client below. This will also link the existing production job, without changing accepted prices or client-facing quote details.</span>
+                      {selectedQuote.myobOrderSyncError ? <span style={{ fontSize: 12, color: "#b42318" }}>Previous MYOB error: {selectedQuote.myobOrderSyncError}</span> : null}
+                    </div>
+                    {["owner", "manager"].includes(String(activeTenant.tenantRole).toLowerCase()) ? (
+                      <form action={recoverAcceptedQuoteClientAction} style={{ display: "grid", gap: 10 }}>
+                        <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                        <label style={{ display: "grid", gap: 5 }}>
+                          <strong style={{ fontSize: 13, color: "#344054" }}>Production Manager client</strong>
+                          <select name="customerId" required defaultValue="" style={{ ...inputStyle, minWidth: 0, maxWidth: "100%" }}>
+                            <option value="">Choose the correct client…</option>
+                            {clients.filter((customer) => customer.isActive).map((customer) => (
+                              <option key={customer.id} value={customer.id}>{customer.id === suggestedPmClient?.id ? "Suggested: " : ""}{customer.companyName || customer.displayName}{customer.companyName && customer.displayName !== customer.companyName ? ` (${customer.displayName})` : ""}{customer.email ? ` · ${customer.email}` : ""}</option>
+                            ))}
+                          </select>
+                        </label>
+                        <label style={{ display: "flex", gap: 8, alignItems: "start", fontSize: 12, color: "#7c2d12" }}>
+                          <input type="checkbox" name="confirmClient" value="1" required style={{ marginTop: 2 }} />
+                          <span>I confirm this is the correct client for the accepted quote and its production job.</span>
+                        </label>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                          <MyobSubmitButton label="Link client" pendingLabel="Linking client…" background="#475467" />
+                          <MyobSubmitButton label="Link & create MYOB Order" pendingLabel="Linking & sending to MYOB…" background="#0f766e" name="sendNow" value="1" />
+                          <Link prefetch={false} href="/clients" style={{ color: "#155eef", fontSize: 12, fontWeight: 800 }}>Client not listed? Open Clients</Link>
+                        </div>
+                        <span style={{ fontSize: 12, color: "#9a3412" }}>If the selected client has no MYOB mapping, Production Manager will try to find or create the MYOB customer. If several matches exist, you can choose the correct MYOB customer in More quote details & admin.</span>
+                      </form>
+                    ) : <span style={{ color: "#9a3412", fontSize: 13 }}>Ask an Owner or Manager to select and confirm the correct client.</span>}
+                  </section>
+                ) : null}
+
                 <section style={{ border: "1px solid #d9e2ef", borderRadius: 18, background: "#fff", padding: 14, display: "grid", gap: 12, order: 2 }}>
                   <form action={updateQuoteJobNameAction} style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: 10, alignItems: "end" }}>
                     <input type="hidden" name="quoteId" value={selectedQuote.id} />
@@ -1119,7 +1161,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   {(() => {
                     const myobTone = myobOrderTone(selectedQuote.myobOrderStatus);
                     const canPush = selectedQuote.status === "accepted" && selectedQuote.myobOrderStatus === "error";
-                    const needsPmClientLink = !linkedClient || quoteClientLinkMismatch;
+                    const needsPmClientLink = !linkedClient || (quoteClientLinkMismatch && !acceptedClientLinkConfirmed);
                     const needsMyobLink = Boolean(linkedClient && !linkedMyobCustomer);
                     const needsAnyClientLink = needsPmClientLink || needsMyobLink;
                     const needsMyobAttention = needsAnyClientLink || selectedQuote.myobOrderStatus === "error";
@@ -1151,7 +1193,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
                         {selectedQuote.myobOrderSyncError && !needsAnyClientLink ? <div style={{ border: "1px solid #fecaca", borderRadius: 12, background: "#fef2f2", color: "#b42318", padding: "9px 11px", fontSize: 12, whiteSpace: "pre-wrap" }}>{selectedQuote.myobOrderSyncError}</div> : null}
 
-                        {needsPmClientLink ? <div style={{ border: "1px solid #fed7aa", borderRadius: 12, background: "#fff7ed", color: "#9a3412", padding: "9px 11px", fontSize: 12 }}>Correct the saved client in the orange panel at the top of Quote workflow before pricing or sending this quote.</div> : null}
+                        {needsPmClientLink ? <div style={{ border: "1px solid #fed7aa", borderRadius: 12, background: "#fff7ed", color: "#9a3412", padding: "9px 11px", fontSize: 12 }}>Use the client recovery panel above to link this accepted quote before sending its MYOB Order.</div> : null}
 
                         {needsSalesReferenceSetup ? (
                           <div style={{ border: "1px solid #dfe7f2", borderRadius: 14, background: "#f8fafc", padding: 12, display: "grid", gap: 8 }}>

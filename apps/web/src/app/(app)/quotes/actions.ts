@@ -31,7 +31,8 @@ import {
   respondToQuoteByToken,
   updateQuoteMyobOrderSyncForTenant,
   updateQuoteJobNameForTenant,
-  updateQuoteLinkedCustomerForTenant
+  updateQuoteLinkedCustomerForTenant,
+  recoverAcceptedQuoteCustomerLinkForTenant
 } from "@/server/quotes";
 import { createProduct, getProductById, updateProduct } from "@/server/products";
 import { ensureProductEditorTemplate, getConfiguratorTemplateById, updateConfiguratorDefinitionJson, updateConfiguratorTemplateMetadata } from "@/server/configurators";
@@ -1434,6 +1435,43 @@ export async function restoreQuoteDraftAction(formData: FormData): Promise<void>
   redirect(`/quotes?selected=${quoteId}&message=Quote%20restored`);
 }
 
+
+/** Manually repair an accepted quote that missed its PM client link. */
+export async function recoverAcceptedQuoteClientAction(formData: FormData): Promise<void> {
+  const activeTenant = await requireTenant();
+  const quoteId = String(formData.get("quoteId") ?? "").trim();
+  const customerId = String(formData.get("customerId") ?? "").trim();
+  const sendNow = String(formData.get("sendNow") ?? "") === "1";
+  const backToQuote = `/quotes?selected=${encodeURIComponent(quoteId)}`;
+  if (!["owner", "manager"].includes(String(activeTenant.tenantRole).toLowerCase())) {
+    redirect(`${backToQuote}&error=${encodeURIComponent("Only an Owner or Manager can repair an accepted quote's client link.")}`);
+  }
+  if (!quoteId || !customerId || String(formData.get("confirmClient") ?? "") !== "1") {
+    redirect(`${backToQuote}&error=${encodeURIComponent("Select and confirm the correct Production Manager client.")}`);
+  }
+
+  let issue = "";
+  let linked = false;
+  let orderResult: Awaited<ReturnType<typeof pushAcceptedQuoteToMyobOrderForTenant>> | null = null;
+  try {
+    await recoverAcceptedQuoteCustomerLinkForTenant(activeTenant.tenantId, quoteId, customerId);
+    linked = true;
+    if (sendNow) orderResult = await pushAcceptedQuoteToMyobOrderForTenant(activeTenant.tenantId, quoteId);
+  } catch (error) {
+    issue = error instanceof Error ? error.message : String(error);
+  }
+  revalidatePath("/quotes");
+  if (issue) {
+    const prefix = linked ? "Client linked successfully, but the MYOB Order could not be created: " : "Could not link the quote client: ";
+    redirect(`${backToQuote}&error=${encodeURIComponent(prefix + issue)}`);
+  }
+  const success = !sendNow
+    ? "Accepted quote linked to the selected Production Manager client. You can now create the MYOB Order."
+    : orderResult?.myobOrderUid
+      ? `Client linked; MYOB Item Order ${orderResult.myobOrderNumber ?? orderResult.myobOrderUid} is now linked to the quote.`
+      : `Client linked. ${orderResult?.message ?? "MYOB Order request submitted."}`;
+  redirect(`${backToQuote}&message=${encodeURIComponent(success)}`);
+}
 
 export async function linkQuoteClientToMyobAction(formData: FormData): Promise<void> {
   const activeTenant = await requireTenant();
