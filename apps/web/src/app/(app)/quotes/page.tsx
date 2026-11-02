@@ -541,6 +541,7 @@ function QuoteLifecycleStrip({ steps }: { steps: QuoteLifecycleStep[] }) {
 }
 
 export default async function QuotesPage({ searchParams }: PageProps) {
+  const pageStartedAt = performance.now();
   const user = await getRequiredSessionUser();
   const activeTenant = await resolveActiveTenantForAuthUserId(user.id);
   if (!activeTenant) redirect("/bootstrap");
@@ -597,6 +598,19 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId).catch(() => ({})) : Promise.resolve({}),
     selected ? canViewQuoteCostBreakdown(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve(false)
   ]);
+
+  const dataLoadMs = Math.round(performance.now() - pageStartedAt);
+  if (dataLoadMs > 750) {
+    console.info("[quotes-page-timing]", {
+      dataLoadMs,
+      selected: Boolean(selected),
+      drafts: allQuoteDrafts.length,
+      lines: quoteLines.length,
+      materials: materials.length,
+      clients: initialClients.length,
+      vercelRegion: process.env.VERCEL_REGION ?? null,
+    });
+  }
 
   const selectedQuote = initialSelectedQuote;
   const clients = initialClients;

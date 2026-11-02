@@ -637,6 +637,97 @@ export async function listQuoteLineTotals(quoteIds: string[]): Promise<Map<strin
   return new Map(result.rows.map((row) => [row.quoteId, Number(row.total) || 0]));
 }
 
+/**
+ * Status polling must not transfer full quote configuration snapshots every
+ * ten seconds. Read only fields used by quoteActivityFingerprint; keep the
+ * parent/child display order identical to listQuoteLines so the same revision
+ * never produces a different fingerprint and causes an endless refresh loop.
+ */
+type QuoteStatusLine = Pick<QuoteLineRecord, "id" | "clientResponseStatus" | "clientRespondedAt" | "updatedAt"> & {
+  parentLineId: string | null;
+};
+
+type QuoteStatusDraft = Pick<QuoteDraftRecord,
+  "status" | "updatedAt" | "sentAt" | "emailStatus" | "emailSentAt" | "emailLastError" |
+  "viewedAt" | "acceptedAt" | "declinedAt" | "changesRequestedAt" |
+  "myobOrderStatus" | "myobOrderSyncedAt" | "myobOrderSyncError"
+>;
+
+type OrderedQuoteLine = { id: string; parentLineId: string | null };
+
+export function orderQuoteStatusLines<T extends OrderedQuoteLine>(lines: T[]): T[] {
+  const rowsById = new Set(lines.map((line) => line.id));
+  const childrenByParent = new Map<string, T[]>();
+  const linkedChildIds = new Set<string>();
+  for (const line of lines) {
+    const parentId = String(line.parentLineId ?? "").trim();
+    if (!parentId || parentId === line.id || !rowsById.has(parentId)) continue;
+    const children = childrenByParent.get(parentId) ?? [];
+    children.push(line);
+    childrenByParent.set(parentId, children);
+    linkedChildIds.add(line.id);
+  }
+
+  const ordered: T[] = [];
+  const added = new Set<string>();
+  const append = (line: T) => {
+    if (added.has(line.id)) return;
+    ordered.push(line);
+    added.add(line.id);
+    for (const child of childrenByParent.get(line.id) ?? []) append(child);
+  };
+  for (const line of lines) if (!linkedChildIds.has(line.id)) append(line);
+  for (const line of lines) append(line);
+  return ordered;
+}
+
+export async function getQuoteStatusSnapshotForTenant(
+  tenantId: string,
+  quoteId: string,
+): Promise<{ fingerprint: string; status: string; updatedAt: string } | null> {
+  // This is a read-only status endpoint. The normal quote editor remains the
+  // authoritative full-data path; do not call getQuoteDraftById/listQuoteLines.
+  const draftResult = await pool.query<QuoteStatusDraft>(`
+    SELECT
+      status,
+      updated_at as "updatedAt",
+      sent_at as "sentAt",
+      COALESCE(email_status, 'not_sent') as "emailStatus",
+      email_sent_at as "emailSentAt",
+      email_last_error as "emailLastError",
+      viewed_at as "viewedAt",
+      accepted_at as "acceptedAt",
+      declined_at as "declinedAt",
+      changes_requested_at as "changesRequestedAt",
+      myob_order_status as "myobOrderStatus",
+      myob_order_synced_at as "myobOrderSyncedAt",
+      myob_order_sync_error as "myobOrderSyncError"
+    FROM sales.quote_drafts
+    WHERE tenant_id = $1::uuid AND id = $2::uuid
+    LIMIT 1
+  `, [tenantId, quoteId]);
+  const draft = draftResult.rows[0];
+  if (!draft) return null;
+
+  const lineResult = await pool.query<QuoteStatusLine>(`
+    SELECT
+      id,
+      COALESCE(client_response_status, 'pending') as "clientResponseStatus",
+      client_responded_at as "clientRespondedAt",
+      updated_at as "updatedAt",
+      configuration_snapshot ->> 'parentLineId' as "parentLineId"
+    FROM sales.quote_lines
+    WHERE quote_id = $1::uuid
+    ORDER BY created_at ASC
+  `, [quoteId]);
+  const orderedLines = orderQuoteStatusLines(lineResult.rows);
+  return {
+    fingerprint: quoteActivityFingerprint(draft, orderedLines),
+    status: draft.status,
+    updatedAt: statusTimestamp(draft.updatedAt),
+  };
+}
+
 export async function listQuoteLines(quoteId: string): Promise<QuoteLineRecord[]> {
   await Promise.all([
     ensureQuoteLineConfigurationColumn(),
