@@ -4,7 +4,7 @@ import { lazy, Suspense, useState } from "react";
 import type { QuoteProduct } from "./QuoteLineBuilder";
 import type { MyobMatrixItem, PricingSettings, QuoteMaterial } from "./QuoteMaterialFlowBuilder";
 import type { QuoteCostingResources } from "./quoteCostingResources";
-import type { QuoteSubJob } from "@/lib/quote-sub-jobs";
+import { currentQuoteSubJob, type QuoteSubJob } from "@/lib/quote-sub-jobs";
 
 const QuoteLineBuilder = lazy(() => import("./QuoteLineBuilder").then((module) => ({ default: module.QuoteLineBuilder })));
 const QuoteMaterialFlowBuilder = lazy(() => import("./QuoteMaterialFlowBuilder").then((module) => ({ default: module.QuoteMaterialFlowBuilder })));
@@ -51,21 +51,21 @@ export function QuoteLineStartBuilder({
   categoryImages = {},
 }: QuoteLineStartBuilderProps) {
   const [mode, setMode] = useState<StartMode>("saved");
-  const [subJobId, setSubJobId] = useState("");
-  const sectionPicker = subJobs.length ? (
-    <label style={{ display: "grid", gap: 6, maxWidth: 480, fontSize: 13, fontWeight: 850, color: "#344054" }}>
-      Add line under Sub Job
-      <select value={subJobId} onChange={(event) => setSubJobId(event.target.value)} style={{ minHeight: 42, padding: "0 12px", borderRadius: 10, border: "1px solid #cbd5e1", background: "#fff" }}>
-        <option value="">General / Unassigned</option>
-        {subJobs.map((job) => <option key={job.id} value={job.id}>{job.title}</option>)}
-      </select>
-    </label>
-  ) : null;
+  // Once a Sub Job is created, every subsequent new line defaults to it.
+  // The current section is derived from persisted section order, so it survives
+  // saves, refreshes and switching between list/catalogue entry layouts.
+  const activeSubJob = currentQuoteSubJob(subJobs);
+  const subJobId = activeSubJob?.id ?? null;
+  const sectionIndicator = (
+    <div role="status" aria-live="polite" style={{ padding: "8px 11px", borderRadius: 9, background: "#eff6ff", color: "#1e40af", fontSize: 13 }}>
+      New lines go into: <strong>{activeSubJob?.title ?? "General / Unassigned"}</strong>
+    </div>
+  );
 
   if (quoteEntryLayout === "catalogue") {
     return (
       <div style={{ display: "grid", gap: 12 }}>
-      {sectionPicker}
+      {sectionIndicator}
       <Suspense fallback={<div style={{ minHeight: 150, display: "grid", placeItems: "center", color: "#64748b", fontSize: 13, fontWeight: 800 }}>Loading visual catalogue…</div>}>
         <VisualQuoteCatalogue
           quoteId={quoteId}
@@ -85,7 +85,7 @@ export function QuoteLineStartBuilder({
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      {sectionPicker}
+      {sectionIndicator}
       <section style={{ display: "grid", gap: 8 }}>
         <div style={{ fontSize: 12, fontWeight: 950, color: "#475467", textTransform: "uppercase", letterSpacing: "0.06em" }}>
           Start from

@@ -63,7 +63,7 @@ export async function createQuoteSubJobAction(formData: FormData): Promise<void>
   const ok = await createQuoteSubJob(tenant.tenantId, quoteId, title);
   if (!ok) redirect("/quotes?error=Quote%20not%20found");
   revalidatePath("/quotes");
-  redirect(`/quotes?selected=${quoteId}&message=Sub%20job%20created#sub-jobs`);
+  redirect(`/quotes?selected=${quoteId}&message=Sub%20job%20created#quote-builder`);
 }
 
 export async function renameQuoteSubJobAction(formData: FormData): Promise<void> {

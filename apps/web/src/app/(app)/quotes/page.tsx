@@ -1,6 +1,6 @@
 import { isPassThroughQuoteLine } from "@/lib/dispatch-pricing";
 import { Fragment } from "react";
-import { groupQuoteLinesBySubJob } from "@/lib/quote-sub-jobs";
+import { currentQuoteSubJob, groupQuoteLinesBySubJob } from "@/lib/quote-sub-jobs";
 import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -619,6 +619,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
   const quoteLineGroups = groupQuoteLinesBySubJob(quoteLines, quoteSubJobs);
   const orderedQuoteLines = quoteLineGroups.flatMap((group) => group.lines);
+  const activeSubJob = currentQuoteSubJob(quoteSubJobs);
   const subJobByLineId = new Map(quoteLineGroups.flatMap((group) => group.lines.map((line) => [line.id, group] as const)));
   const selectedQuote = initialSelectedQuote;
   const clients = initialClients;
@@ -1226,13 +1227,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                 <section id="sub-jobs" style={{ display: "grid", gap: 12, border: "1px solid #dbe4f0", borderRadius: 18, padding: 16, background: "#f8fafc" }}>
                   <div>
                     <h3 style={{ margin: 0 }}>Sub Jobs <span style={{ color: "#667085", fontWeight: 650, fontSize: 13 }}>({quoteSubJobs.length})</span></h3>
-                    <p style={{ margin: "5px 0 0", color: "#667085", fontSize: 13 }}>Organise this quote into named sections, such as Vehicle 123 Wrap. Each section can contain any number of lines.</p>
+                    <p style={{ margin: "5px 0 0", color: "#667085", fontSize: 13 }}>Each section can have multiple quote lines. New lines automatically go into the most recently created section; rename or remove sections here without affecting line prices.</p>
                   </div>
-                  <form action={createQuoteSubJobAction} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                    <input type="hidden" name="quoteId" value={selectedQuote.id} />
-                    <input name="title" required maxLength={200} placeholder="New Sub Job name, e.g. Vehicle 123 Wrap" style={{ ...inputStyle, flex: "1 1 280px", minWidth: 0 }} />
-                    <button type="submit" style={{ ...buttonStyle, background: "#155eef" }}>+ Add Sub Job</button>
-                  </form>
                   {quoteSubJobs.length ? <div style={{ display: "grid", gap: 7 }}>
                     {quoteSubJobs.map((job) => (
                       <div key={job.id} style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8, padding: 9, border: "1px solid #e2e8f0", borderRadius: 12, background: "#fff" }}>
@@ -1242,6 +1238,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                           <input name="title" defaultValue={job.title} required maxLength={200} aria-label="Sub Job name" style={{ ...inputStyle, flex: "1 1 200px", minWidth: 0 }} />
                           <button type="submit" style={{ ...buttonStyle, background: "#334155", padding: "0 12px" }}>Rename</button>
                         </form>
+                        {(() => {
+                          const group = quoteLineGroups.find((item) => item.id === job.id);
+                          return <span style={{ fontSize: 12, color: "#334155", fontWeight: 750, fontVariantNumeric: "tabular-nums" }}>
+                            {formatMoney(group?.subtotal ?? 0)} ex GST · <strong>{formatMoney(group?.totalIncGst ?? 0)} inc GST</strong>
+                          </span>;
+                        })()}
                         <form action={deleteQuoteSubJobAction}>
                           <input type="hidden" name="quoteId" value={selectedQuote.id} />
                           <input type="hidden" name="subJobId" value={job.id} />
@@ -1255,7 +1257,18 @@ export default async function QuotesPage({ searchParams }: PageProps) {
 
               {selectedQuote.status !== "deleted" ? (
                 <section id="quote-builder" style={{ display: "grid", gap: 10, scrollMarginTop: 18, order: 0 }}>
-                  <details data-production-manager-auto-refresh-protected="true" style={{ border: "2px solid #155eef", borderRadius: 18, background: "#fff", overflow: "hidden", boxShadow: "0 8px 24px rgba(21,94,239,0.10)" }}>
+                  <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, padding: 12, background: "#f8fbff", display: "grid", gap: 10 }}>
+                    <div style={{ fontSize: 13, color: "#334155" }}>
+                      <strong>Current section: {activeSubJob?.title ?? "General / Unassigned"}</strong>
+                      <span style={{ display: "block", marginTop: 3, color: "#64748b" }}>Add quote lines under this heading until you start another Sub Job.</span>
+                    </div>
+                    <form action={createQuoteSubJobAction} style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
+                      <input type="hidden" name="quoteId" value={selectedQuote.id} />
+                      <input name="title" required maxLength={200} aria-label="Next Sub Job name" placeholder="Next section, e.g. Vehicle 456 Wrap" style={{ ...inputStyle, flex: "1 1 260px", minWidth: 0 }} />
+                      <button type="submit" style={{ ...buttonStyle, background: "#155eef" }}>+ Start next Sub Job</button>
+                    </form>
+                  </div>
+                  <details data-production-manager-auto-refresh-protected="true" open={message === "Sub job created" ? true : undefined} style={{ border: "2px solid #155eef", borderRadius: 18, background: "#fff", overflow: "hidden", boxShadow: "0 8px 24px rgba(21,94,239,0.10)" }}>
                     <summary style={{ listStyle: "none", cursor: "pointer", padding: "18px 20px", background: "linear-gradient(135deg,#155eef,#2563eb)", color: "#fff", fontWeight: 950, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}><span style={{ fontSize: 18 }}>＋ Create quote line</span><span style={{ fontSize: 12, color: "#dbeafe", fontWeight: 800 }}>Choose a product, configure it and add pricing</span></summary>
                     <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
                       {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
@@ -1302,6 +1315,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                   const section = subJobByLineId.get(line.id);
                   const previousSection = lineIndex ? subJobByLineId.get(orderedQuoteLines[lineIndex - 1]!.id) : null;
                   const showSectionHeading = quoteSubJobs.length > 0 && section && (lineIndex === 0 || section.id !== previousSection?.id);
+                  const nextSection = lineIndex + 1 < orderedQuoteLines.length ? subJobByLineId.get(orderedQuoteLines[lineIndex + 1]!.id) : null;
+                  const showSectionTotal = quoteSubJobs.length > 0 && section && (lineIndex === orderedQuoteLines.length - 1 || section.id !== nextSection?.id);
                   const editableProduct = line.productId ? savedQuoteProducts.find((product) => product.id === line.productId) ?? null : null;
                   const surveyReference = surveyLineReference(line.configurationSnapshot);
                   const surveyNeedsConfig = surveyLineNeedsConfiguration(line.configurationSnapshot);
@@ -1313,7 +1328,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <Fragment key={line.id}>
                     {showSectionHeading && section ? <div style={{ marginTop: 9, padding: "10px 14px", background: "#eaf2ff", border: "1px solid #bfdbfe", borderRadius: 12, display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                       <strong style={{ color: "#1e40af", fontSize: 15 }}>{section.title}</strong>
-                      <span style={{ color: "#1e40af", fontSize: 13 }}>{section.lines.length} line{section.lines.length === 1 ? "" : "s"} · {formatMoney(section.subtotal)} ex GST</span>
+                      <span style={{ color: "#1e40af", fontSize: 13 }}>{section.lines.length} line{section.lines.length === 1 ? "" : "s"} · {formatMoney(section.subtotal)} ex GST · <strong>{formatMoney(section.totalIncGst)} inc GST</strong></span>
                     </div> : null}
                     <details
                       id={`quote-line-${line.id}`}
@@ -1511,6 +1526,12 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         </form>
                       </div>
                     </details>
+                    {showSectionTotal && section ? <div aria-label={`${section.title} sub quote total`} style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 12, alignItems: "center", padding: "11px 14px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 12, color: "#0f172a", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                      <strong>{section.title} — Sub Job total</strong>
+                      <span>Ex GST: <strong>{formatMoney(section.subtotal)}</strong></span>
+                      <span>GST: <strong>{formatMoney(section.gst)}</strong></span>
+                      <span>Inc GST: <strong>{formatMoney(section.totalIncGst)}</strong></span>
+                    </div> : null}
                     </Fragment>
                   );
                 })}

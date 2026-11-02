@@ -6,6 +6,17 @@ export type SectionLine = {
   configurationSnapshot: Record<string, unknown>;
 };
 
+/** New quote lines belong to the most recently added section, not General.
+ * Sections arrive ordered by creation time; their sortOrder determines which
+ * section is current. In a tie, the later row in the query wins.
+ * This does not move or change any previously saved quote lines.
+ */
+export function currentQuoteSubJob(subJobs: QuoteSubJob[]): QuoteSubJob | null {
+  if (!subJobs.length) return null;
+  return subJobs.reduce<QuoteSubJob | null>((latest, job) =>
+    !latest || job.sortOrder >= latest.sortOrder ? job : latest, null);
+}
+
 export function quoteLineSubJobId(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   const value = (snapshot as Record<string, unknown>).subJobId;
@@ -18,6 +29,8 @@ export function groupQuoteLinesBySubJob<T extends SectionLine>(lines: T[], subJo
   title: string;
   lines: T[];
   subtotal: number;
+  gst: number;
+  totalIncGst: number;
 }> {
   const ordered = [...subJobs].sort((a, b) => a.sortOrder - b.sortOrder || a.title.localeCompare(b.title));
   const sections = ordered.map((job) => ({ id: job.id as string | null, title: job.title, lines: [] as T[], subtotal: 0 }));
@@ -39,5 +52,26 @@ export function groupQuoteLinesBySubJob<T extends SectionLine>(lines: T[], subJo
     const value = Number(String(line.lineTotal ?? "0").replace(/[$,]/g, ""));
     if (Number.isFinite(value) && (line as { clientResponseStatus?: string }).clientResponseStatus !== "cancelled") section.subtotal += value;
   }
-  return general.lines.length ? [...sections, general] : sections;
+  const groups = general.lines.length ? [...sections, general] : sections;
+  // Round to cents and allocate GST cents across sections so their displayed
+  // totals always add up to the overall quote. Rounding each section's GST
+  // independently can otherwise make the overall total differ by a cent.
+  const cents = groups.map((group) => Math.round(group.subtotal * 100));
+  const exactGstCents = cents.map((value) => value / 10); // Australian GST: 10%
+  const gstCents = exactGstCents.map((value) => Math.floor(value));
+  let remainder = Math.round(cents.reduce((sum, value) => sum + value, 0) / 10)
+    - gstCents.reduce((sum, value) => sum + value, 0);
+  const remainderOrder = exactGstCents
+    .map((value, index) => ({ index, fraction: value - Math.floor(value) }))
+    .sort((a, b) => b.fraction - a.fraction || a.index - b.index);
+  for (const { index } of remainderOrder) {
+    if (remainder <= 0) break;
+    gstCents[index]! += 1;
+    remainder--;
+  }
+  return groups.map((group, index) => ({
+    ...group,
+    gst: gstCents[index]! / 100,
+    totalIncGst: (cents[index]! + gstCents[index]!) / 100
+  }));
 }

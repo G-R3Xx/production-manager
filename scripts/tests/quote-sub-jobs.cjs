@@ -65,3 +65,67 @@ assert.match(quotesServerSource, /sj\.quote_id = qd\.id AND sj\.id::text = p\."m
 assert.match(read("apps/web/src/server/quote-sub-jobs.ts"), /WITH RECURSIVE allowed/);
 assert.match(read("apps/web/src/server/quote-pdf.ts"), /sectionLabels/);
 console.log("PASS: Sub Job grouping, inheritance, cancellations, unassigned, both builders, SQL authorization, PDF labels");
+
+// Sequential section entry: each new section becomes the automatic destination
+// for subsequent lines in either builder until the next section is created.
+const { currentQuoteSubJob } = moduleExports;
+assert.equal(currentQuoteSubJob([]), null);
+assert.equal(currentQuoteSubJob([a]), a);
+assert.equal(currentQuoteSubJob([b, a]), b); // database/UI order need not match
+assert.equal(currentQuoteSubJob([a, { ...b, sortOrder: 0 }])?.id, b.id); // later creation wins ties
+const newSection = { id: "c", quoteId: "q", title: "Vehicle 789 Wrap", sortOrder: 2 };
+assert.equal(currentQuoteSubJob([b, newSection, a]), newSection);
+const lastSectionRemoved = [a, b];
+assert.equal(currentQuoteSubJob(lastSectionRemoved), b);
+const firstLine = { id: "first", lineTotal: "55", configurationSnapshot: { subJobId: currentQuoteSubJob([a]).id } };
+const secondLine = { id: "second", lineTotal: "70", configurationSnapshot: { subJobId: currentQuoteSubJob([b, a]).id } };
+const resultSections = groupQuoteLinesBySubJob([firstLine, secondLine], [a, b]);
+assert.deepEqual(resultSections.map((section) => section.lines.map((line) => line.id)), [["first"], ["second"]]);
+const startBuilder = read("apps/web/src/app/(app)/quotes/QuoteLineStartBuilder.tsx");
+assert.match(startBuilder, /const activeSubJob = currentQuoteSubJob\(subJobs\)/);
+assert.match(startBuilder, /const subJobId = activeSubJob\?\.id \?\? null/);
+assert.doesNotMatch(startBuilder, /setSubJobId|General \/ Unassigned<\/option>/);
+assert.match(startBuilder, /subJobId=\{subJobId\}/g);
+const quotePage = read("apps/web/src/app/(app)/quotes/page.tsx");
+assert.match(quotePage, /\+ Start next Sub Job/);
+assert.match(quotePage, /open=\{message === "Sub job created" \? true : undefined\}/);
+assert.match(read("apps/web/src/app/(app)/quotes/actions.ts"), /message=Sub%20job%20created#quote-builder/);
+console.log("PASS: sequential section creation, automatic current section, line assignment and both quote builders");
+
+// Per-section totals must reconcile with the quote total (rounding at the
+// overall-quote level, not GST independently on every small section).
+const sectionsWithGst = groupQuoteLinesBySubJob([
+  { id: "a1", lineTotal: "100.00", configurationSnapshot: { subJobId: "a" } },
+  { id: "a2", lineTotal: "25.00", configurationSnapshot: { subJobId: "a" } },
+  { id: "b1", lineTotal: "80.00", configurationSnapshot: { subJobId: "b" } },
+  { id: "cancel", lineTotal: "200.00", clientResponseStatus: "cancelled", configurationSnapshot: { subJobId: "b" } },
+], [a, b]);
+assert.deepEqual(sectionsWithGst.map((group) => ({ title: group.title, subtotal: group.subtotal, gst: group.gst, total: group.totalIncGst })), [
+  { title: a.title, subtotal: 125, gst: 12.5, total: 137.5 },
+  { title: b.title, subtotal: 80, gst: 8, total: 88 },
+]);
+const tinyLines = [
+  { id: "tiny1", lineTotal: "0.05", configurationSnapshot: { subJobId: "a" } },
+  { id: "tiny2", lineTotal: "0.05", configurationSnapshot: { subJobId: "b" } },
+  { id: "tiny3", lineTotal: "0.05", configurationSnapshot: {} },
+];
+const tinyGroups = groupQuoteLinesBySubJob(tinyLines, [a,b]);
+const cents = (n) => Math.round(n * 100);
+assert.equal(tinyGroups.reduce((sum, group) => sum + cents(group.subtotal), 0), 15);
+assert.equal(tinyGroups.reduce((sum, group) => sum + cents(group.gst), 0), 2);
+assert.equal(tinyGroups.reduce((sum, group) => sum + cents(group.totalIncGst), 0), 17);
+// A negative line (credit) must not break cent allocation.
+const negativeGroups = groupQuoteLinesBySubJob([
+  { id: "a-credit", lineTotal: "-0.05", configurationSnapshot: { subJobId: "a" } },
+  { id: "b-charge", lineTotal: "0.10", configurationSnapshot: { subJobId: "b" } },
+], [a,b]);
+assert.equal(negativeGroups.reduce((sum, group) => sum + cents(group.gst), 0), 1);
+assert.equal(negativeGroups.reduce((sum, group) => sum + cents(group.totalIncGst), 0), 6);
+const pageSource = read("apps/web/src/app/(app)/quotes/page.tsx");
+const clientPageSource = read("apps/web/src/app/public/quotes/[token]/page.tsx");
+assert.match(pageSource, /showSectionTotal && section/);
+assert.match(clientPageSource, /showSectionTotal && section/);
+assert.match(pageSource, /formatMoney\(section\.totalIncGst\)/);
+assert.match(clientPageSource, /formatMoney\(section\.totalIncGst\)/);
+assert.match(read("apps/web/src/server/quote-pdf.ts"), /money\(group\.totalIncGst\)/);
+console.log("PASS: section ex GST, allocated GST, inc GST totals, cancelled lines, rounding and staff/client/PDF outputs");

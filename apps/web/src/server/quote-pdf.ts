@@ -416,7 +416,7 @@ export async function buildQuotePdf(input:{
   const sectionLabels:Record<string,string>={};
   if(input.subJobs?.length) for(const group of groups){
     const first=group.lines[0];
-    if(first) sectionLabels[first.id]=`${group.title} | ${money(group.subtotal)} ex GST`;
+    if(first) sectionLabels[first.id]=`${group.title.slice(0,29)} | ${money(group.subtotal)} ex | ${money(group.totalIncGst)} inc GST`;
   }
   const pdf=new PdfBuilder(),catalogId=pdf.reserve(),pagesId=pdf.reserve(),fontId=pdf.reserve(),boldFontId=pdf.reserve();
   pdf.set(fontId,"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");

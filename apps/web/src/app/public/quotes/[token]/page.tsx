@@ -486,11 +486,13 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
               const section = sectionByLine.get(line.id);
               const previousSection = index ? sectionByLine.get(orderedLines[index - 1]!.id) : null;
               const showHeading = subJobs.length > 0 && section && (index === 0 || section.id !== previousSection?.id);
+              const nextSection = index + 1 < orderedLines.length ? sectionByLine.get(orderedLines[index + 1]!.id) : null;
+              const showSectionTotal = subJobs.length > 0 && section && (index === orderedLines.length - 1 || section.id !== nextSection?.id);
               const clientLine = quoteLineForClient(line);
               return (
                 <Fragment key={line.id}>
                 {showHeading && section ? <div className="quote-print-line" style={{ padding: "12px 16px", borderRadius: 13, background: "#eff6ff", border: "1px solid #bfdbfe", display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap", color: "#1e40af" }}>
-                  <strong>{section.title}</strong><span style={{ fontWeight: 750, fontSize: 13 }}>Section subtotal: {formatMoney(section.subtotal)} ex GST</span>
+                  <strong>{section.title}</strong><span style={{ fontWeight: 750, fontSize: 13 }}>Sub Job: {formatMoney(section.subtotal)} ex GST · {formatMoney(section.totalIncGst)} inc GST</span>
                 </div> : null}
                 <div
                   className="quote-print-line quote-line-grid"
@@ -521,6 +523,12 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
                     locked={lineResponsesLocked}
                   />
                 </div>
+                {showSectionTotal && section ? <div className="quote-print-line" aria-label={`${section.title} sub quote total`} style={{ display: "flex", justifyContent: "flex-end", gap: 12, flexWrap: "wrap", padding: "10px 14px", borderRadius: 12, background: "#f1f5f9", border: "1px solid #cbd5e1", color: "#0f172a", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
+                  <strong>{section.title} — Sub Job total</strong>
+                  <span>Ex GST: <strong>{formatMoney(section.subtotal)}</strong></span>
+                  <span>GST: <strong>{formatMoney(section.gst)}</strong></span>
+                  <span>Inc GST: <strong>{formatMoney(section.totalIncGst)}</strong></span>
+                </div> : null}
                 </Fragment>
               );
             })}
