@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
@@ -249,6 +250,15 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                       <span style={helpStyle}>{QUOTE_ENTRY_LAYOUT_OPTIONS.find((option) => option.value === row.quoteEntryLayout)?.description ?? QUOTE_ENTRY_LAYOUT_OPTIONS[0]?.description}</span>
                     </label>
                   </div>
+                  {canEditRow ? (
+                    <div style={{ borderTop: "1px solid #e2e8f0", paddingTop: 14, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                      <span style={{ display: "grid", gap: 4 }}>
+                        <strong style={{ fontSize: 14, color: "#0f172a" }}>Training & Certificates</strong>
+                        <span style={{ fontSize: 12, color: "#64748b" }}>Licences, courses, inductions, supporting photos and expiry reminders</span>
+                      </span>
+                      <Link prefetch={false} href={`/users/${row.membershipId}/certificates`} style={{ textDecoration: "none", border: "1px solid #bfdbfe", background: "#eff6ff", color: "#1d4ed8", borderRadius: 10, padding: "10px 14px", fontSize: 13, fontWeight: 800 }}>Manage training / certificates</Link>
+                    </div>
+                  ) : null}
                   <div style={{ display: "flex", gap: "6px 18px", flexWrap: "wrap", fontSize: 11, color: "#94a3b8" }}>
                     <span>Joined {formatDate(row.membershipCreatedAt)}</span>
                     <span>Updated {formatDate(row.membershipUpdatedAt)}</span>

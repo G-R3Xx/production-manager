@@ -5,6 +5,7 @@ import { requireAuthenticatedUser, getSupabaseServerClient } from "@/lib/supabas
 import { listMembershipsForAuthUser } from "@/server/bootstrap/memberships";
 import { clearStoredActiveTenantId, getStoredActiveTenantId, setStoredActiveTenantId } from "@/server/bootstrap/activeTenant";
 import { markAllNotificationsReadForTenant } from "@/server/notifications";
+import { canManageStaff } from "@/server/users";
 
 export async function signOutAction(): Promise<void> {
   const supabase = await getSupabaseServerClient();
@@ -39,5 +40,5 @@ export async function markAllNotificationsReadAction(): Promise<void> {
   const memberships = await listMembershipsForAuthUser(user.id);
   const tenantId = String(await getStoredActiveTenantId() ?? "");
   const tenant = memberships.find((row) => row.tenantId === tenantId && row.membershipStatus === "active") ?? memberships.find((row) => row.membershipStatus === "active");
-  if (tenant) await markAllNotificationsReadForTenant(tenant.tenantId);
+  if (tenant) await markAllNotificationsReadForTenant(tenant.tenantId, canManageStaff(tenant.tenantRole));
 }

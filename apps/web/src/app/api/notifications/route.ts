@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { listNotificationsWithUnreadForTenant } from "@/server/notifications";
+import { canManageStaff } from "@/server/users";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +16,6 @@ export async function GET() {
     );
   }
 
-  const snapshot = await listNotificationsWithUnreadForTenant(activeTenant.tenantId);
+  const snapshot = await listNotificationsWithUnreadForTenant(activeTenant.tenantId, 12, activeTenant.membershipStatus === "active" && canManageStaff(activeTenant.tenantRole));
   return NextResponse.json(snapshot, { headers: { "Cache-Control": "private, no-store" } });
 }

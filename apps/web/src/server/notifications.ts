@@ -3,6 +3,8 @@ import "server-only";
 import { createHash } from "node:crypto";
 import { pool } from "@production-manager/db";
 import { relationHasColumns, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
+import { generateStaffCertificateAlerts } from "@/server/staff-certificates";
+import { australianLocalDate } from "@/lib/staff-certificate";
 
 export type AppNotificationRecord = {
   id: string;
@@ -72,17 +74,33 @@ export async function createNotificationForTenant(tenantId: string, input: {
 
 export type NotificationSnapshot = { notifications: AppNotificationRecord[]; unreadCount: number };
 
-export async function listNotificationsWithUnreadForTenant(tenantId: string, limit = 12): Promise<NotificationSnapshot> {
+// Certificate alerts are checked at most once per 5 minutes per workspace per instance.
+// A DB uniqueness key prevents duplicates across simultaneous Vercel workers.
+const certificateAlertsChecked = new Map<string, { day: string; until: number }>();
+export async function listNotificationsWithUnreadForTenant(tenantId: string, limit = 12, manager = false): Promise<NotificationSnapshot> {
   await ensureNotificationSchema();
+  if (manager) {
+    const today = australianLocalDate();
+    const cached = certificateAlertsChecked.get(tenantId);
+    if (!cached || cached.day !== today || cached.until < Date.now()) {
+      try {
+        await generateStaffCertificateAlerts(tenantId);
+        certificateAlertsChecked.set(tenantId, { day: today, until: Date.now() + 5 * 60 * 1000 });
+      } catch (error) {
+        // A missing migration must not break existing application alerts.
+        console.error("Staff certificate alert check failed; confirm migration 063", error);
+      }
+    }
+  }
   const result = await pool.query<AppNotificationRecord & { unreadCount: string }>(`
     SELECT id,tenant_id::text AS "tenantId",event_type AS "eventType",title,message,href,
       payload_json AS "payloadJson",is_read AS "isRead",created_at AS "createdAt",
       (count(*) FILTER (WHERE is_read=false) OVER ())::text AS "unreadCount"
     FROM app.notifications
-    WHERE tenant_id=$1::uuid
+    WHERE tenant_id=$1::uuid AND ($3::boolean OR event_type <> 'staff_certificate_expiry')
     ORDER BY is_read ASC,created_at DESC
     LIMIT $2::int
-  `, [tenantId, Math.max(1, Math.min(50, limit))]);
+  `, [tenantId, Math.max(1, Math.min(50, limit)), manager]);
   return {
     notifications: result.rows.map((row: AppNotificationRecord & { unreadCount: string }) => {
       const { unreadCount: _unreadCount, ...notification } = row;
@@ -304,10 +322,10 @@ export async function getAppActivityPulseForTenant(tenantId: string, scope: AppP
   return pending;
 }
 
-export async function markAllNotificationsReadForTenant(tenantId: string): Promise<void> {
+export async function markAllNotificationsReadForTenant(tenantId: string, manager = false): Promise<void> {
   await ensureNotificationSchema();
   await pool.query(`
     UPDATE app.notifications SET is_read=true,read_at=COALESCE(read_at,now())
-    WHERE tenant_id=$1::uuid AND is_read=false
-  `, [tenantId]);
+    WHERE tenant_id=$1::uuid AND is_read=false AND ($2::boolean OR event_type <> 'staff_certificate_expiry')
+  `, [tenantId, manager]);
 }
