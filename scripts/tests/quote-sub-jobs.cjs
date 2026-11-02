@@ -127,5 +127,5 @@ assert.match(pageSource, /showSectionTotal && section/);
 assert.match(clientPageSource, /showSectionTotal && section/);
 assert.match(pageSource, /formatMoney\(section\.totalIncGst\)/);
 assert.match(clientPageSource, /formatMoney\(section\.totalIncGst\)/);
-assert.match(read("apps/web/src/server/quote-pdf.ts"), /money\(group\.totalIncGst\)/);
+assert.match(read("apps/web/src/server/quote-pdf.ts"), /sectionLabels\[first.id\]=group.title.slice\(0,60\)/);
 console.log("PASS: section ex GST, allocated GST, inc GST totals, cancelled lines, rounding and staff/client/PDF outputs");

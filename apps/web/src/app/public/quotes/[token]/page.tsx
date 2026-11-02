@@ -491,8 +491,8 @@ export default async function PublicQuotePage({ params, searchParams }: PageProp
               const clientLine = quoteLineForClient(line);
               return (
                 <Fragment key={line.id}>
-                {showHeading && section ? <div className="quote-print-line" style={{ padding: "12px 16px", borderRadius: 13, background: "#eff6ff", border: "1px solid #bfdbfe", display: "flex", gap: 10, justifyContent: "space-between", flexWrap: "wrap", color: "#1e40af" }}>
-                  <strong>{section.title}</strong><span style={{ fontWeight: 750, fontSize: 13 }}>Sub Job: {formatMoney(section.subtotal)} ex GST · {formatMoney(section.totalIncGst)} inc GST</span>
+                {showHeading && section ? <div className="quote-print-line" style={{ padding: "12px 16px", borderRadius: 13, background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af" }}>
+                  <strong>{section.title}</strong>
                 </div> : null}
                 <div
                   className="quote-print-line quote-line-grid"
