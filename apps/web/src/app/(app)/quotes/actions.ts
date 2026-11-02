@@ -1,5 +1,7 @@
 "use server";
 
+import { enforcePassThroughLine, isPassThroughQuoteLine } from "@/lib/dispatch-pricing";
+
 import { randomUUID } from "crypto";
 import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
@@ -178,7 +180,7 @@ function recalculateLineForMarkup(input: {
   company: Awaited<ReturnType<typeof getCompanySettingsByTenantId>>;
 }): { snapshot: Record<string, unknown>; unitPrice: string } {
   const pricing = recordValue(input.snapshot.pricingSnapshot) ?? {};
-  if (String(pricing.pricingSource ?? "") === "myob_item_matrix") {
+  if (isPassThroughQuoteLine(input.snapshot) || String(pricing.pricingSource ?? "") === "pass_through" || String(pricing.pricingSource ?? "") === "myob_item_matrix") {
     return { snapshot: input.snapshot, unitPrice: input.currentUnitPrice };
   }
 
@@ -223,7 +225,7 @@ function recalculateLineForProfit(input: {
   company: Awaited<ReturnType<typeof getCompanySettingsByTenantId>>;
 }): { snapshot: Record<string, unknown>; unitPrice: string } {
   const pricing = recordValue(input.snapshot.pricingSnapshot) ?? {};
-  if (String(pricing.pricingSource ?? "") === "myob_item_matrix") return { snapshot: input.snapshot, unitPrice: input.currentUnitPrice };
+  if (isPassThroughQuoteLine(input.snapshot) || String(pricing.pricingSource ?? "") === "pass_through" || String(pricing.pricingSource ?? "") === "myob_item_matrix") return { snapshot: input.snapshot, unitPrice: input.currentUnitPrice };
   const markup = Math.max(0.0001, numberValue(pricing.markupMultiplier as string | number | undefined, standardMarkupForSnapshot(input.snapshot, input.company)));
   const oldProfit = Math.max(0.0001, numberValue(pricing.profitMultiplier as string | number | undefined, numberValue(input.company?.globalProfitMultiplier, 1.2)));
   const priceLevelFactor = Math.max(0, numberValue(pricing.priceLevelFactor as string | number | undefined, 1));
@@ -595,14 +597,14 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
     const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
     const serviceLineSnapshot = jsonObject(formData.get("serviceLineConfigurationSnapshot"));
     const serviceLineInput: LinkedQuoteLineInput | null = serviceLineProductName && serviceLineUnitPrice
-      ? {
+      ? enforcePassThroughLine({
           productName: serviceLineProductName,
           optionSummary: nullable(formData.get("serviceLineOptionSummary")),
           quantity: serviceLineQuantity,
           unitPrice: serviceLineUnitPrice,
           notes: nullable(formData.get("serviceLineNotes")),
           configurationSnapshot: serviceLineSnapshot
-        }
+        })
       : null;
 
     const accessEquipmentLineProductName = String(formData.get("accessEquipmentLineProductName") ?? "").trim();
@@ -628,15 +630,16 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
     // Authorisation and tenant ownership are checked inside the same PostgreSQL
     // statement that writes the line. This removes the extra membership query
     // that previously ran before every quote-line save.
+    const normalisedMain = enforcePassThroughLine({ productName, unitPrice, configurationSnapshot });
     const saved = await saveQuoteLineBundleForAuthUser(user.id, quoteId, {
       lineId: editingLineId,
       productId: savedProductId,
       productName,
       optionSummary: nullable(formData.get("optionSummary")),
       quantity,
-      unitPrice,
+      unitPrice: normalisedMain.unitPrice,
       notes: nullable(formData.get("notes")),
-      configurationSnapshot,
+      configurationSnapshot: normalisedMain.configurationSnapshot,
       existingDispatchLineId,
       existingAccessEquipmentLineId,
       dispatchLine: serviceLineInput,
@@ -710,14 +713,14 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
   const serviceLineQuantity = String(formData.get("serviceLineQuantity") ?? "1").trim() || "1";
   const serviceLineSnapshot = jsonObject(formData.get("serviceLineConfigurationSnapshot"));
   const serviceLineInput: LinkedQuoteLineInput | null = serviceLineProductName && serviceLineUnitPrice
-    ? {
+    ? enforcePassThroughLine({
         productName: serviceLineProductName,
         optionSummary: nullable(formData.get("serviceLineOptionSummary")),
         quantity: serviceLineQuantity,
         unitPrice: serviceLineUnitPrice,
         notes: nullable(formData.get("serviceLineNotes")),
         configurationSnapshot: serviceLineSnapshot
-      }
+      })
     : null;
 
   const accessEquipmentLineProductName = String(formData.get("accessEquipmentLineProductName") ?? "").trim();
@@ -734,6 +737,8 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
         configurationSnapshot: accessEquipmentLineSnapshot
       }
     : null;
+
+  const normalisedMain = enforcePassThroughLine({ productName, unitPrice, configurationSnapshot });
 
   if (editingLineId) {
     const existingLine = await getQuoteLineForTenant(activeTenant.tenantId, quoteId, editingLineId);
@@ -783,10 +788,10 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
       productName,
       optionSummary: nullable(formData.get("optionSummary")),
       quantity,
-      unitPrice,
+      unitPrice: normalisedMain.unitPrice,
       notes: nullable(formData.get("notes")),
       configurationSnapshot: {
-        ...configurationSnapshot,
+        ...normalisedMain.configurationSnapshot,
         ...(existingParentLineId ? { parentLineId: existingParentLineId } : {}),
         linkedDispatchLineId: linkedDispatchLineId || null,
         linkedAccessEquipmentLineId: linkedAccessEquipmentLineId || null,
@@ -802,9 +807,9 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
     productName,
     optionSummary: nullable(formData.get("optionSummary")),
     quantity,
-    unitPrice,
+    unitPrice: normalisedMain.unitPrice,
     notes: nullable(formData.get("notes")),
-    configurationSnapshot
+    configurationSnapshot: normalisedMain.configurationSnapshot
   });
 
   const linkedDispatchLineId = await upsertLinkedQuoteLine(
@@ -838,10 +843,10 @@ export async function addQuoteLineAction(formData: FormData): Promise<void> {
       productName,
       optionSummary: nullable(formData.get("optionSummary")),
       quantity,
-      unitPrice,
+      unitPrice: normalisedMain.unitPrice,
       notes: nullable(formData.get("notes")),
       configurationSnapshot: {
-        ...configurationSnapshot,
+        ...normalisedMain.configurationSnapshot,
         linkedDispatchLineId: linkedDispatchLineId || null,
         linkedAccessEquipmentLineId: linkedAccessEquipmentLineId || null
       }
@@ -873,6 +878,7 @@ export async function updateQuoteLineMarkupAction(formData: FormData): Promise<v
 
   const snapshot = recordValue(line.configurationSnapshot) ?? {};
   const pricing = recordValue(snapshot.pricingSnapshot) ?? {};
+  if (isPassThroughQuoteLine(snapshot, line.productName)) redirect(`/quotes?selected=${quoteId}&error=Delivery%20and%20courier%20charges%20cannot%20be%20marked%20up`);
   if (String(pricing.pricingSource ?? "") === "myob_item_matrix") {
     redirect(`/quotes?selected=${quoteId}&error=This%20line%20uses%20MYOB%20matrix%20pricing%20so%20markup%20is%20not%20applied`);
   }
@@ -912,6 +918,7 @@ export async function updateQuoteLineProfitAction(formData: FormData): Promise<v
   if (!line) redirect(`/quotes?selected=${quoteId}&error=The%20quote%20line%20could%20not%20be%20found`);
   const snapshot = recordValue(line.configurationSnapshot) ?? {};
   const pricing = recordValue(snapshot.pricingSnapshot) ?? {};
+  if (isPassThroughQuoteLine(snapshot, line.productName)) redirect(`/quotes?selected=${quoteId}&error=Delivery%20and%20courier%20charges%20cannot%20have%20profit%20applied`);
   if (String(pricing.pricingSource ?? "") === "myob_item_matrix") redirect(`/quotes?selected=${quoteId}&error=This%20line%20uses%20MYOB%20matrix%20pricing%20so%20profit%20is%20not%20applied`);
   const recalculated = recalculateLineForProfit({ snapshot, currentUnitPrice: line.unitPrice, profitMultiplier: 1 + requestedPercent / 100, company });
   await updateQuoteLineForTenant(activeTenant.tenantId, quoteId, lineId, { productName: line.productName, optionSummary: line.optionSummary, quantity: line.quantity, unitPrice: recalculated.unitPrice, notes: line.notes, configurationSnapshot: recalculated.snapshot });

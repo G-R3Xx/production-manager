@@ -206,10 +206,11 @@ function nullableText(value: string | null | undefined): string | null {
   return cleaned.length ? cleaned : null;
 }
 
-function normaliseDispatchType(value: string | null | undefined): "pickup" | "delivery" | "install" | null {
+function normaliseDispatchType(value: string | null | undefined): "pickup" | "delivery" | "courier" | "install" | null {
   const clean = String(value ?? "").trim().toLowerCase();
   if (clean === "pickup" || clean === "pick up" || clean === "collection" || clean === "collect") return "pickup";
-  if (clean === "delivery" || clean === "deliver" || clean === "courier") return "delivery";
+  if (clean === "courier") return "courier";
+  if (clean === "delivery" || clean === "deliver") return "delivery";
   if (clean === "install" || clean === "installation" || clean === "site install") return "install";
   return null;
 }
@@ -217,6 +218,7 @@ function normaliseDispatchType(value: string | null | undefined): "pickup" | "de
 function readyStepLabelForDispatch(value: string | null | undefined): string | null {
   const dispatch = normaliseDispatchType(value);
   if (dispatch === "install") return "Ready for install";
+  if (dispatch === "courier") return "Ready for courier";
   if (dispatch === "delivery") return "Ready for delivery";
   if (dispatch === "pickup") return "Ready for pickup";
   return null;
@@ -225,6 +227,7 @@ function readyStepLabelForDispatch(value: string | null | undefined): string | n
 function dispatchStepTypeForDispatch(value: string | null | undefined): string {
   const dispatch = normaliseDispatchType(value);
   if (dispatch === "install") return "ready_for_install";
+  if (dispatch === "courier") return "ready_for_delivery";
   if (dispatch === "delivery") return "ready_for_delivery";
   if (dispatch === "pickup") return "ready_for_pickup";
   return "ready_for_dispatch";
@@ -233,6 +236,7 @@ function dispatchStepTypeForDispatch(value: string | null | undefined): string {
 function variationProductNameForDispatch(value: string | null | undefined): string {
   const dispatch = normaliseDispatchType(value);
   if (dispatch === "install") return "Sign Install";
+  if (dispatch === "courier") return "Courier";
   if (dispatch === "delivery") return "Delivery";
   if (dispatch === "pickup") return "Pickup / collection change";
   return "Production variation";
@@ -259,7 +263,7 @@ function departmentColumnFromText(value: string | null | undefined): ProductionB
 
 function isReadyHandoffText(value: string | null | undefined): boolean {
   const source = cleanSearchText(value);
-  return /\b(ready for install|ready for pickup|ready for delivery|ready for collect|ready for collection|ready to install|ready to deliver|ready to pickup|ready to collect|dispatch|packed)\b/.test(source);
+  return /\b(ready for install|ready for pickup|ready for delivery|ready for courier|ready for collect|ready for collection|ready to install|ready to deliver|ready to pickup|ready to collect|dispatch|packed)\b/.test(source);
 }
 
 function destinationColumnFromText(value: string | null | undefined, fallback: ProductionBoardColumnKey = "install"): ProductionBoardColumnKey {
@@ -1188,7 +1192,7 @@ export async function updateProductionStepAssignmentForTenant(tenantId: string, 
 
 function productionBoardColumnForText(text: string): ProductionBoardColumnKey {
   const source = cleanSearchText(text);
-  const finalStep = /\b(ready for install|ready for pickup|ready for delivery|dispatch|packed)\b/.test(source);
+  const finalStep = /\b(ready for install|ready for pickup|ready for delivery|ready for courier|dispatch|packed)\b/.test(source);
 
   if (finalStep) {
     if (/\binstall|installed|installer|site\b/.test(source)) return "install";
@@ -1208,7 +1212,7 @@ function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "
 
   const nextStep = cleanSearchText([row.nextStepLabel, row.nextStepType].filter(Boolean).join(" · "));
   const dispatch = cleanSearchText(row.dispatchType ?? "");
-  const dispatchColumn: ProductionBoardColumnKey | null = dispatch === "pickup" ? "pickup" : dispatch === "delivery" ? "deliver" : dispatch === "install" ? "install" : null;
+  const dispatchColumn: ProductionBoardColumnKey | null = dispatch === "pickup" ? "pickup" : (dispatch === "delivery" || dispatch === "courier") ? "deliver" : dispatch === "install" ? "install" : null;
   const isGenericReadyStep = /ready/.test(nextStep) && /install/.test(nextStep) && /pickup/.test(nextStep) && /delivery/.test(nextStep);
   if (isGenericReadyStep && dispatchColumn) return dispatchColumn;
 
@@ -1229,7 +1233,7 @@ function productionBoardColumnForNextStep(row: Omit<ProductionBoardCardRecord, "
   }
 
   if (/\b(ready for install|install|installed|installer|site install)\b/.test(nextStep)) return "install";
-  if (/\b(ready for delivery|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
+  if (/\b(ready for delivery|ready for courier|deliver|delivery|courier|freight|drop off|dispatch)\b/.test(nextStep)) return "deliver";
   if (/\b(ready for pickup|pickup|pick up|collect|collection)\b/.test(nextStep)) return "pickup";
 
   if (/\b(laminate|lamination|cello|fold|score|crease|bind|staple|number|numbering|pad|tape|trim|guillotine|cut|route|router|cnc|jingwei|finish|finishing|quality|pack|packed|apply|mount|mounted|eyelet|drill|hole|holes)\b/.test(nextStep)) return "finishing";
@@ -1309,7 +1313,7 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
         ps.step_type,
         CASE
           WHEN pj.dispatch_type = 'pickup' THEN 'pickup'
-          WHEN pj.dispatch_type = 'delivery' THEN 'deliver'
+          WHEN pj.dispatch_type IN ('delivery','courier') THEN 'deliver'
           WHEN pj.dispatch_type = 'install' THEN 'install'
           WHEN concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%pickup%'
             OR concat_ws(' ', pj.project_name, pi.title, pi.production_type, pi.size_summary, pi.substrate_summary, pi.colour_summary, pi.finishing_summary, ql.product_name, ql.option_summary) ILIKE '%pick up%'
@@ -1330,6 +1334,7 @@ export async function listProductionBoardCardsForTenant(tenantId: string): Promi
           lower(ps.label) LIKE '%ready for install%'
           OR lower(ps.label) LIKE '%ready for pickup%'
           OR lower(ps.label) LIKE '%ready for delivery%'
+          OR lower(ps.label) LIKE '%ready for courier%'
           OR lower(ps.label) LIKE '%ready%pickup%'
           OR lower(ps.label) LIKE '%ready%delivery%'
           OR lower(ps.label) LIKE '%ready%install%'
@@ -1671,7 +1676,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
 }): Promise<{ id: string; artworkFileCount: number }> {
   await ensureProductionTables();
   const dispatchType = normaliseDispatchType(input.dispatchType) ?? "pickup";
-  const deliveryAddress = dispatchType === "delivery" ? nullableText(input.address) : null;
+  const deliveryAddress = dispatchType === "delivery" || dispatchType === "courier" ? nullableText(input.address) : null;
   const jobResult = await pool.query<{ id: string }>(`
     INSERT INTO production.production_jobs AS existing_job (
       tenant_id,artwork_approval_id,quote_id,quote_number,client_name,contact_name,project_name,
@@ -1681,7 +1686,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
       qd.tenant_id,NULL,qd.id,qd.quote_number,$4::varchar,$5::varchar,
       ('WooCommerce order ' || $3::text),'ready_to_start',$6::varchar,'normal',
       concat_ws(E'\n','Created automatically from paid WooCommerce order ' || $3::text,
-        CASE WHEN $6::text='delivery' AND $7::text IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
+        CASE WHEN $6::text IN ('delivery','courier') AND $7::text IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
       'wordpress_woocommerce',$2::varchar,$8::uuid,$9::jsonb,now(),now()
     FROM sales.quote_drafts qd
     WHERE qd.tenant_id=$1::uuid AND qd.id=$10::uuid
@@ -1691,7 +1696,7 @@ export async function createProductionJobFromWebsiteOrderForTenant(tenantId: str
       contact_name=EXCLUDED.contact_name,dispatch_type=EXCLUDED.dispatch_type,
       internal_notes=concat_ws(E'\n',
         NULLIF(btrim(regexp_replace(COALESCE(existing_job.internal_notes,''), E'(^|\\n)Delivery address:[^\\n]*', '', 'g')), ''),
-        CASE WHEN EXCLUDED.dispatch_type='delivery' AND $7::text IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
+        CASE WHEN EXCLUDED.dispatch_type IN ('delivery','courier') AND $7::text IS NOT NULL THEN 'Delivery address: ' || $7::text ELSE NULL END),
       payload_json=EXCLUDED.payload_json,updated_at=now()
     RETURNING id
   `, [tenantId, input.externalOrderId, input.orderNumber, input.clientName, input.contactName ?? null,
@@ -1847,6 +1852,7 @@ export async function setProductionJobDispatchTypeForTenant(tenantId: string, jo
           OR lower(ps.label) LIKE 'ready%install%'
           OR lower(ps.label) LIKE 'ready%pickup%'
           OR lower(ps.label) LIKE 'ready%delivery%'
+          OR lower(ps.label) LIKE 'ready%courier%'
           OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
         )
     )
@@ -1871,6 +1877,7 @@ export async function setProductionJobDispatchTypeForTenant(tenantId: string, jo
         OR lower(ps.label) LIKE 'ready%install%'
         OR lower(ps.label) LIKE 'ready%pickup%'
         OR lower(ps.label) LIKE 'ready%delivery%'
+          OR lower(ps.label) LIKE 'ready%courier%'
         OR ps.step_type IN ('ready_for_dispatch','ready_for_install','ready_for_delivery','ready_for_pickup')
       )
   `, [tenantId, jobId, readyLabel, stepType]);
@@ -2003,7 +2010,7 @@ function isPreProductionStep(stepType: string | null | undefined, label: string 
 
 function isDispatchReadyStep(stepType: string | null | undefined, label: string | null | undefined): boolean {
   const value = cleanSearchText(`${stepType} ${label}`).replace(/\s+/g, "_");
-  return /ready_(?:for|to)_(?:dispatch|install|pickup|delivery)/.test(value)
+  return /ready_(?:for|to)_(?:dispatch|install|pickup|delivery|courier)/.test(value)
     || /ready_for_install_pickup_delivery/.test(value)
     || /ready_for_pickup_delivery/.test(value);
 }
@@ -2236,7 +2243,7 @@ export async function getProductionInstallSchedulerPayloadForStep(tenantId: stri
   const hasSpecificDestination = /\b(pickup|pick up|collect|collection|counter|deliver|delivery|courier|freight|drop off|dispatch|install|installed|installer|site install|site)\b/.test(destinationSourceClean);
   const stepLabelClean = cleanSearchText(row.stepLabel);
   const genericReadyLabel = /ready/.test(stepLabelClean) && /install/.test(stepLabelClean) && /pickup/.test(stepLabelClean) && /delivery/.test(stepLabelClean);
-  const destination = dispatchColumn === "delivery" ? "deliver" : dispatchColumn ?? (hasSpecificDestination
+  const destination = dispatchColumn === "delivery" || dispatchColumn === "courier" ? "deliver" : dispatchColumn ?? (hasSpecificDestination
     ? destinationColumnFromText(destinationSource, "install")
     : genericReadyLabel ? "install" : destinationColumnFromText(row.stepLabel, "install"));
 

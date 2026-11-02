@@ -362,7 +362,7 @@ function productionStage(production: ProductionJobRecord | null | undefined, inv
   if (status.includes("ready_for_dispatch") || status.includes("ready_for_install") || status.includes("ready_for_delivery") || status.includes("ready_for_pickup")) {
     const dispatch = normalise(production.dispatchType);
     if (dispatch.includes("install")) return "ready_for_install";
-    if (dispatch.includes("deliver")) return "ready_for_delivery";
+    if (dispatch.includes("deliver") || dispatch.includes("courier")) return "ready_for_delivery";
     if (dispatch.includes("pickup") || dispatch.includes("collect")) return "ready_for_pickup";
   }
   return "production";

@@ -1,5 +1,7 @@
 "use client";
 
+import { isPassThroughDispatchService, passThroughUnitPrice } from "@/lib/dispatch-pricing";
+
 import { useEffect, useMemo, useState, useTransition, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
 import { saveQuoteLineFast } from "./saveQuoteLineClient";
@@ -91,7 +93,7 @@ type QuoteMaterialFlowBuilderProps = {
 type FlowType = QuickQuoteFlowType;
 type BaseType = "acrylic" | "acm" | "corflute" | "pvc" | "banner" | "other_sheet";
 type SmallFormatType = "business_cards" | "flyers" | "brochures" | "booklets" | "duplicate_books" | "stickers";
-type ServiceType = "" | "pickup" | "delivery" | "install" | "access_equipment";
+type ServiceType = "" | "pickup" | "delivery" | "courier" | "install" | "access_equipment";
 type PrintMethod = "" | "no_print" | "direct_print" | "roll_stock" | "cut_vinyl";
 type InkChoice = "" | "none" | "cmyk" | "white" | "both";
 type SidesChoice = "" | "single" | "double";
@@ -325,7 +327,8 @@ const smallFinishingOptions = [
 
 const serviceTypes: Array<{ key: Exclude<ServiceType, "">; label: string; icon: string; description: string }> = [
   { key: "pickup", label: "Pickup", icon: "↗", description: "Client collects the job. Usually no charge unless you add notes or a manual price." },
-  { key: "delivery", label: "Delivery", icon: "▣", description: "Add a delivery charge as its own quote line." },
+  { key: "delivery", label: "Delivery", icon: "▣", description: "Deliver the job. Enter the exact charge; no markup or discounts." },
+  { key: "courier", label: "Courier", icon: "✉", description: "Send by courier. Enter the exact charge; no markup or discounts." },
   { key: "install", label: "Install", icon: "⚒", description: "Charge install time by crew size, hours and standard fixing consumables." },
   { key: "access_equipment", label: "Access equipment", icon: "▦", description: "Hire equipment charged by day, with quote pricing applied automatically." }
 ];
@@ -1322,7 +1325,7 @@ function flowTypeLabel(value: FlowType): string {
   if (value === "poster_printing") return "Poster printing";
   if (value === "small_format") return "Small format / print";
   if (value === "component") return "Custom component";
-  if (value === "service") return "Pickup / delivery / install";
+  if (value === "service") return "Pickup / delivery / courier / install";
   return "Choose later";
 }
 
@@ -1621,6 +1624,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const selectedMaterialMarkupMultiplier = selectedMarkupMaterial?.salesMarkupMultiplier != null && Number(selectedMarkupMaterial.salesMarkupMultiplier) > 0
     ? Number(selectedMarkupMaterial.salesMarkupMultiplier)
     : null;
+  const isPassThroughDispatch = isPassThroughDispatchService(serviceType);
+  const isPassThroughServiceLine = flowType === "service" && isPassThroughDispatch;
   const lineStandardMarkupMultiplier = flowType === "service" && serviceType === "access_equipment"
     ? standardAccessEquipmentMarkupMultiplier
     : selectedMaterialMarkupMultiplier ?? standardMarkupMultiplier;
@@ -2577,9 +2582,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         rows.push({ label: "Pickup", detail: "Client collection", amount: 1, unit: "each", rate: 0, cost: 0, note: "no charge" });
       }
 
-      if (serviceType === "delivery") {
-        const charge = numberValue(deliveryCharge, 0);
-        if (charge > 0) rows.push({ label: "Delivery", detail: "Delivery charge", amount: 1, unit: "each", rate: charge, cost: charge });
+      if (isPassThroughDispatchService(serviceType)) {
+        const charge = passThroughUnitPrice(numberValue(deliveryCharge, 0));
+        if (charge > 0) rows.push({ label: serviceType === "courier" ? "Courier" : "Delivery", detail: "Pass-through charge (no markup)", amount: 1, unit: "each", rate: charge, cost: charge });
       }
 
       if (serviceType === "install") {
@@ -2652,7 +2657,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const priceLevelFactor = Math.max(0, numberValue(pricingSettings?.priceLevelFactor, 1));
   const manualQuoteDiscountPercent = discountPercentValue(pricingSettings?.manualQuoteDiscountPercent);
   const manualQuoteDiscountMultiplier = Math.max(0, 1 - manualQuoteDiscountPercent / 100);
-  const pricingMultiplier = sellMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
+  const pricingMultiplier = isPassThroughServiceLine ? 1 : sellMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
   const standardPricingMultiplier = standardMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
   const standardAccessEquipmentPricingMultiplier = standardAccessEquipmentMarkupMultiplier * profitMultiplier * priceLevelFactor * manualQuoteDiscountMultiplier;
   const effectivePricingMultiplier = pricingMultiplier;
@@ -2670,7 +2675,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     : null;
   const myobPlanUnitPrice = selectedPlanMatrixPrice ? selectedPlanMatrixPrice.unitPrice * manualQuoteDiscountMultiplier : null;
   const autoUnitPrice = useMyobPlanPricing ? (myobPlanUnitPrice ?? 0) : (rawCost * effectivePricingMultiplier);
-  const unitPrice = unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
+  const unitPrice = isPassThroughServiceLine ? passThroughUnitPrice(rawCost) : unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice;
   const lineTotal = unitPrice * quantityNumber;
   const wizardPriceReady = presentation !== "wizard" || (
     flowType === "service"
@@ -2692,9 +2697,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   const dispatchCosts = useMemo<CostRow[]>(() => {
     const rows: CostRow[] = [];
 
-    if (serviceType === "delivery") {
-      const charge = numberValue(deliveryCharge, 0);
-      if (charge > 0) rows.push({ label: "Delivery", detail: "Delivery charge", amount: 1, unit: "each", rate: charge, cost: charge });
+    if (isPassThroughDispatchService(serviceType)) {
+      const charge = passThroughUnitPrice(numberValue(deliveryCharge, 0));
+      if (charge > 0) rows.push({ label: serviceType === "courier" ? "Courier" : "Delivery", detail: "Pass-through charge (no markup)", amount: 1, unit: "each", rate: charge, cost: charge });
     }
 
     if (serviceType === "install") {
@@ -2719,7 +2724,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     return rows;
   }, [serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, otherConsumableTitle, labourRate, dispatchLineQuantity]);
   const dispatchRawCost = dispatchCosts.reduce((total, row) => total + row.cost, 0);
-  const dispatchUnitPrice = dispatchRawCost * standardPricingMultiplier;
+  const dispatchUnitPrice = isPassThroughDispatch ? dispatchRawCost : dispatchRawCost * standardPricingMultiplier;
   const dispatchLineTotal = dispatchUnitPrice * dispatchLineQuantity;
   const fixingAllowanceSummary = serviceFixings.map((key) => {
     const item = serviceFixingOptionForKey(key, materialPool);
@@ -2736,12 +2741,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
   }).filter(Boolean).join(", ");
   const dispatchSummary = serviceType === "pickup"
     ? "Pickup"
-    : serviceType === "delivery"
-      ? `Delivery${deliveryCharge ? ` · allowance ${money(numberValue(deliveryCharge, 0))}` : ""}`
+    : isPassThroughDispatch
+      ? `${serviceType === "courier" ? "Courier" : "Delivery"}${deliveryCharge ? ` · charge ${money(numberValue(deliveryCharge, 0))}` : ""}`
       : serviceType === "install"
         ? ["Install", installCrewSize ? `${installCrewSize} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null, installMinutes ? `${usage(numberValue(installMinutes, 0) / 60)} hr ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null, travelCharge ? `${money(numberValue(travelCharge, 0))} travel / call-out total` : null, fixingAllowanceSummary ? `Fixings allowance: ${fixingAllowanceSummary}` : null].filter(Boolean).join(" · ")
         : "";
-  const shouldCreateDispatchLine = flowType !== "service" && (serviceType === "delivery" || serviceType === "install") && dispatchUnitPrice > 0;
+  const shouldCreateDispatchLine = flowType !== "service" && (isPassThroughDispatch || serviceType === "install") && dispatchUnitPrice > 0;
   const accessEquipmentDaysNumber = Math.max(1, numberValue(accessEquipmentDays, 1));
   const accessEquipmentRawDailyCharge = numberValue(accessEquipmentDailyCharge, 0);
   const accessEquipmentDailySellPrice = accessEquipmentRawDailyCharge * standardAccessEquipmentPricingMultiplier;
@@ -2839,7 +2844,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     : flowType === "service"
     ? [
       serviceType === "install" ? "Install only — client-supplied signage" : serviceType === "access_equipment" ? accessEquipmentSummary : serviceLabel,
-      serviceType === "delivery" && deliveryCharge ? `Delivery charge ${money(numberValue(deliveryCharge, 0))}` : null,
+      isPassThroughDispatch && deliveryCharge ? `${serviceType === "courier" ? "Courier" : "Delivery"} charge ${money(numberValue(deliveryCharge, 0))}` : null,
       serviceType === "install" ? `${installCrewSize || "1"} installer${numberValue(installCrewSize, 1) === 1 ? "" : "s"}` : null,
       serviceType === "install" && installMinutes ? `${usage(numberValue(installMinutes, 0) / 60)} hr install ${installLabourBasis === "per_item" ? "per item" : "total line item"}` : null,
       serviceType === "install" && travelCharge ? `Travel / call-out charge ${money(numberValue(travelCharge, 0))} total` : null,
@@ -2898,7 +2903,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
 
   const accessEquipmentSelectionComplete = !accessEquipmentRequired || accessEquipmentDetailsComplete;
   const dispatchComplete = serviceType === "pickup"
-    || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0)
+    || (isPassThroughDispatch && numberValue(deliveryCharge, 0) > 0)
     || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0 && accessEquipmentSelectionComplete);
 
   const planMatrixPricingReady = flowType !== "plan_printing" || planPricingMode === "pm_calculated" || Boolean(selectedPlanMatrixItem && selectedPlanMatrixPrice);
@@ -2908,7 +2913,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     : flowType === "service"
     ? Boolean(serviceType && quoteQuantityEntered && (
       serviceType === "pickup"
-      || (serviceType === "delivery" && numberValue(deliveryCharge, 0) > 0)
+      || (isPassThroughDispatch && numberValue(deliveryCharge, 0) > 0)
       || (serviceType === "install" && numberValue(installCrewSize, 0) > 0 && numberValue(installMinutes, 0) > 0 && accessEquipmentSelectionComplete)
       || (serviceType === "access_equipment" && accessEquipmentDetailsComplete)
     ))
@@ -3009,7 +3014,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     componentLabourMinutes,
     quantity: effectiveQuantity,
     unitPriceOverridden,
-    manualUnitPrice: (unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2),
+    manualUnitPrice: unitPrice.toFixed(2),
     notes: lineNotes,
     materialSnapshots: {
       main: snapshotMaterialForSave(selectedMainMaterial),
@@ -3030,8 +3035,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         .map((material) => [material.id, snapshotMaterialForSave(material) as SnapshotMaterial])).values())
     },
     pricingSnapshot: {
-      markupMultiplier: lineMarkupMultiplier,
-      profitMultiplier,
+      markupMultiplier: isPassThroughServiceLine ? 1 : lineMarkupMultiplier,
+      profitMultiplier: isPassThroughServiceLine ? 1 : profitMultiplier,
       labourRate,
       inkRatePerSqm,
       inkBillingIncrementSqm,
@@ -3040,9 +3045,9 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       autoUnitPrice,
       priceLevelCode: pricingSettings?.priceLevelCode || "Level A",
       priceLevelName: pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A",
-      priceLevelFactor,
-      manualQuoteDiscountPercent,
-      pricingSource: flowType === "plan_printing" && planPricingMode === "myob_matrix" && selectedPlanMatrixPrice ? "myob_item_matrix" : "pm_calculated",
+      priceLevelFactor: isPassThroughServiceLine ? 1 : priceLevelFactor,
+      manualQuoteDiscountPercent: isPassThroughServiceLine ? 0 : manualQuoteDiscountPercent,
+      pricingSource: flowType === "plan_printing" && planPricingMode === "myob_matrix" && selectedPlanMatrixPrice ? "myob_item_matrix" : isPassThroughServiceLine ? "pass_through" : "pm_calculated",
       myobMatrixItemUid: selectedPlanMatrixPrice ? selectedPlanMatrixItem?.myobUid ?? initialSnapshot?.myobMatrixItemUid : undefined,
       myobMatrixItemName: selectedPlanMatrixPrice ? selectedPlanMatrixItem?.name ?? initialSnapshot?.myobMatrixItemName : undefined,
       myobMatrixItemSku: selectedPlanMatrixPrice ? String(selectedPlanMatrixItem?.sku ?? initialSnapshot?.myobMatrixItemSku ?? "") : undefined,
@@ -3093,15 +3098,16 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     notes: "",
     materialSnapshots: { componentParts: [], installation: Array.from(new Map(serviceFixings.map((key) => serviceFixingMaterialForKey(key, materialPool)).filter((material): material is QuoteMaterial => Boolean(material)).map((material) => [material.id, snapshotMaterialForSave(material) as SnapshotMaterial])).values()) },
     pricingSnapshot: {
-      markupMultiplier: standardMarkupMultiplier,
-      profitMultiplier,
+      markupMultiplier: isPassThroughDispatch ? 1 : standardMarkupMultiplier,
+      profitMultiplier: isPassThroughDispatch ? 1 : profitMultiplier,
       labourRate,
       rawCost: dispatchRawCost,
       autoUnitPrice: dispatchUnitPrice,
       priceLevelCode: pricingSettings?.priceLevelCode || "Level A",
       priceLevelName: pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A",
-      priceLevelFactor,
-      manualQuoteDiscountPercent,
+      priceLevelFactor: isPassThroughDispatch ? 1 : priceLevelFactor,
+      manualQuoteDiscountPercent: isPassThroughDispatch ? 0 : manualQuoteDiscountPercent,
+      pricingSource: isPassThroughDispatch ? "pass_through" : "pm_calculated",
       pricingBreakdown: dispatchCosts.map((row) => ({ ...row }))
     }
   };
@@ -3367,15 +3373,15 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         <div style={compactPanel}>
           <div style={compactGrid}>
             <label style={{ display: "grid", gap: 6 }}>
-              <b>Pickup / delivery / install</b>
+              <b>Pickup / delivery / courier / install</b>
               <select value={serviceType} onChange={(event) => { setServiceType(event.target.value as ServiceType); changed(); }} style={inputStyle}>
                 <option value="">Choose</option>
                 {availableServiceTypes.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
               </select>
             </label>
-            {serviceType === "delivery" ? (
+            {isPassThroughDispatch ? (
               <label style={{ display: "grid", gap: 6 }}>
-                <b>Delivery charge ($)</b>
+                <b>{serviceType === "courier" ? "Courier charge ($)" : "Delivery charge ($)"} · no markup</b>
                 <input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} />
               </label>
             ) : null}
@@ -3524,6 +3530,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       service: "/quote-wizard/flow-service.png",
       pickup: "/quote-wizard/flow-service.png",
       delivery: "/quote-wizard/flow-service.png",
+      courier: "/quote-wizard/flow-service.png",
       install: "/quote-wizard/flow-service.png",
       access_equipment: "/quote-wizard/service-access-equipment.webp",
       component: "/quote-wizard/flow-component.png",
@@ -3692,7 +3699,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         ["small_format", "Small format / print", "small_format"],
         ["plan_printing", "Plan printing", "plan_printing"],
         ["poster_printing", "Poster printing", "poster_printing"],
-        ["service", "Pickup / delivery / install", "service"],
+        ["service", "Pickup / delivery / courier / install", "service"],
         ["component", "Custom component / assembly", "component"]
       ];
       return <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 14 }}>{choices.map(([value,label,kind]) => {
@@ -3758,7 +3765,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
     const wizardServiceDetails = () => {
       if (!serviceType) return null;
       if (serviceType === "pickup") return <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, color: "#475467", fontSize: 13 }}>Client pickup selected. No delivery or installation charge will be added.</div>;
-      if (serviceType === "delivery") return <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}><label style={{ display: "grid", gap: 6, maxWidth: 360 }}><b>Delivery charge ($)</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} /></label></div>;
+      if (isPassThroughDispatch) return <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}><label style={{ display: "grid", gap: 6, maxWidth: 360 }}><b>{serviceType === "courier" ? "Courier charge ($)" : "Delivery charge ($)"} · no markup</b><input value={deliveryCharge} onChange={(event) => { setDeliveryCharge(event.target.value); changed(); }} placeholder="Dollar amount, eg 45.00" type="number" min="0" step="0.01" style={inputStyle} /></label></div>;
       if (serviceType === "install") return <div style={{ display: "grid", gap: 12 }}>
         <div style={{ border: "1px solid #dbeafe", borderRadius: 14, background: "#f8fbff", padding: 12, display: "grid", gap: 10 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 10 }}>
@@ -3946,7 +3953,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
       component_details: "Component details",
       component_parts: "Materials and parts",
       component_labour: "Assembly labour",
-      dispatch: "Pickup / delivery / install",
+      dispatch: "Pickup / delivery / courier / install",
       review: "Internal notes",
     };
     return (
@@ -3956,12 +3963,12 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
         <input type="hidden" name="configurationSnapshot" value={JSON.stringify(configurationSnapshot)} />
         <input type="hidden" name="productName" value={editingLine?.productName || lineName} />
         <input type="hidden" name="optionSummary" value={optionSummary} />
-        <input type="hidden" name="unitPrice" value={(unitPriceOverridden ? numberValue(manualUnitPrice, 0) : autoUnitPrice).toFixed(2)} />
+        <input type="hidden" name="unitPrice" value={unitPrice.toFixed(2)} />
         <input type="hidden" name="quantity" value={effectiveQuantity} />
         <input type="hidden" name="notes" value={lineNotes} />
         {shouldCreateDispatchLine ? (
           <>
-            <input type="hidden" name="serviceLineProductName" value={serviceType === "install" ? "Sign Install" : "Delivery"} />
+            <input type="hidden" name="serviceLineProductName" value={serviceType === "install" ? "Sign Install" : serviceType === "courier" ? "Courier" : "Delivery"} />
             <input type="hidden" name="serviceLineOptionSummary" value={dispatchSummary} />
             <input type="hidden" name="serviceLineUnitPrice" value={dispatchUnitPrice.toFixed(2)} />
             <input type="hidden" name="serviceLineQuantity" value={String(dispatchLineQuantity)} />
@@ -4034,7 +4041,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
                 </div>
               </details>
             ) : null}
-            {canOverrideMarkup ? (useMyobPlanPricing && selectedPlanMatrixPrice ? (
+            {canOverrideMarkup && !isPassThroughServiceLine ? (useMyobPlanPricing && selectedPlanMatrixPrice ? (
               <span style={{ color: "#64748b", fontSize: 12, fontWeight: 800 }}>Markup is not applied to this line because MYOB matrix pricing is controlling the sell price.</span>
             ) : (
               <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }} onClick={(event) => event.stopPropagation()}>
@@ -4060,7 +4067,8 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, myobMatrixItems =
               </div>
             )) : null}
             {flowType === "plan_printing" && planPricingMode === "myob_matrix" && selectedPlanMatrixPrice ? <span style={{ color: "#067647", fontSize: 12, fontWeight: 850 }}>MYOB {pricingSettings?.priceLevelName || pricingSettings?.priceLevelCode || "Level A"} · {myobMatrixTierLabel(activePlanPriceMatrix, selectedPlanMatrixPrice.quantityOver)} · {matrixItemLabel(selectedPlanMatrixItem as MyobMatrixItem)}{manualQuoteDiscountPercent > 0 ? ` · ${manualQuoteDiscountPercent}% quote discount applied` : ""}</span> : null}
-            {shouldCreateDispatchLine ? <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>Plus {serviceType === "install" ? "Sign Install" : "Delivery"}: qty {usage(dispatchLineQuantity)} × {money(dispatchUnitPrice)} = {money(dispatchLineTotal)}</span> : null}
+            {isPassThroughServiceLine ? <span style={{ color: "#047857", fontSize: 12, fontWeight: 850 }}>Delivery/Courier charges are passed through at the entered amount (ex GST); no markup, profit, price-level adjustment or discount.</span> : null}
+            {shouldCreateDispatchLine ? <span style={{ color: "#9a3412", fontSize: 12, fontWeight: 850 }}>Plus {serviceType === "install" ? "Sign Install" : serviceType === "courier" ? "Courier" : "Delivery"}: qty {usage(dispatchLineQuantity)} × {money(dispatchUnitPrice)} = {money(dispatchLineTotal)}</span> : null}
             {shouldCreateAccessEquipmentLine ? <span style={{ color: "#1d4ed8", fontSize: 12, fontWeight: 850 }}>Plus Access Equipment - {accessEquipmentType.trim()}: {usage(accessEquipmentDaysNumber)} day{accessEquipmentDaysNumber === 1 ? "" : "s"} × {money(accessEquipmentDailySellPrice)} = {money(accessEquipmentLineTotal)}</span> : null}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

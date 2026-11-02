@@ -935,6 +935,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                     <option value="">Not set / keep from quote</option>
                     <option value="pickup">Pickup</option>
                     <option value="delivery">Delivery</option>
+                    <option value="courier">Courier</option>
                     <option value="install">Install</option>
                   </select>
                 </label>

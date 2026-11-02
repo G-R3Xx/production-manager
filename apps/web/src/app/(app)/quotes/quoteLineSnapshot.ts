@@ -177,7 +177,7 @@ export type QuickQuoteSnapshot = {
     priceLevelName?: string;
     priceLevelFactor?: number;
     manualQuoteDiscountPercent?: number;
-    pricingSource?: "myob_item_matrix" | "pm_calculated";
+    pricingSource?: "myob_item_matrix" | "pm_calculated" | "pass_through";
     myobMatrixItemUid?: string;
     myobMatrixItemName?: string;
     myobMatrixItemSku?: string;
@@ -426,7 +426,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
   let flowType: QuickQuoteFlowType = "signage";
   if (text.includes("plan printing")) flowType = "plan_printing";
   else if (text.includes("poster printing")) flowType = "poster_printing";
-  else if (["delivery", "pickup", "sign install", "install labour"].some((item) => normalise(input.productName).includes(item))) flowType = "service";
+  else if (["delivery", "courier", "pickup", "sign install", "install labour"].some((item) => normalise(input.productName).includes(item))) flowType = "service";
   else if (["business card", "flyer", "brochure", "booklet", "duplicate", "triplicate", "ncr", "sticker"].some((item) => text.includes(item))) flowType = "small_format";
 
   const substrateName = byLabel.get("substrate") ?? byLabel.get("stock") ?? "";
@@ -443,7 +443,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
   const laminate = laminateName && normalise(laminateName) !== "none" ? findMaterial(input.materials, laminateName) : undefined;
   const finishingValue = byLabel.get("finishing") ?? "";
   const finishing = inferFinishing(finishingValue);
-  const dispatchValue = byLabel.get("dispatch") ?? firstDetail(rows, (value) => ["pickup", "delivery", "install"].some((item) => normalise(value).startsWith(item)));
+  const dispatchValue = byLabel.get("dispatch") ?? firstDetail(rows, (value) => ["pickup", "delivery", "courier", "install"].some((item) => normalise(value).startsWith(item)));
   const dispatchText = normalise(dispatchValue);
 
   const printMethod = normalise(printDetail).includes("direct") ? "direct_print"
@@ -455,7 +455,7 @@ export function inferLegacyQuickQuoteSnapshot(input: {
   const sides = normalise(sidesDetail).includes("double") ? "double" : sidesDetail ? "single" : "";
   const ink = normalise(inkDetail).includes("white") && normalise(inkDetail).includes("cmyk") ? "both"
     : normalise(inkDetail).includes("white") ? "white" : normalise(inkDetail).includes("cmyk") ? "cmyk" : "";
-  const serviceType = dispatchText.includes("install") ? "install" : dispatchText.includes("delivery") ? "delivery" : dispatchText.includes("pickup") ? "pickup" : flowType === "service" ? (normalise(input.productName).includes("install") ? "install" : normalise(input.productName).includes("delivery") ? "delivery" : "pickup") : "";
+  const serviceType = dispatchText.includes("install") ? "install" : dispatchText.includes("courier") ? "courier" : dispatchText.includes("delivery") ? "delivery" : dispatchText.includes("pickup") ? "pickup" : flowType === "service" ? (normalise(input.productName).includes("install") ? "install" : normalise(input.productName).includes("courier") ? "courier" : normalise(input.productName).includes("delivery") ? "delivery" : "pickup") : "";
 
   const smallStock = flowType === "small_format" || flowType === "plan_printing" || flowType === "poster_printing" ? mainMaterial : undefined;
   const smallType = text.includes("business card") ? "business_cards"
@@ -546,7 +546,7 @@ export function stepForQuoteSummaryRow(label: string, value: string, snapshot: Q
   if (labelKey === "backing") return flowType === "signage" ? "laminate" : null;
   if (labelKey === "laminate" || labelKey === "coating") return flowType === "signage" ? "laminate" : "small_coating";
   if (labelKey === "finishing") return flowType === "signage" ? "finishing" : "small_finishing";
-  if (labelKey === "dispatch" || valueKey.startsWith("pickup") || valueKey.startsWith("delivery") || valueKey.startsWith("install")) return "dispatch";
+  if (labelKey === "dispatch" || valueKey.startsWith("pickup") || valueKey.startsWith("delivery") || valueKey.startsWith("courier") || valueKey.startsWith("install")) return "dispatch";
   if (valueKey.includes("print setup") || valueKey === "direct print" || valueKey === "no print" || valueKey === "roll stock" || valueKey === "cut vinyl") return "print";
   if (valueKey === "cmyk" || valueKey === "white" || valueKey.includes("cmyk white")) return flowType === "signage" ? "ink" : "small_print";
   if (valueKey.includes("sided") || valueKey.includes("positive print") || valueKey.includes("reverse print")) return flowType === "signage" ? "sides" : "small_sides";

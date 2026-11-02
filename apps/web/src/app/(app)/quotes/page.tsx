@@ -1,3 +1,4 @@
+import { isPassThroughQuoteLine } from "@/lib/dispatch-pricing";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { unstable_cache } from "next/cache";
@@ -1340,17 +1341,17 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                                 <strong style={{ color: "#101828", fontSize: 17, lineHeight: 1.05 }}>${cleanQuoteLineAmount(line.lineTotal)}</strong>
                               </div>
                             </div>
-                            {canOverrideQuoteMarkup ? (
+                            {canOverrideQuoteMarkup && !isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? (
                               <QuoteLineMarkupEditor
                                 quoteId={selectedQuote.id}
                                 lineId={line.id}
                                 markupMultiplier={markupInfo.markup}
                                 standardMarkupMultiplier={markupInfo.standard}
-                                disabledReason={markupInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null}
+                                disabledReason={isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? "No markup on dispatch" : markupInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null}
                               />
                             ) : null}
-                            {canOverrideQuoteMarkup ? (
-                              <QuoteLineProfitEditor quoteId={selectedQuote.id} lineId={line.id} profitPercent={profitInfo.percent} standardProfitPercent={profitInfo.standardPercent} disabledReason={profitInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null} />
+                            {canOverrideQuoteMarkup && !isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? (
+                              <QuoteLineProfitEditor quoteId={selectedQuote.id} lineId={line.id} profitPercent={profitInfo.percent} standardProfitPercent={profitInfo.standardPercent} disabledReason={isPassThroughQuoteLine(line.configurationSnapshot, line.productName) ? "No profit on dispatch" : profitInfo.pricingSource === "myob_item_matrix" ? "MYOB matrix" : null} />
                             ) : null}
                             <form action={deleteQuoteLineAction} style={{ display: "inline-flex", margin: 0 }}>
                               <input type="hidden" name="quoteId" value={selectedQuote.id} />
