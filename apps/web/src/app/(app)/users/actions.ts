@@ -13,7 +13,8 @@ const updateStaffSchema = staffProfileNamesSchema.extend({
   tenantRole: z.enum(["owner", "manager", "staff", "sales", "installer", "accounts"]),
   membershipStatus: z.enum(["active", "invited", "disabled"]),
   quoteLabourRate: z.string().optional().or(z.literal("")),
-  quoteEntryLayout: z.enum(["list", "catalogue"])
+  quoteEntryLayout: z.enum(["list", "catalogue"]),
+  quoteCostBreakdownEnabled: z.boolean()
 });
 
 export async function updateStaffMemberAction(formData: FormData): Promise<void> {
@@ -31,7 +32,8 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
     tenantRole: String(formData.get("tenantRole") || "staff"),
     membershipStatus: String(formData.get("membershipStatus") || "active"),
     quoteLabourRate: String(formData.get("quoteLabourRate") || ""),
-    quoteEntryLayout: String(formData.get("quoteEntryLayout") || "list")
+    quoteEntryLayout: String(formData.get("quoteEntryLayout") || "list"),
+    quoteCostBreakdownEnabled: formData.get("quoteCostBreakdownEnabled") === "on"
   });
 
   if (!parsed.success) {
@@ -50,7 +52,8 @@ export async function updateStaffMemberAction(formData: FormData): Promise<void>
       tenantRole: parsed.data.tenantRole,
       membershipStatus: parsed.data.membershipStatus,
       quoteLabourRate: parsed.data.quoteLabourRate,
-      quoteEntryLayout: parsed.data.quoteEntryLayout
+      quoteEntryLayout: parsed.data.quoteEntryLayout,
+      quoteCostBreakdownEnabled: parsed.data.quoteCostBreakdownEnabled
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Could not update staff member.";

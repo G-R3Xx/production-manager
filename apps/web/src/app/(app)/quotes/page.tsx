@@ -29,6 +29,7 @@ import { listLabourForTenant, listMachinesForTenant } from "@/server/productionR
 import type { QuoteCostingResources } from "./quoteCostingResources";
 import { QuoteSearchInput } from "./QuoteSearchInput";
 import { getQuoteVisualCategoryImages } from "@/server/quote-visuals";
+import { canViewQuoteCostBreakdown } from "@/server/users";
 
 type PageProps = {
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
@@ -572,7 +573,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selectedArtworkApproval,
     selectedProductionJob,
     quoteEntryLayout,
-    quoteVisualCategoryRecords
+    quoteVisualCategoryRecords,
+    canViewCostBreakdown
   ] = await Promise.all([
     listQuoteDraftSummariesForTenant(activeTenant.tenantId, { includeDeleted: true }),
     builderDataNeeded ? cachedQuoteMaterials(activeTenant.tenantId) : Promise.resolve([]),
@@ -591,7 +593,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
     selected ? cachedQuoteArtworkApproval(activeTenant.tenantId, selected) : Promise.resolve(null),
     selected ? cachedQuoteProductionJob(activeTenant.tenantId, selected) : Promise.resolve(null),
     Promise.resolve((activeTenant.quoteEntryLayout === "catalogue" ? "catalogue" : "list") as "catalogue" | "list"),
-    builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId).catch(() => ({})) : Promise.resolve({})
+    builderDataNeeded ? getQuoteVisualCategoryImages(activeTenant.tenantId).catch(() => ({})) : Promise.resolve({}),
+    selected ? canViewQuoteCostBreakdown(activeTenant.tenantId, activeTenant.userProfileId) : Promise.resolve(false)
   ]);
 
   const selectedQuote = initialSelectedQuote;
@@ -922,6 +925,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     </div>
                   </div>
                   <div style={{ marginLeft: "auto", display: "flex", gap: 8, alignItems: "center", justifyContent: "flex-end", flexWrap: "wrap", flex: "1 1 620px" }}>
+                    {canViewCostBreakdown && selectedQuote.status !== "deleted" ? <Link prefetch={false} href={`/quotes/${selectedQuote.id}/cost-breakdown`} target="_blank" rel="noopener noreferrer" style={{ minHeight: 42, borderRadius: 14, border: "1px solid #c4b5fd", background: "#f5f3ff", color: "#5b21b6", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Show cost breakdown</Link> : null}
                     {quotePublicUrl ? <a href={quotePublicUrl} target="_blank" rel="noreferrer" style={{ minHeight: 42, borderRadius: 14, border: "1px solid #cbd5e1", background: "#fff", color: "#111827", fontWeight: 950, display: "inline-flex", alignItems: "center", padding: "0 14px", textDecoration: "none", flex: "0 0 auto" }}>Open client quote</a> : null}
                     {selectedQuote.status !== "deleted" ? (
                       <div style={{ flex: "0 0 auto" }}>

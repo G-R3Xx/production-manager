@@ -1,0 +1,22 @@
+// Static security wiring smoke test, no app dependencies needed.
+const fs=require('node:fs');
+const assert=require('node:assert/strict');
+const read=x=>fs.readFileSync(x,'utf8');
+const server=read('apps/web/src/server/users.ts');
+const page=read('apps/web/src/app/(app)/quotes/[id]/cost-breakdown/page.tsx');
+const quote=read('apps/web/src/app/(app)/quotes/page.tsx');
+const staff=read('apps/web/src/app/(app)/users/page.tsx');
+const action=read('apps/web/src/app/(app)/users/actions.ts');
+const migration=read('infra/sql/062_quote_cost_breakdown_permission.sql');
+assert(server.includes('m.status = \'active\''));
+assert(server.includes('m.tenant_id = $1::uuid'));
+assert(server.includes('m.user_profile_id = $2::uuid'));
+assert(server.includes('return result.rows[0]?.enabled === true'));
+assert(page.indexOf('await canViewQuoteCostBreakdown')<page.indexOf('await getQuoteDraftById'));
+assert(page.includes('getQuoteDraftById(tenant.tenantId, id)'));
+assert(page.includes('notFound()'));
+assert(quote.includes('canViewCostBreakdown && selectedQuote.status !== "deleted" ? <Link'));
+assert(staff.includes('name="quoteCostBreakdownEnabled"'));
+assert(action.includes('formData.get("quoteCostBreakdownEnabled") === "on"'));
+assert(migration.includes('boolean NOT NULL DEFAULT false'));
+console.log('PASS: permission default deny and server gating wiring');

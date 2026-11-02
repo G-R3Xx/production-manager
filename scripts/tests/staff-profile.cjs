@@ -26,7 +26,7 @@ const assert=require('node:assert/strict');
    CREATE TABLE app.tenants(id uuid PRIMARY KEY,name text,slug text,status text,created_at timestamptz DEFAULT now());
    CREATE TABLE app.tenant_settings(tenant_id uuid,trading_name text,company_legal_name text,email text);
    CREATE TABLE app.user_profiles(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),auth_user_id uuid UNIQUE,full_name varchar(200) NOT NULL,short_name varchar(50) NOT NULL,email text,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
-   CREATE TABLE app.memberships(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid REFERENCES app.tenants(id),user_profile_id uuid REFERENCES app.user_profiles(id),tenant_role tenant_role,status membership_status,quote_labour_rate numeric(10,2),quote_entry_layout varchar(20) DEFAULT 'list',created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
+   CREATE TABLE app.memberships(id uuid PRIMARY KEY DEFAULT gen_random_uuid(),tenant_id uuid REFERENCES app.tenants(id),user_profile_id uuid REFERENCES app.user_profiles(id),tenant_role tenant_role,status membership_status,quote_labour_rate numeric(10,2),quote_entry_layout varchar(20) DEFAULT 'list',quote_cost_breakdown_enabled boolean NOT NULL DEFAULT false,created_at timestamptz DEFAULT now(),updated_at timestamptz DEFAULT now());
    CREATE TABLE app.test_assignment(assignee uuid REFERENCES app.user_profiles(id));
    INSERT INTO app.tenants VALUES ('${tenant}','Test Workspace','test-workspace','active',now()),('${otherTenant}','Other','other','active',now());
    INSERT INTO app.user_profiles(id,auth_user_id,full_name,short_name,email) VALUES

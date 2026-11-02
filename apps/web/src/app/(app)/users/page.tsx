@@ -112,7 +112,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
           <div style={{ padding: 24, color: "#475467" }}>No users found for this workspace yet.</div>
         ) : (
           <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1160 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 1320 }}>
               <thead>
                 <tr style={{ background: "#f8fafc", textAlign: "left" }}>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Staff member</th>
@@ -121,6 +121,7 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Status</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Labour $/hr</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Quote layout</th>
+                  <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Cost breakdown</th>
                   <th style={{ padding: 16, borderBottom: "1px solid #e5e7eb" }}>Joined</th>
                   <th style={{ padding: 12, borderBottom: "1px solid #e5e7eb", position: "sticky", right: 0, zIndex: 3, background: "#f8fafc", boxShadow: "-10px 0 18px -16px rgba(15, 23, 42, 0.55)", width: 82, minWidth: 82 }}>Action</th>
                 </tr>
@@ -213,6 +214,14 @@ export default async function UsersPage({ searchParams }: UsersPageProps) {
                         <div style={{ marginTop: 7, color: "#64748b", fontSize: 12, maxWidth: 190 }}>
                           {QUOTE_ENTRY_LAYOUT_OPTIONS.find((option) => option.value === row.quoteEntryLayout)?.description ?? QUOTE_ENTRY_LAYOUT_OPTIONS[0]?.description}
                         </div>
+                      </td>
+                      <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", verticalAlign: "top" }}>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, fontWeight: 800, color: "#334155" }}>
+                          <input form={`staff-${row.membershipId}`} name="quoteCostBreakdownEnabled" type="checkbox" defaultChecked={row.quoteCostBreakdownEnabled} disabled={!canEdit}
+                            style={{ width: 18, height: 18, accentColor: "#2563eb" }} />
+                          Show cost breakdown
+                        </label>
+                        <div style={{ marginTop: 7, color: "#64748b", fontSize: 12, maxWidth: 180 }}>Allow this person to view confidential itemised quote costs.</div>
                       </td>
                       <td style={{ padding: 16, borderBottom: "1px solid #e5e7eb", color: "#475467", fontSize: 13, verticalAlign: "top", lineHeight: 1.45 }}>
                         <div>{formatDate(row.membershipCreatedAt)}</div>

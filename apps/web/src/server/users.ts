@@ -14,6 +14,7 @@ export type TenantUserRecord = {
   membershipStatus: MembershipStatusValue;
   quoteLabourRate: string | null;
   quoteEntryLayout: QuoteEntryLayout;
+  quoteCostBreakdownEnabled: boolean;
   userProfileId: string;
   authUserId: string;
   fullName: string;
@@ -120,6 +121,7 @@ async function queryUsersForTenant(tenantId: string) {
         m.status::text AS "membershipStatus",
         (to_jsonb(m) ->> 'quote_labour_rate') AS "quoteLabourRate",
         COALESCE(NULLIF(to_jsonb(m) ->> 'quote_entry_layout', ''), 'list') AS "quoteEntryLayout",
+        COALESCE((to_jsonb(m) ->> 'quote_cost_breakdown_enabled')::boolean, false) AS "quoteCostBreakdownEnabled",
         up.id AS "userProfileId",
         up.auth_user_id AS "authUserId",
         up.full_name AS "fullName",
@@ -208,6 +210,21 @@ export async function getQuoteEntryLayoutForUser(tenantId: string, userProfileId
   return normaliseQuoteEntryLayout(result.rows[0]?.quoteEntryLayout);
 }
 
+/** Confidential quote costs must be gated on the server, independently of UI visibility. */
+export async function canViewQuoteCostBreakdown(tenantId: string, userProfileId: string): Promise<boolean> {
+  if (!process.env.DATABASE_URL) return false;
+  const result = await pool.query<{ enabled: boolean }>(
+    `SELECT COALESCE((to_jsonb(m) ->> 'quote_cost_breakdown_enabled')::boolean, false) AS enabled
+       FROM app.memberships m
+      WHERE m.tenant_id = $1::uuid
+        AND m.user_profile_id = $2::uuid
+        AND m.status = 'active'
+      LIMIT 1`,
+    [tenantId, userProfileId]
+  );
+  return result.rows[0]?.enabled === true;
+}
+
 export async function getTenantStaffSummary(tenantId: string): Promise<TenantStaffSummary> {
   if (!process.env.DATABASE_URL) {
     return { totalUsers: 0, activeUsers: 0, pendingUsers: 0, disabledUsers: 0, activeAdmins: 0 };
@@ -241,6 +258,7 @@ export async function updateTenantUserMembershipByAdmin(input: {
   membershipStatus: string;
   quoteLabourRate?: string | null;
   quoteEntryLayout?: string | null;
+  quoteCostBreakdownEnabled?: boolean;
 }): Promise<void> {
   if (!process.env.DATABASE_URL) throw new Error("Staff changes cannot be saved because the database is not configured.");
 
@@ -254,6 +272,9 @@ export async function updateTenantUserMembershipByAdmin(input: {
   const nextRole = normaliseTenantRole(input.tenantRole);
   const nextStatus = normaliseMembershipStatus(input.membershipStatus);
   const nextQuoteEntryLayout = normaliseQuoteEntryLayout(input.quoteEntryLayout);
+  if (!(await relationHasColumns("app.memberships", ["quote_cost_breakdown_enabled"]))) {
+    throw new Error("Cost breakdown permission migration required: run infra/sql/062_quote_cost_breakdown_permission.sql first.");
+  }
   if (!(await quoteEntryLayoutColumnExists())) {
     throw new Error("Quote layout database migration is required. Run infra/sql/051_quote_entry_layout.sql in the Supabase SQL Editor, then try again.");
   }
@@ -359,11 +380,12 @@ export async function updateTenantUserMembershipByAdmin(input: {
             status = $3::membership_status,
             quote_labour_rate = $5::numeric,
             quote_entry_layout = $6,
+            quote_cost_breakdown_enabled = $7,
             updated_at = NOW()
         WHERE id = $1
           AND tenant_id = $4
       `,
-      [input.membershipId, nextRole, nextStatus, input.tenantId, quoteLabourRate, nextQuoteEntryLayout]
+      [input.membershipId, nextRole, nextStatus, input.tenantId, quoteLabourRate, nextQuoteEntryLayout, input.quoteCostBreakdownEnabled === true]
     );
 
     // Update the profile only after the tenant membership and admin checks above.
