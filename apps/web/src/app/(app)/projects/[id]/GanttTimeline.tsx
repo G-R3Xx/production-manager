@@ -1,7 +1,7 @@
 "use client";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
-import { rescheduleProjectTaskAction } from "../actions";
+import { rescheduleProjectTaskAction, assignProjectTaskAction } from "../actions";
 import type { ProjectTimelineTaskRecord, ProjectSubJobRecord } from "@/server/project-timelines";
 import {
   timelineDayIndex, timelinePositionInWindow, timelineTaskRangeLabel, timelineWindow,
@@ -14,6 +14,8 @@ type Props = {
   canEdit: boolean;
   tasks: ProjectTimelineTaskRecord[];
   sections: ProjectSubJobRecord[];
+  staff: { id: string; name: string }[];
+  revision: string;
 };
 type TaskDates = Pick<ProjectTimelineTaskRecord, "plannedStart" | "plannedEnd">;
 type DragSession = {
@@ -41,9 +43,34 @@ function statusColor(task: ProjectTimelineTaskRecord): string {
   return "#64748b";
 }
 
-export function GanttTimeline({ projectId, canEdit, tasks, sections }: Props) {
+export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revision }: Props) {
   const router = useRouter();
   const [savedDates, setSavedDates] = useState<Record<string, TaskDates>>({});
+  const [savedAssignees, setSavedAssignees] = useState<Record<string, string | null>>({});
+  const revisionRef = useRef(revision);
+  useEffect(() => { revisionRef.current = revision; }, [revision]);
+  // Only poll while this particular project timeline is visible. Revision is a tiny indexed query.
+  useEffect(() => {
+    let alive = true;
+    const check = async () => {
+      if (!alive || document.visibilityState !== "visible" || savingRef.current || dragRef.current) return;
+      try {
+        const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/revision`, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json() as { revision?: string };
+        if (data.revision && data.revision !== revisionRef.current) {
+          revisionRef.current = data.revision;
+          startTransition(() => router.refresh());
+        }
+      } catch { /* Normal network interruptions must not affect editing. */ }
+    };
+    const timer = window.setInterval(() => void check(), 40000);
+    const channel = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("pm-project-schedule") : null;
+    if (channel) channel.onmessage = (event: MessageEvent<{ projectId?: string }>) => {
+      if (event.data?.projectId === projectId) void check();
+    };
+    return () => { alive = false; window.clearInterval(timer); channel?.close(); };
+  }, [projectId, router]);
   const [dragPreview, setDragPreview] = useState<{ taskId: string; dates: TaskDates } | null>(null);
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
@@ -53,8 +80,10 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections }: Props) {
   const displayedTasks = useMemo(() => tasks.map(task => ({
     ...task,
     ...(savedDates[task.id] ?? {}),
+    ...(Object.prototype.hasOwnProperty.call(savedAssignees, task.id) ? { assigneeProfileId: savedAssignees[task.id],
+      assigneeName: staff.find(person => person.id === savedAssignees[task.id])?.name ?? null } : {}),
     ...(dragPreview?.taskId === task.id ? dragPreview.dates : {})
-  })), [tasks, savedDates, dragPreview]);
+  })), [tasks, savedDates, savedAssignees, staff, dragPreview]);
   // Once the refreshed server snapshot includes saved dates, release local overrides.
   useEffect(() => {
     setSavedDates(previous => {
@@ -69,6 +98,39 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections }: Props) {
       return changed ? next : previous;
     });
   }, [tasks]);
+  useEffect(() => {
+    setSavedAssignees(previous => {
+      const next = { ...previous };
+      let changed = false;
+      for (const task of tasks) {
+        if (Object.prototype.hasOwnProperty.call(next, task.id) && next[task.id] === task.assigneeProfileId) {
+          delete next[task.id]; changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [tasks]);
+
+  async function saveAssignee(task: ProjectTimelineTaskRecord, nextAssignee: string | null) {
+    if (!canEdit || savingRef.current || task.assigneeProfileId === nextAssignee) return;
+    savingRef.current = task.id;
+    setSavingId(task.id);
+    setFeedback(null);
+    setSavedAssignees(previous => ({...previous, [task.id]: nextAssignee}));
+    try {
+      const result = await assignProjectTaskAction({ projectId, taskId: task.id,
+        assigneeProfileId: nextAssignee, expectedAssigneeProfileId: task.assigneeProfileId });
+      if (!result.ok) throw new Error(result.error);
+      const name = staff.find(person => person.id === nextAssignee)?.name ?? "Unassigned";
+      setFeedback({ error:false, text: `${task.title} assigned to ${name}. ` });
+      if (typeof BroadcastChannel !== "undefined") { const channel = new BroadcastChannel("pm-project-schedule");
+        channel.postMessage({projectId}); channel.close(); }
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setSavedAssignees(previous => { const copy = {...previous}; delete copy[task.id]; return copy; });
+      setFeedback({ error:true, text: error instanceof Error ? error.message : "Couldn't save assignment." });
+    } finally { savingRef.current = null; setSavingId(null); }
+  }
 
   async function saveDates(task: ProjectTimelineTaskRecord, dates: TaskDates) {
     if (!canEdit || savingRef.current ||
@@ -84,7 +146,9 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections }: Props) {
       });
       if (!result.ok) throw new Error(result.error);
       setFeedback({ error: false, text: `${task.title} schedule updated — ${timelineTaskRangeLabel(dates)}.` });
-      // Update the schedule forms without blocking the bar interaction with a redirect.
+      // Notify other tabs immediately; other staff refresh via a cheap revision probe.
+      if (typeof BroadcastChannel !== "undefined") { const channel = new BroadcastChannel("pm-project-schedule");
+        channel.postMessage({projectId}); channel.close(); }
       startTransition(() => router.refresh());
     } catch (error) {
       setSavedDates(previous => {
@@ -211,7 +275,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections }: Props) {
         <h2 style={{ fontSize: 18, margin: "0 0 4px" }}>Gantt timeline</h2>
         <div style={{ color: "#64748b", fontSize: 12 }}>Bars follow scheduled times (Sydney time). Allocated work hours are separate.</div>
         <div style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
-          {canEdit ? "Drag a bar to move it; drag either end to extend or shrink it. Zoom to Day for short tasks. Changes save on release." : "Select a bar to view its task. Only owners/managers can change schedules."}
+          {canEdit ? "Drag a bar to move it or resize its ends. Use the staff dropdown beside any task to assign it instantly. Changes save automatically." : "Select a bar to view its task. Only owners/managers can change schedules."}
         </div>
       </div>
       <div role="group" aria-label="Timeline zoom" style={{ display: "flex", gap: 4, padding: 4, border: "1px solid #dbe4ef", borderRadius: 11 }}>
@@ -266,7 +330,13 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections }: Props) {
               <div style={labelCell}>
                 <a href={`#task-${task.id}`} style={{ color: "#1e3a8a", fontWeight: 800, textDecoration: "none" }}>{task.title}</a>
                 <div style={{ marginTop: 3, fontSize: 11, fontWeight: 700, color: "#334155" }}>{timeLabel}</div>
-                <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>{plannedHoursLabel(task.allocatedMinutes)} allocated {task.assigneeName ? `· ${task.assigneeName}` : ""}</div>
+                <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>{plannedHoursLabel(task.allocatedMinutes)} allocated</div>
+                {canEdit ? <select aria-label={`Assign staff to ${task.title}`} title="Assign staff — saves immediately"
+                  value={task.assigneeProfileId ?? ""} disabled={savingId !== null} onChange={event => void saveAssignee(task, event.target.value || null)}
+                  style={{ marginTop: 3, width: "100%", maxWidth: 220, height: 27, background: "white", border: "1px solid #cbd5e1", borderRadius: 6, fontSize: 11 }}>
+                  <option value="">Unassigned</option>
+                  {staff.map(person => <option key={person.id} value={person.id}>{person.name}</option>)}
+                </select> : <div style={{ fontSize: 11, color: "#64748b" }}>{task.assigneeName ?? "Unassigned"}</div>}
               </div>
               <div style={gridTrack}>
                 {model.nowLeft !== null ? <div aria-hidden="true" style={{ position: "absolute", left: `${model.nowLeft}%`, top: 0, bottom: 0, borderLeft: "2px solid #dc2626", zIndex: 1, opacity: 0.7 }} /> : null}

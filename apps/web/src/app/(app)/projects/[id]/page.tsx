@@ -11,6 +11,7 @@ import {
 import { listActiveStaffOptionsForTenant, type ActiveStaffOption } from "@/server/users";
 import { PROJECT_TASK_STATUSES, plannedHoursLabel } from "@/lib/project-timeline";
 import { GanttTimeline } from "./GanttTimeline";
+import { CompletionDateEditor } from "./CompletionDateEditor";
 import { addProjectTaskAction, updateProjectTaskAction, removeProjectTaskAction, scheduleProductionStepAction } from "../actions";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -106,9 +107,10 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
         <span>{subJobs.length} Sub Jobs</span><span>{tasks.length} scheduled tasks</span><span>{plannedHoursLabel(tasks.reduce((sum, task) => sum + task.allocatedMinutes, 0))} allocated work</span>
       </div>
     </header>
+    <CompletionDateEditor jobId={project.productionJobId} initialDate={project.dueDate} canEdit={canEdit}/>
     {message ? <div role="status" style={{ ...card, padding: 12, borderColor: "#86efac", color: "#166534" }}>{message}</div> : null}
     {error ? <div role="alert" style={{ ...card, padding: 12, borderColor: "#fca5a5", color: "#991b1b" }}>{error}</div> : null}
-    <GanttTimeline projectId={id} canEdit={canEdit} tasks={tasks} sections={subJobs} />
+    <GanttTimeline projectId={id} canEdit={canEdit} tasks={tasks} sections={subJobs} staff={staff.map(person => ({ id: person.userProfileId, name: person.shortName || person.fullName }))} revision={project.updatedAt} />
     {canEdit && productionSteps.length > 0 ? <details style={card}>
       <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Add existing Production Steps to the timeline ({productionSteps.length})</summary>
       <p style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>Scheduling a step links it to the original production checklist. Its completion status stays connected; the schedule and allocated hours are managed here.</p>

@@ -11,6 +11,7 @@ export type ProjectPlanRecord = {
   title: string;
   clientName: string;
   jobStatus: string;
+  dueDate: string | null;
   updatedAt: string;
   taskCount: number;
 };
@@ -46,7 +47,7 @@ export async function listProjectPlansForTenant(tenantId: string): Promise<Proje
     SELECT p.id::text, p.tenant_id::text AS "tenantId", p.production_job_id::text AS "productionJobId",
            j.quote_id::text AS "quoteId", j.quote_number AS "quoteNumber",
            COALESCE(NULLIF(j.project_name,''), j.quote_number, j.client_name) AS title,
-           j.client_name AS "clientName", j.status AS "jobStatus", p.updated_at::text AS "updatedAt",
+           j.client_name AS "clientName", j.status AS "jobStatus", j.due_date::text AS "dueDate", p.updated_at::text AS "updatedAt",
            (SELECT count(*)::int FROM production.project_timeline_tasks task WHERE task.project_id = p.id) AS "taskCount"
       FROM production.project_plans p
       JOIN production.production_jobs j ON j.id = p.production_job_id AND j.tenant_id = p.tenant_id
@@ -94,7 +95,7 @@ export async function getProjectPlanForTenant(tenantId: string, projectId: strin
     SELECT p.id::text, p.tenant_id::text AS "tenantId", p.production_job_id::text AS "productionJobId",
            j.quote_id::text AS "quoteId", j.quote_number AS "quoteNumber",
            COALESCE(NULLIF(j.project_name,''), j.quote_number, j.client_name) AS title,
-           j.client_name AS "clientName", j.status AS "jobStatus", p.updated_at::text AS "updatedAt",
+           j.client_name AS "clientName", j.status AS "jobStatus", j.due_date::text AS "dueDate", p.updated_at::text AS "updatedAt",
            (SELECT count(*)::int FROM production.project_timeline_tasks task WHERE task.project_id = p.id) AS "taskCount"
       FROM production.project_plans p
       JOIN production.production_jobs j ON j.id = p.production_job_id AND j.tenant_id = p.tenant_id
@@ -295,4 +296,34 @@ export async function scheduleExistingProductionStep(
     UPDATE production.project_plans SET updated_at=now() WHERE id IN (SELECT project_id FROM inserted)
   `, [tenantId, projectId, stepId, schedule.plannedStart, schedule.plannedEnd, schedule.allocatedMinutes]);
   return (result.rowCount ?? 0) > 0;
+}
+
+/** Assign one active workspace staff member without overwriting schedule, labour or task status.
+ * Compare-and-swap prevents overwriting changes made in a different open tab. */
+export async function assignProjectTaskForTenant(tenantId: string, projectId: string, taskId: string,
+  newAssignee: string | null, expectedAssignee: string | null): Promise<boolean> {
+  const result = await pool.query(`
+    WITH changed AS (
+      UPDATE production.project_timeline_tasks task SET assignee_profile_id=$4::uuid, updated_at=now()
+        FROM production.project_plans p, production.production_jobs job
+       WHERE task.id=$3::uuid AND task.project_id=p.id AND p.id=$2::uuid
+         AND p.tenant_id=$1::uuid AND job.id=p.production_job_id AND job.tenant_id=p.tenant_id
+         AND job.status <> 'deleted' AND task.assignee_profile_id IS NOT DISTINCT FROM $5::uuid
+         AND ($4::uuid IS NULL OR EXISTS (SELECT 1 FROM app.memberships m
+               WHERE m.tenant_id=$1::uuid AND m.user_profile_id=$4::uuid AND m.status='active'))
+       RETURNING task.project_id
+    )
+    UPDATE production.project_plans SET updated_at=now() WHERE id IN (SELECT project_id FROM changed)
+  `, [tenantId, projectId, taskId, newAssignee, expectedAssignee]);
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** Cheap revision probe: only one indexed row, no task payload. */
+export async function getProjectRevision(tenantId: string, projectId: string): Promise<string | null> {
+  const result = await pool.query<{ revision: string }>(`
+    SELECT p.updated_at::text AS revision FROM production.project_plans p
+    JOIN production.production_jobs job ON job.id=p.production_job_id AND job.tenant_id=p.tenant_id
+    WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND job.status <> 'deleted'
+  `, [tenantId, projectId]);
+  return result.rows[0]?.revision ?? null;
 }

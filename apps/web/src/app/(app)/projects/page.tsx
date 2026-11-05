@@ -49,7 +49,7 @@ export default async function ProjectsPage({ searchParams }: PageProps) {
           <div style={{ fontWeight: 900, fontSize: 16 }}>{project.title}</div>
           <div style={{ color: "#475569", fontSize: 12, marginTop: 5 }}>{project.clientName} · {project.quoteNumber ?? "Production Job"}</div>
           <div style={{ display: "flex", justifyContent: "space-between", color: "#334155", fontSize: 12, marginTop: 14, gap: 12 }}>
-            <span>{project.taskCount} scheduled tasks</span><span>{project.jobStatus.replace(/_/g," ")}</span>
+            <span>{project.taskCount} scheduled tasks</span><span>{project.dueDate ? `Completed by ${project.dueDate}` : "No completion date"}</span>
           </div>
         </Link>)}
       </div> : <p style={{ color: "#64748b", margin: 0 }}>No project timelines yet. Create one from an existing Production Job.</p>}

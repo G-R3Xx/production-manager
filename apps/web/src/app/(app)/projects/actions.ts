@@ -5,7 +5,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   createProjectPlanForProductionJob,
-  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask
+  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant
 } from "@/server/project-timelines";
 import type { ProjectTaskStatus } from "@/lib/project-timeline";
 
@@ -144,4 +144,18 @@ export async function rescheduleProjectTaskAction(input: {
   } catch (error) {
     return { ok: false, error: errorText(error) };
   }
+}
+
+/** Quick assignment from a Gantt row. Server-enforced manager access. */
+export async function assignProjectTaskAction(input: {
+  projectId: string; taskId: string; assigneeProfileId: string | null; expectedAssigneeProfileId: string | null;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tenantId = await requireProjectManager();
+  if (!input.projectId || !input.taskId) return { ok: false, error: "Project or task is missing." };
+  try {
+    const updated = await assignProjectTaskForTenant(tenantId, input.projectId, input.taskId,
+      input.assigneeProfileId, input.expectedAssigneeProfileId);
+    if (!updated) return { ok: false, error: "Assignment changed elsewhere, or the selected staff member is not active in this workspace. Refresh and try again." };
+    return { ok: true };
+  } catch (error) { return { ok: false, error: errorText(error) }; }
 }

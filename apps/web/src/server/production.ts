@@ -2455,3 +2455,73 @@ export async function getProductionItemByIdForTenant(tenantId: string, itemId: s
   `, [tenantId, itemId]);
   return result.rows[0] ?? null;
 }
+
+
+/** Minimal calendar projection: one completion deadline per Production Job.
+ * Never load production items, artwork, steps, or project tasks for the calendar. */
+export type ProductionCompletionDeadline = {
+  jobId: string;
+  projectId: string | null;
+  quoteNumber: string | null;
+  projectName: string;
+  clientName: string;
+  status: string;
+  dueDate: string | null;
+};
+
+export async function listProductionCompletionDeadlines(tenantId: string): Promise<ProductionCompletionDeadline[]> {
+  const result = await pool.query<ProductionCompletionDeadline>(`
+    SELECT job.id::text AS "jobId", plan.id::text AS "projectId",
+           job.quote_number AS "quoteNumber",
+           COALESCE(NULLIF(job.project_name, ''), job.quote_number, job.client_name) AS "projectName",
+           job.client_name AS "clientName", job.status,
+           job.due_date::text AS "dueDate"
+      FROM production.production_jobs job
+      LEFT JOIN production.project_plans plan ON plan.production_job_id=job.id AND plan.tenant_id=job.tenant_id
+     WHERE job.tenant_id=$1::uuid AND job.status <> 'deleted'
+     ORDER BY job.due_date ASC NULLS LAST, job.updated_at DESC
+     LIMIT 1500
+  `, [tenantId]);
+  return result.rows;
+}
+
+/** One-row deadline refresh for an open project editor. */
+export async function getProductionCompletionDeadline(tenantId: string, jobId: string): Promise<ProductionCompletionDeadline | null> {
+  const result = await pool.query<ProductionCompletionDeadline>(`
+    SELECT job.id::text AS "jobId", plan.id::text AS "projectId",
+           job.quote_number AS "quoteNumber",
+           COALESCE(NULLIF(job.project_name, ''), job.quote_number, job.client_name) AS "projectName",
+           job.client_name AS "clientName", job.status, job.due_date::text AS "dueDate"
+      FROM production.production_jobs job
+      LEFT JOIN production.project_plans plan ON plan.production_job_id=job.id AND plan.tenant_id=job.tenant_id
+     WHERE job.tenant_id=$1::uuid AND job.id=$2::uuid AND job.status <> 'deleted'
+  `,[tenantId,jobId]);
+  return result.rows[0] ?? null;
+}
+
+/** Compare-and-swap prevents stale calendar/project tabs silently overwriting each other. */
+export async function updateProductionCompletionDeadline(
+  tenantId: string, jobId: string, dueDate: string | null, expectedDate: string | null
+): Promise<ProductionCompletionDeadline | null> {
+  const result = await pool.query<ProductionCompletionDeadline>(`
+    WITH updated AS (
+      UPDATE production.production_jobs job
+         SET due_date=$3::date, updated_at=now()
+       WHERE job.tenant_id=$1::uuid AND job.id=$2::uuid AND job.status <> 'deleted'
+         AND job.due_date IS NOT DISTINCT FROM $4::date
+       RETURNING job.id, job.tenant_id, job.quote_number, job.project_name, job.client_name, job.status, job.due_date
+    ), workflow AS (
+      UPDATE app.jobs w SET due_date=updated.due_date, updated_at=now()
+        FROM updated WHERE w.production_job_id=updated.id AND w.tenant_id=updated.tenant_id
+       RETURNING w.id
+    )
+    SELECT updated.id::text AS "jobId", plan.id::text AS "projectId",
+           updated.quote_number AS "quoteNumber",
+           COALESCE(NULLIF(updated.project_name,''), updated.quote_number, updated.client_name) AS "projectName",
+           updated.client_name AS "clientName", updated.status,
+           updated.due_date::text AS "dueDate"
+      FROM updated
+      LEFT JOIN production.project_plans plan ON plan.production_job_id=updated.id AND plan.tenant_id=updated.tenant_id
+  `,[tenantId,jobId,dueDate,expectedDate]);
+  return result.rows[0] ?? null;
+}
