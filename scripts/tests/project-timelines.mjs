@@ -177,3 +177,23 @@ test('Gantt direct save is permission-scoped and updates only dates, never task 
   assert.match(chart, /rescheduleProjectTaskAction\(/);
   assert.match(chart, /setSavedDates\(previous =>/);
 });
+
+test('Gantt pointer interactions prioritise moving and do not invoke native link dragging', () => {
+  const chart = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/GanttTimeline.tsx','utf8');
+  // Native link dragging cancels pointer sequences in Chromium, so disable it.
+  assert.match(chart,/draggable=\{false\} onDragStart=\{event => event\.preventDefault\(\)\}/);
+  // Only deliberate resize-grip grabs may resize. The centre of a bar moves.
+  assert.match(chart,/event\.target instanceof Element \? event\.target\.closest\("\[data-gantt-resize\]"\)/);
+  assert.match(chart,/const mode: TimelineDragMode = grip === "start" \? "resize-start" : grip === "end" \? "resize-end" : "move"/);
+  assert.doesNotMatch(chart,/bounds\.width >= 24 && x <= edge/);
+  // Small bars get a full hit target, without falsely widening their visible time span.
+  assert.match(chart,/Math\.max\(barPixels, canEdit \? 38 : 12\)/);
+  assert.match(chart,/showResizeGrips = canEdit && barPixels >= 52/);
+  assert.match(chart,/pointerEvents: "none"/);
+  // A tiny gesture cannot accidentally follow the task link; the drag preserves
+  // allocated hours because the rescheduling action only updates dates.
+  assert.match(chart,/if \(session\.moved \|\| session\.mode !== "move"\) suppressClickRef\.current/);
+  assert.match(chart,/onKeyDown=\{event =>/);
+  assert.match(chart,/session\.startScrollLeft/);
+  assert.match(chart,/!session\.moved \? 0 : session\.lastX/);
+});

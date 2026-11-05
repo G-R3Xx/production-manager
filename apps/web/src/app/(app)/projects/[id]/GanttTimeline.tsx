@@ -6,7 +6,7 @@ import type { ProjectTimelineTaskRecord, ProjectSubJobRecord } from "@/server/pr
 import {
   timelineDayIndex, timelinePositionInWindow, timelineTaskRangeLabel, timelineWindow,
   shiftTimelineFocus, plannedHoursLabel, sydneyTodayDayIndex, sydneyNowMinuteIndex,
-  timelineDragSchedule, timelineMinuteIndex, compareProjectTaskOrder, reorderProjectTaskIds, type TimelineDragMode, type TimelineZoom
+  timelineDragSchedule, timelineDragSnapMinutes, timelineMinuteIndex, compareProjectTaskOrder, reorderProjectTaskIds, type TimelineDragMode, type TimelineZoom
 } from "@/lib/project-timeline";
 
 type Props = {
@@ -24,6 +24,9 @@ type DragSession = {
   startX: number;
   mode: TimelineDragMode;
   preview: TaskDates | null;
+  startScrollLeft: number;
+  lastX: number;
+  moved: boolean;
 };
 const DAY_MS = 86_400_000;
 function dateForDay(day: number) { return new Date(day * DAY_MS); }
@@ -79,6 +82,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
   const [savingId, setSavingId] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ error: boolean; text: string } | null>(null);
   const dragRef = useRef<DragSession | null>(null);
+  const autoScrollFrameRef = useRef<number | null>(null);
   const savingRef = useRef<string | null>(null);
   const suppressClickRef = useRef<string | null>(null);
   const displayedTasks = useMemo(() => tasks.map(task => ({
@@ -227,52 +231,108 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
     }
   }
 
-  function beginDrag(event: ReactPointerEvent<HTMLAnchorElement>, task: ProjectTimelineTaskRecord) {
-    if (!canEdit || savingRef.current || dragRef.current || event.button !== 0 || !event.isPrimary) return;
-    suppressClickRef.current = null;
-    const bounds = event.currentTarget.getBoundingClientRect();
-    const x = event.clientX - bounds.left;
-    const edge = Math.min(11, bounds.width * 0.28);
-    // Tiny bars in a broad overview can be moved. Zoom to Day to resize them precisely.
-    let mode: TimelineDragMode = "move";
-    if (bounds.width >= 24 && x <= edge && timelineMinuteIndex(task.plannedStart) >= model.startMinute) mode = "resize-start";
-    else if (bounds.width >= 24 && x >= bounds.width - edge && timelineMinuteIndex(task.plannedEnd) <= model.endMinute) mode = "resize-end";
-    dragRef.current = { task, pointerId: event.pointerId, startX: event.clientX, mode, preview: null };
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setFeedback(null);
+  function stopDragAutoScroll() {
+    if (autoScrollFrameRef.current !== null) {
+      window.cancelAnimationFrame(autoScrollFrameRef.current);
+      autoScrollFrameRef.current = null;
+    }
   }
 
-  function moveDrag(event: ReactPointerEvent<HTMLAnchorElement>) {
-    const session = dragRef.current;
-    if (!session || session.pointerId !== event.pointerId) return;
-    const delta = (event.clientX - session.startX) * (model.endMinute - model.startMinute) / model.width;
-    const candidate = timelineDragSchedule(session.task, session.mode, delta, zoom);
-    // Keep a sliver of the task in view so pointer capture isn't lost mid-gesture.
+  // Keep delta tied to the original pointer location AND the timeline's horizontal
+  // scroll offset. Without the scroll term, moving across a long project becomes
+  // unreliable as soon as the viewport moves under the pointer.
+  function updateDragPreview(session: DragSession, clientX: number) {
+    const scrolled = (scrollRef.current?.scrollLeft ?? session.startScrollLeft) - session.startScrollLeft;
+    const distance = clientX - session.startX + scrolled;
+    if (Math.abs(distance) >= 4) session.moved = true;
+    const deltaMinutes = distance * (model.endMinute - model.startMinute) / model.width;
+    const candidate = timelineDragSchedule(session.task, session.mode, deltaMinutes, zoom);
+    // Keep the bar mounted while dragging, including at the edge of a day/week.
     if (timelinePositionInWindow(candidate, model.startMinute, model.endMinute).width <= 0) return;
     if (session.preview?.plannedStart === candidate.plannedStart && session.preview?.plannedEnd === candidate.plannedEnd) return;
     session.preview = candidate;
     setDragPreview({ taskId: session.task.id, dates: candidate });
   }
 
+  function startDragAutoScroll() {
+    stopDragAutoScroll();
+    const tick = () => {
+      const session = dragRef.current;
+      if (!session) { autoScrollFrameRef.current = null; return; }
+      const viewport = scrollRef.current;
+      if (viewport) {
+        const bounds = viewport.getBoundingClientRect();
+        // Allow room for the sticky task-name column on the left.
+        const leftEdge = Math.min(bounds.right - 65, bounds.left + 255 + 35);
+        const rightEdge = bounds.right - 55;
+        // Do not scroll on a normal click merely because a task happens to sit
+        // near the viewport edge. Edge-scrolling starts only after a real drag.
+        const direction = !session.moved ? 0 : session.lastX < leftEdge ? -1 : session.lastX > rightEdge ? 1 : 0;
+        if (direction) {
+          const previousScroll = viewport.scrollLeft;
+          viewport.scrollLeft += direction * 14;
+          if (viewport.scrollLeft !== previousScroll) updateDragPreview(session, session.lastX);
+        }
+      }
+      autoScrollFrameRef.current = window.requestAnimationFrame(tick);
+    };
+    autoScrollFrameRef.current = window.requestAnimationFrame(tick);
+  }
+
+  function beginDrag(event: ReactPointerEvent<HTMLAnchorElement>, task: ProjectTimelineTaskRecord) {
+    if (!canEdit || savingRef.current || dragRef.current || event.button !== 0 || !event.isPrimary) return;
+    suppressClickRef.current = null;
+    // Only the explicit narrow end grips resize. The rest of the hit area ALWAYS
+    // moves the task, including for one-hour bars that used to have 22px of
+    // ambiguous resize zones inside a 60px bar.
+    const grip = event.target instanceof Element ? event.target.closest("[data-gantt-resize]")?.getAttribute("data-gantt-resize") : null;
+    const mode: TimelineDragMode = grip === "start" ? "resize-start" : grip === "end" ? "resize-end" : "move";
+    dragRef.current = { task, pointerId: event.pointerId, startX: event.clientX,
+      startScrollLeft: scrollRef.current?.scrollLeft ?? 0, lastX: event.clientX,
+      moved: false, mode, preview: null };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setFeedback(null);
+    startDragAutoScroll();
+  }
+
+  function moveDrag(event: ReactPointerEvent<HTMLAnchorElement>) {
+    const session = dragRef.current;
+    if (!session || session.pointerId !== event.pointerId) return;
+    session.lastX = event.clientX;
+    updateDragPreview(session, event.clientX);
+  }
+
   function finishDrag(event: ReactPointerEvent<HTMLAnchorElement>) {
     const session = dragRef.current;
     if (!session || session.pointerId !== event.pointerId) return;
+    // Pointer-up may arrive without an intermediate move event; use its location.
+    session.lastX = event.clientX;
+    updateDragPreview(session, event.clientX);
     dragRef.current = null;
+    stopDragAutoScroll();
     setDragPreview(null);
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    // A small drag below the snap threshold must not accidentally follow the
+    // task link; only a deliberate click should open the task editor.
+    if (session.moved || session.mode !== "move") suppressClickRef.current = session.task.id;
     if (session.preview && (session.preview.plannedStart !== session.task.plannedStart ||
         session.preview.plannedEnd !== session.task.plannedEnd)) {
-      suppressClickRef.current = session.task.id;
       void saveDates(session.task, session.preview);
     }
   }
 
   function cancelDrag(event: ReactPointerEvent<HTMLAnchorElement>) {
     if (dragRef.current?.pointerId === event.pointerId) {
+      if (dragRef.current.moved) suppressClickRef.current = dragRef.current.task.id;
       dragRef.current = null;
+      stopDragAutoScroll();
       setDragPreview(null);
     }
   }
+
+  useEffect(() => () => {
+    if (autoScrollFrameRef.current !== null) window.cancelAnimationFrame(autoScrollFrameRef.current);
+  }, []);
 
   const firstTaskDay = tasks.length ? Math.min(...tasks.map(task => timelineDayIndex(task.plannedStart))) : sydneyTodayDayIndex();
   // A short project should open on an hourly scale rather than tiny day-level bars.
@@ -339,7 +399,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
         <h2 style={{ fontSize: 18, margin: "0 0 4px" }}>Gantt timeline</h2>
         <div style={{ color: "#64748b", fontSize: 12 }}>Bars follow scheduled times (Sydney time). Allocated work hours are separate.</div>
         <div style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
-          {canEdit ? "Drag the grip beside a task name to reorder it within its Sub Job; drag timeline bars to reschedule. Use the staff dropdown to assign tasks." : "Select a bar to view its task. Only owners/managers can change schedules."}
+          {canEdit ? "Drag a bar from its middle to move it; use the small grips at either end to resize (zoom to Day for short tasks). Drag the grip beside the task name to reorder its row." : "Select a bar to view its task. Only owners/managers can change schedules."}
         </div>
       </div>
       <div role="group" aria-label="Timeline zoom" style={{ display: "flex", gap: 4, padding: 4, border: "1px solid #dbe4ef", borderRadius: 11 }}>
@@ -390,6 +450,12 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
             const bar = timelinePositionInWindow(task, model.startMinute, model.endMinute);
             const timeLabel = timelineTaskRangeLabel(task);
             const description = `${task.title} | ${timeLabel} (Sydney time) | ${plannedHoursLabel(task.allocatedMinutes)} allocated`;
+            const barPixels = bar.width * model.width / 100;
+            // A one-hour task is only 10px wide in Week view. Increase its
+            // invisible grab target without falsifying its visible time span.
+            const hitPixels = Math.max(barPixels, canEdit ? 38 : 12);
+            const hitPadding = (hitPixels - barPixels) / 2;
+            const showResizeGrips = canEdit && barPixels >= 52;
             return <div key={task.id} style={{ display: "flex", borderBottom: "1px solid #edf2f7", minHeight: 59 }}>
               <div style={{ ...labelCell, background: rowDrop?.id === task.id ? "#dbeafe" : "#fff",
                 boxShadow: rowDrop?.id === task.id ? `inset 0 ${rowDrop.after ? -3 : 3}px #2563eb` : undefined }}
@@ -447,19 +513,46 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
               <div style={gridTrack}>
                 {model.nowLeft !== null ? <div aria-hidden="true" style={{ position: "absolute", left: `${model.nowLeft}%`, top: 0, bottom: 0, borderLeft: "2px solid #dc2626", zIndex: 1, opacity: 0.7 }} /> : null}
                 {bar.width > 0 ? <a href={`#task-${task.id}`}
-                  title={canEdit ? `${description} · Drag to move; drag ends to resize. Zoom in for short tasks.` : description}
+                  draggable={false} onDragStart={event => event.preventDefault()}
+                  title={canEdit ? `${description} · Drag to move; drag the end grips to resize. Arrow keys move, Shift+arrows resize finish.` : description}
                   aria-label={description}
                   onPointerDown={event => beginDrag(event, task)} onPointerMove={moveDrag} onPointerUp={finishDrag}
                   onPointerCancel={cancelDrag} onLostPointerCapture={cancelDrag}
                   onClick={event => { if (suppressClickRef.current === task.id) { event.preventDefault(); suppressClickRef.current = null; } }}
-                  style={{ display: "block", position: "absolute", top: 16, left: `${bar.left}%`, width: `${bar.width}%`,
-                    minWidth: 5, height: 26, borderRadius: 5, background: statusColor(task), zIndex: 2,
+                  onKeyDown={event => {
+                    if (!canEdit || savingRef.current || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+                    event.preventDefault();
+                    const direction = event.key === "ArrowRight" ? 1 : -1;
+                    const mode: TimelineDragMode = event.shiftKey ? "resize-end" : "move";
+                    const next = timelineDragSchedule(task, mode, direction * timelineDragSnapMinutes(zoom), zoom);
+                    void saveDates(task, next);
+                  }}
+                  style={{ display: "block", position: "absolute", top: 13,
+                    left: `calc(${bar.left}% - ${hitPadding}px)`, width: hitPixels,
+                    height: 33, zIndex: 2, borderRadius: 6,
                     cursor: canEdit ? (dragPreview?.taskId === task.id ? "grabbing" : "grab") : "pointer",
-                    touchAction: canEdit ? "none" : "auto", userSelect: "none", boxShadow: dragPreview?.taskId === task.id ? "0 0 0 3px #93c5fd" : undefined,
+                    touchAction: canEdit ? "none" : "auto", userSelect: "none", WebkitUserSelect: "none",
                     opacity: savingId === task.id ? 0.75 : 1 }}>
-                    {canEdit && bar.width * model.width / 100 >= 24 ? <>
-                      <span aria-hidden="true" style={{ position: "absolute", left: 4, top: 6, bottom: 6, width: 3, borderLeft: "1px solid white", borderRight: "1px solid white", pointerEvents: "none" }}/>
-                      <span aria-hidden="true" style={{ position: "absolute", right: 4, top: 6, bottom: 6, width: 3, borderLeft: "1px solid white", borderRight: "1px solid white", pointerEvents: "none" }}/>
+                    {/* Visible duration stays exact even when the touch/pointer target is larger. */}
+                    <span aria-hidden="true" style={{ display: "block", position: "absolute", top: 3, height: 27,
+                      left: hitPadding, width: Math.max(2, barPixels), borderRadius: 5,
+                      background: statusColor(task), pointerEvents: "none",
+                      boxShadow: dragPreview?.taskId === task.id ? "0 0 0 3px #93c5fd" : undefined }}/>
+                    {showResizeGrips ? <>
+                      <span data-gantt-resize="start" aria-hidden="true" title="Drag to change start"
+                        style={{ position: "absolute", left: hitPadding, top: 3, height: 27, width: 10,
+                          borderRadius: "5px 0 0 5px", cursor: "ew-resize", touchAction: "none",
+                          background: "rgba(255,255,255,.12)", borderRight: "1px solid rgba(255,255,255,.65)" }}>
+                        <span style={{ display: "block", margin: "9px 0 0 4px", height: 9,
+                          borderLeft: "2px solid white", pointerEvents: "none" }}/>
+                      </span>
+                      <span data-gantt-resize="end" aria-hidden="true" title="Drag to change finish"
+                        style={{ position: "absolute", left: hitPadding + barPixels - 10, top: 3, height: 27, width: 10,
+                          borderRadius: "0 5px 5px 0", cursor: "ew-resize", touchAction: "none",
+                          background: "rgba(255,255,255,.12)", borderLeft: "1px solid rgba(255,255,255,.65)" }}>
+                        <span style={{ display: "block", margin: "9px 0 0 4px", height: 9,
+                          borderLeft: "2px solid white", pointerEvents: "none" }}/>
+                      </span>
                     </> : null}
                   </a> : null}
               </div>
@@ -470,7 +563,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
     </div>
     <div style={{ display: "flex", gap: 15, flexWrap: "wrap", padding: "11px 17px", fontSize: 11, color: "#475569" }}>
       <span>⚪ Planned</span><span>🔵 In progress</span><span>🟠 Blocked</span><span>🟢 Completed</span><span style={{ color: "#b91c1c" }}>│ Now</span>
-      <span>Scroll for more dates. {canEdit ? "Drag task-name grips to reorder; drag bars to reschedule or resize. Arrow buttons reorder by keyboard." : "Select a bar to view the task."}</span>
+      <span>Scroll for more dates. {canEdit ? "Bar centre = move; white end grips = resize. Use Left/Right arrows to move a focused bar, Shift+arrows to resize its finish. Task-name grips reorder rows." : "Select a bar to view the task."}</span>
     </div>
   </section>;
 }
