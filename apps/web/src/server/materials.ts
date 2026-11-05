@@ -2,6 +2,7 @@ import "server-only";
 
 import { pool } from "@production-manager/db";
 import { relationHasColumns, runtimeSchemaFallbackEnabled } from "@/server/schema-readiness";
+import { normalizeFinishingProducts, type QuoteFinishingProductKey } from "@/lib/quote-finishing-addons";
 
 export type MaterialRecord = {
   id: string;
@@ -23,6 +24,8 @@ export type MaterialRecord = {
   reversePrintable: boolean;
   usedForBacking: boolean;
   showAsInstallationOption: boolean;
+  quoteAddOnEnabled: boolean;
+  quoteAddOnProducts: QuoteFinishingProductKey[];
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -67,6 +70,8 @@ export type CreateMaterialInput = {
   reversePrintable: boolean;
   usedForBacking: boolean;
   showAsInstallationOption: boolean;
+  quoteAddOnEnabled: boolean;
+  quoteAddOnProducts: QuoteFinishingProductKey[];
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -256,6 +261,8 @@ export async function listQuoteMaterialsForTenant(tenantId: string): Promise<Mat
       COALESCE(m.reverse_printable, stock.reverse_printable, false) AS "reversePrintable",
       COALESCE(m.used_for_backing, stock.used_for_backing, false) AS "usedForBacking",
       COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
+      COALESCE(m.cost_json ->> 'quoteAddOnEnabled', 'false') = 'true' AS "quoteAddOnEnabled",
+      CASE WHEN jsonb_typeof(m.cost_json -> 'quoteAddOnProducts') = 'array' THEN m.cost_json -> 'quoteAddOnProducts' ELSE '[]'::jsonb END AS "quoteAddOnProducts",
       stock.stock_uom AS "stockUom",
       stock.purchase_uom AS "purchaseUom",
       stock.stock_quantity::text AS "stockQuantity",
@@ -292,6 +299,7 @@ export async function listQuoteMaterialsForTenant(tenantId: string): Promise<Mat
     ...row,
     materialType: presentMaterialType(row.materialType),
     costJson: row.costJson && typeof row.costJson === "object" ? row.costJson : {},
+    quoteAddOnProducts: normalizeFinishingProducts(row.quoteAddOnProducts),
     myobPayloadJson: {}
   }));
 }
@@ -323,6 +331,8 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       COALESCE(m.reverse_printable, stock.reverse_printable, false) AS "reversePrintable",
       COALESCE(m.used_for_backing, stock.used_for_backing, false) AS "usedForBacking",
       COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
+      COALESCE(m.cost_json ->> 'quoteAddOnEnabled', 'false') = 'true' AS "quoteAddOnEnabled",
+      CASE WHEN jsonb_typeof(m.cost_json -> 'quoteAddOnProducts') = 'array' THEN m.cost_json -> 'quoteAddOnProducts' ELSE '[]'::jsonb END AS "quoteAddOnProducts",
       stock.stock_uom AS "stockUom",
       stock.purchase_uom AS "purchaseUom",
       stock.stock_quantity::text AS "stockQuantity",
@@ -354,7 +364,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
     ORDER BY m.name ASC, m.created_at DESC
   `, [tenantId]);
 
-  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType), costJson: row.costJson && typeof row.costJson === "object" ? row.costJson : {}, myobPayloadJson: row.myobPayloadJson && typeof row.myobPayloadJson === "object" ? row.myobPayloadJson : {} }));
+  return result.rows.map((row) => ({ ...row, materialType: presentMaterialType(row.materialType), costJson: row.costJson && typeof row.costJson === "object" ? row.costJson : {}, myobPayloadJson: row.myobPayloadJson && typeof row.myobPayloadJson === "object" ? row.myobPayloadJson : {}, quoteAddOnProducts: normalizeFinishingProducts(row.quoteAddOnProducts) }));
 }
 
 export async function getDashboardMaterialSummary(tenantId: string): Promise<{
@@ -507,7 +517,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
       $6::varchar,$7::varchar,$8::varchar,$9::material_type,$10::varchar,$11::varchar,
       $12::numeric,$13::numeric,$14::boolean,$15::boolean,
       $16::varchar,$17::varchar,$18::numeric,$19::numeric,
-      jsonb_build_object('purchaseCost',$19::numeric,'wastagePercent',$20::numeric,'showAsInstallationOption',$26::boolean),
+      jsonb_build_object('purchaseCost',$19::numeric,'wastagePercent',$20::numeric,'showAsInstallationOption',$26::boolean, 'quoteAddOnEnabled',$30::boolean, 'quoteAddOnProducts',$31::jsonb),
       $21::numeric,$22::numeric,$23::numeric,$24::numeric,$25::varchar,
       $27::text,$28::text,$29::varchar,
       true,now(),now()
@@ -542,7 +552,9 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
     saved.showAsInstallationOption,
     saved.quoteImageUrl,
     saved.quoteImageStoragePath,
-    saved.quoteVisualCategory
+    saved.quoteVisualCategory,
+    saved.quoteAddOnEnabled,
+    JSON.stringify(normalizeFinishingProducts(saved.quoteAddOnProducts))
   ]);
   return result.rows[0];
 }
@@ -572,7 +584,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       purchase_uom=$18::varchar,
       stock_quantity=$19::numeric,
       purchase_cost=$20::numeric,
-      cost_json=COALESCE(cost_json,'{}'::jsonb) || jsonb_build_object('purchaseCost',$20::numeric,'wastagePercent',$21::numeric,'showAsInstallationOption',$27::boolean),
+      cost_json=COALESCE(cost_json,'{}'::jsonb) || jsonb_build_object('purchaseCost',$20::numeric,'wastagePercent',$21::numeric,'showAsInstallationOption',$27::boolean, 'quoteAddOnEnabled',$31::boolean, 'quoteAddOnProducts',$32::jsonb),
       width_mm=$22::numeric,
       length_mm=$23::numeric,
       roll_width_mm=$24::numeric,
@@ -613,7 +625,9 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     saved.showAsInstallationOption,
     saved.quoteImageUrl,
     saved.quoteImageStoragePath,
-    saved.quoteVisualCategory
+    saved.quoteVisualCategory,
+    saved.quoteAddOnEnabled,
+    JSON.stringify(normalizeFinishingProducts(saved.quoteAddOnProducts))
   ]);
 }
 

@@ -44,6 +44,8 @@ export type SnapshotMaterial = {
   reversePrintable?: boolean;
   usedForBacking?: boolean;
   showAsInstallationOption?: boolean;
+  quoteAddOnEnabled?: boolean;
+  quoteAddOnProducts?: string[];
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -103,6 +105,7 @@ export type QuickQuoteSnapshot = {
   customEyeletQty?: string;
   standoffMaterialId?: string;
   standoffQtyPerItem?: string;
+  finishingAddOnQty?: Record<string, string>;
   smallType?: string;
   smallStockId?: string;
   customSmallStockEnabled?: boolean;
@@ -163,6 +166,7 @@ export type QuickQuoteSnapshot = {
     standoff?: SnapshotMaterial | null;
     componentParts?: SnapshotMaterial[];
     installation?: SnapshotMaterial[];
+    finishingAddOns?: SnapshotMaterial[];
   };
   pricingSnapshot?: {
     markupMultiplier?: number;
@@ -256,6 +260,8 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
     reversePrintable: value.reversePrintable === true || stringValue(value.reversePrintable).trim().toLowerCase() === "true",
     usedForBacking: value.usedForBacking === true || stringValue(value.usedForBacking).trim().toLowerCase() === "true",
     showAsInstallationOption: value.showAsInstallationOption === true || stringValue(value.showAsInstallationOption).trim().toLowerCase() === "true",
+    quoteAddOnEnabled: value.quoteAddOnEnabled === true,
+    quoteAddOnProducts: stringArray(value.quoteAddOnProducts),
     supplierName: stringValue(value.supplierName) || null,
     sku: stringValue(value.sku) || null,
     stockUom: stringValue(value.stockUom) || null,
@@ -291,6 +297,9 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
   const installationMaterials = Array.isArray(materialData.installation)
     ? materialData.installation.map(snapshotMaterial).filter((item): item is SnapshotMaterial => Boolean(item))
     : [];
+  const finishingAddOnMaterials = Array.isArray(materialData.finishingAddOns)
+    ? materialData.finishingAddOns.map(snapshotMaterial).filter((item): item is SnapshotMaterial => Boolean(item))
+    : [];
 
   return {
     ...(sourceValue as QuickQuoteSnapshot),
@@ -302,6 +311,7 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
     finishings: stringArray(sourceValue.finishings),
     finishingMinutes: recordOfStrings(sourceValue.finishingMinutes),
     finishingLabourBasis: recordOfLabourBasis(sourceValue.finishingLabourBasis),
+    finishingAddOnQty: recordOfStrings(sourceValue.finishingAddOnQty),
     ncrPageColours: stringArray(sourceValue.ncrPageColours),
     smallFinishings: stringArray(sourceValue.smallFinishings),
     smallFinishingMinutes: recordOfStrings(sourceValue.smallFinishingMinutes),
@@ -323,7 +333,8 @@ export function readQuickQuoteSnapshot(value: unknown): QuickQuoteSnapshot | nul
       eyelet: snapshotMaterial(materialData.eyelet),
       standoff: snapshotMaterial(materialData.standoff),
       componentParts: componentMaterials,
-      installation: installationMaterials
+      installation: installationMaterials,
+      finishingAddOns: finishingAddOnMaterials
     }
   };
 }
@@ -340,7 +351,8 @@ export function materialsFromSnapshot(snapshot: QuickQuoteSnapshot | null | unde
     snapshot.materialSnapshots.eyelet,
     snapshot.materialSnapshots.standoff,
     ...(snapshot.materialSnapshots.componentParts ?? []),
-    ...(snapshot.materialSnapshots.installation ?? [])
+    ...(snapshot.materialSnapshots.installation ?? []),
+    ...(snapshot.materialSnapshots.finishingAddOns ?? [])
   ].filter((item): item is SnapshotMaterial => Boolean(item?.id && item?.name));
   const seen = new Set<string>();
   return values.filter((item) => {

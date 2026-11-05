@@ -1,6 +1,7 @@
 "use client";
 
 import { isPassThroughDispatchService, passThroughUnitPrice } from "@/lib/dispatch-pricing";
+import { finishingMaterialAvailable } from "@/lib/quote-finishing-addons";
 
 import { useEffect, useMemo, useState, useTransition, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -19,6 +20,8 @@ export type QuoteMaterial = {
   reversePrintable?: boolean;
   usedForBacking?: boolean;
   showAsInstallationOption?: boolean;
+  quoteAddOnEnabled?: boolean;
+  quoteAddOnProducts?: string[];
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -1212,6 +1215,8 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
     reversePrintable: material.reversePrintable === true,
     usedForBacking: material.usedForBacking === true,
     showAsInstallationOption: material.showAsInstallationOption === true,
+    quoteAddOnEnabled: material.quoteAddOnEnabled === true,
+    quoteAddOnProducts: material.quoteAddOnProducts ?? [],
     supplierName: material.supplierName ?? null,
     sku: material.sku ?? null,
     stockUom: material.stockUom ?? null,
@@ -1546,6 +1551,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
   const [laminateMinutes, setLaminateMinutes] = useState(snapshotString(initialSnapshot, "laminateMinutes"));
   const [laminateLabourBasis, setLaminateLabourBasis] = useState<LabourBasis>(labourBasisValue(initialSnapshot?.laminateLabourBasis, "line_total"));
   const [finishings, setFinishings] = useState<string[]>(snapshotStringArray(initialSnapshot, "finishings"));
+  const [finishingAddOnQty, setFinishingAddOnQty] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "finishingAddOnQty"));
   const [finishingMinutes, setFinishingMinutes] = useState<Record<string, string>>(snapshotStringRecord(initialSnapshot, "finishingMinutes"));
   const [finishingLabourBasis, setFinishingLabourBasis] = useState<Record<string, LabourBasis>>(labourBasisRecord(snapshotStringRecord(initialSnapshot, "finishingLabourBasis"), "line_total"));
   const [eyeletPresetLabel, setEyeletPresetLabel] = useState(snapshotString(initialSnapshot, "eyeletPresetLabel", eyeletPresets[0]?.label ?? ""));
@@ -1794,7 +1800,10 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
   const selectedSmallStock = customSmallStockEnabled ? customSmallStock : departmentStocks.find((material) => material.id === smallStockId);
   const selectedSmallCoating = laminateMaterials.find((material) => material.id === smallCoatingId);
   const eyeletMaterial = materialPool.find((material) => materialText(material).includes("eyelet"));
-  const standoffMaterials = useMemo(() => materialPool.filter(isStandoffMaterial), [materialPool]);
+  const standoffMaterials = useMemo(() => materialPool.filter((material) =>
+    isStandoffMaterial(material) && (!material.quoteAddOnEnabled || finishingMaterialAvailable(material, baseType)
+      || (Boolean(editingLine) && material.id === standoffMaterialId && initialSnapshot?.baseType === baseType))
+  ), [materialPool, baseType, editingLine, standoffMaterialId, initialSnapshot?.baseType]);
   const selectedStandoffMaterial = standoffMaterials.find((material) => material.id === standoffMaterialId);
   const installationMaterials = useMemo(() => materialPool
     .filter((material) => material.showAsInstallationOption === true)
@@ -2000,6 +2009,20 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
   const eyeletOperation = labourForProcess(costingResources, [...processAliases.eyelets], costingDepartment);
   const configuredEyeletMaterial = eyeletOperation?.consumableMaterialId ? materialPool.find((material) => material.id === eyeletOperation.consumableMaterialId) : undefined;
   const effectiveEyeletMaterial = configuredEyeletMaterial ?? eyeletMaterial;
+  const quoteFinishingProductKey = flowType === "signage" ? baseType : flowType === "small_format" ? smallType : "";
+  const initialFinishingProductKey = initialSnapshot?.flowType === "signage" ? initialSnapshot.baseType : initialSnapshot?.flowType === "small_format" ? initialSnapshot.smallType : "";
+  const eligibleFinishingAddOns = useMemo(() => materialPool.filter((material) => {
+    // Dedicated Eyelets / Standoffs controls already cost these parts and must
+    // not silently double-charge them as generic optional material add-ons.
+    if (material.id === effectiveEyeletMaterial?.id || isStandoffMaterial(material)) return false;
+    if (finishingMaterialAvailable(material, quoteFinishingProductKey)) return true;
+    // Existing quote snapshots keep their selected material even if the material
+    // was subsequently hidden/disabled in Materials, but only for the same product.
+    return Boolean(editingLine && quoteFinishingProductKey && quoteFinishingProductKey === initialFinishingProductKey
+      && numberValue(finishingAddOnQty[material.id], 0) > 0);
+  }).sort((a, b) => a.name.localeCompare(b.name)), [materialPool, effectiveEyeletMaterial?.id, quoteFinishingProductKey, editingLine, initialFinishingProductKey, finishingAddOnQty]);
+  const selectedFinishingAddOns = useMemo(() => eligibleFinishingAddOns.filter((material) => numberValue(finishingAddOnQty[material.id], 0) > 0), [eligibleFinishingAddOns, finishingAddOnQty]);
+
   const eyeletLabourRate = labourRateForProcess(costingResources, [...processAliases.eyelets], costingDepartment, labourRate);
   const jingweiLabourRate = labourRateForProcess(costingResources, [...processAliases.jingwei], costingDepartment, labourRate);
   const mountLabourRate = labourRateForProcess(costingResources, [...processAliases.print_vinyl_application], costingDepartment, labourRate);
@@ -2650,8 +2673,25 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
       }
     }
 
+    if (flowType === "signage" || flowType === "small_format") {
+      for (const material of selectedFinishingAddOns) {
+        const perItemQty = Math.max(0, numberValue(finishingAddOnQty[material.id], 0));
+        if (perItemQty <= 0) continue;
+        const unit = eachRate(material); // Supports each/pack and saved wastage.
+        rows.push({
+          label: "Finishing add-on",
+          detail: material.name,
+          amount: perItemQty,
+          unit: "each",
+          rate: unit.rate,
+          cost: perItemQty * unit.rate,
+          note: [`${usage(perItemQty)} per finished item`, `${usage(perItemQty * quantityNumber)} total for qty ${usage(quantityNumber)}`, unit.note].filter(Boolean).join(" · ")
+        });
+      }
+    }
+
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, effectiveEyeletMaterial, eyeletOperation, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, effectiveEyeletMaterial, eyeletOperation, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, selectedFinishingAddOns, finishingAddOnQty, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);
@@ -2807,6 +2847,28 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
     return finishingOptions.find((item) => item.key === key)?.label ?? "";
   }).filter(Boolean).join(", ");
   const smallFinishingSummary = selectedKeys(smallFinishingOptions, smallFinishings);
+  const addOnSummary = selectedFinishingAddOns.map((material) => `${customerMaterialName(material)} × ${usage(numberValue(finishingAddOnQty[material.id], 0))}`).join(", ");
+  const finishingAddOnPanel = eligibleFinishingAddOns.length ? (
+    <div style={{ marginTop: 12, padding: 12, border: "1px solid #bfdbfe", borderRadius: 12, background: "#eff6ff", display: "grid", gap: 10 }}>
+      <div><b>Optional finishing materials</b><div style={{ fontSize: 12, color: "#475467", marginTop: 3 }}>From Materials settings for this base product. Set a quantity for each finished item; quote quantity is applied automatically.</div></div>
+      {eligibleFinishingAddOns.map((material) => {
+        const quantityPerItem = Math.max(0, numberValue(finishingAddOnQty[material.id], 0));
+        const unit = eachRate(material);
+        return <div key={material.id} style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10, borderRadius: 10, padding: 9, background: "#fff", border: "1px solid #dbeafe" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 8, flex: "1 1 200px", fontWeight: 800, minWidth: 0 }}>
+            <input type="checkbox" checked={quantityPerItem > 0} onChange={(event) => { setFinishingAddOnQty((prev) => ({ ...prev, [material.id]: event.target.checked ? (numberValue(prev[material.id], 0) > 0 ? prev[material.id] : "1") : "0" })); setUnitPriceOverridden(false); }} />
+            <span>{internalMaterialName(material)}</span>
+          </label>
+          {quantityPerItem > 0 ? <label style={{ display: "flex", gap: 7, alignItems: "center", flex: "0 0 auto", fontSize: 12, fontWeight: 800 }}>
+            Qty / finished item
+            <input type="number" min="1" step="1" value={finishingAddOnQty[material.id] ?? "1"} onChange={(event) => { setFinishingAddOnQty((prev) => ({ ...prev, [material.id]: event.target.value })); setUnitPriceOverridden(false); }} style={{ ...inputStyle, maxWidth: 90 }} />
+          </label> : null}
+          <small style={{ flex: "0 1 190px", color: "#475467" }}>Cost {money(unit.rate)} each{quantityPerItem > 0 ? ` · ${usage(quantityPerItem * quantityNumber)} total` : ""}</small>
+        </div>;
+      })}
+    </div>
+  ) : null;
+
 
   const componentPartSummary = pricedComponentParts.map((part) => {
     const material = materialPool.find((item) => item.id === part.materialId);
@@ -2861,6 +2923,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
       smallFinishingSummary ? `Finishing: ${smallFinishingSummary}` : null,
+      addOnSummary ? `Finishing add-ons: ${addOnSummary}` : null,
       serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
@@ -2879,6 +2942,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
       smallPrintColour ? smallPrintColour === "mono" ? "Mono" : smallPrintColour === "cmyk" ? "CMYK" : "CMYK + special" : null,
       selectedSmallCoatingName ? `Coating: ${selectedSmallCoatingName}` : null,
       smallFinishingSummary ? `Finishing: ${smallFinishingSummary}` : null,
+      addOnSummary ? `Finishing add-ons: ${addOnSummary}` : null,
       serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ")
@@ -2898,6 +2962,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
       laminateUseLabel || (selectedLaminateName ? `Laminate: ${selectedLaminateName}` : null),
       standoffSummary || null,
       finishingSummary ? `Finishing: ${finishingSummary}` : null,
+      addOnSummary ? `Finishing add-ons: ${addOnSummary}` : null,
       serviceType !== "install" && dispatchSummary ? `Dispatch: ${dispatchSummary}` : null,
       `Qty ${quantityNumber}`
     ].filter(Boolean).join(" · ");
@@ -2964,6 +3029,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
     finishings,
     finishingMinutes,
     finishingLabourBasis,
+    finishingAddOnQty: Object.fromEntries(selectedFinishingAddOns.map((material) => [material.id, finishingAddOnQty[material.id]])),
     eyeletPresetLabel,
     customEyeletQty,
     standoffMaterialId: panelStandoffsApplicable ? standoffMaterialId : "",
@@ -3026,6 +3092,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
       smallCoating: snapshotMaterialForSave(selectedSmallCoating),
       eyelet: snapshotMaterialForSave(effectiveEyeletMaterial),
       standoff: snapshotMaterialForSave(panelStandoffsApplicable ? selectedStandoffMaterial : undefined),
+      finishingAddOns: selectedFinishingAddOns.map((material) => snapshotMaterialForSave(material) as SnapshotMaterial),
       componentParts: Array.from(new Map(componentParts
         .map((part) => materialPool.find((material) => material.id === part.materialId))
         .filter((material): material is QuoteMaterial => Boolean(material))
@@ -3247,6 +3314,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
           <div style={checkGrid}>{finishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={finishings.includes(item.key)} onChange={() => { toggleFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div>
           <SelectedLabourMinutes options={finishingOptions} selected={finishings} values={finishingMinutes} bases={finishingLabourBasis} onChange={(value) => { setFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setFinishingLabourBasis(value); changed(); }} defaultBasis="line_total" eachLabelFor="eyelets" labourRate={labourRate} labourRatesByKey={signageFinishingLabourRates} automaticByKey={signageFinishingAutomaticLabour} quantity={quantityNumber} />
           {finishings.includes("eyelets") ? <div style={compactGrid}><label style={{ display: "grid", gap: 6 }}><b>Eyelet preset</b><select value={eyeletPresetLabel} onChange={(event) => { setEyeletPresetLabel(event.target.value); changed(); }} style={inputStyle}>{eyeletPresets.map((item) => <option key={item.label} value={item.label}>{item.label}</option>)}</select></label><label style={{ display: "grid", gap: 6 }}><b>Custom eyelet qty</b><input value={customEyeletQty} onChange={(event) => { setCustomEyeletQty(event.target.value); changed(); }} type="number" min="0" step="1" style={inputStyle} /></label></div> : null}
+          {finishingAddOnPanel}
           {panelStandoffsApplicable ? (
             <div style={{ marginTop: 12, border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", padding: 12, display: "grid", gap: 10 }}>
               <div>
@@ -3353,7 +3421,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
     }
 
     if (compactStep === "small_finishing") {
-      return <div style={compactPanel}><div style={checkGrid}>{smallFinishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={smallFinishings.includes(item.key)} onChange={() => { toggleSmallFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); changed(); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} labourRatesByKey={smallFinishingLabourRates} automaticByKey={smallFinishingAutomaticLabour} quantity={quantityNumber} /></div>;
+      return <div style={compactPanel}><div style={checkGrid}>{smallFinishingOptions.map((item) => <label key={item.key} style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 850 }}><input type="checkbox" checked={smallFinishings.includes(item.key)} onChange={() => { toggleSmallFinishing(item.key); changed(); }} /><span>{item.label}</span></label>)}</div><SelectedLabourMinutes options={smallFinishingOptions} selected={smallFinishings} values={smallFinishingMinutes} bases={smallFinishingLabourBasis} onChange={(value) => { setSmallFinishingMinutes(value); changed(); }} onBasesChange={(value) => { setSmallFinishingLabourBasis(value); changed(); }} defaultBasis={smallFinishingDefaultBasis} labourRate={labourRate} labourRatesByKey={smallFinishingLabourRates} automaticByKey={smallFinishingAutomaticLabour} quantity={quantityNumber} />{finishingAddOnPanel}</div>;
     }
 
     if (compactStep === "quantity" || compactStep === "small_quantity") {

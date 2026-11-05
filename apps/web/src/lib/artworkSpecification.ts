@@ -179,6 +179,17 @@ export function buildArtworkSpecificationSnapshot(line: QuoteLineLike, capturedA
   mountingParts.push(...mountingFromSummary);
   if (mountingParts.length) add(items, { key: "mounting", label: "Mounting", value: unique(mountingParts).join(" · "), icon: "mounting" });
 
+  const finishingAddOnQty = recordValue(snapshot.finishingAddOnQty) ?? {};
+  const savedFinishingMaterials = Array.isArray(materials.finishingAddOns) ? materials.finishingAddOns : [];
+  const finishingAddOnParts = savedFinishingMaterials.flatMap((material) => {
+    const materialRecord = recordValue(material);
+    const id = text(materialRecord?.id);
+    const qty = Number(finishingAddOnQty[id] ?? 0);
+    const name = materialName(material);
+    return id && name && Number.isFinite(qty) && qty > 0 ? [`${name} × ${numberText(qty)} per item`] : [];
+  });
+  if (finishingAddOnParts.length) add(items, { key: "finishing_addons", label: "Finishing materials", value: finishingAddOnParts.join(" · "), icon: "mounting" });
+
   const dispatch = dispatchLabel(snapshot.serviceType);
   if (dispatch) add(items, { key: "dispatch", label: "Pickup / delivery / install", value: dispatch.value, icon: dispatch.icon });
 

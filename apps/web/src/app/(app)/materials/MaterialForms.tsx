@@ -4,6 +4,7 @@ import type { CSSProperties, ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { createMaterialAction, updateMaterialAction } from "./actions";
 import { normalizeQuoteImageFile } from "@/lib/quote-image-normalize";
+import { QUOTE_FINISHING_PRODUCT_GROUPS } from "@/lib/quote-finishing-addons";
 
 type SupplierOption = {
   id: string;
@@ -27,6 +28,8 @@ type MaterialFormRecord = {
   reversePrintable: boolean;
   usedForBacking: boolean;
   showAsInstallationOption: boolean;
+  quoteAddOnEnabled: boolean;
+  quoteAddOnProducts: string[];
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -525,6 +528,7 @@ function QuoteImageField({ material }: { material?: MaterialFormRecord }) {
 }
 
 function MaterialFormBody({ suppliers, stockSources, material, submitLabel }: { suppliers: SupplierOption[]; stockSources: StockSourceOption[]; material?: MaterialFormRecord; submitLabel: string }) {
+  const [showFinishingAddOn, setShowFinishingAddOn] = useState(material?.quoteAddOnEnabled === true);
   const initialKind = useMemo(() => normaliseMaterialKind(material?.materialType), [material?.materialType]);
   const initialGroup = useMemo(() => normaliseMaterialGroup(material?.materialGroup, initialKind), [material?.materialGroup, initialKind]);
   const [kind, setKind] = useState<MaterialKind>(initialKind);
@@ -569,6 +573,27 @@ function MaterialFormBody({ suppliers, stockSources, material, submitLabel }: { 
           Show as installation option
         </label>
       </Field>
+      <div style={{ border: "1px solid #bfdbfe", borderRadius: 12, padding: 14, background: "#eff6ff", display: "grid", gap: 12 }}>
+        <div style={{ fontWeight: 900, color: "#1d4ed8" }}>Quote finishing add-on</div>
+        <label style={{ display: "flex", gap: 10, alignItems: "center", fontWeight: 800 }}>
+          <input type="checkbox" name="quoteAddOnEnabled" checked={showFinishingAddOn} onChange={(event) => setShowFinishingAddOn(event.target.checked)} />
+          Offer this material as an optional add-on in the quote builder
+        </label>
+        <p style={helperStyle}>Choose the base products where this material should appear. For example, enable Stutcards for Corflute signs only. Staff choose a quantity per finished item; the usual saved material cost, pack conversion, wastage and quote markups apply. Eyelet placement and labour continue to use the existing Eyelets finishing option.</p>
+        {showFinishingAddOn ? <>
+          <div style={{ fontSize: 12, fontWeight: 800, color: "#344054" }}>Show on these products</div>
+          {QUOTE_FINISHING_PRODUCT_GROUPS.map((group) => <fieldset key={group.title} style={{ border: "1px solid #cbd5e1", borderRadius: 10, padding: 12, background: "#fff" }}>
+            <legend style={{ padding: "0 6px", fontWeight: 800, fontSize: 13 }}>{group.title}</legend>
+            <div style={{ ...gridStyle, gap: 10 }}>
+              {group.options.map((option) => <label key={option.key} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, fontWeight: 700 }}>
+                <input type="checkbox" name="quoteAddOnProducts" value={option.key} defaultChecked={material?.quoteAddOnProducts?.includes(option.key) === true} />
+                {option.label}
+              </label>)}
+            </div>
+          </fieldset>)}
+          <div style={helperStyle}>Select at least one product. These settings affect new quotes; existing accepted quote prices are not changed.</div>
+        </> : null}
+      </div>
       <Field label="Notes">
         <textarea
           name="notes"

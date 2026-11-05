@@ -6,6 +6,7 @@ import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import { createMaterial, listMaterialsForTenant, resolvePhysicalMaterialId, saveMaterialPriceManagerChanges, setMaterialActive, setMaterialQuoteImage, updateMaterial, type MaterialPriceManagerChange } from "@/server/materials";
+import { normalizeFinishingProducts } from "@/lib/quote-finishing-addons";
 import { listSuppliersForTenant } from "@/server/suppliers";
 import { bulkApplyMaterialSheet, previewMaterialPriceWorkbook } from "@/server/material-price-sheet";
 import { queueMyobMasterDataSync, runMyobMasterDataSyncNow } from "@/server/myob-background-sync";
@@ -51,7 +52,10 @@ function materialInput(tenantId:string,formData:FormData,name:string,image:Uploa
   customerFacingName:readString(formData,'customerFacingName')||null,sku:readString(formData,'sku')||null,
   materialType:readString(formData,'materialType')||'sheet_media',materialGroup:readString(formData,'materialGroup')||null,
   minimumBillableSheetFraction:readOptionalNumeric(formData,'minimumBillableSheetFraction'),rollBillingIncrementMetres:readOptionalNumeric(formData,'rollBillingIncrementMetres'),
-  reversePrintable:readChecked(formData,'reversePrintable'),usedForBacking:readChecked(formData,'usedForBacking'),showAsInstallationOption:readChecked(formData,'showAsInstallationOption'),stockUom:readString(formData,'stockUom')||'sheet',
+  reversePrintable:readChecked(formData,'reversePrintable'),usedForBacking:readChecked(formData,'usedForBacking'),showAsInstallationOption:readChecked(formData,'showAsInstallationOption'),
+  quoteAddOnEnabled:readChecked(formData,'quoteAddOnEnabled'),
+  quoteAddOnProducts:readChecked(formData,'quoteAddOnEnabled')?normalizeFinishingProducts(formData.getAll('quoteAddOnProducts')):[],
+  stockUom:readString(formData,'stockUom')||'sheet',
   purchaseUom:readString(formData,'purchaseUom')||'sheet',stockQuantity:readRequiredNumeric(formData,'stockQuantity'),purchaseCost:readRequiredNumeric(formData,'purchaseCost'),
   wastagePercent:String(Math.max(0,Number(readRequiredNumeric(formData,'wastagePercent'))||0)),
   widthMm:readOptionalNumeric(formData,'widthMm'),lengthMm:readOptionalNumeric(formData,'lengthMm'),rollWidthMm:readOptionalNumeric(formData,'rollWidthMm'),gsm:readOptionalNumeric(formData,'gsm'),notes:readString(formData,'notes')||null,
@@ -63,6 +67,7 @@ function materialInput(tenantId:string,formData:FormData,name:string,image:Uploa
 export async function createMaterialAction(formData:FormData){
   const active=await tenant();const name=readString(formData,'name');if(!name)redirect('/materials?error=Material%20name%20is%20required');
   let created:{id:string}|null=null;let saveError="";
+  if(readChecked(formData,'quoteAddOnEnabled') && normalizeFinishingProducts(formData.getAll('quoteAddOnProducts')).length===0) redirect('/materials?error=Select%20a%20base%20product%20for%20the%20finishing%20add-on');
   try{
     const uploaded=await uploadQuoteImageIfPresent(active.tenantId,"materials/new",formData);
     created=await createMaterial(materialInput(active.tenantId,formData,name,uploaded??{imageUrl:null,storagePath:null}));
@@ -80,6 +85,7 @@ export async function updateMaterialAction(formData:FormData){
   const active=await tenant();const materialId=readString(formData,'materialId');const name=readString(formData,'name');
   if(!materialId)redirect('/materials?error=Material%20ID%20is%20missing');if(!name)redirect('/materials?error=Material%20name%20is%20required');
   let saveError="";
+  if(readChecked(formData,'quoteAddOnEnabled') && normalizeFinishingProducts(formData.getAll('quoteAddOnProducts')).length===0) redirect('/materials?error=Select%20a%20base%20product%20for%20the%20finishing%20add-on');
   try{
     const removeImage=readChecked(formData,'removeQuoteImage');
     const uploaded=await uploadQuoteImageIfPresent(active.tenantId,`materials/${materialId}`,formData);
