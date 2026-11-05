@@ -51,3 +51,12 @@ test("Gantt still allows direct single staff assignment without changing duratio
  assert.match(server,/assignProjectTaskForTenant/);
  assert.match(server,/assignee_profile_id IS NOT DISTINCT FROM/);
 });
+
+test("calendar date tiles show client and job name as two visible lines",()=>{
+ const calendar=src("app/(app)/calendar/CompletionCalendar.tsx");
+ const tile=calendar.split('matching.slice(0,expandedDay===day?matching.length:3).map(job=>')[1]?.split('matching.length>3')[0]??"";
+ assert.ok(tile,"calendar job tile exists");
+ assert.match(tile, /<span[^>]*>\{job\.clientName\}<\/span>/);
+ assert.match(tile, /<span[^>]*>\{job\.projectName\}<\/span>/);
+ assert.match(tile, /aria-label=\{`\$\{job\.clientName\} — \$\{job\.projectName\}/);
+});

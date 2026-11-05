@@ -111,8 +111,12 @@ export function CompletionCalendar({initialJobs,today,canEdit}:Props){
                 {matching.length>0?<small style={{fontSize:10,color:"#64748b"}}>{matching.length} job{matching.length===1?"":"s"}</small>:null}
               </div>
               {matching.slice(0,expandedDay===day?matching.length:3).map(job=><button type="button" key={job.jobId} onClick={()=>setSelected(job)}
-                title={`${job.projectName} — ${job.clientName}\nCompleted by ${formatDate(job.dueDate)}`}
-                style={{display:"block",width:"100%",marginBottom:4,textAlign:"left",padding:"5px 6px",borderRadius:6,border:"1px solid #bfd7fd",borderLeft:`3px solid ${completed(job.status)?"#059669":day<today?"#dc2626":"#3068bb"}`,background:completed(job.status)?"#ecfdf5":"#eef5ff",fontSize:11,fontWeight:750,color:"#1e3a8a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",cursor:"pointer"}}>{job.projectName}</button>)}
+                title={`${job.clientName} — ${job.projectName}\nCompleted by ${formatDate(job.dueDate)}`}
+                aria-label={`${job.clientName} — ${job.projectName}, completed by ${formatDate(job.dueDate)}`}
+                style={{display:"block",width:"100%",marginBottom:4,textAlign:"left",padding:"5px 6px",borderRadius:6,border:"1px solid #bfd7fd",borderLeft:`3px solid ${completed(job.status)?"#059669":day<today?"#dc2626":"#3068bb"}`,background:completed(job.status)?"#ecfdf5":"#eef5ff",fontSize:11,fontWeight:750,color:"#1e3a8a",overflow:"hidden",cursor:"pointer"}}>
+                <span style={{display:"block",fontWeight:850,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.clientName}</span>
+                <span style={{display:"block",fontSize:10,fontWeight:600,color:"#475569",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{job.projectName}</span>
+              </button>)}
               {matching.length>3&&expandedDay!==day?<button type="button" onClick={()=>setExpandedDay(day)} style={{border:0,background:"none",color:"#475569",padding:2,fontSize:10,cursor:"pointer"}}>+{matching.length-3} more</button>:null}
             </div>;
           })}
