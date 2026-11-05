@@ -5,7 +5,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   createProjectPlanForProductionJob,
-  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep
+  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask
 } from "@/server/project-timelines";
 import type { ProjectTaskStatus } from "@/lib/project-timeline";
 
@@ -119,4 +119,29 @@ export async function scheduleProductionStepAction(form: FormData): Promise<void
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/projects");
   projectRedirect(projectId, "Production step added to timeline");
+}
+
+/** Called directly from the Gantt chart; no redirect or full task-form submission. */
+export async function rescheduleProjectTaskAction(input: {
+  projectId: string;
+  taskId: string;
+  plannedStart: string;
+  plannedEnd: string;
+  expectedStart: string;
+  expectedEnd: string;
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tenantId = await requireProjectManager();
+  if (!input.projectId || !input.taskId) return { ok: false, error: "Project or task is missing." };
+  try {
+    const updated = await rescheduleProjectTask(tenantId, input.projectId, input.taskId, input);
+    if (!updated) return {
+      ok: false,
+      error: "This task was changed elsewhere or is no longer available. Refresh and try again."
+    };
+    // These pages are force-dynamic. The chart refreshes once after success;
+    // invalidating the route here as well would trigger redundant re-render work.
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: errorText(error) };
+  }
 }

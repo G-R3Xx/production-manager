@@ -156,6 +156,39 @@ export function sydneyNowMinuteIndex(now = new Date()): number {
   return timelineMinuteIndex(`${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`);
 }
 
+
+/** Direct manipulation uses wall-clock minutes; changes never alter allocated work hours. */
+export type TimelineDragMode = "move" | "resize-start" | "resize-end";
+export function timelineDragSnapMinutes(zoom: TimelineZoom): number {
+  // Fine adjustment on a day, easier grabs on a week, date-level edits on a month.
+  return zoom === "day" ? 15 : zoom === "week" ? 30 : 1440;
+}
+export function timelineLocalDateTime(minuteIndex: number): string {
+  return new Date(minuteIndex * 60_000).toISOString().slice(0, 16);
+}
+export function timelineDragSchedule(
+  task: { plannedStart: string; plannedEnd: string },
+  mode: TimelineDragMode,
+  rawDeltaMinutes: number,
+  zoom: TimelineZoom
+): { plannedStart: string; plannedEnd: string } {
+  const start = timelineMinuteIndex(task.plannedStart);
+  const end = timelineMinuteIndex(task.plannedEnd);
+  const step = timelineDragSnapMinutes(zoom);
+  const delta = Math.round(rawDeltaMinutes / step) * step;
+  let nextStart = start;
+  let nextEnd = end;
+  if (mode === "move") {
+    nextStart += delta;
+    nextEnd += delta;
+  } else if (mode === "resize-start") {
+    nextStart = Math.min(start + delta, end - 15);
+  } else {
+    nextEnd = Math.max(end + delta, start + 15);
+  }
+  return { plannedStart: timelineLocalDateTime(nextStart), plannedEnd: timelineLocalDateTime(nextEnd) };
+}
+
 export function plannedHoursLabel(minutes: number): string {
   const hours = minutes / 60;
   return `${Number.isInteger(hours) ? hours : Number(hours.toFixed(2))}h`;

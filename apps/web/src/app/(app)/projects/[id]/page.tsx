@@ -108,7 +108,7 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
     </header>
     {message ? <div role="status" style={{ ...card, padding: 12, borderColor: "#86efac", color: "#166534" }}>{message}</div> : null}
     {error ? <div role="alert" style={{ ...card, padding: 12, borderColor: "#fca5a5", color: "#991b1b" }}>{error}</div> : null}
-    <GanttTimeline tasks={tasks} sections={subJobs} />
+    <GanttTimeline projectId={id} canEdit={canEdit} tasks={tasks} sections={subJobs} />
     {canEdit && productionSteps.length > 0 ? <details style={card}>
       <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17 }}>Add existing Production Steps to the timeline ({productionSteps.length})</summary>
       <p style={{ color: "#64748b", fontSize: 13, lineHeight: 1.5 }}>Scheduling a step links it to the original production checklist. Its completion status stays connected; the schedule and allocated hours are managed here.</p>

@@ -223,6 +223,38 @@ export async function updateProjectTask(tenantId: string, projectId: string, tas
   return (result.rowCount ?? 0) > 0;
 }
 
+/** Schedule-only write for direct Gantt manipulation. Does not overwrite task ownership,
+ * allocated labour, title, status or production checklist state. The expected timestamps
+ * prevent a stale browser tab from silently overwriting another planner's update. */
+export async function rescheduleProjectTask(
+  tenantId: string, projectId: string, taskId: string,
+  input: { plannedStart: string; plannedEnd: string; expectedStart: string; expectedEnd: string }
+): Promise<boolean> {
+  const next = parseProjectSchedule({
+    plannedStart: input.plannedStart, plannedEnd: input.plannedEnd, allocatedHours: "0"
+  });
+  // Validate original timestamps before passing them as SQL parameters too.
+  parseProjectSchedule({
+    plannedStart: input.expectedStart, plannedEnd: input.expectedEnd, allocatedHours: "0"
+  });
+  const result = await pool.query(`
+    WITH changed AS (
+      UPDATE production.project_timeline_tasks task
+         SET planned_start=$4::timestamp, planned_end=$5::timestamp, updated_at=now()
+        FROM production.project_plans p, production.production_jobs j
+       WHERE task.id=$3::uuid AND task.project_id=p.id AND p.id=$2::uuid
+         AND p.tenant_id=$1::uuid AND j.id=p.production_job_id AND j.tenant_id=p.tenant_id
+         AND j.status <> 'deleted'
+         AND task.planned_start=$6::timestamp AND task.planned_end=$7::timestamp
+       RETURNING task.project_id
+    )
+    UPDATE production.project_plans SET updated_at=now()
+     WHERE id IN (SELECT project_id FROM changed)
+  `, [tenantId, projectId, taskId,
+    next.plannedStart, next.plannedEnd, input.expectedStart, input.expectedEnd]);
+  return (result.rowCount ?? 0) > 0;
+}
+
 export async function deleteProjectTask(tenantId: string, projectId: string, taskId: string): Promise<boolean> {
   const result = await pool.query(`
     WITH removed AS (

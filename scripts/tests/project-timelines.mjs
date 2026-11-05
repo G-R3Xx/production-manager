@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseProjectSchedule, timelineDayIndex, timelineDayRange, timelinePosition, timelineMinuteIndex, timelineWindow, timelinePositionInWindow, timelineTaskRangeLabel, shiftTimelineFocus, plannedHoursLabel } from '../../apps/web/src/lib/project-timeline.ts';
+import { parseProjectSchedule, timelineDayIndex, timelineDayRange, timelinePosition, timelineMinuteIndex, timelineWindow, timelinePositionInWindow, timelineTaskRangeLabel, shiftTimelineFocus, plannedHoursLabel, timelineDragSchedule, timelineDragSnapMinutes } from '../../apps/web/src/lib/project-timeline.ts';
 const root = process.cwd();
 
 test('one task can span days with separately allocated labour hours', () => {
@@ -115,4 +115,65 @@ test('Gantt chart exposes clock labels and date navigation in the client compone
   assert.match(source, /Jump to timeline date/);
   assert.match(source, /Previous \$\{zoom\}/);
   assert.doesNotMatch(source, /timelinePosition\(task, model\.first, model\.last\)/);
+});
+
+
+test('dragging shifts start and finish by the same snapped wall-clock minutes', () => {
+  const task = { plannedStart: '2026-11-06T08:30', plannedEnd: '2026-11-06T09:30', allocatedMinutes: 60 };
+  assert.deepEqual(timelineDragSchedule(task, 'move', 60, 'day'), {
+    plannedStart: '2026-11-06T09:30', plannedEnd: '2026-11-06T10:30'
+  });
+  assert.deepEqual(timelineDragSchedule(task, 'move', -16, 'day'), {
+    plannedStart: '2026-11-06T08:15', plannedEnd: '2026-11-06T09:15'
+  });
+  assert.equal(task.allocatedMinutes, 60, 'drag changes schedule, not allocated work');
+  assert.equal(timelineDragSnapMinutes('day'), 15);
+  assert.equal(timelineDragSnapMinutes('week'), 30);
+  assert.equal(timelineDragSnapMinutes('month'), 1440);
+});
+
+test('resizing changes only one end, cannot invert or zero a short task', () => {
+  const task = { plannedStart: '2026-11-06T08:30', plannedEnd: '2026-11-06T09:30' };
+  assert.deepEqual(timelineDragSchedule(task, 'resize-start', 30, 'day'), {
+    plannedStart: '2026-11-06T09:00', plannedEnd: '2026-11-06T09:30'
+  });
+  assert.deepEqual(timelineDragSchedule(task, 'resize-end', 45, 'day'), {
+    plannedStart: '2026-11-06T08:30', plannedEnd: '2026-11-06T10:15'
+  });
+  assert.deepEqual(timelineDragSchedule(task, 'resize-end', -480, 'day'), {
+    plannedStart: '2026-11-06T08:30', plannedEnd: '2026-11-06T08:45'
+  });
+  assert.deepEqual(timelineDragSchedule(task, 'resize-start', 480, 'day'), {
+    plannedStart: '2026-11-06T09:15', plannedEnd: '2026-11-06T09:30'
+  });
+});
+
+test('week and month operations snap correctly across midnight/month boundaries', () => {
+  const task = { plannedStart: '2026-11-30T09:15', plannedEnd: '2026-12-01T12:45' };
+  assert.deepEqual(timelineDragSchedule(task, 'move', 1440, 'month'), {
+    plannedStart: '2026-12-01T09:15', plannedEnd: '2026-12-02T12:45'
+  });
+  assert.deepEqual(timelineDragSchedule(task, 'resize-start', -60, 'week'), {
+    plannedStart: '2026-11-30T08:15', plannedEnd: '2026-12-01T12:45'
+  });
+});
+
+test('Gantt direct save is permission-scoped and updates only dates, never task labour or completion', () => {
+  const source = fs.readFileSync('apps/web/src/server/project-timelines.ts', 'utf8');
+  const actions = fs.readFileSync('apps/web/src/app/(app)/projects/actions.ts', 'utf8');
+  const chart = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/GanttTimeline.tsx', 'utf8');
+  const page = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/page.tsx', 'utf8');
+  const saveQuery = source.split('export async function rescheduleProjectTask(')[1].split('export async function deleteProjectTask(')[0];
+  assert.match(saveQuery, /AND p\.tenant_id=\$1::uuid/);
+  assert.match(saveQuery, /task\.planned_start=\$6::timestamp AND task\.planned_end=\$7::timestamp/);
+  assert.match(saveQuery, /SET planned_start=\$4::timestamp, planned_end=\$5::timestamp/);
+  assert.doesNotMatch(saveQuery, /SET .*allocated_minutes|SET .*status=|SET .*assignee/);
+  assert.match(actions, /rescheduleProjectTaskAction[\s\S]*requireProjectManager\(\)/);
+  assert.match(page, /<GanttTimeline projectId=\{id\} canEdit=\{canEdit\}/);
+  assert.match(chart, /onPointerDown=\{event => beginDrag\(event, task\)\}/);
+  assert.match(chart, /onPointerMove=\{moveDrag\}/);
+  assert.match(chart, /onPointerUp=\{finishDrag\}/);
+  assert.match(chart, /setPointerCapture/);
+  assert.match(chart, /rescheduleProjectTaskAction\(/);
+  assert.match(chart, /setSavedDates\(previous =>/);
 });
