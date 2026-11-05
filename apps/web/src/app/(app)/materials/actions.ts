@@ -55,6 +55,7 @@ function materialInput(tenantId:string,formData:FormData,name:string,image:Uploa
   reversePrintable:readChecked(formData,'reversePrintable'),usedForBacking:readChecked(formData,'usedForBacking'),showAsInstallationOption:readChecked(formData,'showAsInstallationOption'),
   quoteAddOnEnabled:readChecked(formData,'quoteAddOnEnabled'),
   quoteAddOnProducts:readChecked(formData,'quoteAddOnEnabled')?normalizeFinishingProducts(formData.getAll('quoteAddOnProducts')):[],
+  standardCutMinutesPerSheet:(()=>{const value=readOptionalNumeric(formData,'standardCutMinutesPerSheet'); if(value!==null&&(Number(value)<0||Number(value)>240)) throw new Error('Cutting time must be from 0 to 240 minutes per sheet.'); return value;})(),
   stockUom:readString(formData,'stockUom')||'sheet',
   purchaseUom:readString(formData,'purchaseUom')||'sheet',stockQuantity:readRequiredNumeric(formData,'stockQuantity'),purchaseCost:readRequiredNumeric(formData,'purchaseCost'),
   wastagePercent:String(Math.max(0,Number(readRequiredNumeric(formData,'wastagePercent'))||0)),
@@ -238,6 +239,7 @@ export async function saveMaterialPriceManagerAction(formData: FormData) {
       syncQueued = queued.filter(Boolean).length;
     }
     revalidatePath("/materials");
+    revalidatePath("/quotes");
     return {
       ok: true as const,
       updated: result.updatedIds.length,

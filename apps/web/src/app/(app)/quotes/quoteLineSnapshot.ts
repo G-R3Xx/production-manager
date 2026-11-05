@@ -46,6 +46,7 @@ export type SnapshotMaterial = {
   showAsInstallationOption?: boolean;
   quoteAddOnEnabled?: boolean;
   quoteAddOnProducts?: string[];
+  standardCutMinutesPerSheet?: string | null;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -262,6 +263,7 @@ function snapshotMaterial(value: unknown): SnapshotMaterial | null {
     showAsInstallationOption: value.showAsInstallationOption === true || stringValue(value.showAsInstallationOption).trim().toLowerCase() === "true",
     quoteAddOnEnabled: value.quoteAddOnEnabled === true,
     quoteAddOnProducts: stringArray(value.quoteAddOnProducts),
+    standardCutMinutesPerSheet: stringValue(value.standardCutMinutesPerSheet) || (value.standardCutMinutesPerSheet === 0 ? "0" : null),
     supplierName: stringValue(value.supplierName) || null,
     sku: stringValue(value.sku) || null,
     stockUom: stringValue(value.stockUom) || null,

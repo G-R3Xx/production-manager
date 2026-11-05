@@ -25,7 +25,7 @@ const productKeys = groups.flatMap(group => group.options.map(option=>option.key
 assert.equal(productKeys.length, new Set(productKeys).size);
 for(const key of ['corflute','acm','acrylic','pvc','banner','other_sheet','business_cards','booklets','duplicate_books']) assert.ok(productKeys.includes(key));
 const materialPage=read(file('app/(app)/materials/page.tsx'));
-assert.match(materialPage, /key: option\.key, label: option\.label/);
+assert.match(materialPage, /QUOTE_FINISHING_PRODUCT_OPTIONS\.filter/);
 assert.doesNotMatch(materialPage, /key: String\(option\.key\)/);
 const materialForms=read(file('app/(app)/materials/MaterialForms.tsx'));
 const actions=read(file('app/(app)/materials/actions.ts'));

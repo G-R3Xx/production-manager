@@ -8,7 +8,7 @@ import { listSuppliersForTenant } from "@/server/suppliers";
 import { setMaterialActiveAction, syncMaterialToMyobAction } from "./actions";
 import { startPurchaseOrderAction } from "../purchasing/actions";
 import { CreateMaterialForm, EditMaterialForm } from "./MaterialForms";
-import { QUOTE_FINISHING_PRODUCT_GROUPS } from "@/lib/quote-finishing-addons";
+import { QUOTE_FINISHING_PRODUCT_OPTIONS } from "@/lib/quote-finishing-addons";
 import { AutoRefreshWhenPending } from "@/components/AutoRefreshWhenPending";
 import { MaterialPriceSheetManager } from "./MaterialPriceSheetManager";
 import { MaterialPriceManager } from "./MaterialPriceManager";
@@ -228,8 +228,9 @@ function MaterialCard({ material, suppliers, stockSources }: { material: Materia
           {material.reversePrintable ? <div style={{ marginTop: 3, color: "#155e75", fontSize: 12, fontWeight: 800 }}>Reverse printable</div> : null}
           {material.usedForBacking ? <div style={{ marginTop: 3, color: "#7c3aed", fontSize: 12, fontWeight: 800 }}>Used for backing</div> : null}
           {material.quoteAddOnEnabled ? <div style={{ marginTop: 4, color: "#155eef", fontSize: 12, fontWeight: 750 }}>
-            Quote finishing add-on: {QUOTE_FINISHING_PRODUCT_GROUPS.flatMap((group) => group.options.map((option) => ({ key: option.key, label: option.label }))).filter((option) => material.quoteAddOnProducts.includes(option.key)).map((option) => option.label).join(", ") || "No products selected"}
+            Quote finishing add-on: {QUOTE_FINISHING_PRODUCT_OPTIONS.filter((option) => material.quoteAddOnProducts.includes(option.key)).map((option) => option.label).join(", ") || "No products selected"}
           </div> : null}
+          {material.standardCutMinutesPerSheet != null ? <div style={{ marginTop: 3, color: "#475467", fontSize: 12 }}>Standard cutting: {material.standardCutMinutesPerSheet} min/sheet</div> : null}
           {material.stockSourceMaterialId ? <div style={{ marginTop: 3, color: "#3730a3", fontSize: 12, fontWeight: 850 }}>Sales variant · shares stock with {material.stockSourceName ?? "physical stock item"}</div> : null}
           <div style={{ marginTop: 4, color: "#475467", fontSize: 14 }}>{formatMaterialType(material.materialType)} · Stock {material.stockQuantity ?? "0"} {material.stockUom ?? "units"} · Cost ${material.purchaseCost ?? "0"}/{material.purchaseUom ?? "unit"}{material.salesMarkupMultiplier ? ` · Sales markup ×${material.salesMarkupMultiplier}` : ""}</div>
         </div>
@@ -353,6 +354,9 @@ export default async function MaterialsPage({ searchParams }: MaterialsPageProps
               purchaseCost: material.purchaseCost,
               wastagePercent: material.wastagePercent,
               showAsInstallationOption: material.showAsInstallationOption,
+              quoteAddOnEnabled: material.quoteAddOnEnabled,
+              quoteAddOnProducts: material.quoteAddOnProducts,
+              standardCutMinutesPerSheet: material.standardCutMinutesPerSheet,
               reversePrintable: material.reversePrintable,
               widthMm: material.widthMm,
               lengthMm: material.lengthMm,

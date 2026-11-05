@@ -26,6 +26,7 @@ export type MaterialRecord = {
   showAsInstallationOption: boolean;
   quoteAddOnEnabled: boolean;
   quoteAddOnProducts: QuoteFinishingProductKey[];
+  standardCutMinutesPerSheet: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -72,6 +73,7 @@ export type CreateMaterialInput = {
   showAsInstallationOption: boolean;
   quoteAddOnEnabled: boolean;
   quoteAddOnProducts: QuoteFinishingProductKey[];
+  standardCutMinutesPerSheet: string | null;
   stockUom: string;
   purchaseUom: string;
   stockQuantity: string;
@@ -263,6 +265,7 @@ export async function listQuoteMaterialsForTenant(tenantId: string): Promise<Mat
       COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
       COALESCE(m.cost_json ->> 'quoteAddOnEnabled', 'false') = 'true' AS "quoteAddOnEnabled",
       CASE WHEN jsonb_typeof(m.cost_json -> 'quoteAddOnProducts') = 'array' THEN m.cost_json -> 'quoteAddOnProducts' ELSE '[]'::jsonb END AS "quoteAddOnProducts",
+      m.cost_json ->> 'standardCutMinutesPerSheet' AS "standardCutMinutesPerSheet",
       stock.stock_uom AS "stockUom",
       stock.purchase_uom AS "purchaseUom",
       stock.stock_quantity::text AS "stockQuantity",
@@ -333,6 +336,7 @@ export async function listMaterialsForTenant(tenantId: string): Promise<Material
       COALESCE(m.cost_json ->> 'showAsInstallationOption', 'false') = 'true' AS "showAsInstallationOption",
       COALESCE(m.cost_json ->> 'quoteAddOnEnabled', 'false') = 'true' AS "quoteAddOnEnabled",
       CASE WHEN jsonb_typeof(m.cost_json -> 'quoteAddOnProducts') = 'array' THEN m.cost_json -> 'quoteAddOnProducts' ELSE '[]'::jsonb END AS "quoteAddOnProducts",
+      m.cost_json ->> 'standardCutMinutesPerSheet' AS "standardCutMinutesPerSheet",
       stock.stock_uom AS "stockUom",
       stock.purchase_uom AS "purchaseUom",
       stock.stock_quantity::text AS "stockQuantity",
@@ -517,7 +521,7 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
       $6::varchar,$7::varchar,$8::varchar,$9::material_type,$10::varchar,$11::varchar,
       $12::numeric,$13::numeric,$14::boolean,$15::boolean,
       $16::varchar,$17::varchar,$18::numeric,$19::numeric,
-      jsonb_build_object('purchaseCost',$19::numeric,'wastagePercent',$20::numeric,'showAsInstallationOption',$26::boolean, 'quoteAddOnEnabled',$30::boolean, 'quoteAddOnProducts',$31::jsonb),
+      jsonb_build_object('purchaseCost',$19::numeric,'wastagePercent',$20::numeric,'showAsInstallationOption',$26::boolean, 'quoteAddOnEnabled',$30::boolean, 'quoteAddOnProducts',$31::jsonb,'standardCutMinutesPerSheet',$32::numeric),
       $21::numeric,$22::numeric,$23::numeric,$24::numeric,$25::varchar,
       $27::text,$28::text,$29::varchar,
       true,now(),now()
@@ -554,7 +558,8 @@ export async function createMaterial(input: CreateMaterialInput): Promise<{ id: 
     saved.quoteImageStoragePath,
     saved.quoteVisualCategory,
     saved.quoteAddOnEnabled,
-    JSON.stringify(normalizeFinishingProducts(saved.quoteAddOnProducts))
+    JSON.stringify(normalizeFinishingProducts(saved.quoteAddOnProducts)),
+    saved.standardCutMinutesPerSheet
   ]);
   return result.rows[0];
 }
@@ -584,7 +589,7 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
       purchase_uom=$18::varchar,
       stock_quantity=$19::numeric,
       purchase_cost=$20::numeric,
-      cost_json=COALESCE(cost_json,'{}'::jsonb) || jsonb_build_object('purchaseCost',$20::numeric,'wastagePercent',$21::numeric,'showAsInstallationOption',$27::boolean, 'quoteAddOnEnabled',$31::boolean, 'quoteAddOnProducts',$32::jsonb),
+      cost_json=COALESCE(cost_json,'{}'::jsonb) || jsonb_build_object('purchaseCost',$20::numeric,'wastagePercent',$21::numeric,'showAsInstallationOption',$27::boolean, 'quoteAddOnEnabled',$31::boolean, 'quoteAddOnProducts',$32::jsonb,'standardCutMinutesPerSheet',$33::numeric),
       width_mm=$22::numeric,
       length_mm=$23::numeric,
       roll_width_mm=$24::numeric,
@@ -627,7 +632,8 @@ export async function updateMaterial(input: UpdateMaterialInput): Promise<void> 
     saved.quoteImageStoragePath,
     saved.quoteVisualCategory,
     saved.quoteAddOnEnabled,
-    JSON.stringify(normalizeFinishingProducts(saved.quoteAddOnProducts))
+    JSON.stringify(normalizeFinishingProducts(saved.quoteAddOnProducts)),
+    saved.standardCutMinutesPerSheet
   ]);
 }
 
@@ -701,6 +707,9 @@ export type MaterialPriceManagerChange = {
   purchaseCost: string;
   wastagePercent: string;
   showAsInstallationOption: boolean;
+  quoteAddOnEnabled: boolean;
+  quoteAddOnProducts: QuoteFinishingProductKey[];
+  standardCutMinutesPerSheet: string | null;
   reversePrintable: boolean;
   widthMm: string | null;
   lengthMm: string | null;
@@ -816,6 +825,11 @@ export async function saveMaterialPriceManagerChanges(
       const purchaseCost = cleanMaterialManagerNumber(rawChange.purchaseCost) ?? "0";
       const wastagePercent = String(Math.max(0, Number(cleanMaterialManagerNumber(rawChange.wastagePercent) ?? "0") || 0));
       const showAsInstallationOption = rawChange.showAsInstallationOption === true;
+      const quoteAddOnEnabled = rawChange.quoteAddOnEnabled === true;
+      const quoteAddOnProducts = quoteAddOnEnabled ? normalizeFinishingProducts(rawChange.quoteAddOnProducts) : [];
+      const standardCutMinutesPerSheet = cleanMaterialManagerNumber(rawChange.standardCutMinutesPerSheet, true);
+      if (standardCutMinutesPerSheet !== null && Number(standardCutMinutesPerSheet) > 240) throw new Error("Standard cutting minutes cannot exceed 240 per sheet.");
+      if (quoteAddOnEnabled && !quoteAddOnProducts.length) throw new Error(`Select at least one base product for '${name}' or disable the finishing add-on.`);
       const reversePrintable = rawChange.reversePrintable === true && materialType === "roll_media";
       const widthMm = cleanMaterialManagerNumber(rawChange.widthMm, true);
       const lengthMm = cleanMaterialManagerNumber(rawChange.lengthMm, true);
@@ -837,13 +851,13 @@ export async function saveMaterialPriceManagerChanges(
           ) VALUES (
             $1::uuid,$2::uuid,null,$3::varchar,$4::varchar,$5::varchar,$6::material_type,$7::varchar,$8::varchar,
             $21::numeric,$22::numeric,$23::boolean,false,$9::varchar,$10::varchar,$11::numeric,$12::numeric,$14::numeric,$15::numeric,$16::numeric,$17::numeric,$20::varchar,null,
-            jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'priceManagerSource','in-app')
+            jsonb_build_object('purchaseCost',$12::numeric,'wastagePercent',$13::numeric,'showAsInstallationOption',$19::boolean,'quoteAddOnEnabled',$24::boolean,'quoteAddOnProducts',$25::jsonb,'standardCutMinutesPerSheet',$26::numeric,'priceManagerSource','in-app')
               || CASE WHEN $18::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$18::text) END
               || CASE WHEN $20::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteVisualCategory',$20::text) END,
             true,now(),now()
           )
           RETURNING id
-        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres, reversePrintable]);
+        `, [tenantId, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres, reversePrintable, quoteAddOnEnabled, JSON.stringify(quoteAddOnProducts), standardCutMinutesPerSheet]);
         const id = created.rows[0]?.id;
         if (!id) throw new Error(`Could not add material '${name}'.`);
         createdIds.push(id);
@@ -872,13 +886,13 @@ export async function saveMaterialPriceManagerChanges(
             gsm=$18::numeric,
             quote_visual_category=$21::varchar,
             cost_json=(COALESCE(cost_json,'{}'::jsonb)-'priceCheckedAt'-'quoteVisualCategory')
-              || jsonb_build_object('purchaseCost',$13::numeric,'wastagePercent',$14::numeric,'showAsInstallationOption',$20::boolean,'priceManagerSource','in-app')
+              || jsonb_build_object('purchaseCost',$13::numeric,'wastagePercent',$14::numeric,'showAsInstallationOption',$20::boolean,'quoteAddOnEnabled',$25::boolean,'quoteAddOnProducts',$26::jsonb,'standardCutMinutesPerSheet',$27::numeric,'priceManagerSource','in-app')
               || CASE WHEN $19::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('priceCheckedAt',$19::text) END
               || CASE WHEN $21::text IS NULL THEN '{}'::jsonb ELSE jsonb_build_object('quoteVisualCategory',$21::text) END,
             updated_at=now()
         WHERE tenant_id=$1::uuid AND id=$2::uuid
         RETURNING id
-      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres, reversePrintable]);
+      `, [tenantId, rawChange.id, supplierId, name, customerFacingName, sku, toLegacyMaterialType(materialType), materialType, group, stockUom, purchaseUom, stockQuantity, purchaseCost, wastagePercent, widthMm, lengthMm, rollWidthMm, gsm, priceCheckedAt, showAsInstallationOption, quoteVisualCategory, minimumBillableSheetFraction, rollBillingIncrementMetres, reversePrintable, quoteAddOnEnabled, JSON.stringify(quoteAddOnProducts), standardCutMinutesPerSheet]);
       if (!result.rows[0]?.id) throw new Error(`Material '${name}' no longer exists.`);
       updatedIds.push(rawChange.id);
 

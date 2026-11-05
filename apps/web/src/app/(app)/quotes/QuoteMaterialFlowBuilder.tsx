@@ -2,6 +2,7 @@
 
 import { isPassThroughDispatchService, passThroughUnitPrice } from "@/lib/dispatch-pricing";
 import { finishingMaterialAvailable } from "@/lib/quote-finishing-addons";
+import { allocatedStandardSheetCutting } from "@/lib/standard-sheet-cutting";
 
 import { useEffect, useMemo, useState, useTransition, type FormEvent, type KeyboardEvent } from "react";
 import { useRouter } from "next/navigation";
@@ -22,6 +23,7 @@ export type QuoteMaterial = {
   showAsInstallationOption?: boolean;
   quoteAddOnEnabled?: boolean;
   quoteAddOnProducts?: string[];
+  standardCutMinutesPerSheet?: string | null;
   supplierName?: string | null;
   sku?: string | null;
   stockUom?: string | null;
@@ -1217,6 +1219,7 @@ function snapshotMaterialForSave(material: QuoteMaterial | undefined): SnapshotM
     showAsInstallationOption: material.showAsInstallationOption === true,
     quoteAddOnEnabled: material.quoteAddOnEnabled === true,
     quoteAddOnProducts: material.quoteAddOnProducts ?? [],
+    standardCutMinutesPerSheet: material.standardCutMinutesPerSheet ?? null,
     supplierName: material.supplierName ?? null,
     sku: material.sku ?? null,
     stockUom: material.stockUom ?? null,
@@ -2169,6 +2172,26 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
           const sheetUse = sheetUsageForQuoteLine(selectedMainMaterial, usageWidth, usageHeight, quantityNumber);
           const rate = sheetUnitRate(selectedMainMaterial);
           rows.push({ label: "Base material", detail: selectedMainMaterial.name, amount: sheetUse.amount, unit: "sheet", rate: rate.rate, cost: sheetUse.amount * rate.rate, note: [spacingUsageNote || null, sheetUse.note, rate.note].filter(Boolean).join(" · ") || undefined });
+          const standardCut = allocatedStandardSheetCutting({
+            baseType,
+            configuredMinutesPerSheet: selectedMainMaterial.standardCutMinutesPerSheet,
+            calculatedSheetUse: sheetUse.calculatedTotal,
+            finishedQuantity: quantityNumber,
+            specialtyCutSelected: finishings.includes("jingwei")
+          });
+          if (standardCut.minutesPerItem > 0) {
+            const perSheetMinutes = standardCut.minutesPerSheet;
+            const labourRatePerMinute = jingweiLabourRate / 60;
+            rows.push({
+              label: "Standard sheet cutting",
+              detail: selectedMainMaterial.name,
+              amount: standardCut.minutesPerItem,
+              unit: "min",
+              rate: labourRatePerMinute,
+              cost: standardCut.minutesPerItem * labourRatePerMinute,
+              note: `${usage(perSheetMinutes)} min/parent sheet · ${usage(sheetUse.calculatedTotal)} allocated sheets across ${usage(quantityNumber)} signs · ${money(jingweiLabourRate)}/hr${finishings.includes("jingwei") ? " · specialty cut replaces standard" : ""}`
+            });
+          }
         }
       }
 
@@ -2691,7 +2714,7 @@ export function QuoteMaterialFlowBuilder({ quoteId, materials, subJobId = null, 
     }
 
     return rows;
-  }, [flowType, selectedMainMaterial, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, effectiveEyeletMaterial, eyeletOperation, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, selectedFinishingAddOns, finishingAddOnQty, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, labourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
+  }, [flowType, selectedMainMaterial, baseType, areaSqm, width, height, usageWidth, usageHeight, spacingUsageNote, artworkChoice, artworkMinutes, printed, printSetupMinutes, printSetupLabourBasis, printAutomaticLabour, selectedMedia, needsAdditionalMediaCost, sideMultiplier, resolvedPrintMethod, needsInkStep, ink, backingApplicable, selectedBacking, backingId, selectedBackingGroup, selectedLaminate, laminateId, laminateMinutes, laminateLabourBasis, laminateAutomaticLabour, finishings, finishingMinutes, finishingLabourBasis, signageFinishingAutomaticLabour, signageFinishingLabourRates, eyeletPresetLabel, customEyeletQty, eyeletMaterial, effectiveEyeletMaterial, eyeletOperation, panelStandoffsApplicable, selectedStandoffMaterial, standoffQtyPerItem, selectedSmallStock, quantityNumber, smallPrintColour, sides, selectedSmallCoating, smallCoatingId, smallFinishings, smallFinishingMinutes, smallFinishingLabourBasis, smallFinishingDefaultBasis, smallFinishingAutomaticLabour, smallFinishingLabourRates, isDuplicateBook, ncrSetsPerBook, ncrCopiesCount, ncrPageColours, serviceType, deliveryCharge, installCrewSize, installMinutes, installLabourBasis, travelCharge, accessEquipmentDailyCharge, accessEquipmentType, serviceFixings, serviceFixingQty, serviceFixingRate, materialPool, selectedFinishingAddOns, finishingAddOnQty, otherConsumableTitle, componentParts, componentLabourMinutes, componentLabourLabel, componentName, labourRate, jingweiLabourRate, monoRatePerSqm, inkRatePerSqm, inkBillingIncrementSqm, isPrintDepartment, effectiveDropDirection, safeDropOverlapMm, dropLayoutPreview]);
 
   const serviceLabel = serviceTypes.find((item) => item.key === serviceType)?.label;
   const rawCost = costs.reduce((total, row) => total + row.cost, 0);

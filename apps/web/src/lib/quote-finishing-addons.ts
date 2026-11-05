@@ -22,6 +22,11 @@ export const QUOTE_FINISHING_PRODUCT_GROUPS = [
 ] as const;
 
 export type QuoteFinishingProductKey = typeof QUOTE_FINISHING_PRODUCT_GROUPS[number]["options"][number]["key"];
+const quoteFinishingProductOptions: Array<{ key: QuoteFinishingProductKey; label: string }> = [];
+for (const group of QUOTE_FINISHING_PRODUCT_GROUPS) {
+  for (const option of group.options) quoteFinishingProductOptions.push(option);
+}
+export const QUOTE_FINISHING_PRODUCT_OPTIONS: ReadonlyArray<{ key: QuoteFinishingProductKey; label: string }> = quoteFinishingProductOptions;
 const allowedKeys: ReadonlySet<string> = new Set(QUOTE_FINISHING_PRODUCT_GROUPS.flatMap((group) => group.options.map((option) => option.key)));
 
 export function normalizeFinishingProducts(value: unknown): QuoteFinishingProductKey[] {

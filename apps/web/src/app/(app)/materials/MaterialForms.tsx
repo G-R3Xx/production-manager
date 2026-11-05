@@ -30,6 +30,7 @@ type MaterialFormRecord = {
   showAsInstallationOption: boolean;
   quoteAddOnEnabled: boolean;
   quoteAddOnProducts: string[];
+  standardCutMinutesPerSheet: string | null;
   stockUom: string | null;
   purchaseUom: string | null;
   stockQuantity: string | null;
@@ -594,6 +595,9 @@ function MaterialFormBody({ suppliers, stockSources, material, submitLabel }: { 
           <div style={helperStyle}>Select at least one product. These settings affect new quotes; existing accepted quote prices are not changed.</div>
         </> : null}
       </div>
+      <Field label="Standard cutting labour per parent sheet (minutes)" helper="Corflute and ACM default to 5 minutes per parent sheet. Leave blank for that default; use 0 to switch off standard cutting. Cutting is divided by the number of finished signs per parent sheet. Specialty Jingwei cutting replaces it.">
+        <input name="standardCutMinutesPerSheet" type="number" min="0" max="240" step="0.1" placeholder="Auto (Corflute / ACM: 5 min)" defaultValue={material?.standardCutMinutesPerSheet ?? ""} style={inputStyle} />
+      </Field>
       <Field label="Notes">
         <textarea
           name="notes"

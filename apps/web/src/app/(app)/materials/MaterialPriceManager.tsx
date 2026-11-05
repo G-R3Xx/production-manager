@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { saveMaterialPriceManagerAction, saveMaterialPriceManagerQuoteImageAction } from "./actions";
 import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
 import { normalizeQuoteImageFile, normalizeQuoteImageUrl } from "@/lib/quote-image-normalize";
+import { QUOTE_FINISHING_PRODUCT_GROUPS, QUOTE_FINISHING_PRODUCT_OPTIONS, normalizeFinishingProducts, type QuoteFinishingProductKey } from "@/lib/quote-finishing-addons";
 
 type MaterialManagerSource = {
   id: string;
@@ -20,6 +21,9 @@ type MaterialManagerSource = {
   purchaseCost: string;
   wastagePercent: string;
   showAsInstallationOption: boolean;
+  quoteAddOnEnabled: boolean;
+  quoteAddOnProducts: QuoteFinishingProductKey[];
+  standardCutMinutesPerSheet: string | null;
   reversePrintable: boolean;
   widthMm: string | null;
   lengthMm: string | null;
@@ -55,6 +59,9 @@ type GridRow = {
   purchaseCost: string;
   wastagePercent: string;
   showAsInstallationOption: boolean;
+  quoteAddOnEnabled: boolean;
+  quoteAddOnProducts: QuoteFinishingProductKey[];
+  standardCutMinutesPerSheet: string;
   reversePrintable: boolean;
   widthMm: string;
   lengthMm: string;
@@ -211,6 +218,9 @@ function rowsFromMaterials(materials: MaterialManagerSource[]): GridRow[] {
     purchaseCost: String(material.purchaseCost ?? ""),
     wastagePercent: String(material.wastagePercent ?? "0"),
     showAsInstallationOption: material.showAsInstallationOption === true,
+    quoteAddOnEnabled: material.quoteAddOnEnabled === true,
+    quoteAddOnProducts: normalizeFinishingProducts(material.quoteAddOnProducts),
+    standardCutMinutesPerSheet: material.standardCutMinutesPerSheet ?? "",
     reversePrintable: material.reversePrintable === true,
     widthMm: material.widthMm ?? "",
     lengthMm: material.lengthMm ?? "",
@@ -250,6 +260,14 @@ function usesRollBilling(type: string): boolean {
   return ["roll_media", "roll_laminate", "cello_stock"].includes(canonicalType(type));
 }
 
+function finishingProductsSummary(products: readonly QuoteFinishingProductKey[]): string {
+  const labels = QUOTE_FINISHING_PRODUCT_OPTIONS
+    .filter((option) => products.includes(option.key))
+    .map((option) => option.label);
+  if (!labels.length) return "Choose products…";
+  return labels.length > 2 ? `${labels.slice(0, 2).join(", ")} +${labels.length - 2}` : labels.join(", ");
+}
+
 function unitCost(row: GridRow): number {
   const cost = Number(String(row.purchaseCost).replace(/,/g, ""));
   const qty = Number(String(row.stockQuantity).replace(/,/g, ""));
@@ -279,6 +297,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
   const [isPending, startTransition] = useTransition();
   const [imageBusy, setImageBusy] = useState<Set<string>>(() => new Set());
   const [normalizingImages, setNormalizingImages] = useState(false);
+  const [addOnProductEditorKey, setAddOnProductEditorKey] = useState<string | null>(null);
   const dirtyCountRef = useRef(0);
 
   useEffect(() => { dirtyCountRef.current = dirty.size; }, [dirty]);
@@ -321,6 +340,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
 
   const supplierNames = useMemo(() => [...new Set(suppliers.filter((supplier) => supplier.isActive).map((supplier) => supplier.displayName).filter(Boolean))].sort((a, b) => a.localeCompare(b)), [suppliers]);
   const sections = SECTIONS[group];
+  const editingAddOnRow = rows.find((row) => row.key === addOnProductEditorKey) ?? null;
 
   useEffect(() => {
     if (section !== "all" && !SECTIONS[group].some((item) => item.key === section)) setSection("all");
@@ -349,6 +369,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       if (row.key !== key) return row;
       const next = { ...row, [field]: value } as GridRow;
       if (field === "purchaseCost") next.priceCheckedAt = todayLocal();
+      if (field === "quoteAddOnEnabled" && value === false) next.quoteAddOnProducts = [];
       if (field === "action") {
         if (value === "HIDE" || value === "ARCHIVE") next.active = false;
         else if (value === "RESTORE") next.active = true;
@@ -367,6 +388,18 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     markDirty(key);
   }
 
+  function toggleAddOnProduct(key: string, product: QuoteFinishingProductKey, checked: boolean) {
+    setRows((current) => current.map((row) => {
+      if (row.key !== key) return row;
+      const products = normalizeFinishingProducts(
+        checked ? [...row.quoteAddOnProducts, product] : row.quoteAddOnProducts.filter((item) => item !== product)
+      );
+      // Selecting a first product enables the add-on. Removing the last disables it.
+      return { ...row, quoteAddOnProducts: products, quoteAddOnEnabled: products.length > 0 };
+    }));
+    markDirty(key);
+  }
+
   function addMaterial() {
     const currentSection = section === "all" ? sections[0] : sections.find((item) => item.key === section) ?? sections[0];
     const materialType = currentSection.defaultType;
@@ -374,7 +407,7 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     const key = `new-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     setRows((current) => [...current, {
       key, id: null, action: "ADD", materialGroup: group, materialType, name: "", customerFacingName: "", supplierName: "", sku: "",
-      purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, reversePrintable: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
+      purchaseUom: uoms.purchaseUom, stockUom: uoms.stockUom, stockQuantity: ["paper_stock", "card_stock"].includes(materialType) ? "1000" : "", purchaseCost: "", wastagePercent: "0", showAsInstallationOption: false, quoteAddOnEnabled: false, quoteAddOnProducts: [], standardCutMinutesPerSheet: "", reversePrintable: false, widthMm: "", lengthMm: "", rollWidthMm: "", gsm: "",
       priceCheckedAt: todayLocal(), active: true, savedState: "active", quoteImageUrl: null, quoteImageStoragePath: null, quoteVisualCategory: "", minimumBillableSheetFraction: "", rollBillingIncrementMetres: ""
     }]);
     setSection(currentSection.key);
@@ -390,12 +423,14 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
 
   function removeNewRow(key: string) {
     setRows((current) => current.filter((row) => row.key !== key));
+    setAddOnProductEditorKey((current) => current === key ? null : current);
     setDirty((current) => { const next = new Set(current); next.delete(key); return next; });
   }
 
   function discardChanges() {
     if (dirty.size && !window.confirm(`Discard ${dirty.size} unsaved material change${dirty.size === 1 ? "" : "s"}?`)) return;
     setRows(rowsFromMaterials(materials));
+    setAddOnProductEditorKey(null);
     setDirty(new Set());
     setMessage(""); setError("");
   }
@@ -405,6 +440,8 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
     if (!changedRows.length) return;
     const invalid = changedRows.find((row) => !row.name.trim());
     if (invalid) { setError("Every new or edited material needs an internal material name before saving."); return; }
+    const missingAddOnProducts = changedRows.find((row) => row.quoteAddOnEnabled && !row.quoteAddOnProducts.length);
+    if (missingAddOnProducts) { setError(`Choose at least one base product for ${missingAddOnProducts.name}, or untick Quote add-on.`); return; }
     if (!window.confirm(`Save ${changedRows.length} material change${changedRows.length === 1 ? "" : "s"}?\n\nExisting quotes and historical jobs will not be repriced.`)) return;
 
     const payload = changedRows.map((row) => ({
@@ -422,6 +459,9 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       purchaseCost: row.purchaseCost,
       wastagePercent: row.wastagePercent,
       showAsInstallationOption: row.showAsInstallationOption,
+      quoteAddOnEnabled: row.quoteAddOnEnabled,
+      quoteAddOnProducts: row.quoteAddOnEnabled ? row.quoteAddOnProducts : [],
+      standardCutMinutesPerSheet: row.standardCutMinutesPerSheet || null,
       reversePrintable: row.reversePrintable,
       widthMm: row.widthMm || null,
       lengthMm: row.lengthMm || null,
@@ -461,7 +501,13 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       // refresh (and re-downloading quote thumbnails) after every ordinary price edit.
       // New rows need the database-generated ID; new supplier placeholders need the
       // refreshed supplier list, so only those cases refresh the page.
-      if (changedRows.some((row) => !row.id) || result.supplierPlaceholders > 0) router.refresh();
+      const addOnSettingsChanged = changedRows.some((row) => {
+        const original = materials.find((item) => item.id === row.id);
+        return Boolean(original) && (row.quoteAddOnEnabled !== original!.quoteAddOnEnabled ||
+          JSON.stringify(row.quoteAddOnProducts) !== JSON.stringify(normalizeFinishingProducts(original!.quoteAddOnProducts)) ||
+          row.standardCutMinutesPerSheet !== (original!.standardCutMinutesPerSheet ?? ""));
+      });
+      if (changedRows.some((row) => !row.id) || result.supplierPlaceholders > 0 || addOnSettingsChanged) router.refresh();
     });
   }
 
@@ -570,10 +616,10 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
       </div>
 
       <div style={{ width: "100%", minWidth: 0, overflowX: "auto", maxHeight: 620, overflowY: "auto" }}>
-        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 2060, fontSize: 13 }}>
+        <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 0, minWidth: 2280, fontSize: 13 }}>
           <thead style={{ position: "sticky", top: 0, zIndex: 2 }}>
             <tr style={{ background: "#f9fafb", color: "#344054", textAlign: "left" }}>
-              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Billing increment", "Reverse printable", "Install option", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
+              {["Action", "Material", "Client name", "Supplier", "SKU", "Type", "Quote category", "Quote add-on", "Base products", "Quote image", "Purchase UOM", "Stock UOM", "Pack / roll qty", "Purchase cost", "Waste %", "Billing increment", "Reverse printable", "Install option", "Cut min/sheet", "Unit cost", "Price checked", "Width mm", "Length mm", "Roll width", "GSM", ""].map((label, index) => <th key={label || "controls"} style={{
                 padding: "9px 8px",
                 borderBottom: "1px solid #e4e7ec",
                 whiteSpace: "nowrap",
@@ -602,6 +648,14 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105 }}><input value={row.sku} onChange={(event) => updateRow(row.key, "sku", event.target.value)} style={cellInputStyle} placeholder="SKU" /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 150 }}><select value={row.materialType} onChange={(event) => updateRow(row.key, "materialType", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }}>{TYPE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 150 }}><select value={row.quoteVisualCategory} onChange={(event) => updateRow(row.key, "quoteVisualCategory", event.target.value)} style={{ ...cellInputStyle, background: "#fff" }}>{QUOTE_CATEGORY_OPTIONS.map(([value, label]) => <option key={value || "auto"} value={value}>{label}</option>)}</select></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 100, textAlign: "center" }}>
+                  <input type="checkbox" checked={row.quoteAddOnEnabled} onChange={(event) => updateRow(row.key, "quoteAddOnEnabled", event.target.checked)} title="Offer this material as an optional finishing add-on for selected base products" aria-label={`Quote finishing add-on for ${row.name}`} />
+                </td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 215 }}>
+                  <button type="button" onClick={() => setAddOnProductEditorKey(row.key)} disabled={isPending} title="Choose the base products that can offer this material" style={{ width: "100%", minHeight: 34, borderRadius: 8, border: "1px solid #cbd5e1", background: row.quoteAddOnEnabled ? "#eff6ff" : "#fff", color: row.quoteAddOnEnabled ? "#1d4ed8" : "#475467", padding: "4px 8px", fontSize: 12, fontWeight: 800, textAlign: "left", cursor: isPending ? "wait" : "pointer" }}>
+                    {finishingProductsSummary(row.quoteAddOnProducts)}
+                  </button>
+                </td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 175 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
                     <div style={{ width: 40, height: 40, border: "1px solid #e4e7ec", borderRadius: 7, background: "#f8fafc", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto" }}>
@@ -642,6 +696,9 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
                   {canonicalType(row.materialType) === "roll_media" ? <input type="checkbox" checked={row.reversePrintable} onChange={(event) => updateRow(row.key, "reversePrintable", event.target.checked)} title="Allow this clear roll media to be reverse printed for viewing through the face" /> : <span style={{ color: "#98a2b3", fontWeight: 700 }}>—</span>}
                 </td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "center" }}><input type="checkbox" checked={row.showAsInstallationOption} onChange={(event) => updateRow(row.key, "showAsInstallationOption", event.target.checked)} title="Show this material as a selectable item on Install quote lines" /></td>
+                <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 120 }}>
+                  {usesSheetBilling(row.materialType) ? <input type="number" min="0" max="240" step="0.1" value={row.standardCutMinutesPerSheet} onChange={(event) => updateRow(row.key, "standardCutMinutesPerSheet", event.target.value)} placeholder="Auto" title="Corflute / ACM: 5 minutes per parent sheet by default. 0 disables. Specialty cutting replaces standard." style={{ ...cellInputStyle, textAlign: "right" }} /> : <span style={{ color: "#98a2b3" }}>—</span>}
+                </td>
                 <td style={{ padding: "5px 10px", borderBottom: "1px solid #eaecf0", minWidth: 105, textAlign: "right", fontWeight: 850, color: "#0f766e", whiteSpace: "nowrap" }}>{money.format(unitCost(row))}</td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 135 }}><input type="date" value={row.priceCheckedAt} onChange={(event) => updateRow(row.key, "priceCheckedAt", event.target.value)} style={cellInputStyle} /></td>
                 <td style={{ padding: 5, borderBottom: "1px solid #eaecf0", minWidth: 88 }}><input inputMode="decimal" value={row.widthMm} onChange={(event) => updateRow(row.key, "widthMm", event.target.value)} style={{ ...cellInputStyle, textAlign: "right" }} /></td>
@@ -658,6 +715,35 @@ export function MaterialPriceManager({ tenantId, materials, suppliers }: { tenan
         </table>
         {!visibleRows.length ? <div style={{ padding: 30, textAlign: "center", color: "#667085" }}>No materials match this department/type filter.</div> : null}
       </div>
+
+      {editingAddOnRow ? (
+        <div role="presentation" style={{ position: "fixed", inset: 0, zIndex: 100, background: "rgba(15,23,42,0.55)", display: "grid", placeItems: "center", padding: 16 }}>
+          <div role="dialog" aria-modal="true" aria-labelledby="pm-finishing-products-title" style={{ width: "min(640px, 100%)", maxHeight: "min(85vh, 750px)", overflowY: "auto", background: "#fff", borderRadius: 16, boxShadow: "0 22px 65px rgba(0,0,0,0.25)", padding: 20, display: "grid", gap: 14 }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <h3 id="pm-finishing-products-title" style={{ margin: 0, fontSize: 19 }}>Finishing add-on — base products</h3>
+                <p style={{ color: "#475467", margin: "6px 0 0", fontSize: 13 }}>{editingAddOnRow.name || "New material"} · Select where this material is offered in the quote builder.</p>
+              </div>
+              <button type="button" onClick={() => setAddOnProductEditorKey(null)} aria-label="Close product chooser" style={{ border: "1px solid #d0d5dd", borderRadius: 9, background: "#fff", padding: "6px 11px", cursor: "pointer", fontWeight: 800 }}>×</button>
+            </div>
+            {QUOTE_FINISHING_PRODUCT_GROUPS.map((group) => (
+              <fieldset key={group.title} style={{ border: "1px solid #dbeafe", borderRadius: 11, padding: 12 }}>
+                <legend style={{ padding: "0 6px", fontWeight: 850, color: "#1d4ed8" }}>{group.title}</legend>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 11 }}>
+                  {group.options.map((option) => (
+                    <label key={option.key} style={{ display: "flex", alignItems: "center", gap: 9, fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                      <input type="checkbox" checked={editingAddOnRow.quoteAddOnProducts.includes(option.key)} onChange={(event) => toggleAddOnProduct(editingAddOnRow.key, option.key, event.target.checked)} />
+                      {option.label}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            ))}
+            <p style={{ color: "#475467", fontSize: 12, margin: 0 }}>Selecting a product automatically enables the add-on. Clear all products to disable it. Changes are saved using the table’s Save changes button.</p>
+            <div style={{ display: "flex", justifyContent: "flex-end" }}><button type="button" onClick={() => setAddOnProductEditorKey(null)} style={{ border: "none", borderRadius: 9, background: "#2563eb", color: "#fff", fontWeight: 850, minHeight: 40, padding: "0 18px", cursor: "pointer" }}>Done</button></div>
+          </div>
+        </div>
+      ) : null}
 
       <datalist id="pm-material-suppliers">{supplierNames.map((name) => <option key={name} value={name} />)}</datalist>
       <div style={{ padding: "11px 16px", borderTop: "1px solid #e4e7ec", background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", color: "#667085", fontSize: 12 }}>
