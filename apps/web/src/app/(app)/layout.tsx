@@ -15,7 +15,7 @@ type AppLayoutProps = {
 
 export const preferredRegion = "syd1";
 
-const APP_VERSION = "V26.11.05.04";
+const APP_VERSION = "V26.11.05.05";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
@@ -25,6 +25,7 @@ const navItems = [
   { href: "/quotes", label: "Quotes", emoji: "$" },
   { href: "/artwork-approvals", label: "Artwork", emoji: "▧" },
   { href: "/production", label: "Production", emoji: "⚒" },
+  { href: "/projects", label: "Projects", emoji: "▤" },
   { href: "/clients", label: "Clients", emoji: "◉" },
   { href: "/suppliers", label: "Suppliers", emoji: "◫" },
   { href: "/purchasing", label: "Purchasing", emoji: "▤" },

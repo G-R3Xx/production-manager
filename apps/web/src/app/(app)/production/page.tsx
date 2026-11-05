@@ -905,6 +905,7 @@ export async function ProductionPageContent({ searchParams }: PageProps) {
                 <button type="submit" style={secondaryButtonStyle}>Sync from artwork pages</button>
               </form>
               <a href={`/job-sheets/${selectedJob.id}`} target="_blank" rel="noreferrer" style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none", color: "#0f172a" }}>Print job sheet</a>
+              <Link prefetch={false} href={`/projects?productionJobId=${encodeURIComponent(selectedJob.id)}`} style={{ ...secondaryButtonStyle, display: "inline-flex", alignItems: "center", textDecoration: "none", color: "#1d4ed8" }}>Project timeline</Link>
               {selectedJob.status === "deleted" ? (
                 <form action={restoreProductionJobAction}>
                   <input type="hidden" name="jobId" value={selectedJob.id} />
