@@ -193,3 +193,21 @@ export function plannedHoursLabel(minutes: number): string {
   const hours = minutes / 60;
   return `${Number.isInteger(hours) ? hours : Number(hours.toFixed(2))}h`;
 }
+
+
+/** Stable visual row ordering, independent of when a task is scheduled. */
+export function compareProjectTaskOrder(
+  a: { sortOrder: number; plannedStart: string; id: string },
+  b: { sortOrder: number; plannedStart: string; id: string }
+): number {
+  return a.sortOrder - b.sortOrder || a.plannedStart.localeCompare(b.plannedStart) || a.id.localeCompare(b.id);
+}
+
+/** Move a task before/after another task within the same Sub Job. Never change its dates. */
+export function reorderProjectTaskIds(ids: readonly string[], movedId: string, targetId: string, after = false): string[] {
+  if (!ids.includes(movedId) || !ids.includes(targetId) || movedId === targetId) return [...ids];
+  const next = ids.filter(id => id !== movedId);
+  const index = next.indexOf(targetId);
+  next.splice(index + (after ? 1 : 0), 0, movedId);
+  return next;
+}

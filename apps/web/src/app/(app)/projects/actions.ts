@@ -5,7 +5,7 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   createProjectPlanForProductionJob,
-  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant
+  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant, reorderProjectTasksForTenant
 } from "@/server/project-timelines";
 import type { ProjectTaskStatus } from "@/lib/project-timeline";
 
@@ -156,6 +156,24 @@ export async function assignProjectTaskAction(input: {
     const updated = await assignProjectTaskForTenant(tenantId, input.projectId, input.taskId,
       input.assigneeProfileId, input.expectedAssigneeProfileId);
     if (!updated) return { ok: false, error: "Assignment changed elsewhere, or the selected staff member is not active in this workspace. Refresh and try again." };
+    return { ok: true };
+  } catch (error) { return { ok: false, error: errorText(error) }; }
+}
+
+
+/** Reorder task rows only; does not shift Gantt dates or change task ownership. */
+export async function reorderProjectTasksAction(input: {
+  projectId: string; subJobId: string | null;
+  orderedTaskIds: string[]; expectedTaskIds: string[];
+}): Promise<{ ok: true } | { ok: false; error: string }> {
+  const tenantId = await requireProjectManager();
+  if (!input.projectId || !Array.isArray(input.orderedTaskIds) || !Array.isArray(input.expectedTaskIds)) {
+    return { ok: false, error: "Invalid project task order." };
+  }
+  try {
+    const saved = await reorderProjectTasksForTenant(tenantId, input.projectId, input.subJobId,
+      input.orderedTaskIds, input.expectedTaskIds);
+    if (!saved) return { ok: false, error: "Tasks were changed elsewhere, or this section is no longer available. Refresh and try again." };
     return { ok: true };
   } catch (error) { return { ok: false, error: errorText(error) }; }
 }

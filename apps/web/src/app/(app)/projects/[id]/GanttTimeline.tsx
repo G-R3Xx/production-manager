@@ -1,12 +1,12 @@
 "use client";
 import { startTransition, useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent as ReactPointerEvent } from "react";
 import { useRouter } from "next/navigation";
-import { rescheduleProjectTaskAction, assignProjectTaskAction } from "../actions";
+import { rescheduleProjectTaskAction, assignProjectTaskAction, reorderProjectTasksAction } from "../actions";
 import type { ProjectTimelineTaskRecord, ProjectSubJobRecord } from "@/server/project-timelines";
 import {
   timelineDayIndex, timelinePositionInWindow, timelineTaskRangeLabel, timelineWindow,
   shiftTimelineFocus, plannedHoursLabel, sydneyTodayDayIndex, sydneyNowMinuteIndex,
-  timelineDragSchedule, timelineMinuteIndex, type TimelineDragMode, type TimelineZoom
+  timelineDragSchedule, timelineMinuteIndex, compareProjectTaskOrder, reorderProjectTaskIds, type TimelineDragMode, type TimelineZoom
 } from "@/lib/project-timeline";
 
 type Props = {
@@ -47,6 +47,10 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
   const router = useRouter();
   const [savedDates, setSavedDates] = useState<Record<string, TaskDates>>({});
   const [savedAssignees, setSavedAssignees] = useState<Record<string, string | null>>({});
+  const [savedGroupOrder, setSavedGroupOrder] = useState<Record<string, string[]>>({});
+  const [rowDragId, setRowDragId] = useState<string | null>(null);
+  const [rowDrop, setRowDrop] = useState<{ id: string; after: boolean } | null>(null);
+  const rowDragIdRef = useRef<string | null>(null);
   const revisionRef = useRef(revision);
   useEffect(() => { revisionRef.current = revision; }, [revision]);
   // Only poll while this particular project timeline is visible. Revision is a tiny indexed query.
@@ -84,6 +88,37 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
       assigneeName: staff.find(person => person.id === savedAssignees[task.id])?.name ?? null } : {}),
     ...(dragPreview?.taskId === task.id ? dragPreview.dates : {})
   })), [tasks, savedDates, savedAssignees, staff, dragPreview]);
+  // Keep the user-chosen display order while refreshing server data.
+  const orderedTasks = useMemo(() => [...displayedTasks].sort((a, b) => {
+    if (a.subJobId === b.subJobId) {
+      const order = savedGroupOrder[a.subJobId ?? "general"];
+      if (order) {
+        const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+        if (ia !== -1 && ib !== -1) return ia - ib;
+        if (ia !== -1) return -1;
+        if (ib !== -1) return 1;
+      }
+    }
+    return compareProjectTaskOrder(a, b);
+  }), [displayedTasks, savedGroupOrder]);
+
+  // Release optimistic row ordering only when the server snapshot has caught up.
+  useEffect(() => {
+    setSavedGroupOrder(previous => {
+      const next = { ...previous };
+      let changed = false;
+      for (const [key, ids] of Object.entries(previous)) {
+        const groupId = key === "general" ? null : key;
+        const fresh = tasks.filter(task => task.subJobId === groupId)
+          .sort(compareProjectTaskOrder).map(task => task.id);
+        if (fresh.length === ids.length && fresh.every((id, i) => id === ids[i])) {
+          delete next[key]; changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [tasks]);
+
   // Once the refreshed server snapshot includes saved dates, release local overrides.
   useEffect(() => {
     setSavedDates(previous => {
@@ -110,6 +145,35 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
       return changed ? next : previous;
     });
   }, [tasks]);
+
+  async function saveRowOrder(movedId: string, targetId: string, after: boolean) {
+    const moved = orderedTasks.find(task => task.id === movedId);
+    const target = orderedTasks.find(task => task.id === targetId);
+    if (!canEdit || savingRef.current || !moved || !target || moved.subJobId !== target.subJobId) return;
+    const groupId = moved.subJobId;
+    const expectedIds = orderedTasks.filter(task => task.subJobId === groupId).map(task => task.id);
+    const newIds = reorderProjectTaskIds(expectedIds, movedId, targetId, after);
+    if (newIds.every((id, i) => id === expectedIds[i])) return;
+    const key = groupId ?? "general";
+    savingRef.current = movedId;
+    setSavingId(movedId);
+    setFeedback(null);
+    setSavedGroupOrder(previous => ({ ...previous, [key]: newIds }));
+    try {
+      const result = await reorderProjectTasksAction({ projectId, subJobId: groupId,
+        orderedTaskIds: newIds, expectedTaskIds: expectedIds });
+      if (!result.ok) throw new Error(result.error);
+      setFeedback({ error: false, text: `Task order saved for ${sections.find(section => section.id === groupId)?.title ?? "General / Unassigned"}.` });
+      if (typeof BroadcastChannel !== "undefined") {
+        const channel = new BroadcastChannel("pm-project-schedule");
+        channel.postMessage({ projectId }); channel.close();
+      }
+      startTransition(() => router.refresh());
+    } catch (error) {
+      setSavedGroupOrder(previous => { const next = { ...previous }; delete next[key]; return next; });
+      setFeedback({ error: true, text: error instanceof Error ? error.message : "Couldn't save task order." });
+    } finally { savingRef.current = null; setSavingId(null); }
+  }
 
   async function saveAssignee(task: ProjectTimelineTaskRecord, nextAssignee: string | null) {
     if (!canEdit || savingRef.current || task.assigneeProfileId === nextAssignee) return;
@@ -236,10 +300,10 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
     const nowMinute = sydneyNowMinuteIndex();
     const nowLeft = nowMinute >= window.startMinute && nowMinute < window.endMinute ?
       ((nowMinute - window.startMinute) / (window.endMinute - window.startMinute)) * 100 : null;
-    const visibleTasks = displayedTasks.filter(task => timelinePositionInWindow(task, window.startMinute, window.endMinute).width > 0);
+    const visibleTasks = orderedTasks.filter(task => timelinePositionInWindow(task, window.startMinute, window.endMinute).width > 0);
     return { ...window, width, markers, nowLeft, visibleTasks,
       gridStep: zoom === "day" ? width / 24 : zoom === "week" ? width / 28 : width / window.dayCount };
-  }, [displayedTasks, focusDay, zoom]);
+  }, [orderedTasks, focusDay, zoom]);
 
   // On narrow screens a task at 09:00 or on Friday must not start off-screen.
   // Horizontal scrolling is for navigating the timeline; no data is fetched here.
@@ -275,7 +339,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
         <h2 style={{ fontSize: 18, margin: "0 0 4px" }}>Gantt timeline</h2>
         <div style={{ color: "#64748b", fontSize: 12 }}>Bars follow scheduled times (Sydney time). Allocated work hours are separate.</div>
         <div style={{ color: "#475569", fontSize: 12, marginTop: 4 }}>
-          {canEdit ? "Drag a bar to move it or resize its ends. Use the staff dropdown beside any task to assign it instantly. Changes save automatically." : "Select a bar to view its task. Only owners/managers can change schedules."}
+          {canEdit ? "Drag the grip beside a task name to reorder it within its Sub Job; drag timeline bars to reschedule. Use the staff dropdown to assign tasks." : "Select a bar to view its task. Only owners/managers can change schedules."}
         </div>
       </div>
       <div role="group" aria-label="Timeline zoom" style={{ display: "flex", gap: 4, padding: 4, border: "1px solid #dbe4ef", borderRadius: 11 }}>
@@ -300,7 +364,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
     </div>
     {feedback ? <div role={feedback.error ? "alert" : "status"} style={{ margin: "0 18px 10px", padding: "9px 12px", borderRadius: 8,
       background: feedback.error ? "#fef2f2" : "#ecfdf5", color: feedback.error ? "#991b1b" : "#065f46", fontSize: 12 }}>{feedback.text}</div> : null}
-    {savingId ? <div role="status" style={{ padding: "0 18px 10px", color: "#475569", fontSize: 12 }}>Saving task schedule…</div> : null}
+    {savingId ? <div role="status" style={{ padding: "0 18px 10px", color: "#475569", fontSize: 12 }}>Saving task change…</div> : null}
     {dragPreview ? <div role="status" style={{ padding: "0 18px 10px", color: "#1d4ed8", fontSize: 12, fontWeight: 750 }}>
       {dragRef.current?.mode === "move" ? "Moving" : dragRef.current?.mode === "resize-start" ? "Adjusting start" : "Adjusting finish"}: {timelineTaskRangeLabel(dragPreview.dates)}
     </div> : null}
@@ -322,13 +386,55 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
           <div style={{ display: "flex", background: "#e8eef7", borderBottom: "1px solid #cbd5e1", color: "#1e3a5f", fontWeight: 900 }}>
             <div style={{ ...labelCell, background: "#e8eef7" }}>{group.title}</div><div style={{ flex: 1 }} />
           </div>
-          {group.tasks.map(task => {
+          {group.tasks.map((task, taskIndex) => {
             const bar = timelinePositionInWindow(task, model.startMinute, model.endMinute);
             const timeLabel = timelineTaskRangeLabel(task);
             const description = `${task.title} | ${timeLabel} (Sydney time) | ${plannedHoursLabel(task.allocatedMinutes)} allocated`;
             return <div key={task.id} style={{ display: "flex", borderBottom: "1px solid #edf2f7", minHeight: 59 }}>
-              <div style={labelCell}>
-                <a href={`#task-${task.id}`} style={{ color: "#1e3a8a", fontWeight: 800, textDecoration: "none" }}>{task.title}</a>
+              <div style={{ ...labelCell, background: rowDrop?.id === task.id ? "#dbeafe" : "#fff",
+                boxShadow: rowDrop?.id === task.id ? `inset 0 ${rowDrop.after ? -3 : 3}px #2563eb` : undefined }}
+                onDragOver={event => {
+                  const moving = orderedTasks.find(item => item.id === rowDragIdRef.current);
+                  if (!canEdit || !moving || moving.subJobId !== task.subJobId || moving.id === task.id || savingRef.current) return;
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = "move";
+                  const bounds = event.currentTarget.getBoundingClientRect();
+                  const after = event.clientY > bounds.top + bounds.height / 2;
+                  setRowDrop(previous => previous?.id === task.id && previous.after === after ? previous : { id: task.id, after });
+                }}
+                onDrop={event => {
+                  event.preventDefault();
+                  const sourceId = rowDragIdRef.current;
+                  const after = event.clientY > event.currentTarget.getBoundingClientRect().top + event.currentTarget.clientHeight / 2;
+                  rowDragIdRef.current = null; setRowDragId(null); setRowDrop(null);
+                  if (sourceId) void saveRowOrder(sourceId, task.id, after);
+                }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 5, minWidth: 0 }}>
+                  {canEdit ? <span draggable={savingId === null} role="img"
+                    aria-label={`Drag to reorder ${task.title}`} title="Drag up or down to reorder this task"
+                    onDragStart={event => {
+                      if (savingRef.current) { event.preventDefault(); return; }
+                      rowDragIdRef.current = task.id; setRowDragId(task.id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData("text/plain", task.id);
+                    }}
+                    onDragEnd={() => { rowDragIdRef.current = null; setRowDragId(null); setRowDrop(null); }}
+                    style={{ flex: "0 0 auto", cursor: rowDragId === task.id ? "grabbing" : "grab",
+                      fontSize: 17, color: "#64748b", userSelect: "none", padding: "1px 3px" }}>⠿</span> : null}
+                  <a href={`#task-${task.id}`} style={{ color: "#1e3a8a", fontWeight: 800, textDecoration: "none", overflowWrap: "anywhere", flex: 1 }}>{task.title}</a>
+                  {canEdit ? <span style={{ display: "flex", gap: 2 }}>
+                    {([-1, 1] as const).map(direction => {
+                      const neighbour = group.tasks[taskIndex + direction]?.id;
+                      return <button key={direction} type="button" disabled={!neighbour || savingId !== null}
+                        aria-label={`Move ${task.title} ${direction < 0 ? "up" : "down"}`}
+                        title={direction < 0 ? "Move task up" : "Move task down"}
+                        onClick={() => { if (neighbour) void saveRowOrder(task.id, neighbour, direction > 0); }}
+                        style={{ padding: "1px 4px", cursor: neighbour ? "pointer" : "default", border: 0, borderRadius: 4,
+                          background: "#f1f5f9", color: neighbour ? "#1d4ed8" : "#94a3b8", fontSize: 12 }}>
+                        {direction < 0 ? "↑" : "↓"}</button>;
+                    })}
+                  </span> : null}
+                </div>
                 <div style={{ marginTop: 3, fontSize: 11, fontWeight: 700, color: "#334155" }}>{timeLabel}</div>
                 <div style={{ marginTop: 2, fontSize: 11, color: "#64748b" }}>{plannedHoursLabel(task.allocatedMinutes)} allocated</div>
                 {canEdit ? <select aria-label={`Assign staff to ${task.title}`} title="Assign staff — saves immediately"
@@ -364,7 +470,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
     </div>
     <div style={{ display: "flex", gap: 15, flexWrap: "wrap", padding: "11px 17px", fontSize: 11, color: "#475569" }}>
       <span>⚪ Planned</span><span>🔵 In progress</span><span>🟠 Blocked</span><span>🟢 Completed</span><span style={{ color: "#b91c1c" }}>│ Now</span>
-      <span>Scroll for more dates. {canEdit ? "Drag bars to reschedule, resize their ends, or select a task for detailed editing." : "Select a bar to view the task."}</span>
+      <span>Scroll for more dates. {canEdit ? "Drag task-name grips to reorder; drag bars to reschedule or resize. Arrow buttons reorder by keyboard." : "Select a bar to view the task."}</span>
     </div>
   </section>;
 }

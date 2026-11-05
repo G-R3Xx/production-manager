@@ -133,7 +133,7 @@ export async function listProjectTasks(tenantId: string, projectId: string): Pro
       LEFT JOIN app.user_profiles profile ON profile.id=task.assignee_profile_id
       LEFT JOIN production.production_steps step ON step.id=task.production_step_id AND step.job_id=job.id
      WHERE p.id=$2::uuid AND p.tenant_id=$1::uuid
-     ORDER BY task.planned_start, task.sort_order, task.id
+     ORDER BY task.sort_order, task.planned_start, task.id
   `, [tenantId, projectId]);
   return result.rows;
 }
@@ -190,8 +190,10 @@ export async function addProjectTask(tenantId: string, projectId: string, input:
         ))
     ), added AS (
       INSERT INTO production.project_timeline_tasks
-        (project_id, title, sub_job_id, planned_start, planned_end, allocated_minutes, assignee_profile_id, status, notes)
-      SELECT scope.id, $3, $4::uuid, $5::timestamp, $6::timestamp, $7::integer, $8::uuid, $9, $10
+        (project_id, title, sub_job_id, planned_start, planned_end, allocated_minutes, assignee_profile_id, status, notes, sort_order)
+      SELECT scope.id, $3, $4::uuid, $5::timestamp, $6::timestamp, $7::integer, $8::uuid, $9, $10,
+             COALESCE((SELECT MAX(previous.sort_order) + 1 FROM production.project_timeline_tasks previous
+               WHERE previous.project_id=scope.id AND previous.sub_job_id IS NOT DISTINCT FROM $4::uuid), 0)
       FROM scope RETURNING project_id
     )
     UPDATE production.project_plans SET updated_at=now() WHERE id IN (SELECT project_id FROM added)
@@ -288,8 +290,11 @@ export async function scheduleExistingProductionStep(
       WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND job.status <> 'deleted'
     ), inserted AS (
       INSERT INTO production.project_timeline_tasks
-        (project_id, production_step_id, title, sub_job_id, planned_start, planned_end, allocated_minutes)
-      SELECT project_id, step_id, label, sub_job_id, $4::timestamp, $5::timestamp, $6::integer FROM source
+        (project_id, production_step_id, title, sub_job_id, planned_start, planned_end, allocated_minutes, sort_order)
+      SELECT project_id, step_id, label, sub_job_id, $4::timestamp, $5::timestamp, $6::integer,
+             COALESCE((SELECT MAX(previous.sort_order) + 1 FROM production.project_timeline_tasks previous
+               WHERE previous.project_id=source.project_id AND previous.sub_job_id IS NOT DISTINCT FROM source.sub_job_id), 0)
+      FROM source
       ON CONFLICT (project_id, production_step_id) WHERE production_step_id IS NOT NULL DO NOTHING
       RETURNING project_id
     )
@@ -326,4 +331,68 @@ export async function getProjectRevision(tenantId: string, projectId: string): P
     WHERE p.tenant_id=$1::uuid AND p.id=$2::uuid AND job.status <> 'deleted'
   `, [tenantId, projectId]);
   return result.rows[0]?.revision ?? null;
+}
+
+
+/** Reorder the tasks in a single Sub Job (or General) without touching their schedule,
+ * staff, labour allocations or linked production steps. The project row lock serialises
+ * competing reorders and the expected ID order rejects stale browser snapshots. */
+export async function reorderProjectTasksForTenant(
+  tenantId: string, projectId: string, subJobId: string | null,
+  orderedTaskIds: string[], expectedTaskIds: string[]
+): Promise<boolean> {
+  const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuid.test(tenantId) || !uuid.test(projectId) || (subJobId !== null && !uuid.test(subJobId)) ||
+      orderedTaskIds.length === 0 || orderedTaskIds.length > 500 ||
+      orderedTaskIds.length !== expectedTaskIds.length ||
+      orderedTaskIds.some(id => !uuid.test(id)) || expectedTaskIds.some(id => !uuid.test(id)) ||
+      new Set(orderedTaskIds).size !== orderedTaskIds.length ||
+      new Set(expectedTaskIds).size !== expectedTaskIds.length ||
+      orderedTaskIds.some(id => !expectedTaskIds.includes(id))) return false;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const project = await client.query(`
+      SELECT p.id FROM production.project_plans p
+      JOIN production.production_jobs j ON j.id=p.production_job_id AND j.tenant_id=p.tenant_id
+      WHERE p.id=$2::uuid AND p.tenant_id=$1::uuid AND j.status <> 'deleted'
+        AND ($3::uuid IS NULL OR EXISTS (SELECT 1 FROM sales.quote_sub_jobs sj
+          WHERE sj.id=$3::uuid AND sj.quote_id=j.quote_id))
+      FOR UPDATE OF p
+    `, [tenantId, projectId, subJobId]);
+    if (!project.rowCount) { await client.query("ROLLBACK"); return false; }
+
+    const current = await client.query<{ id: string }>(`
+      SELECT task.id::text FROM production.project_timeline_tasks task
+      WHERE task.project_id=$1::uuid AND task.sub_job_id IS NOT DISTINCT FROM $2::uuid
+      ORDER BY task.sort_order, task.planned_start, task.id
+      FOR UPDATE
+    `, [projectId, subJobId]);
+    const currentIds = current.rows.map(row => row.id);
+    if (currentIds.length !== expectedTaskIds.length ||
+        currentIds.some((id, i) => id !== expectedTaskIds[i])) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    const updated = await client.query(`
+      UPDATE production.project_timeline_tasks task
+         SET sort_order=ordered.ordinality::integer - 1, updated_at=now()
+        FROM unnest($3::uuid[]) WITH ORDINALITY AS ordered(id, ordinality)
+       WHERE task.project_id=$1::uuid AND task.sub_job_id IS NOT DISTINCT FROM $2::uuid
+         AND task.id=ordered.id
+    `, [projectId, subJobId, orderedTaskIds]);
+    if (updated.rowCount !== currentIds.length) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    await client.query('UPDATE production.project_plans SET updated_at=now() WHERE id=$1::uuid', [projectId]);
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 }
