@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import { parseProjectSchedule, timelineDayIndex, timelineDayRange, timelinePosition, plannedHoursLabel } from '../../apps/web/src/lib/project-timeline.ts';
+import { parseProjectSchedule, timelineDayIndex, timelineDayRange, timelinePosition, timelineMinuteIndex, timelineWindow, timelinePositionInWindow, timelineTaskRangeLabel, shiftTimelineFocus, plannedHoursLabel } from '../../apps/web/src/lib/project-timeline.ts';
 const root = process.cwd();
 
 test('one task can span days with separately allocated labour hours', () => {
@@ -36,7 +36,7 @@ test('section grouping preserves one task per sub-job and general tasks', () => 
   assert.deepEqual(tasks.filter(x=>x.subJobId===null).map(x=>x.id), ['d']);
 });
 
-test('Gantt bars cover task start and end days inclusive', () => {
+test('Gantt bars preserve exact start/end positions across multi-day ranges', () => {
   const items = [{ plannedStart:'2026-11-09T09:00',plannedEnd:'2026-11-13T17:00' },
     {plannedStart:'2026-11-16T08:00',plannedEnd:'2026-11-16T09:00'}];
   const {first,last} = timelineDayRange(items);
@@ -62,4 +62,57 @@ test('tenant-scoped writes and production-step links remain explicit', () => {
   assert.match(actions, /\["owner", "manager"\]/);
   assert.match(UI, /Production Step.*checklist/);
   assert.match(UI, /Allocated work hours/);
+});
+
+
+test('Gantt positions use actual minutes: sequential tasks do not overlap', () => {
+  const first = { plannedStart:'2026-11-06T08:30', plannedEnd:'2026-11-06T09:30' };
+  const second = { plannedStart:'2026-11-06T09:30', plannedEnd:'2026-11-06T10:00' };
+  const focus = timelineDayIndex(first.plannedStart);
+  assert.equal(timelineMinuteIndex(second.plannedStart) - timelineMinuteIndex(first.plannedStart), 60);
+  for (const zoom of ['day', 'week', 'month']) {
+    const range = timelineWindow(focus, zoom);
+    const a = timelinePositionInWindow(first, range.startMinute, range.endMinute);
+    const b = timelinePositionInWindow(second, range.startMinute, range.endMinute);
+    assert.ok(a.width > b.width, `${zoom}: 60 minutes must be wider than 30 minutes`);
+    assert.ok(b.left > a.left, `${zoom}: second task must start later`);
+    assert.ok(Math.abs((a.left + a.width) - b.left) < 1e-8, `${zoom}: adjacent bars should touch, not overlap`);
+  }
+  assert.equal(timelineTaskRangeLabel(first), '6 Nov 08:30 – 09:30');
+  assert.equal(timelineTaskRangeLabel(second), '6 Nov 09:30 – 10:00');
+});
+
+test('Gantt windows are calendar-aligned and can navigate accurately', () => {
+  const focus = timelineDayIndex('2026-11-06T12:00'); // Friday
+  const day = timelineWindow(focus, 'day');
+  const week = timelineWindow(focus, 'week');
+  const month = timelineWindow(focus, 'month');
+  assert.equal(day.dayCount, 1);
+  assert.equal(week.dayCount, 7);
+  assert.equal(week.firstDay, timelineDayIndex('2026-11-02T00:00')); // Monday
+  assert.equal(month.dayCount, 30);
+  assert.equal(month.firstDay, timelineDayIndex('2026-11-01T00:00'));
+  assert.equal(shiftTimelineFocus(focus, 'week', 1), focus + 7);
+  assert.equal(timelineWindow(shiftTimelineFocus(focus, 'month', 1), 'month').firstDay, timelineDayIndex('2026-12-01T00:00'));
+});
+
+test('Gantt hides tasks outside the period and clips cross-midnight tasks', () => {
+  const focus = timelineDayIndex('2026-11-06T00:00');
+  const range = timelineWindow(focus, 'day');
+  const task = { plannedStart: '2026-11-05T23:30', plannedEnd: '2026-11-06T01:00' };
+  const clipped = timelinePositionInWindow(task, range.startMinute, range.endMinute);
+  assert.equal(clipped.left, 0);
+  assert.ok(Math.abs(clipped.width - 100 / 24) < 1e-9);
+  assert.deepEqual(timelinePositionInWindow({plannedStart:'2026-11-07T09:00',plannedEnd:'2026-11-07T10:00'},range.startMinute,range.endMinute), {left:0,width:0});
+  assert.equal(timelineTaskRangeLabel(task), '5 Nov 23:30 – 6 Nov 01:00');
+});
+
+test('Gantt chart exposes clock labels and date navigation in the client component', () => {
+  const source = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/GanttTimeline.tsx', 'utf8');
+  assert.match(source, /timelinePositionInWindow\(task, model\.startMinute, model\.endMinute\)/);
+  assert.match(source, /String\(hour\)\.padStart\(2, "0"\)/);
+  assert.match(source, /timelineTaskRangeLabel\(task\)/);
+  assert.match(source, /Jump to timeline date/);
+  assert.match(source, /Previous \$\{zoom\}/);
+  assert.doesNotMatch(source, /timelinePosition\(task, model\.first, model\.last\)/);
 });

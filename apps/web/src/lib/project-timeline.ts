@@ -43,6 +43,14 @@ export function parseProjectSchedule(input: {
 }
 
 export type GanttSpan = { left: number; width: number };
+export type TimelineZoom = "day" | "week" | "month";
+export type TimelineWindow = {
+  startMinute: number;
+  endMinute: number; // exclusive; chart positions use the actual minute, not just the date
+  firstDay: number;
+  dayCount: number;
+  title: string;
+};
 const DAY_MS = 86_400_000;
 export function timelineDayIndex(dateTime: string): number {
   const date = dateTime.slice(0, 10);
@@ -67,17 +75,85 @@ export function timelineDayRange(items: { plannedStart: string; plannedEnd: stri
   return { first: first - 1, last: Math.min(last + 2, first + 365) };
 }
 
+/** Minute index of a workspace-local datetime-local value. Date.UTC deliberately avoids
+ * interpreting the browser's timezone: the database stores these values as local wall time. */
+export function timelineMinuteIndex(dateTime: string): number {
+  const year = Number(dateTime.slice(0, 4));
+  const month = Number(dateTime.slice(5, 7));
+  const day = Number(dateTime.slice(8, 10));
+  const hour = Number(dateTime.slice(11, 13));
+  const minute = Number(dateTime.slice(14, 16));
+  return Date.UTC(year, month - 1, day, hour, minute) / 60_000;
+}
+
+function utcDate(day: number): Date { return new Date(day * DAY_MS); }
+function formatDay(day: number, options: Intl.DateTimeFormatOptions): string {
+  return utcDate(day).toLocaleDateString("en-AU", { ...options, timeZone: "UTC" });
+}
+
+/** A real calendar day, Monday-to-Sunday week, or full calendar month. */
+export function timelineWindow(focusDay: number, zoom: TimelineZoom): TimelineWindow {
+  const date = utcDate(focusDay);
+  let firstDay = focusDay;
+  let dayCount = 1;
+  let title = formatDay(focusDay, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  if (zoom === "week") {
+    firstDay = focusDay - ((date.getUTCDay() + 6) % 7);
+    dayCount = 7;
+    title = `${formatDay(firstDay, { weekday: "short", day: "numeric", month: "short" })} – ${formatDay(firstDay + 6, { weekday: "short", day: "numeric", month: "short", year: "numeric" })}`;
+  } else if (zoom === "month") {
+    firstDay = Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / DAY_MS);
+    const nextMonth = Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) / DAY_MS);
+    dayCount = nextMonth - firstDay;
+    title = formatDay(firstDay, { month: "long", year: "numeric" });
+  }
+  return { firstDay, dayCount, startMinute: firstDay * 1440, endMinute: (firstDay + dayCount) * 1440, title };
+}
+
+export function shiftTimelineFocus(focusDay: number, zoom: TimelineZoom, step: number): number {
+  if (zoom !== "month") return focusDay + step * (zoom === "week" ? 7 : 1);
+  const date = utcDate(focusDay);
+  return Math.floor(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + step, 1) / DAY_MS);
+}
+
+/** Keeps sub-day offsets at every zoom. A 09:30 start follows an 08:30 start,
+ * even on the week/month overview. Bars are clipped at the visible window. */
+export function timelinePositionInWindow(
+  item: { plannedStart: string; plannedEnd: string }, startMinute: number, endMinute: number
+): GanttSpan {
+  const start = timelineMinuteIndex(item.plannedStart);
+  const end = timelineMinuteIndex(item.plannedEnd);
+  if (!(end > startMinute && start < endMinute && end > start)) return { left: 0, width: 0 };
+  const clippedStart = Math.max(start, startMinute);
+  const clippedEnd = Math.min(end, endMinute);
+  const total = endMinute - startMinute;
+  if (total <= 0) return { left: 0, width: 0 };
+  return { left: ((clippedStart - startMinute) / total) * 100, width: ((clippedEnd - clippedStart) / total) * 100 };
+}
+
+/** Backward-compatible whole-date window, now positioned by exact time. */
 export function timelinePosition(item: { plannedStart: string; plannedEnd: string }, first: number, last: number): GanttSpan {
-  const start = timelineDayIndex(item.plannedStart);
-  const end = timelineDayIndex(item.plannedEnd);
-  if (start > last || end < first) return { left: 0, width: 0 };
-  const clippedStart = Math.max(first, Math.min(start, last));
-  const clippedEnd = Math.max(clippedStart, Math.min(end, last));
-  const total = Math.max(1, last - first + 1);
-  return {
-    left: ((clippedStart - first) / total) * 100,
-    width: Math.max(0.5, ((clippedEnd - clippedStart + 1) / total) * 100)
-  };
+  return timelinePositionInWindow(item, first * 1440, (last + 1) * 1440);
+}
+
+/** Clear, always-visible start/finish labels in the chart's task column. */
+export function timelineTaskRangeLabel(task: { plannedStart: string; plannedEnd: string }): string {
+  const startDay = timelineDayIndex(task.plannedStart);
+  const endDay = timelineDayIndex(task.plannedEnd);
+  const startLabel = `${formatDay(startDay, { day: "numeric", month: "short" })} ${task.plannedStart.slice(11, 16)}`;
+  const endLabel = startDay === endDay ? task.plannedEnd.slice(11, 16) :
+    `${formatDay(endDay, { day: "numeric", month: "short" })} ${task.plannedEnd.slice(11, 16)}`;
+  return `${startLabel} – ${endLabel}`;
+}
+
+/** Local wall clock for the marker, not a UTC instant on a fixed-width day. */
+export function sydneyNowMinuteIndex(now = new Date()): number {
+  const parts = new Intl.DateTimeFormat("en-AU", {
+    timeZone: "Australia/Sydney", year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", hourCycle: "h23"
+  }).formatToParts(now);
+  const part = (name: string) => parts.find(item => item.type === name)?.value ?? "00";
+  return timelineMinuteIndex(`${part("year")}-${part("month")}-${part("day")}T${part("hour")}:${part("minute")}`);
 }
 
 export function plannedHoursLabel(minutes: number): string {
