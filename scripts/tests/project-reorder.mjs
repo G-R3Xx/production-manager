@@ -29,7 +29,7 @@ test('reordering is tenant-scoped, atomic, optimistic and does not modify schedu
   const fragment=source.slice(source.indexOf('export async function reorderProjectTasksForTenant('));
   const actions=fs.readFileSync('apps/web/src/app/(app)/projects/actions.ts','utf8');
   assert.match(fragment,/p\.tenant_id=\$1::uuid/);
-  assert.match(fragment,/task\.sub_job_id IS NOT DISTINCT FROM \$2::uuid/);
+  assert.match(fragment,/COALESCE\(task\.manual_section_id, task\.sub_job_id\) IS NOT DISTINCT FROM \$2::uuid/);
   assert.match(fragment,/FOR UPDATE OF p/);
   assert.match(fragment,/FOR UPDATE/);
   assert.match(fragment,/ROLLBACK/);
@@ -50,6 +50,6 @@ test('chart exposes a drag handle plus keyboard-accessible move controls',()=>{
 test('new tasks append to their own Sub Job order',()=>{
   const src=fs.readFileSync('apps/web/src/server/project-timelines.ts','utf8');
   assert.match(src,/MAX\(previous\.sort_order\) \+ 1/);
-  assert.match(src,/previous\.sub_job_id IS NOT DISTINCT FROM \$4::uuid/);
+  assert.match(src,/COALESCE\(previous\.manual_section_id, previous\.sub_job_id\) IS NOT DISTINCT FROM \$4::uuid/);
   assert.match(src,/previous\.sub_job_id IS NOT DISTINCT FROM source\.sub_job_id/);
 });

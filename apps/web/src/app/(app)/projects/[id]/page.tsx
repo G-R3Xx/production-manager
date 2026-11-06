@@ -12,7 +12,8 @@ import { listActiveStaffOptionsForTenant, type ActiveStaffOption } from "@/serve
 import { PROJECT_TASK_STATUSES, plannedHoursLabel } from "@/lib/project-timeline";
 import { GanttTimeline } from "./GanttTimeline";
 import { CompletionDateEditor } from "./CompletionDateEditor";
-import { addProjectTaskAction, updateProjectTaskAction, removeProjectTaskAction, scheduleProductionStepAction } from "../actions";
+import { addProjectTaskAction, updateProjectTaskAction, removeProjectTaskAction, scheduleProductionStepAction,
+  updateManualProjectPlanAction, addManualProjectSectionAction, renameManualProjectSectionAction, removeManualProjectSectionAction } from "../actions";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
 const card: CSSProperties = { background: "#fff", border: "1px solid #e2e8f0", borderRadius: 18, padding: 20, boxShadow: "0 8px 25px rgba(15,23,42,.04)" };
@@ -97,17 +98,52 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
   return <main style={{ maxWidth: 1600, margin: "0 auto", display: "grid", gap: 18, minWidth: 0, paddingBottom: 64 }}>
     <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
       <Link href="/projects" style={{ color: "#1d4ed8", fontSize: 13, fontWeight: 900, textDecoration: "none" }}>← All Projects</Link>
-      <Link href={`/production/${project.productionJobId}`} style={{ color: "#1d4ed8", fontSize: 13, fontWeight: 900 }}>Open Production Job</Link>
+      {project.productionJobId ? <Link href={`/production/${project.productionJobId}`} style={{ color: "#1d4ed8", fontSize: 13, fontWeight: 900 }}>Open Production Job</Link> : <span style={{ fontSize: 12, color: "#475569", fontWeight: 800 }}>Standalone project · no quote or job link</span>}
     </div>
     <header style={{ ...card, background: "linear-gradient(120deg,#f8fbff,#eef4ff)" }}>
-      <div style={{ textTransform: "uppercase", fontSize: 11, letterSpacing: 1, fontWeight: 900, color: "#475569" }}>Project timeline · {project.quoteNumber ?? "Production"}</div>
+      <div style={{ textTransform: "uppercase", fontSize: 11, letterSpacing: 1, fontWeight: 900, color: "#475569" }}>Project timeline · {project.isManual ? "Manual" : project.quoteNumber ?? "Production"}</div>
       <h1 style={{ margin: "6px 0", fontSize: 27, color: "#0f172a" }}>{project.title}</h1>
-      <div style={{ color: "#475569", fontSize: 13 }}>{project.clientName} · {project.jobStatus.replace(/_/g, " ")}</div>
+      <div style={{ color: "#475569", fontSize: 13 }}>{project.clientName ? `${project.clientName} · ` : ""}{project.isManual ? "Standalone planning (no MYOB/quote/Production Job)" : project.jobStatus.replace(/_/g, " ")}</div>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12, fontSize: 13, fontWeight: 800, color: "#334155" }}>
         <span>{subJobs.length} Sub Jobs</span><span>{tasks.length} scheduled tasks</span><span>{plannedHoursLabel(tasks.reduce((sum, task) => sum + task.allocatedMinutes, 0))} allocated work</span>
       </div>
     </header>
-    <CompletionDateEditor jobId={project.productionJobId} initialDate={project.dueDate} canEdit={canEdit}/>
+    {project.isManual ? <section style={card}>
+      <details>
+        <summary style={{ fontWeight: 850, fontSize: 15, cursor: "pointer" }}>Project details {project.dueDate ? `· target ${project.dueDate}` : "· no target date"}</summary>
+        {canEdit ? <form action={updateManualProjectPlanAction} style={{ display: "flex", flexWrap: "wrap", alignItems: "end", gap: 10, marginTop: 13 }}>
+          <input type="hidden" name="projectId" value={id}/>
+          <label style={{ ...field, flex: "2 1 250px" }}>Project name<input style={input} name="title" required maxLength={200} defaultValue={project.title}/></label>
+          <label style={{ ...field, flex: "1 1 200px" }}>Client / reference<input style={input} name="clientName" maxLength={200} defaultValue={project.clientName}/></label>
+          <label style={{ ...field, flex: "1 1 170px" }}>Target completion<input style={input} type="date" name="dueDate" defaultValue={project.dueDate ?? ""}/></label>
+          <button type="submit" style={darkButton}>Save details</button>
+        </form> : null}
+        <p style={{ color: "#64748b", fontSize: 12 }}>Manual project dates are kept here. The Main Calendar currently displays Production Job deadlines only.</p>
+      </details>
+    </section> : project.productionJobId ? <CompletionDateEditor jobId={project.productionJobId} initialDate={project.dueDate} canEdit={canEdit}/> : null}
+    {project.isManual && canEdit ? <section style={card}>
+      <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>Manual Sub Jobs</h2>
+      <p style={{ color: "#64748b", fontSize: 12 }}>Add sections for different parts of this project. Each section can contain its own tasks, assigned staff and schedule.</p>
+      <form action={addManualProjectSectionAction} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }}>
+        <input type="hidden" name="projectId" value={id}/>
+        <label style={{ ...field, flex: "1 1 240px" }}>New Sub Job<input name="title" required maxLength={200} style={input} placeholder="e.g. Gallery Wall Graphics"/></label>
+        <button style={darkButton} type="submit">+ Add Sub Job</button>
+      </form>
+      {subJobs.length > 0 ? <div style={{ display: "grid", gap: 9, marginTop: 16 }}>
+        {subJobs.map(section => <div key={section.id} style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap", borderTop: "1px solid #edf2f7", paddingTop: 9 }}>
+          <form action={renameManualProjectSectionAction} style={{ display: "flex", alignItems: "end", flex: "1 1 260px", gap: 8 }}>
+            <input type="hidden" name="projectId" value={id}/><input type="hidden" name="sectionId" value={section.id}/>
+            <label style={{ ...field, flex: 1 }}>Sub Job name<input name="title" style={input} required maxLength={200} defaultValue={section.title}/></label>
+            <button type="submit" style={{ ...darkButton, background: "#e0eaff", color: "#1e40af" }}>Rename</button>
+          </form>
+          <form action={removeManualProjectSectionAction}>
+            <input type="hidden" name="projectId" value={id}/><input type="hidden" name="sectionId" value={section.id}/>
+            <button type="submit" title="Keep tasks, move them to General / Unassigned" style={{ ...darkButton, background: "#fff5f5", color: "#b91c1c", border: "1px solid #fecaca" }}>Remove section</button>
+          </form>
+        </div>)}
+        <p style={{ color: "#64748b", fontSize: 12, margin: 0 }}>Removing a section keeps its tasks under General / Unassigned.</p>
+      </div> : null}
+    </section> : null}
     {message ? <div role="status" style={{ ...card, padding: 12, borderColor: "#86efac", color: "#166534" }}>{message}</div> : null}
     {error ? <div role="alert" style={{ ...card, padding: 12, borderColor: "#fca5a5", color: "#991b1b" }}>{error}</div> : null}
     <GanttTimeline projectId={id} canEdit={canEdit} tasks={tasks} sections={subJobs} staff={staff.map(person => ({ id: person.userProfileId, name: person.shortName || person.fullName }))} revision={project.updatedAt} />

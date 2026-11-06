@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
-  createProjectPlanForProductionJob,
+  createProjectPlanForProductionJob, createManualProjectPlan, updateManualProjectPlan,
+  addManualProjectSection, renameManualProjectSection, removeManualProjectSection,
   addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant, reorderProjectTasksForTenant
 } from "@/server/project-timelines";
 import type { ProjectTaskStatus } from "@/lib/project-timeline";
@@ -42,7 +43,8 @@ function projectRedirect(projectId: string, message: string, error = false): nev
 function errorText(err: unknown): string {
   const message = err instanceof Error ? err.message : "Unable to save task";
   if (/invalid input syntax for type uuid/i.test(message)) return "Invalid project, section or staff selection.";
-  if (/relation .* does not exist/i.test(message)) return "Run SQL migration 065_project_timelines.sql before using Projects.";
+  if (/relation .* does not exist|column .* does not exist/i.test(message)) return "Check that SQL migrations 065 and 066 have been applied.";
+  if (/^(Project name|Client\/reference|Sub Job name|Invalid target completion date)/.test(message)) return message;
   if (/^(Choose a valid|Finish must be|Allocated work hours|Task title must be|Invalid task status|Notes cannot exceed)/.test(message)) return message;
   return "Project task could not be saved. Check the details or ask a manager to review the setup.";
 }
@@ -176,4 +178,64 @@ export async function reorderProjectTasksAction(input: {
     if (!saved) return { ok: false, error: "Tasks were changed elsewhere, or this section is no longer available. Refresh and try again." };
     return { ok: true };
   } catch (error) { return { ok: false, error: errorText(error) }; }
+}
+
+/** Standalone timelines use their own metadata and sections; no quote/job link. */
+export async function createManualProjectPlanAction(form: FormData): Promise<void> {
+  const tenantId = await requireProjectManager();
+  let id: string;
+  try {
+    id = await createManualProjectPlan(tenantId, value(form, "title"), value(form, "clientName"));
+  } catch (error) {
+    redirect(`/projects?error=${encodeURIComponent(errorText(error))}`);
+  }
+  revalidatePath("/projects");
+  projectRedirect(id, "Manual project created — add Sub Jobs and tasks below");
+}
+
+export async function updateManualProjectPlanAction(form: FormData): Promise<void> {
+  const tenantId = await requireProjectManager();
+  const projectId = value(form, "projectId");
+  let saved = false;
+  try {
+    saved = await updateManualProjectPlan(tenantId, projectId, value(form, "title"),
+      value(form, "clientName"), optional(form, "dueDate"));
+  } catch (error) { projectRedirect(projectId, errorText(error), true); }
+  if (!saved) projectRedirect(projectId, "Manual project not found in this workspace", true);
+  revalidatePath("/projects");
+  revalidatePath(`/projects/${projectId}`);
+  projectRedirect(projectId, "Project details updated");
+}
+
+export async function addManualProjectSectionAction(form: FormData): Promise<void> {
+  const tenantId = await requireProjectManager();
+  const projectId = value(form, "projectId");
+  let saved = false;
+  try { saved = await addManualProjectSection(tenantId, projectId, value(form, "title")); }
+  catch (error) { projectRedirect(projectId, errorText(error), true); }
+  if (!saved) projectRedirect(projectId, "Manual project not found in this workspace", true);
+  revalidatePath(`/projects/${projectId}`);
+  projectRedirect(projectId, "Sub Job added");
+}
+
+export async function renameManualProjectSectionAction(form: FormData): Promise<void> {
+  const tenantId = await requireProjectManager();
+  const projectId = value(form, "projectId");
+  let saved = false;
+  try { saved = await renameManualProjectSection(tenantId, projectId, value(form, "sectionId"), value(form, "title")); }
+  catch (error) { projectRedirect(projectId, errorText(error), true); }
+  if (!saved) projectRedirect(projectId, "Sub Job not found in this workspace", true);
+  revalidatePath(`/projects/${projectId}`);
+  projectRedirect(projectId, "Sub Job renamed");
+}
+
+export async function removeManualProjectSectionAction(form: FormData): Promise<void> {
+  const tenantId = await requireProjectManager();
+  const projectId = value(form, "projectId");
+  let saved = false;
+  try { saved = await removeManualProjectSection(tenantId, projectId, value(form, "sectionId")); }
+  catch (error) { projectRedirect(projectId, errorText(error), true); }
+  if (!saved) projectRedirect(projectId, "Sub Job not found in this workspace", true);
+  revalidatePath(`/projects/${projectId}`);
+  projectRedirect(projectId, "Sub Job removed; its tasks are now in General / Unassigned");
 }
