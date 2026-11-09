@@ -11,8 +11,9 @@ import {
 import { listActiveStaffOptionsForTenant, type ActiveStaffOption } from "@/server/users";
 import { PROJECT_TASK_STATUSES, plannedHoursLabel } from "@/lib/project-timeline";
 import { GanttTimeline } from "./GanttTimeline";
+import { ProjectTaskForm } from "./ProjectTaskForm";
 import { CompletionDateEditor } from "./CompletionDateEditor";
-import { addProjectTaskAction, updateProjectTaskAction, removeProjectTaskAction, scheduleProductionStepAction,
+import { removeProjectTaskAction, scheduleProductionStepAction,
   updateManualProjectPlanAction, addManualProjectSectionAction, renameManualProjectSectionAction, removeManualProjectSectionAction } from "../actions";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -187,11 +188,9 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
               </div>
               {canEdit ? <details style={{ marginTop: 8 }}>
                 <summary style={{ cursor: "pointer", fontWeight: 800, color: "#1d4ed8", fontSize: 13 }}>Edit schedule / allocation</summary>
-                <form action={updateProjectTaskAction} style={{ display: "grid", gap: 12, paddingTop: 14 }}>
-                  <input type="hidden" name="projectId" value={id} /><input type="hidden" name="taskId" value={task.id} />
+                <ProjectTaskForm projectId={id} taskId={task.id} mode="edit">
                   <Fields task={task} subJobId={section.id} sections={subJobs} staff={staff} period={period} isEdit />
-                  <div><button type="submit" style={darkButton}>Save task</button></div>
-                </form>
+                </ProjectTaskForm>
                 <form action={removeProjectTaskAction} style={{ marginTop: 10 }}>
                   <input type="hidden" name="projectId" value={id}/><input type="hidden" name="taskId" value={task.id}/>
                   <button style={{ border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 9, background: "#fff5f5", padding: "8px 13px", fontWeight: 800, cursor: "pointer" }} type="submit">Remove from timeline</button>
@@ -201,11 +200,9 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
           </div> : <p style={{ color: "#94a3b8", fontSize: 12, margin: 0 }}>No scheduled tasks in this section.</p>}
           {canEdit ? <details style={{ background: "#f8fbff", border: "1px dashed #bfd2ea", padding: 13, borderRadius: 12 }}>
             <summary style={{ color: "#1e40af", fontSize: 13, fontWeight: 850, cursor: "pointer" }}>+ Add a planning task under {section.title}</summary>
-            <form action={addProjectTaskAction} style={{ display: "grid", gap: 12, paddingTop: 13 }}>
-              <input type="hidden" name="projectId" value={id}/>
+            <ProjectTaskForm projectId={id} mode="create">
               <Fields subJobId={section.id} sections={subJobs} staff={staff} period={period} />
-              <div><button type="submit" style={darkButton}>Add task</button></div>
-            </form>
+            </ProjectTaskForm>
           </details> : null}
         </article>;
       })}

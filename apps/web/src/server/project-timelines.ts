@@ -192,7 +192,7 @@ function cleanTask(input: TimelineTaskInput): TimelineTaskInput & { schedule: Pr
 }
 
 /** Inserts/updates require tenant-scoped projects, their own section type, and active assignees. */
-export async function addProjectTask(tenantId: string, projectId: string, input: TimelineTaskInput): Promise<boolean> {
+export async function addProjectTask(tenantId: string, projectId: string, input: TimelineTaskInput, taskId: string | null = null): Promise<boolean> {
   const data = cleanTask(input);
   const result = await pool.query(`
     WITH scope AS (
@@ -210,9 +210,9 @@ export async function addProjectTask(tenantId: string, projectId: string, input:
         ))
     ), added AS (
       INSERT INTO production.project_timeline_tasks
-        (project_id, title, sub_job_id, manual_section_id, planned_start, planned_end,
+        (id, project_id, title, sub_job_id, manual_section_id, planned_start, planned_end,
          allocated_minutes, assignee_profile_id, status, notes, sort_order)
-      SELECT scope.id, $3,
+      SELECT COALESCE($11::uuid, gen_random_uuid()), scope.id, $3,
              CASE WHEN scope.production_job_id IS NOT NULL THEN $4::uuid ELSE NULL END,
              CASE WHEN scope.production_job_id IS NULL THEN $4::uuid ELSE NULL END,
              $5::timestamp, $6::timestamp, $7::integer, $8::uuid, $9, $10,
@@ -223,8 +223,35 @@ export async function addProjectTask(tenantId: string, projectId: string, input:
     )
     UPDATE production.project_plans SET updated_at=now() WHERE id IN (SELECT project_id FROM added)
   `, [tenantId, projectId, data.title, data.subJobId, data.schedule.plannedStart, data.schedule.plannedEnd,
-    data.schedule.allocatedMinutes, data.assigneeProfileId, data.status, data.notes]);
+    data.schedule.allocatedMinutes, data.assigneeProfileId, data.status, data.notes, taskId]);
   return (result.rowCount ?? 0) > 0;
+}
+
+/** Fetch one saved row rather than reloading every task and the entire project page.
+ * Shared by the fast create/edit action so the chart can display confirmed saves immediately. */
+export async function getProjectTaskForTenant(
+  tenantId: string, projectId: string, taskId: string
+): Promise<ProjectTimelineTaskRecord | null> {
+  const result = await pool.query<ProjectTimelineTaskRecord>(`
+    SELECT task.id::text, task.project_id::text AS "projectId",
+           COALESCE(task.manual_section_id, task.sub_job_id)::text AS "subJobId",
+           task.production_step_id::text AS "productionStepId", task.title,
+           to_char(task.planned_start, 'YYYY-MM-DD"T"HH24:MI') AS "plannedStart",
+           to_char(task.planned_end, 'YYYY-MM-DD"T"HH24:MI') AS "plannedEnd",
+           task.allocated_minutes AS "allocatedMinutes",
+           task.assignee_profile_id::text AS "assigneeProfileId",
+           COALESCE(NULLIF(profile.short_name, ''), profile.full_name) AS "assigneeName",
+           task.status, step.status AS "productionStepStatus", task.notes, task.sort_order AS "sortOrder"
+      FROM production.project_timeline_tasks task
+      JOIN production.project_plans p ON p.id = task.project_id
+      LEFT JOIN production.production_jobs j ON j.id = p.production_job_id AND j.tenant_id = p.tenant_id
+      LEFT JOIN app.user_profiles profile ON profile.id = task.assignee_profile_id
+      LEFT JOIN production.production_steps step ON step.id = task.production_step_id AND step.job_id = j.id
+     WHERE p.tenant_id = $1::uuid AND p.id = $2::uuid AND task.id = $3::uuid
+       AND (p.production_job_id IS NULL OR j.status <> 'deleted')
+     LIMIT 1
+  `, [tenantId, projectId, taskId]);
+  return result.rows[0] ?? null;
 }
 
 export async function updateProjectTask(tenantId: string, projectId: string, taskId: string, input: TimelineTaskInput): Promise<boolean> {

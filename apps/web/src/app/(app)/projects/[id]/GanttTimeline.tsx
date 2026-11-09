@@ -48,6 +48,10 @@ function statusColor(task: ProjectTimelineTaskRecord): string {
 
 export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revision }: Props) {
   const router = useRouter();
+  // Confirmed inline form saves become visible immediately without awaiting a
+  // complete server-component refresh (which loads unrelated project data).
+  const [inlineTaskChanges, setInlineTaskChanges] = useState<Record<string, ProjectTimelineTaskRecord>>({});
+  const [lastSavedTaskId, setLastSavedTaskId] = useState<string | null>(null);
   const [savedDates, setSavedDates] = useState<Record<string, TaskDates>>({});
   const [savedAssignees, setSavedAssignees] = useState<Record<string, string | null>>({});
   const [savedGroupOrder, setSavedGroupOrder] = useState<Record<string, string[]>>({});
@@ -85,13 +89,46 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
   const autoScrollFrameRef = useRef<number | null>(null);
   const savingRef = useRef<string | null>(null);
   const suppressClickRef = useRef<string | null>(null);
-  const displayedTasks = useMemo(() => tasks.map(task => ({
+  useEffect(() => {
+    const receive = (event: Event) => {
+      const detail = (event as CustomEvent<{ projectId: string; task: ProjectTimelineTaskRecord }>).detail;
+      if (detail?.projectId !== projectId || !detail.task?.id) return;
+      setInlineTaskChanges(previous => ({ ...previous, [detail.task.id]: detail.task }));
+      setLastSavedTaskId(detail.task.id);
+      setSavedDates(previous => { const next = { ...previous }; delete next[detail.task.id]; return next; });
+      setSavedAssignees(previous => { const next = { ...previous }; delete next[detail.task.id]; return next; });
+    };
+    window.addEventListener("pm-project-task-saved", receive);
+    return () => window.removeEventListener("pm-project-task-saved", receive);
+  }, [projectId]);
+  useEffect(() => {
+    setInlineTaskChanges(previous => {
+      let changed = false;
+      const next = { ...previous };
+      for (const task of tasks) {
+        const inline = next[task.id];
+        if (inline && task.title === inline.title && task.subJobId === inline.subJobId &&
+          task.plannedStart === inline.plannedStart && task.plannedEnd === inline.plannedEnd &&
+          task.allocatedMinutes === inline.allocatedMinutes && task.assigneeProfileId === inline.assigneeProfileId &&
+          task.status === inline.status && task.notes === inline.notes) {
+          delete next[task.id]; changed = true;
+        }
+      }
+      return changed ? next : previous;
+    });
+  }, [tasks]);
+  const displayedTasks = useMemo(() => {
+    const merged = tasks.map(task => inlineTaskChanges[task.id] ?? task);
+    const known = new Set(tasks.map(task => task.id));
+    merged.push(...Object.values(inlineTaskChanges).filter(task => !known.has(task.id)));
+    return merged.map(task => ({
     ...task,
     ...(savedDates[task.id] ?? {}),
     ...(Object.prototype.hasOwnProperty.call(savedAssignees, task.id) ? { assigneeProfileId: savedAssignees[task.id],
       assigneeName: staff.find(person => person.id === savedAssignees[task.id])?.name ?? null } : {}),
     ...(dragPreview?.taskId === task.id ? dragPreview.dates : {})
-  })), [tasks, savedDates, savedAssignees, staff, dragPreview]);
+  }));
+  }, [tasks, inlineTaskChanges, savedDates, savedAssignees, staff, dragPreview]);
   // Keep the user-chosen display order while refreshing server data.
   const orderedTasks = useMemo(() => [...displayedTasks].sort((a, b) => {
     if (a.subJobId === b.subJobId) {
@@ -334,12 +371,20 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
     if (autoScrollFrameRef.current !== null) window.cancelAnimationFrame(autoScrollFrameRef.current);
   }, []);
 
-  const firstTaskDay = tasks.length ? Math.min(...tasks.map(task => timelineDayIndex(task.plannedStart))) : sydneyTodayDayIndex();
+  const firstTaskDay = orderedTasks.length ? Math.min(...orderedTasks.map(task => timelineDayIndex(task.plannedStart))) : sydneyTodayDayIndex();
   // A short project should open on an hourly scale rather than tiny day-level bars.
   const [zoom, setZoom] = useState<TimelineZoom>(() => tasks.length && tasks.every(task =>
     timelineDayIndex(task.plannedStart) === firstTaskDay && timelineDayIndex(task.plannedEnd) === firstTaskDay
   ) ? "day" : "week");
   const [focusDay, setFocusDay] = useState(firstTaskDay);
+  // A newly saved task may be on a different day/week from the current view.
+  // Reveal it without waiting for the server component tree to reload.
+  useEffect(() => {
+    if (!lastSavedTaskId) return;
+    const saved = inlineTaskChanges[lastSavedTaskId];
+    if (saved) setFocusDay(timelineDayIndex(saved.plannedStart));
+    setLastSavedTaskId(null);
+  }, [lastSavedTaskId, inlineTaskChanges]);
   const scrollRef = useRef<HTMLDivElement>(null);
   const model = useMemo(() => {
     const window = timelineWindow(focusDay, zoom);
@@ -375,7 +420,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
       return result === null ? position.left : Math.min(result, position.left);
     }, null);
     viewport.scrollLeft = earliest === null ? 0 : Math.max(0, (earliest / 100) * model.width - 75);
-  }, [tasks, focusDay, zoom, model.startMinute, model.endMinute, model.width]);
+  }, [inlineTaskChanges, tasks, focusDay, zoom, model.startMinute, model.endMinute, model.width]);
 
   const groups = [{ id: null, title: "General / Unassigned" }, ...sections.map(s => ({ id: s.id, title: s.title }))]
     .map(group => ({ ...group, tasks: model.visibleTasks.filter(task => task.subJobId === group.id) }))
@@ -420,7 +465,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
       }} style={{ padding: "6px 9px", border: "1px solid #cbd5e1", borderRadius: 8 }} />
       <button type="button" onClick={() => setFocusDay(sydneyTodayDayIndex())} style={{ cursor: "pointer", border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "7px 12px" }}>Today</button>
       <button type="button" onClick={() => setFocusDay(firstTaskDay)} style={{ cursor: "pointer", border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff", padding: "7px 12px" }}>First task</button>
-      <span style={{ color: "#64748b", fontSize: 11 }}>{model.visibleTasks.length} of {tasks.length} tasks in this period</span>
+      <span style={{ color: "#64748b", fontSize: 11 }}>{model.visibleTasks.length} of {orderedTasks.length} tasks in this period</span>
     </div>
     {feedback ? <div role={feedback.error ? "alert" : "status"} style={{ margin: "0 18px 10px", padding: "9px 12px", borderRadius: 8,
       background: feedback.error ? "#fef2f2" : "#ecfdf5", color: feedback.error ? "#991b1b" : "#065f46", fontSize: 12 }}>{feedback.text}</div> : null}
@@ -429,7 +474,7 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
       {dragRef.current?.mode === "move" ? "Moving" : dragRef.current?.mode === "resize-start" ? "Adjusting start" : "Adjusting finish"}: {timelineTaskRangeLabel(dragPreview.dates)}
     </div> : null}
     <div ref={scrollRef} style={{ overflowX: "auto", borderTop: "1px solid #e2e8f0" }} tabIndex={0} aria-label="Scrollable project Gantt chart">
-      {tasks.length === 0 ? <p style={{ padding: 20, margin: 0, color: "#64748b" }}>Add your first task or schedule an existing Production Step to populate the timeline.</p> :
+      {orderedTasks.length === 0 ? <p style={{ padding: 20, margin: 0, color: "#64748b" }}>Add your first task or schedule an existing Production Step to populate the timeline.</p> :
       <div style={{ width: 255 + model.width, minWidth: "100%" }}>
         <div style={{ display: "flex", background: "#edf4ff", borderBottom: "1px solid #cbd5e1" }}>
           <div style={{ ...labelCell, background: "#edf4ff", fontWeight: 900, paddingTop: 15 }}>Task / scheduled time</div>

@@ -1,14 +1,16 @@
 "use server";
 import { redirect } from "next/navigation";
+import { randomUUID } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   createProjectPlanForProductionJob, createManualProjectPlan, updateManualProjectPlan,
   addManualProjectSection, renameManualProjectSection, removeManualProjectSection,
-  addProjectTask, updateProjectTask, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant, reorderProjectTasksForTenant
+  addProjectTask, updateProjectTask, getProjectTaskForTenant, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant, reorderProjectTasksForTenant
 } from "@/server/project-timelines";
 import type { ProjectTaskStatus } from "@/lib/project-timeline";
+import type { ProjectTimelineTaskRecord } from "@/server/project-timelines";
 
 function value(form: FormData, key: string): string {
   return String(form.get(key) ?? "").trim();
@@ -90,6 +92,45 @@ export async function updateProjectTaskAction(form: FormData): Promise<void> {
   revalidatePath(`/projects/${projectId}`);
   revalidatePath("/projects");
   projectRedirect(projectId, "Task updated");
+}
+
+/** Fast edit/create for the Gantt task forms. Unlike the legacy redirecting actions,
+ * this returns the saved row without revalidating or rebuilding the entire Projects page.
+ * The client updates the Gantt immediately and refreshes the other server-rendered lists
+ * in the background. All permission and tenant validations remain server-side. */
+export async function saveProjectTaskInlineAction(form: FormData): Promise<
+  { ok: true; task: ProjectTimelineTaskRecord; timings: { authMs: number; writeMs: number; readMs: number; totalMs: number } }
+  | { ok: false; error: string }
+> {
+  const started = performance.now();
+  const projectId = value(form, "projectId");
+  const editTaskId = value(form, "taskId");
+  if (!projectId) return { ok: false, error: "Project is required." };
+  try {
+    const tenantId = await requireProjectManager();
+    const authenticated = performance.now();
+    const taskId = editTaskId || randomUUID();
+    const input = taskInput(form);
+    const saved = editTaskId
+      ? await updateProjectTask(tenantId, projectId, taskId, input)
+      : await addProjectTask(tenantId, projectId, input, taskId);
+    const written = performance.now();
+    if (!saved) return { ok: false, error: "Task, Sub Job or assigned staff not found in this workspace." };
+    const task = await getProjectTaskForTenant(tenantId, projectId, taskId);
+    const read = performance.now();
+    if (!task) return { ok: false, error: "Task was saved, but its details could not be loaded. Refresh the project." };
+    const timings = {
+      authMs: Math.round(authenticated - started),
+      writeMs: Math.round(written - authenticated),
+      readMs: Math.round(read - written),
+      totalMs: Math.round(read - started)
+    };
+    console.info("[pm:project-task-save]", { mode: editTaskId ? "edit" : "create", ...timings });
+    return { ok: true, task, timings };
+  } catch (error) {
+    console.warn("[pm:project-task-save] failed", { mode: editTaskId ? "edit" : "create", elapsedMs: Math.round(performance.now() - started), error });
+    return { ok: false, error: errorText(error) };
+  }
 }
 
 export async function removeProjectTaskAction(form: FormData): Promise<void> {
