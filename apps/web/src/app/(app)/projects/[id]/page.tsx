@@ -8,6 +8,7 @@ import {
   getProjectPlanForTenant, listProjectTasks, listProjectSubJobs, listUnscheduledProductionSteps,
 } from "@/server/project-timelines";
 import { listActiveStaffOptionsForTenant } from "@/server/users";
+import { projectSectionDateRangeLabel } from "@/lib/project-timeline";
 
 import { GanttTimeline } from "./GanttTimeline";
 import { ProjectTaskSections, ProjectTaskSummary } from "./ProjectTaskSections";
@@ -47,6 +48,7 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
   const paramsValue = (await searchParams) ?? {};
   const message = typeof paramsValue.message === "string" ? paramsValue.message : null;
   const error = typeof paramsValue.error === "string" ? paramsValue.error : null;
+  const expandManualSections = paramsValue.manageSubJobs === "1";
   return <main style={{ maxWidth: 1600, margin: "0 auto", display: "grid", gap: 18, minWidth: 0, paddingBottom: 64 }}>
     <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
       <Link href="/projects" style={{ color: "#1d4ed8", fontSize: 13, fontWeight: 900, textDecoration: "none" }}>← All Projects</Link>
@@ -73,9 +75,12 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
         <p style={{ color: "#64748b", fontSize: 12 }}>Manual project dates are kept here. The Main Calendar currently displays Production Job deadlines only.</p>
       </details>
     </section> : project.productionJobId ? <CompletionDateEditor jobId={project.productionJobId} initialDate={project.dueDate} canEdit={canEdit}/> : null}
-    {project.isManual && canEdit ? <section style={card}>
-      <h2 style={{ margin: "0 0 8px", fontSize: 18 }}>Manual Sub Jobs</h2>
-      <p style={{ color: "#64748b", fontSize: 12 }}>Add sections for different parts of this project. Each section can contain its own tasks, assigned staff and schedule.</p>
+    {project.isManual && canEdit ? <details style={card} open={expandManualSections}>
+      <summary style={{ cursor: "pointer", fontWeight: 900, fontSize: 17, color: "#0f172a" }}>
+        Manual Sub Jobs ({subJobs.length})
+        <span style={{ marginLeft: 9, color: "#64748b", fontSize: 12, fontWeight: 500 }}>Add, rename or remove sections</span>
+      </summary>
+      <p style={{ color: "#64748b", fontSize: 12, marginTop: 14 }}>Add sections for different parts of this project. Each section can contain its own tasks, assigned staff and schedule.</p>
       <form action={addManualProjectSectionAction} style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "end" }}>
         <input type="hidden" name="projectId" value={id}/>
         <label style={{ ...field, flex: "1 1 240px" }}>New Sub Job<input name="title" required maxLength={200} style={input} placeholder="e.g. Gallery Wall Graphics"/></label>
@@ -85,7 +90,11 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
         {subJobs.map(section => <div key={section.id} style={{ display: "flex", alignItems: "end", gap: 8, flexWrap: "wrap", borderTop: "1px solid #edf2f7", paddingTop: 9 }}>
           <form action={renameManualProjectSectionAction} style={{ display: "flex", alignItems: "end", flex: "1 1 260px", gap: 8 }}>
             <input type="hidden" name="projectId" value={id}/><input type="hidden" name="sectionId" value={section.id}/>
-            <label style={{ ...field, flex: 1 }}>Sub Job name<input name="title" style={input} required maxLength={200} defaultValue={section.title}/></label>
+            <label style={{ ...field, flex: 1 }}>Sub Job name<input name="title" style={input} required maxLength={200} defaultValue={section.title}/>
+              <span style={{ color: "#64748b", fontWeight: 550, fontSize: 11 }}>
+                {projectSectionDateRangeLabel(tasks.filter(task => task.subJobId === section.id))}
+              </span>
+            </label>
             <button type="submit" style={{ ...darkButton, background: "#e0eaff", color: "#1e40af" }}>Rename</button>
           </form>
           <form action={removeManualProjectSectionAction}>
@@ -95,7 +104,7 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
         </div>)}
         <p style={{ color: "#64748b", fontSize: 12, margin: 0 }}>Removing a section keeps its tasks under General / Unassigned.</p>
       </div> : null}
-    </section> : null}
+    </details> : null}
     {message ? <div role="status" style={{ ...card, padding: 12, borderColor: "#86efac", color: "#166534" }}>{message}</div> : null}
     {error ? <div role="alert" style={{ ...card, padding: 12, borderColor: "#fca5a5", color: "#991b1b" }}>{error}</div> : null}
     <GanttTimeline projectId={id} canEdit={canEdit} tasks={tasks} sections={subJobs} staff={staff.map(person => ({ id: person.userProfileId, name: person.shortName || person.fullName }))} revision={project.updatedAt} />

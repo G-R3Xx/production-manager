@@ -5,7 +5,7 @@ import { rescheduleProjectTaskAction, assignProjectTaskAction, reorderProjectTas
 import type { ProjectTimelineTaskRecord, ProjectSubJobRecord } from "@/server/project-timelines";
 import {
   timelineDayIndex, timelinePositionInWindow, timelineTaskRangeLabel, timelineWindow,
-  shiftTimelineFocus, plannedHoursLabel, sydneyTodayDayIndex, sydneyNowMinuteIndex,
+  shiftTimelineFocus, plannedHoursLabel, projectSectionDateRangeLabel, sydneyTodayDayIndex, sydneyNowMinuteIndex,
   timelineDragSchedule, timelineDragSnapMinutes, timelineMinuteIndex, compareProjectTaskOrder, reorderProjectTaskIds, type TimelineDragMode, type TimelineZoom
 } from "@/lib/project-timeline";
 
@@ -55,6 +55,8 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
   const [savedDates, setSavedDates] = useState<Record<string, TaskDates>>({});
   const [savedAssignees, setSavedAssignees] = useState<Record<string, string | null>>({});
   const [savedGroupOrder, setSavedGroupOrder] = useState<Record<string, string[]>>({});
+  // Collapsing a group is a local display preference, never a database update.
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [rowDragId, setRowDragId] = useState<string | null>(null);
   const [rowDrop, setRowDrop] = useState<{ id: string; after: boolean } | null>(null);
   const rowDragIdRef = useRef<string | null>(null);
@@ -424,7 +426,10 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
   }, [inlineTaskChanges, tasks, focusDay, zoom, model.startMinute, model.endMinute, model.width]);
 
   const groups = [{ id: null, title: "General / Unassigned" }, ...sections.map(s => ({ id: s.id, title: s.title }))]
-    .map(group => ({ ...group, tasks: model.visibleTasks.filter(task => task.subJobId === group.id) }))
+    .map(group => ({ ...group,
+      tasks: model.visibleTasks.filter(task => task.subJobId === group.id),
+      allTasks: orderedTasks.filter(task => task.subJobId === group.id)
+    }))
     .filter(group => group.tasks.length);
   const gridTrack: CSSProperties = {
     position: "relative", flex: `0 0 ${model.width}px`, width: model.width, minHeight: 53,
@@ -488,11 +493,30 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
         </div>
         {groups.length === 0 ? <div style={{ padding: 16, fontSize: 13, color: "#64748b" }}>
           No tasks are scheduled in this {zoom}. Use the arrows or date selector to view another period.
-        </div> : groups.map(group => <div key={group.id ?? "general"}>
-          <div style={{ display: "flex", background: "#e8eef7", borderBottom: "1px solid #cbd5e1", color: "#1e3a5f", fontWeight: 900 }}>
-            <div style={{ ...labelCell, background: "#e8eef7" }}>{group.title}</div><div style={{ flex: 1 }} />
+        </div> : groups.map(group => {
+          const groupKey = group.id ?? "general";
+          const collapsed = Boolean(collapsedGroups[groupKey]);
+          const groupLabel = projectSectionDateRangeLabel(group.allTasks);
+          return <div key={groupKey}>
+          <div style={{ display: "flex", background: "#e8eef7", borderBottom: "1px solid #cbd5e1", color: "#1e3a5f", alignItems: "center" }}>
+            <div style={{ ...labelCell, background: "#e8eef7", paddingTop: 7, paddingBottom: 7 }}>
+              <button type="button" aria-expanded={!collapsed} aria-controls={`gantt-group-${groupKey}`}
+                aria-label={`${collapsed ? "Expand" : "Collapse"} ${group.title} tasks`}
+                onClick={() => setCollapsedGroups(previous => ({ ...previous, [groupKey]: !previous[groupKey] }))}
+                style={{ border: 0, background: "transparent", fontWeight: 900, color: "#1e3a5f", cursor: "pointer",
+                  padding: "4px 0", textAlign: "left", display: "flex", alignItems: "center", gap: 7, maxWidth: "100%" }}>
+                <span aria-hidden="true" style={{ width: 13, flexShrink: 0 }}>{collapsed ? "▸" : "▾"}</span>
+                <span style={{ overflowWrap: "anywhere" }}>{group.title}</span>
+              </button>
+            </div>
+            <div style={{ padding: "6px 12px", fontWeight: 650, fontSize: 11, color: "#475569", minWidth: 0 }}
+              title={groupLabel}>
+              <span style={{ marginRight: 12 }}>{group.allTasks.length} {group.allTasks.length === 1 ? "task" : "tasks"}</span>
+              <span>{groupLabel}</span>
+            </div>
           </div>
-          {group.tasks.map((task, taskIndex) => {
+          <div id={`gantt-group-${groupKey}`}>
+          {!collapsed ? group.tasks.map((task, taskIndex) => {
             const bar = timelinePositionInWindow(task, model.startMinute, model.endMinute);
             const timeLabel = timelineTaskRangeLabel(task);
             const description = `${task.title} | ${timeLabel} (Sydney time) | ${plannedHoursLabel(task.allocatedMinutes)} allocated`;
@@ -603,8 +627,9 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
                   </a> : null}
               </div>
             </div>;
-          })}
-        </div>)}
+          }) : null}
+          </div>
+        </div>; })}
       </div>}
     </div>
     <div style={{ display: "flex", gap: 15, flexWrap: "wrap", padding: "11px 17px", fontSize: 11, color: "#475569" }}>

@@ -189,6 +189,34 @@ export function timelineDragSchedule(
   return { plannedStart: timelineLocalDateTime(nextStart), plannedEnd: timelineLocalDateTime(nextEnd) };
 }
 
+/** A Sub Job spans the earliest start to latest finish of its scheduled tasks.
+ * Read the stored local wall-clock values directly: no timezone conversion and
+ * no dependency on the currently selected Gantt week/day/month window. */
+export function projectSectionDateRange(tasks: readonly { plannedStart: string; plannedEnd: string }[]):
+  { start: string; finish: string } | null {
+  if (!tasks.length) return null;
+  let start = tasks[0].plannedStart;
+  let finish = tasks[0].plannedEnd;
+  for (const task of tasks) {
+    if (task.plannedStart < start) start = task.plannedStart;
+    if (task.plannedEnd > finish) finish = task.plannedEnd;
+  }
+  return { start, finish };
+}
+
+function shortLocalDateTime(value: string): string {
+  const date = new Date(`${value.slice(0, 10)}T00:00:00Z`);
+  const day = new Intl.DateTimeFormat("en-AU", {
+    day: "numeric", month: "short", year: "numeric", timeZone: "UTC"
+  }).format(date);
+  return `${day} ${value.slice(11, 16)}`;
+}
+
+export function projectSectionDateRangeLabel(tasks: readonly { plannedStart: string; plannedEnd: string }[]): string {
+  const span = projectSectionDateRange(tasks);
+  return span ? `Start ${shortLocalDateTime(span.start)} · Finish ${shortLocalDateTime(span.finish)}` : "No dates scheduled";
+}
+
 export function plannedHoursLabel(minutes: number): string {
   const hours = minutes / 60;
   return `${Number.isInteger(hours) ? hours : Number(hours.toFixed(2))}h`;

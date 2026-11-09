@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { PROJECT_TASK_STATUSES, plannedHoursLabel } from "@/lib/project-timeline";
+import { PROJECT_TASK_STATUSES, plannedHoursLabel, projectSectionDateRangeLabel } from "@/lib/project-timeline";
 import type { ProjectTimelineTaskRecord, ProjectSubJobRecord } from "@/server/project-timelines";
 import type { ActiveStaffOption } from "@/server/users";
 import { removeProjectTaskAction } from "../actions";
@@ -114,7 +114,10 @@ export function ProjectTaskSections({ projectId, canEdit, tasks, subJobs, staff,
         return <article key={section.id ?? "general"} style={{ ...card, display: "grid", gap: 12, minWidth: 0 }}>
           <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
             <h3 style={{ margin: 0, color: "#1e3a8a", fontSize: 18 }}>{section.title}</h3>
-            <span style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>{sectionTasks.length} tasks · {plannedHoursLabel(sectionTasks.reduce((total, task) => total + task.allocatedMinutes, 0))} allocated</span>
+            <span style={{ color: "#64748b", fontWeight: 800, fontSize: 12, textAlign: "right" }}>
+              {sectionTasks.length} tasks · {plannedHoursLabel(sectionTasks.reduce((total, task) => total + task.allocatedMinutes, 0))} allocated
+              <span style={{ display: "block", marginTop: 4, fontWeight: 550 }}>{projectSectionDateRangeLabel(sectionTasks)}</span>
+            </span>
           </div>
           {sectionTasks.length > 0 ? <div style={{ display: "grid", gap: 8 }}>
             {sectionTasks.map(task => <div key={task.id} id={`task-${task.id}`} style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 13px", background: "#f8fafc", minWidth: 0 }}>

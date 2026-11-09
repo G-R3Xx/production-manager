@@ -39,8 +39,10 @@ function taskInput(form: FormData) {
     notes: optional(form, "notes")
   };
 }
-function projectRedirect(projectId: string, message: string, error = false): never {
-  redirect(`/projects/${encodeURIComponent(projectId)}?${error ? "error" : "message"}=${encodeURIComponent(message)}`);
+function projectRedirect(projectId: string, message: string, error = false, manageSubJobs = false): never {
+  const query = new URLSearchParams({ [error ? "error" : "message"]: message });
+  if (manageSubJobs) query.set("manageSubJobs", "1");
+  redirect(`/projects/${encodeURIComponent(projectId)}?${query.toString()}`);
 }
 function errorText(err: unknown): string {
   const message = err instanceof Error ? err.message : "Unable to save task";
@@ -256,10 +258,10 @@ export async function addManualProjectSectionAction(form: FormData): Promise<voi
   const projectId = value(form, "projectId");
   let saved = false;
   try { saved = await addManualProjectSection(tenantId, projectId, value(form, "title")); }
-  catch (error) { projectRedirect(projectId, errorText(error), true); }
-  if (!saved) projectRedirect(projectId, "Manual project not found in this workspace", true);
+  catch (error) { projectRedirect(projectId, errorText(error), true, true); }
+  if (!saved) projectRedirect(projectId, "Manual project not found in this workspace", true, true);
   revalidatePath(`/projects/${projectId}`);
-  projectRedirect(projectId, "Sub Job added");
+  projectRedirect(projectId, "Sub Job added", false, true);
 }
 
 export async function renameManualProjectSectionAction(form: FormData): Promise<void> {
@@ -267,10 +269,10 @@ export async function renameManualProjectSectionAction(form: FormData): Promise<
   const projectId = value(form, "projectId");
   let saved = false;
   try { saved = await renameManualProjectSection(tenantId, projectId, value(form, "sectionId"), value(form, "title")); }
-  catch (error) { projectRedirect(projectId, errorText(error), true); }
-  if (!saved) projectRedirect(projectId, "Sub Job not found in this workspace", true);
+  catch (error) { projectRedirect(projectId, errorText(error), true, true); }
+  if (!saved) projectRedirect(projectId, "Sub Job not found in this workspace", true, true);
   revalidatePath(`/projects/${projectId}`);
-  projectRedirect(projectId, "Sub Job renamed");
+  projectRedirect(projectId, "Sub Job renamed", false, true);
 }
 
 export async function removeManualProjectSectionAction(form: FormData): Promise<void> {
@@ -278,8 +280,8 @@ export async function removeManualProjectSectionAction(form: FormData): Promise<
   const projectId = value(form, "projectId");
   let saved = false;
   try { saved = await removeManualProjectSection(tenantId, projectId, value(form, "sectionId")); }
-  catch (error) { projectRedirect(projectId, errorText(error), true); }
-  if (!saved) projectRedirect(projectId, "Sub Job not found in this workspace", true);
+  catch (error) { projectRedirect(projectId, errorText(error), true, true); }
+  if (!saved) projectRedirect(projectId, "Sub Job not found in this workspace", true, true);
   revalidatePath(`/projects/${projectId}`);
-  projectRedirect(projectId, "Sub Job removed; its tasks are now in General / Unassigned");
+  projectRedirect(projectId, "Sub Job removed; its tasks are now in General / Unassigned", false, true);
 }
