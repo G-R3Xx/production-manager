@@ -51,7 +51,7 @@ test('tenant-scoped writes and production-step links remain explicit', () => {
   const sql = fs.readFileSync('infra/sql/065_project_timelines.sql','utf8');
   const source = fs.readFileSync('apps/web/src/server/project-timelines.ts','utf8');
   const actions = fs.readFileSync('apps/web/src/app/(app)/projects/actions.ts','utf8');
-  const UI = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/page.tsx','utf8');
+  const UI = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/page.tsx','utf8') + fs.readFileSync('apps/web/src/app/(app)/projects/[id]/ProjectTaskSections.tsx','utf8');
   assert.match(sql, /REFERENCES production\.production_steps\(id\)/);
   assert.match(sql, /REFERENCES sales\.quote_sub_jobs\(id\)/);
   assert.match(sql, /planned_start timestamp without time zone/);

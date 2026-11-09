@@ -7,7 +7,7 @@ import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenan
 import {
   createProjectPlanForProductionJob, createManualProjectPlan, updateManualProjectPlan,
   addManualProjectSection, renameManualProjectSection, removeManualProjectSection,
-  addProjectTask, updateProjectTask, getProjectTaskForTenant, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant, reorderProjectTasksForTenant
+  addProjectTask, updateProjectTask, getProjectTaskForTenant, getProjectRevision, deleteProjectTask, scheduleExistingProductionStep, rescheduleProjectTask, assignProjectTaskForTenant, reorderProjectTasksForTenant
 } from "@/server/project-timelines";
 import type { ProjectTaskStatus } from "@/lib/project-timeline";
 import type { ProjectTimelineTaskRecord } from "@/server/project-timelines";
@@ -99,7 +99,7 @@ export async function updateProjectTaskAction(form: FormData): Promise<void> {
  * The client updates the Gantt immediately and refreshes the other server-rendered lists
  * in the background. All permission and tenant validations remain server-side. */
 export async function saveProjectTaskInlineAction(form: FormData): Promise<
-  { ok: true; task: ProjectTimelineTaskRecord; timings: { authMs: number; writeMs: number; readMs: number; totalMs: number } }
+  { ok: true; task: ProjectTimelineTaskRecord; revision: string; timings: { authMs: number; writeMs: number; readMs: number; totalMs: number } }
   | { ok: false; error: string }
 > {
   const started = performance.now();
@@ -116,9 +116,12 @@ export async function saveProjectTaskInlineAction(form: FormData): Promise<
       : await addProjectTask(tenantId, projectId, input, taskId);
     const written = performance.now();
     if (!saved) return { ok: false, error: "Task, Sub Job or assigned staff not found in this workspace." };
-    const task = await getProjectTaskForTenant(tenantId, projectId, taskId);
+    const [task, revision] = await Promise.all([
+      getProjectTaskForTenant(tenantId, projectId, taskId),
+      getProjectRevision(tenantId, projectId)
+    ]);
     const read = performance.now();
-    if (!task) return { ok: false, error: "Task was saved, but its details could not be loaded. Refresh the project." };
+    if (!task || !revision) return { ok: false, error: "Task was saved, but its details could not be loaded. Refresh the project." };
     const timings = {
       authMs: Math.round(authenticated - started),
       writeMs: Math.round(written - authenticated),
@@ -126,7 +129,7 @@ export async function saveProjectTaskInlineAction(form: FormData): Promise<
       totalMs: Math.round(read - started)
     };
     console.info("[pm:project-task-save]", { mode: editTaskId ? "edit" : "create", ...timings });
-    return { ok: true, task, timings };
+    return { ok: true, task, revision, timings };
   } catch (error) {
     console.warn("[pm:project-task-save] failed", { mode: editTaskId ? "edit" : "create", elapsedMs: Math.round(performance.now() - started), error });
     return { ok: false, error: errorText(error) };

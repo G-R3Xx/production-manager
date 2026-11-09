@@ -12,6 +12,7 @@ const serverSource = fs.readFileSync('apps/web/src/server/project-timelines.ts',
 const pageSource = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/page.tsx', 'utf8');
 const formSource = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/ProjectTaskForm.tsx', 'utf8');
 const ganttSource = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/GanttTimeline.tsx', 'utf8');
+const taskSectionsSource = fs.readFileSync('apps/web/src/app/(app)/projects/[id]/ProjectTaskSections.tsx', 'utf8');
 const tenantId = '11111111-1111-4111-8111-111111111111';
 const projectId = '22222222-2222-4222-8222-222222222222';
 const taskId = '33333333-3333-4333-8333-333333333333';
@@ -42,6 +43,7 @@ function mockActions({ role='manager', databaseSave=true }={}) {
       addProjectTask:async(...args)=>{ calls.push(['add',...args]); return databaseSave; },
       updateProjectTask:async(...args)=>{ calls.push(['edit',...args]); return databaseSave; },
       getProjectTaskForTenant:async(_tenant,_project,id)=>{ calls.push(['read',id]); return exampleTask(id); },
+      getProjectRevision:async(_tenant,_project)=>{ calls.push(['revision']); return '2026-11-09 10:00:00+11'; },
     }
   };
   const c=ts.transpileModule(actionSource,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}});
@@ -59,7 +61,8 @@ test('create task writes once, returns the saved row, without redirect/revalidat
   assert.equal(result.ok,true);
   assert.equal(result.task.title,input.title);
   assert.match(result.task.id,/^[0-9a-f-]{36}$/);
-  assert.deepEqual(calls.map(c=>c[0]),['add','read']);
+  assert.deepEqual(calls.map(c=>c[0]),['add','read','revision']);
+  assert.equal(result.revision,'2026-11-09 10:00:00+11');
   assert.equal(calls[0][1],tenantId);
   assert.equal(calls[0][2],projectId);
   assert.equal(calls[0][4],result.task.id);
@@ -70,7 +73,7 @@ test('edit task uses existing ID, does not create a second task or revalidate th
   const result=await api.saveProjectTaskInlineAction(form(taskId));
   assert.equal(result.ok,true);
   assert.equal(result.task.id,taskId);
-  assert.deepEqual(calls.map(c=>c[0]),['edit','read']);
+  assert.deepEqual(calls.map(c=>c[0]),['edit','read','revision']);
   assert.equal(calls[0][3],taskId);
 });
 test('failed save and unauthorised manager return errors without exposing task data',async()=>{
@@ -106,15 +109,19 @@ test('new task UUID and tenant-scoped single-row read use indexed lookups',async
   assert.match(calls[1].sql,/p\.tenant_id = \$1::uuid/);
   assert.match(calls[1].sql,/LIMIT 1/);
 });
-test('client form confirms save before background refresh; Gantt receives a confirmed task event',()=>{
-  assert.match(pageSource,/<ProjectTaskForm projectId=\{id\} mode="create">/);
-  assert.match(pageSource,/<ProjectTaskForm projectId=\{id\} taskId=\{task\.id\} mode="edit">/);
+test('client form updates every task view without router refresh; Gantt receives revision',()=>{
+  assert.match(pageSource,/<ProjectTaskSections projectId=\{id\}/);
+  assert.match(taskSectionsSource,/<ProjectTaskForm projectId=\{projectId\} mode="create">/);
+  assert.match(taskSectionsSource,/<ProjectTaskForm projectId=\{projectId\} taskId=\{task\.id\} mode="edit">/);
   assert.doesNotMatch(pageSource,/action=\{(?:addProjectTaskAction|updateProjectTaskAction)\}/);
   assert.match(formSource,/await saveProjectTaskInlineAction\(form\)/);
   assert.match(formSource,/setFeedback\(\{ success: true/);
   assert.match(formSource,/window\.dispatchEvent\(new CustomEvent\("pm-project-task-saved"/);
-  assert.match(formSource,/startRefresh\(\(\) => router\.refresh\(\)\)/);
-  assert.doesNotMatch(formSource,/new BroadcastChannel\(/, 'avoid a duplicate same-tab full-project refresh');
+  assert.doesNotMatch(formSource,/router\.refresh\(/, 'no redundant full-project refresh after task save');
+  assert.match(formSource,/revision: result\.revision/);
+  assert.match(taskSectionsSource,/window\.addEventListener\("pm-project-task-saved", receive\)/);
+  assert.match(pageSource,/<ProjectTaskSummary projectId=\{id\} tasks=\{tasks\}/);
+  assert.match(ganttSource,/revisionRef\.current = detail\.revision/);
   assert.match(ganttSource,/window\.addEventListener\("pm-project-task-saved", receive\)/);
   assert.match(ganttSource,/Object\.values\(inlineTaskChanges\)\.filter/);
   assert.match(ganttSource,/orderedTasks\.length === 0/);

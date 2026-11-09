@@ -91,8 +91,9 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
   const suppressClickRef = useRef<string | null>(null);
   useEffect(() => {
     const receive = (event: Event) => {
-      const detail = (event as CustomEvent<{ projectId: string; task: ProjectTimelineTaskRecord }>).detail;
+      const detail = (event as CustomEvent<{ projectId: string; task: ProjectTimelineTaskRecord; revision?: string }>).detail;
       if (detail?.projectId !== projectId || !detail.task?.id) return;
+      if (detail.revision) revisionRef.current = detail.revision;
       setInlineTaskChanges(previous => ({ ...previous, [detail.task.id]: detail.task }));
       setLastSavedTaskId(detail.task.id);
       setSavedDates(previous => { const next = { ...previous }; delete next[detail.task.id]; return next; });

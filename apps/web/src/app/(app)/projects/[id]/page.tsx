@@ -6,14 +6,13 @@ import { getRequiredSessionUser } from "@/server/auth/session";
 import { resolveActiveTenantForAuthUserId } from "@/server/bootstrap/activeTenant";
 import {
   getProjectPlanForTenant, listProjectTasks, listProjectSubJobs, listUnscheduledProductionSteps,
-  type ProjectSubJobRecord, type ProjectTimelineTaskRecord
 } from "@/server/project-timelines";
-import { listActiveStaffOptionsForTenant, type ActiveStaffOption } from "@/server/users";
-import { PROJECT_TASK_STATUSES, plannedHoursLabel } from "@/lib/project-timeline";
+import { listActiveStaffOptionsForTenant } from "@/server/users";
+
 import { GanttTimeline } from "./GanttTimeline";
-import { ProjectTaskForm } from "./ProjectTaskForm";
+import { ProjectTaskSections, ProjectTaskSummary } from "./ProjectTaskSections";
 import { CompletionDateEditor } from "./CompletionDateEditor";
-import { removeProjectTaskAction, scheduleProductionStepAction,
+import { scheduleProductionStepAction,
   updateManualProjectPlanAction, addManualProjectSectionAction, renameManualProjectSectionAction, removeManualProjectSectionAction } from "../actions";
 
 type PageProps = { params: Promise<{ id: string }>; searchParams?: Promise<Record<string, string | string[] | undefined>> };
@@ -32,53 +31,6 @@ function defaultPeriod(): { start: string; finish: string } {
   return { start: `${day}T09:00`, finish: `${day}T10:00` };
 }
 
-function Fields({ task, subJobId, sections, staff, period, isEdit = false }: {
-  task?: ProjectTimelineTaskRecord;
-  subJobId: string | null;
-  sections: ProjectSubJobRecord[];
-  staff: ActiveStaffOption[];
-  period: { start: string; finish: string };
-  isEdit?: boolean;
-}) {
-  return <>
-    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,200px),1fr))", gap: 12 }}>
-      <label style={field}>Task name
-        <input style={input} name="title" required maxLength={200} defaultValue={task?.title ?? ""} placeholder="e.g. Print graphics" />
-      </label>
-      {isEdit ? <label style={field}>Sub Job section
-        <select style={input} name="subJobId" defaultValue={task?.subJobId ?? ""}>
-          <option value="">General / Unassigned</option>
-          {sections.map(s => <option value={s.id} key={s.id}>{s.title}</option>)}
-        </select>
-      </label> : <input type="hidden" name="subJobId" value={subJobId ?? ""} />}
-      <label style={field}>Planned start
-        <input style={input} name="plannedStart" type="datetime-local" step={60} required defaultValue={task?.plannedStart ?? period.start} />
-      </label>
-      <label style={field}>Planned finish
-        <input style={input} name="plannedEnd" type="datetime-local" step={60} required defaultValue={task?.plannedEnd ?? period.finish} />
-      </label>
-      <label style={field}>Allocated work hours
-        <input style={input} name="allocatedHours" type="number" min={0} max={8760} step="0.25" required defaultValue={task ? task.allocatedMinutes / 60 : 1} />
-      </label>
-      <label style={field}>Assigned staff
-        <select style={input} name="assigneeProfileId" defaultValue={task?.assigneeProfileId ?? ""}>
-          <option value="">Unassigned</option>
-          {staff.map(person => <option key={person.userProfileId} value={person.userProfileId}>{person.shortName || person.fullName}</option>)}
-        </select>
-      </label>
-      <label style={field}>Planning status
-        <select style={input} name="status" defaultValue={task?.status ?? "planned"}>
-          {PROJECT_TASK_STATUSES.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-        </select>
-      </label>
-    </div>
-    <label style={field}>Notes (optional)
-      <textarea name="notes" rows={2} maxLength={4000} defaultValue={task?.notes ?? ""} style={{ ...input, resize: "vertical", padding: 10 }} />
-    </label>
-    {task?.productionStepId ? <p style={{ color: "#64748b", fontSize: 12, margin: 0 }}>Linked Production Step: the original checklist keeps its own completion status. Changing this timeline schedule does not create or change the checklist step.</p> : null}
-  </>;
-}
-
 export default async function ProjectTimelinePage({ params, searchParams }: PageProps) {
   const user = await getRequiredSessionUser();
   const tenant = await resolveActiveTenantForAuthUserId(user.id);
@@ -95,7 +47,6 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
   const paramsValue = (await searchParams) ?? {};
   const message = typeof paramsValue.message === "string" ? paramsValue.message : null;
   const error = typeof paramsValue.error === "string" ? paramsValue.error : null;
-  const sections: { id: string | null; title: string }[] = [{ id: null, title: "General / Unassigned" }, ...subJobs];
   return <main style={{ maxWidth: 1600, margin: "0 auto", display: "grid", gap: 18, minWidth: 0, paddingBottom: 64 }}>
     <div style={{ display: "flex", gap: 12, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
       <Link href="/projects" style={{ color: "#1d4ed8", fontSize: 13, fontWeight: 900, textDecoration: "none" }}>← All Projects</Link>
@@ -106,7 +57,7 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
       <h1 style={{ margin: "6px 0", fontSize: 27, color: "#0f172a" }}>{project.title}</h1>
       <div style={{ color: "#475569", fontSize: 13 }}>{project.clientName ? `${project.clientName} · ` : ""}{project.isManual ? "Standalone planning (no MYOB/quote/Production Job)" : project.jobStatus.replace(/_/g, " ")}</div>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", marginTop: 12, fontSize: 13, fontWeight: 800, color: "#334155" }}>
-        <span>{subJobs.length} Sub Jobs</span><span>{tasks.length} scheduled tasks</span><span>{plannedHoursLabel(tasks.reduce((sum, task) => sum + task.allocatedMinutes, 0))} allocated work</span>
+        <span>{subJobs.length} Sub Jobs</span><ProjectTaskSummary projectId={id} tasks={tasks} />
       </div>
     </header>
     {project.isManual ? <section style={card}>
@@ -166,46 +117,6 @@ export default async function ProjectTimelinePage({ params, searchParams }: Page
         </form>)}
       </div>
     </details> : null}
-    <section style={{ display: "grid", gap: 12 }}>
-      <h2 style={{ margin: "7px 0 0", fontSize: 20, color: "#0f172a" }}>Tasks by Sub Job</h2>
-      {sections.map(section => {
-        const sectionTasks = tasks.filter(task => task.subJobId === section.id);
-        return <article key={section.id ?? "general"} style={{ ...card, display: "grid", gap: 12, minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 10, alignItems: "center", justifyContent: "space-between", flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0, color: "#1e3a8a", fontSize: 18 }}>{section.title}</h3>
-            <span style={{ color: "#64748b", fontWeight: 800, fontSize: 12 }}>{sectionTasks.length} tasks · {plannedHoursLabel(sectionTasks.reduce((total, task) => total + task.allocatedMinutes, 0))} allocated</span>
-          </div>
-          {sectionTasks.length > 0 ? <div style={{ display: "grid", gap: 8 }}>
-            {sectionTasks.map(task => <div key={task.id} id={`task-${task.id}`} style={{ border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 13px", background: "#f8fafc", minWidth: 0 }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
-                <div style={{ display: "grid", gap: 3 }}>
-                  <strong style={{ color: "#0f172a" }}>{task.title}</strong>
-                  <span style={{ color: "#64748b", fontSize: 12 }}>{task.plannedStart.replace("T", " ")} – {task.plannedEnd.replace("T", " ")} · {plannedHoursLabel(task.allocatedMinutes)} work{task.assigneeName ? ` · ${task.assigneeName}` : ""}</span>
-                </div>
-                <span style={{ fontSize: 11, color: "#334155", fontWeight: 850, padding: "5px 9px", borderRadius: 20, background: "#e5eefc" }}>
-                  {task.productionStepId ? `Production: ${task.productionStepStatus ?? "unlinked"}` : task.status.replace(/_/g, " ")}
-                </span>
-              </div>
-              {canEdit ? <details style={{ marginTop: 8 }}>
-                <summary style={{ cursor: "pointer", fontWeight: 800, color: "#1d4ed8", fontSize: 13 }}>Edit schedule / allocation</summary>
-                <ProjectTaskForm projectId={id} taskId={task.id} mode="edit">
-                  <Fields task={task} subJobId={section.id} sections={subJobs} staff={staff} period={period} isEdit />
-                </ProjectTaskForm>
-                <form action={removeProjectTaskAction} style={{ marginTop: 10 }}>
-                  <input type="hidden" name="projectId" value={id}/><input type="hidden" name="taskId" value={task.id}/>
-                  <button style={{ border: "1px solid #fecaca", color: "#b91c1c", borderRadius: 9, background: "#fff5f5", padding: "8px 13px", fontWeight: 800, cursor: "pointer" }} type="submit">Remove from timeline</button>
-                </form>
-              </details> : null}
-            </div>)}
-          </div> : <p style={{ color: "#94a3b8", fontSize: 12, margin: 0 }}>No scheduled tasks in this section.</p>}
-          {canEdit ? <details style={{ background: "#f8fbff", border: "1px dashed #bfd2ea", padding: 13, borderRadius: 12 }}>
-            <summary style={{ color: "#1e40af", fontSize: 13, fontWeight: 850, cursor: "pointer" }}>+ Add a planning task under {section.title}</summary>
-            <ProjectTaskForm projectId={id} mode="create">
-              <Fields subJobId={section.id} sections={subJobs} staff={staff} period={period} />
-            </ProjectTaskForm>
-          </details> : null}
-        </article>;
-      })}
-    </section>
+    <ProjectTaskSections projectId={id} canEdit={canEdit} tasks={tasks} subJobs={subJobs} staff={staff} period={period} />
   </main>;
 }
