@@ -66,7 +66,10 @@ export function ProjectTaskForm({ projectId, taskId, mode, children }: Props) {
     }
   }
 
-  return <form ref={formRef} onSubmit={submit} style={{ display: "grid", gap: 12, paddingTop: 13 }}>
+  // This form saves inline and deliberately does not navigate. The global route
+  // overlay listens in the capture phase and otherwise blocks the already-saved
+  // screen for its full 18-second safety timeout.
+  return <form ref={formRef} data-no-global-loader="true" onSubmit={submit} style={{ display: "grid", gap: 12, paddingTop: 13 }}>
     {children}
     <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
       <button type="submit" disabled={saving} style={{ border: 0, borderRadius: 9, background: saving ? "#94a3b8" : "#1e3a8a", color: "#fff", padding: "10px 14px", minHeight: 41, fontWeight: 800, cursor: saving ? "wait" : "pointer" }}>
