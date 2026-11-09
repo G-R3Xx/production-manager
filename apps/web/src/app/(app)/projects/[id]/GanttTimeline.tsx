@@ -229,11 +229,16 @@ export function GanttTimeline({ projectId, canEdit, tasks, sections, staff, revi
       const result = await assignProjectTaskAction({ projectId, taskId: task.id,
         assigneeProfileId: nextAssignee, expectedAssigneeProfileId: task.assigneeProfileId });
       if (!result.ok) throw new Error(result.error);
-      const name = staff.find(person => person.id === nextAssignee)?.name ?? "Unassigned";
-      setFeedback({ error:false, text: `${task.title} assigned to ${name}. ` });
+      // The server returns the real persisted task. Send it through the same
+      // in-page update path as Add/Edit task, so the Gantt, task cards and any
+      // older inline snapshots agree immediately. Do NOT refresh the whole page:
+      // that would let an old inline snapshot override the new assignment.
+      window.dispatchEvent(new CustomEvent("pm-project-task-saved", {
+        detail: { projectId, task: result.task, revision: result.revision }
+      }));
+      setFeedback({ error: false, text: `${task.title} assigned to ${result.task.assigneeName ?? "Unassigned"}.` });
       if (typeof BroadcastChannel !== "undefined") { const channel = new BroadcastChannel("pm-project-schedule");
-        channel.postMessage({projectId}); channel.close(); }
-      startTransition(() => router.refresh());
+        channel.postMessage({ projectId }); channel.close(); }
     } catch (error) {
       setSavedAssignees(previous => { const copy = {...previous}; delete copy[task.id]; return copy; });
       setFeedback({ error:true, text: error instanceof Error ? error.message : "Couldn't save assignment." });

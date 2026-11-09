@@ -194,17 +194,25 @@ export async function rescheduleProjectTaskAction(input: {
   }
 }
 
-/** Quick assignment from a Gantt row. Server-enforced manager access. */
+/** Quick assignment from a Gantt row. Return the confirmed DB task, just like
+ * inline task saves: an older in-page task snapshot must never overwrite the new
+ * assignee after a full router refresh. Manager / tenant / active-staff checks are
+ * still enforced by assignProjectTaskForTenant. */
 export async function assignProjectTaskAction(input: {
   projectId: string; taskId: string; assigneeProfileId: string | null; expectedAssigneeProfileId: string | null;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
+}): Promise<{ ok: true; task: ProjectTimelineTaskRecord; revision: string } | { ok: false; error: string }> {
   const tenantId = await requireProjectManager();
   if (!input.projectId || !input.taskId) return { ok: false, error: "Project or task is missing." };
   try {
     const updated = await assignProjectTaskForTenant(tenantId, input.projectId, input.taskId,
       input.assigneeProfileId, input.expectedAssigneeProfileId);
     if (!updated) return { ok: false, error: "Assignment changed elsewhere, or the selected staff member is not active in this workspace. Refresh and try again." };
-    return { ok: true };
+    const [task, revision] = await Promise.all([
+      getProjectTaskForTenant(tenantId, input.projectId, input.taskId),
+      getProjectRevision(tenantId, input.projectId)
+    ]);
+    if (!task || !revision) return { ok: false, error: "Assignment saved, but its details could not be loaded. Refresh the project." };
+    return { ok: true, task, revision };
   } catch (error) { return { ok: false, error: errorText(error) }; }
 }
 
