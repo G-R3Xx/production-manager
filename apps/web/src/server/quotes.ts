@@ -1051,6 +1051,30 @@ export async function deleteQuoteLineForTenant(tenantId: string, quoteId: string
   `, [tenantId, quoteId, lineId]);
 }
 
+/** Change only the displayed quote-line title, preserving product identity and costing.
+ * Returns the persisted override (null means reset) or undefined if no writable line exists. */
+export async function updateQuoteLineTitleOverrideForTenant(
+  tenantId: string, quoteId: string, lineId: string, titleOverride: string | null
+): Promise<string | null | undefined> {
+  await ensureQuoteLineConfigurationColumn();
+  const result = await pool.query<{ savedTitle: string | null }>(`
+    UPDATE sales.quote_lines AS ql
+    SET configuration_snapshot = CASE
+      WHEN $4::text IS NULL THEN COALESCE(ql.configuration_snapshot, '{}'::jsonb) - 'quoteLineTitleOverride'
+      ELSE jsonb_set(COALESCE(ql.configuration_snapshot, '{}'::jsonb), '{quoteLineTitleOverride}', to_jsonb($4::text), true)
+    END,
+    updated_at = now()
+    FROM sales.quote_drafts AS qd
+    WHERE ql.quote_id = qd.id
+      AND qd.tenant_id = $1::uuid
+      AND ql.quote_id = $2::uuid
+      AND ql.id = $3::uuid
+      AND qd.status NOT IN ('deleted', 'accepted')
+    RETURNING ql.configuration_snapshot ->> 'quoteLineTitleOverride' AS "savedTitle"
+  `, [tenantId, quoteId, lineId, titleOverride]);
+  return result.rows[0]?.savedTitle === undefined ? undefined : result.rows[0].savedTitle;
+}
+
 export async function updateQuoteLineForTenant(tenantId: string, quoteId: string, lineId: string, input: {
   productName: string;
   optionSummary?: string | null;
@@ -1071,7 +1095,11 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
         unit_price = $7::numeric,
         line_total = ($6::numeric * $7::numeric),
         notes = $8::text,
-        configuration_snapshot = COALESCE($9::jsonb, ql.configuration_snapshot),
+        configuration_snapshot = COALESCE($9::jsonb, ql.configuration_snapshot) || CASE
+          WHEN ql.configuration_snapshot ? 'quoteLineTitleOverride'
+          THEN jsonb_build_object('quoteLineTitleOverride', ql.configuration_snapshot -> 'quoteLineTitleOverride')
+          ELSE '{}'::jsonb
+        END,
         client_response_status = 'pending',
         client_response_notes = NULL,
         client_responded_at = NULL,
@@ -1338,7 +1366,11 @@ async function saveQuoteLineBundleForPrincipal(
         unit_price = EXCLUDED.unit_price,
         line_total = EXCLUDED.line_total,
         notes = EXCLUDED.notes,
-        configuration_snapshot = EXCLUDED.configuration_snapshot,
+        configuration_snapshot = EXCLUDED.configuration_snapshot || CASE
+          WHEN ql.configuration_snapshot ? 'quoteLineTitleOverride'
+          THEN jsonb_build_object('quoteLineTitleOverride', ql.configuration_snapshot -> 'quoteLineTitleOverride')
+          ELSE '{}'::jsonb
+        END,
         client_response_status = 'pending',
         client_response_notes = NULL,
         client_responded_at = NULL,

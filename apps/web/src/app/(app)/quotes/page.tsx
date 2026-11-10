@@ -30,6 +30,8 @@ import { ManualQuoteApprovalModalForm } from "@/components/ManualQuoteApprovalMo
 import { QuoteLineMarkupEditor } from "./QuoteLineMarkupEditor";
 import { QuoteLineProfitEditor } from "./QuoteLineProfitEditor";
 import { QuoteLineQuickActions, QuoteLineVisibility } from "./QuoteLineQuickActions";
+import { QuoteLineLabelEditor } from "./QuoteLineLabelEditor";
+import { quoteLineTitleOverride } from "@/lib/quote-line-label";
 import { listLabourForTenant, listMachinesForTenant } from "@/server/productionResources";
 import type { QuoteCostingResources } from "./quoteCostingResources";
 import { QuoteSearchInput } from "./QuoteSearchInput";
@@ -1390,7 +1392,13 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         <div style={{ display: "grid", gap: 10 }}>
                           <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
                             <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                              <strong style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}>{line.productName}</strong>
+                              <span style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}><QuoteLineLabelEditor
+                                quoteId={selectedQuote.id}
+                                lineId={line.id}
+                                productName={line.productName}
+                                initialOverride={quoteLineTitleOverride(line.configurationSnapshot)}
+                                canEdit={selectedQuote.status !== "deleted" && selectedQuote.status !== "accepted"}
+                              /></span>
                               {surveyReference ? <span style={{ borderRadius: 999, padding: "4px 8px", fontSize: 11, fontWeight: 950, background: surveyNeedsConfig ? "#fff7ed" : "#eef4ff", color: surveyNeedsConfig ? "#c2410c" : "#3538cd" }}>{surveyNeedsConfig ? "Survey line · needs pricing" : "Survey linked"}</span> : null}
                               {line.clientResponseStatus !== "pending" ? (
                                 <span style={{

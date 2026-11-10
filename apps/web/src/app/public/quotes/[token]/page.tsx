@@ -3,6 +3,7 @@ export const dynamic = "force-dynamic";
 import { notFound } from "next/navigation";
 import { Fragment } from "react";
 import { groupQuoteLinesBySubJob } from "@/lib/quote-sub-jobs";
+import { quoteLineTitleOverride } from "@/lib/quote-line-label";
 import { listQuoteSubJobs } from "@/server/quote-sub-jobs";
 import { getCompanySettingsByTenantId } from "@/server/company";
 import { customerLogoUrl, getCustomerById } from "@/server/customers";
@@ -304,6 +305,8 @@ function smallFormatLineForClient(line: Pick<QuoteLineRecord, "productName" | "o
 }
 
 function quoteLineForClient(line: Pick<QuoteLineRecord, "productName" | "optionSummary" | "configurationSnapshot">): ClientQuoteLine {
+  const titleOverride = quoteLineTitleOverride(line.configurationSnapshot);
+  if (titleOverride) return { title: titleOverride, detail: null };
   if (isInstallLine(line)) return installLineForClient(line);
   const combined = `${line.productName} · ${line.optionSummary ?? ""}`.toLowerCase();
   if (/\b(card|flyer|brochure|book|booklet|ncr|duplicate|triplicate|gsm|cello)\b/.test(combined)) return smallFormatLineForClient(line);

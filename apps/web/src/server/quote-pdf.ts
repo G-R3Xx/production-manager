@@ -1,4 +1,5 @@
 import "server-only";
+import { quoteLineTitleOverride } from "@/lib/quote-line-label";
 
 import { inflateSync, deflateSync } from "node:zlib";
 import type { CompanySettingsRecord } from "@/server/company";
@@ -154,6 +155,8 @@ function clientPrintApplication(snapshot:Record<string,unknown>|null|undefined,p
   return null;
 }
 export function quoteLineClientTitle(line:QuoteLineRecord):string{
+  const titleOverride=quoteLineTitleOverride(line.configurationSnapshot);
+  if(titleOverride)return titleOverride;
   if(isInstallLine(line))return "Sign Install";
   if(/^access equipment\b/i.test(compactText(line.productName))) return line.productName;
   const parts=summaryParts(line),combined=[line.productName,line.optionSummary].filter(Boolean).join(" · "), base=cleanBaseMaterialName(line.productName),selected=cleanSelectedMaterialName(line);

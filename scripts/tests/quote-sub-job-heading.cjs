@@ -8,6 +8,7 @@ const clientPage = read('apps/web/src/app/public/quotes/[token]/page.tsx');
 const internalEditor = read('apps/web/src/app/(app)/quotes/page.tsx');
 const pdfSource = read('apps/web/src/server/quote-pdf.ts');
 const quoteHelpers = read('apps/web/src/lib/quote-sub-jobs.ts');
+const labelHelpers = read('apps/web/src/lib/quote-line-label.ts');
 // The staff quote editor has a separate section heading from the public quote.
 // Its title bar must NOT duplicate totals already displayed after the lines.
 const internalHeading = internalEditor.match(/\{showSectionHeading && section \? <div[\s\S]*?<\/div> : null\}/)?.[0];
@@ -38,7 +39,9 @@ transform(clientPage, 'page.tsx');
 const helperExports = {};
 new Function('exports', 'require', transform(quoteHelpers, 'quote-sub-jobs.ts'))(helperExports, require);
 const pdfExports = {};
-const stubRequire = (name) => name === 'server-only' ? {} : name === '@/lib/quote-sub-jobs' ? helperExports : require(name);
+const labelExports = {};
+new Function('exports', 'require', transform(labelHelpers, 'quote-line-label.ts'))(labelExports, require);
+const stubRequire = (name) => name === 'server-only' ? {} : name === '@/lib/quote-sub-jobs' ? helperExports : name === '@/lib/quote-line-label' ? labelExports : require(name);
 new Function('exports', 'require', 'Buffer', transform(pdfSource, 'quote-pdf.ts'))(pdfExports, stubRequire, Buffer);
 (async () => {
   const result = await pdfExports.buildQuotePdf({
