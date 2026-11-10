@@ -7,6 +7,7 @@ import { createProductionJobFromArtworkApprovalForTenant } from "@/server/produc
 import { createNotificationForTenant } from "@/server/notifications";
 import { applyPmsColoursToArtworkSpecification, buildArtworkSpecificationSnapshot, pmsColoursForRevision, type ArtworkSpecificationSnapshot } from "@/lib/artworkSpecification";
 import { relationHasColumns, relationsExist } from "@/server/schema-readiness";
+import { assignCurrentSubJobToNewQuoteLine } from "@/lib/quote-sub-jobs";
 
 export type QuoteDraftRecord = {
   id: string;
@@ -1211,6 +1212,32 @@ async function saveQuoteLineBundleForPrincipal(
   const queryStartedAt = Date.now();
   let result: { rows: Array<{ mainLineId: string | null; dispatchLineId: string | null; accessEquipmentLineId: string | null }> };
   try {
+    if (!input.lineId) {
+      // The browser can still hold a builder opened before the latest Sub Job
+      // was created. For INSERTS, the persisted last section is authoritative.
+      // Use the existing DB connection so there is no second connection setup.
+      // EDITS skip this entirely and retain their original section.
+      const activeSection = await client.query<{ id: string }>(`
+        SELECT sj.id::text AS id
+        FROM sales.quote_sub_jobs sj
+        JOIN sales.quote_drafts qd ON qd.id = sj.quote_id
+        WHERE qd.id = $2::uuid
+          AND (
+            ($3::text = 'tenant' AND qd.tenant_id = $1::uuid)
+            OR ($3::text = 'auth_user' AND EXISTS (
+              SELECT 1 FROM app.user_profiles up
+              JOIN app.memberships m ON m.user_profile_id = up.id
+              WHERE up.auth_user_id = $1::uuid
+                AND m.tenant_id = qd.tenant_id
+                AND m.status = 'active'
+            ))
+          )
+        ORDER BY sj.sort_order DESC, sj.created_at DESC, sj.id DESC
+        LIMIT 1
+      `, [principal.id, quoteId, principal.kind]);
+      assignCurrentSubJobToNewQuoteLine(activeSection.rows[0]?.id ?? null,
+        mainSnapshot, dispatchSnapshot, accessSnapshot);
+    }
     result = await client.query<{ mainLineId: string | null; dispatchLineId: string | null; accessEquipmentLineId: string | null }>(`
     WITH payload AS (
       SELECT *

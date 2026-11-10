@@ -17,6 +17,23 @@ export function currentQuoteSubJob(subJobs: QuoteSubJob[]): QuoteSubJob | null {
     !latest || job.sortOrder >= latest.sortOrder ? job : latest, null);
 }
 
+/**
+ * A newly created line must follow the quote's current section at save time,
+ * even if an open/lazy-loaded builder was mounted before that section existed.
+ * Apply the same section to linked dispatch and access-equipment charges.
+ * This is called ONLY for new lines: editing must never move an existing line.
+ */
+export function assignCurrentSubJobToNewQuoteLine(
+  currentSubJobId: string | null,
+  ...snapshots: Array<Record<string, unknown> | null>
+): void {
+  for (const snapshot of snapshots) {
+    if (!snapshot) continue;
+    if (currentSubJobId) snapshot.subJobId = currentSubJobId;
+    else delete snapshot.subJobId;
+  }
+}
+
 export function quoteLineSubJobId(snapshot: unknown): string | null {
   if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return null;
   const value = (snapshot as Record<string, unknown>).subJobId;

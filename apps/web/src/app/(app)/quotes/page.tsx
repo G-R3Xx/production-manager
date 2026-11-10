@@ -1315,7 +1315,7 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                     <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid #dbeafe" }}>
                       {selectedQuote.surveyRequestId ? <div style={{ border: "1px solid #bfdbfe", borderRadius: 14, background: "#eff6ff", color: "#1e3a8a", padding: "10px 12px" }}><strong>Add another line to this survey quote</strong><div style={{ marginTop: 3, fontSize: 12 }}>Survey-created lines remain above with their measurements, photos and notes. Use the same field layout here for any additional work.</div></div> : null}
                       <DeferredQuoteLineStartBuilder
-                        key="new-quote-line"
+                        key={`new-quote-line:${selectedQuote.id}:${activeSubJob?.id ?? "general"}`}
                         quoteId={selectedQuote.id}
                         subJobs={quoteSubJobs}
                         products={savedQuoteProducts}

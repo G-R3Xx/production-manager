@@ -71,6 +71,17 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
         .enquiry-preview-summary::marker { content: ""; }
         .enquiry-preview-card .enquiry-preview-summary:hover { background: #f8fbff; }
         .enquiry-preview-card[open] .enquiry-preview-summary { background: #fbfdff; }
+        /* Keep intake and current enquiries beside each other when the content area is wide enough.
+           Use the actual content width, not the screen width (which includes the app sidebar). */
+        .enquiries-layout-container { min-width: 0; width: 100%; container-type: inline-size; }
+        .enquiries-columns { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+        .enquiries-columns > form { grid-column: 1; grid-row: 1; min-width: 0; width: 100%; box-sizing: border-box; }
+        .enquiries-columns > .enquiries-list { grid-column: 2; grid-row: 1; min-width: 0; width: 100%; box-sizing: border-box; }
+        @container (max-width: 820px) {
+          .enquiries-columns { grid-template-columns: minmax(0, 1fr); }
+          .enquiries-columns > form { grid-column: 1; grid-row: 1; }
+          .enquiries-columns > .enquiries-list { grid-column: 1; grid-row: 2; }
+        }
       `}</style>
       {message ? <section style={{ border: "1px solid #abefc6", background: "#ecfdf3", color: "#067647", borderRadius: 16, padding: 14 }}>{message}</section> : null}
       {error ? <section style={{ border: "1px solid #fda29b", background: "#fff5f4", color: "#b42318", borderRadius: 16, padding: 14 }}>{error}</section> : null}
@@ -102,72 +113,73 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
         </Link>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "420px minmax(0, 1fr)", gap: 16, alignItems: "start" }}>
-        <NewEnquiryForm clients={clients.filter((client) => client.isActive)} />
+      <div className="enquiries-layout-container">
+        <div className="enquiries-columns">
+          <NewEnquiryForm clients={clients.filter((client) => client.isActive)} />
 
-        <section style={{ ...cardStyle(), display: "grid", gap: 12 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-            <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : filter === "completed" ? "Completed enquiries" : "Current enquiries"}</h2>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <Link prefetch={false} href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</Link>
-              <Link prefetch={false} href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</Link>
-              <Link prefetch={false} href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
-              <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} shown</span>
+          <section className="enquiries-list" style={{ ...cardStyle(), display: "grid", gap: 12 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+              <h2 style={{ margin: 0 }}>{filter === "deleted" ? "Deleted enquiries" : filter === "completed" ? "Completed enquiries" : "Current enquiries"}</h2>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <Link prefetch={false} href="/enquiries" style={{ color: !filter ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Active</Link>
+                <Link prefetch={false} href="/enquiries?filter=completed" style={{ color: filter === "completed" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Completed ({completedCount})</Link>
+                <Link prefetch={false} href="/enquiries?filter=deleted" style={{ color: filter === "deleted" ? "#155eef" : "#667085", fontWeight: 800, textDecoration: "none" }}>Deleted ({deletedCount})</Link>
+                <span style={{ fontSize: 13, color: "#667085" }}>{enquiries.length} shown</span>
+              </div>
             </div>
-          </div>
-          <div style={{ display: "grid", gap: 12 }}>
-            {enquiries.map((enquiry) => {
-              const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
-              const logoUrl = enquiry.clientLogoUrl || customerLogoUrl(linkedClient);
-              const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
-              const correspondenceCount = enquiryCorrespondence[0]?.totalCount ?? enquiryCorrespondence.length;
-              const contactLine = [enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ");
-              const purchaseOrderLine = enquiry.clientPurchaseOrderNumber ? `PO: ${enquiry.clientPurchaseOrderNumber}` : "";
+            <div style={{ display: "grid", gap: 12 }}>
+              {enquiries.map((enquiry) => {
+                const linkedClient = clients.find((client) => client.id === enquiry.linkedCustomerId) ?? null;
+                const logoUrl = enquiry.clientLogoUrl || customerLogoUrl(linkedClient);
+                const enquiryCorrespondence = correspondenceByEnquiry.get(enquiry.id) ?? [];
+                const correspondenceCount = enquiryCorrespondence[0]?.totalCount ?? enquiryCorrespondence.length;
+                const contactLine = [enquiry.contactName, enquiry.phone, enquiry.email, enquiry.siteAddress].filter(Boolean).join(" · ");
+                const purchaseOrderLine = enquiry.clientPurchaseOrderNumber ? `PO: ${enquiry.clientPurchaseOrderNumber}` : "";
 
-              return (
-                <details id={`enquiry-${enquiry.id}`} key={enquiry.id} open={selectedEnquiry === enquiry.id} className="enquiry-preview-card" style={{ border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", overflow: "hidden", scrollMarginTop: 88 }}>
-                  <summary className="enquiry-preview-summary" style={{ cursor: "pointer", listStyle: "none", padding: 12, display: "grid", gap: 8 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
-                      <div style={{ display: "flex", gap: 12, alignItems: "start", minWidth: 0 }}>
-                        <ClientLogoBadge logoUrl={logoUrl} name={enquiry.clientName} size={46} radius={12} padding={4} />
-                        <div style={{ minWidth: 0 }}>
-                          <strong style={{ overflowWrap: "anywhere" }}>{enquiry.clientName}</strong>
-                          <div style={{ color: "#475467", marginTop: 4, overflowWrap: "anywhere" }}>{enquiry.requestSummary}</div>
+                return (
+                  <details id={`enquiry-${enquiry.id}`} key={enquiry.id} open={selectedEnquiry === enquiry.id} className="enquiry-preview-card" style={{ border: "1px solid #e5e7eb", borderRadius: 16, background: "#fff", overflow: "hidden", scrollMarginTop: 88 }}>
+                    <summary className="enquiry-preview-summary" style={{ cursor: "pointer", listStyle: "none", padding: 12, display: "grid", gap: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "start" }}>
+                        <div style={{ display: "flex", gap: 12, alignItems: "start", minWidth: 0 }}>
+                          <ClientLogoBadge logoUrl={logoUrl} name={enquiry.clientName} size={46} radius={12} padding={4} />
+                          <div style={{ minWidth: 0 }}>
+                            <strong style={{ overflowWrap: "anywhere" }}>{enquiry.clientName}</strong>
+                            <div style={{ color: "#475467", marginTop: 4, overflowWrap: "anywhere" }}>{enquiry.requestSummary}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
+                          <span style={{ borderRadius: 999, border: `1px solid ${urgencyBadgeStyle(enquiry.urgency).borderColor}`, ...urgencyBadgeStyle(enquiry.urgency), padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{enquiry.urgency || "Normal"}</span>
+                          <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status === "converted" ? "Converted to job" : enquiry.status === "survey_requested" ? "Survey requested" : enquiry.status === "quoted" ? "Quoted" : enquiry.status}</span>
                         </div>
                       </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end", flex: "0 0 auto" }}>
-                        <span style={{ borderRadius: 999, border: `1px solid ${urgencyBadgeStyle(enquiry.urgency).borderColor}`, ...urgencyBadgeStyle(enquiry.urgency), padding: "4px 10px", fontSize: 12, fontWeight: 900 }}>{enquiry.urgency || "Normal"}</span>
-                        <span style={{ borderRadius: 999, background: "#eef2ff", color: "#4338ca", padding: "4px 10px", fontSize: 12, fontWeight: 800 }}>{enquiry.status === "converted" ? "Converted to job" : enquiry.status === "survey_requested" ? "Survey requested" : enquiry.status === "quoted" ? "Quoted" : enquiry.status}</span>
-                      </div>
-                    </div>
-                    {contactLine ? <div style={{ color: "#667085", fontSize: 13 }}>{contactLine}</div> : null}
-                    {purchaseOrderLine ? <div style={{ color: "#475467", fontSize: 13, fontWeight: 800 }}>{purchaseOrderLine}</div> : null}
-                  </summary>
+                      {contactLine ? <div style={{ color: "#667085", fontSize: 13 }}>{contactLine}</div> : null}
+                      {purchaseOrderLine ? <div style={{ color: "#475467", fontSize: 13, fontWeight: 800 }}>{purchaseOrderLine}</div> : null}
+                    </summary>
 
-                  <div style={{ display: "grid", gap: 10, borderTop: "1px solid #eef2f7", padding: "10px 12px 12px" }}>
-                    <details style={{ border: "1px solid #e6edf7", borderRadius: 14, background: "#fbfdff", overflow: "hidden" }}>
-                      <summary style={{ cursor: "pointer", padding: "10px 12px", color: "#2463eb" }}>
-                        <span style={{ display: "inline-flex", width: "calc(100% - 20px)", justifyContent: "space-between", gap: 10, alignItems: "center", verticalAlign: "middle" }}>
-                          <strong style={{ fontSize: 13, color: "#111827" }}>Correspondence</strong>
-                          <span style={{ fontSize: 12, color: "#667085", whiteSpace: "nowrap" }}>{correspondenceCount} attached</span>
-                        </span>
-                      </summary>
-                      <section style={{ display: "grid", gap: 8, borderTop: "1px solid #e6edf7", padding: "10px 12px 12px" }}>
-                        {enquiryCorrespondence.length > 0 ? (
-                          <div style={{ display: "grid", gap: 8 }}>
-                            {enquiryCorrespondence.slice(0, 5).map((item) => (
-                              <EnquiryCorrespondencePreview key={item.id} item={item} />
-                            ))}
-                          </div>
-                        ) : (
-                          <span style={{ color: "#98a2b3", fontSize: 12 }}>No email correspondence attached yet.</span>
-                        )}
-                        {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
-                          <form action={attachEnquiryCorrespondenceAction} style={{ margin: 0 }}>
-                            <input type="hidden" name="enquiryId" value={enquiry.id} />
-                            <EnquiryCorrespondenceDropzone />
-                          </form>
-                        ) : null}
+                    <div style={{ display: "grid", gap: 10, borderTop: "1px solid #eef2f7", padding: "10px 12px 12px" }}>
+                      <details style={{ border: "1px solid #e6edf7", borderRadius: 14, background: "#fbfdff", overflow: "hidden" }}>
+                        <summary style={{ cursor: "pointer", padding: "10px 12px", color: "#2463eb" }}>
+                          <span style={{ display: "inline-flex", width: "calc(100% - 20px)", justifyContent: "space-between", gap: 10, alignItems: "center", verticalAlign: "middle" }}>
+                            <strong style={{ fontSize: 13, color: "#111827" }}>Correspondence</strong>
+                            <span style={{ fontSize: 12, color: "#667085", whiteSpace: "nowrap" }}>{correspondenceCount} attached</span>
+                          </span>
+                        </summary>
+                        <section style={{ display: "grid", gap: 8, borderTop: "1px solid #e6edf7", padding: "10px 12px 12px" }}>
+                          {enquiryCorrespondence.length > 0 ? (
+                            <div style={{ display: "grid", gap: 8 }}>
+                              {enquiryCorrespondence.slice(0, 5).map((item) => (
+                                <EnquiryCorrespondencePreview key={item.id} item={item} />
+                              ))}
+                            </div>
+                          ) : (
+                            <span style={{ color: "#98a2b3", fontSize: 12 }}>No email correspondence attached yet.</span>
+                          )}
+                          {enquiry.status !== "deleted" && enquiry.status !== "converted" ? (
+                            <form action={attachEnquiryCorrespondenceAction} style={{ margin: 0 }}>
+                              <input type="hidden" name="enquiryId" value={enquiry.id} />
+                              <EnquiryCorrespondenceDropzone />
+                            </form>
+                          ) : null}
                       </section>
                     </details>
 
@@ -200,7 +212,8 @@ export default async function EnquiriesPage({ searchParams }: PageProps) {
             })}
             {enquiries.length === 0 ? <p style={{ margin: 0, color: "#667085" }}>No enquiries yet.</p> : null}
           </div>
-        </section>
+          </section>
+        </div>
       </div>
     </div>
   );
