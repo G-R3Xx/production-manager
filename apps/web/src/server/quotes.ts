@@ -1095,7 +1095,16 @@ export async function updateQuoteLineForTenant(tenantId: string, quoteId: string
         unit_price = $7::numeric,
         line_total = ($6::numeric * $7::numeric),
         notes = $8::text,
-        configuration_snapshot = COALESCE($9::jsonb, ql.configuration_snapshot) || CASE
+        -- Editing must not relocate a line: the existing persisted section wins.
+        -- Section moves are performed only by assignQuoteLineSubJob.
+        configuration_snapshot = (
+          COALESCE($9::jsonb, ql.configuration_snapshot, '{}'::jsonb)
+          - 'subJobId' - 'quoteLineTitleOverride'
+        ) || CASE
+          WHEN ql.configuration_snapshot ? 'subJobId'
+          THEN jsonb_build_object('subJobId', ql.configuration_snapshot -> 'subJobId')
+          ELSE '{}'::jsonb
+        END || CASE
           WHEN ql.configuration_snapshot ? 'quoteLineTitleOverride'
           THEN jsonb_build_object('quoteLineTitleOverride', ql.configuration_snapshot -> 'quoteLineTitleOverride')
           ELSE '{}'::jsonb
@@ -1208,6 +1217,7 @@ async function saveQuoteLineBundleForPrincipal(
 
   const payload = {
     mainId: mainLineId,
+    isEditing: Boolean(input.lineId),
     mainProductId: input.productId ?? null,
     mainProductName: input.productName,
     mainOptionSummary: input.optionSummary ?? null,
@@ -1271,6 +1281,7 @@ async function saveQuoteLineBundleForPrincipal(
       SELECT *
       FROM jsonb_to_record($3::jsonb) AS p(
         "mainId" text,
+        "isEditing" boolean,
         "mainProductId" text,
         "mainProductName" text,
         "mainOptionSummary" text,
@@ -1302,7 +1313,9 @@ async function saveQuoteLineBundleForPrincipal(
       FROM sales.quote_drafts qd
       CROSS JOIN payload p
       WHERE qd.id = $2::uuid
-        AND (COALESCE(p."mainSnapshot" ->> 'subJobId', '') = '' OR EXISTS (
+        -- An existing line's stored section is authoritative; the client may
+        -- submit a stale/deleted section while editing, which must not block it.
+        AND (p."isEditing" OR COALESCE(p."mainSnapshot" ->> 'subJobId', '') = '' OR EXISTS (
           SELECT 1 FROM sales.quote_sub_jobs sj
           WHERE sj.quote_id = qd.id AND sj.id::text = p."mainSnapshot" ->> 'subJobId'
         ))
@@ -1366,7 +1379,16 @@ async function saveQuoteLineBundleForPrincipal(
         unit_price = EXCLUDED.unit_price,
         line_total = EXCLUDED.line_total,
         notes = EXCLUDED.notes,
-        configuration_snapshot = EXCLUDED.configuration_snapshot || CASE
+        -- Keep this quote line in its saved Sub Job even when a wizard edit
+        -- serialises a new snapshot without subJobId. Explicit Move uses a
+        -- different action and remains unaffected.
+        configuration_snapshot = (
+          EXCLUDED.configuration_snapshot - 'subJobId' - 'quoteLineTitleOverride'
+        ) || CASE
+          WHEN ql.configuration_snapshot ? 'subJobId'
+          THEN jsonb_build_object('subJobId', ql.configuration_snapshot -> 'subJobId')
+          ELSE '{}'::jsonb
+        END || CASE
           WHEN ql.configuration_snapshot ? 'quoteLineTitleOverride'
           THEN jsonb_build_object('quoteLineTitleOverride', ql.configuration_snapshot -> 'quoteLineTitleOverride')
           ELSE '{}'::jsonb
@@ -1377,7 +1399,7 @@ async function saveQuoteLineBundleForPrincipal(
         client_revision_excluded = false,
         updated_at = now()
       WHERE ql.quote_id = EXCLUDED.quote_id
-      RETURNING id
+      RETURNING id, configuration_snapshot
     ),
     dispatch_saved AS (
       INSERT INTO sales.quote_lines AS ql (
@@ -1395,10 +1417,17 @@ async function saveQuoteLineBundleForPrincipal(
         p."dispatchUnitPrice"::numeric,
         (p."dispatchQuantity"::numeric * p."dispatchUnitPrice"::numeric),
         p."dispatchNotes"::text,
-        COALESCE(p."dispatchSnapshot", '{}'::jsonb),
+        -- Derive the section from the persisted main line, not a possibly
+        -- stale browser snapshot; also handles newly added linked charges.
+        (COALESCE(p."dispatchSnapshot", '{}'::jsonb) - 'subJobId') || CASE
+          WHEN ms.configuration_snapshot ? 'subJobId'
+          THEN jsonb_build_object('subJobId', ms.configuration_snapshot -> 'subJobId')
+          ELSE '{}'::jsonb
+        END,
         'pending', NULL, NULL, false, now(), now()
       FROM payload p
       CROSS JOIN target_quote tq
+      CROSS JOIN main_saved ms
       WHERE p."dispatchEnabled" AND p."dispatchId" IS NOT NULL
       ON CONFLICT (id) DO UPDATE SET
         product_name = EXCLUDED.product_name,
@@ -1407,7 +1436,11 @@ async function saveQuoteLineBundleForPrincipal(
         unit_price = EXCLUDED.unit_price,
         line_total = EXCLUDED.line_total,
         notes = EXCLUDED.notes,
-        configuration_snapshot = EXCLUDED.configuration_snapshot,
+        configuration_snapshot = (EXCLUDED.configuration_snapshot - 'quoteLineTitleOverride') || CASE
+          WHEN ql.configuration_snapshot ? 'quoteLineTitleOverride'
+          THEN jsonb_build_object('quoteLineTitleOverride', ql.configuration_snapshot -> 'quoteLineTitleOverride')
+          ELSE '{}'::jsonb
+        END,
         client_response_status = 'pending',
         client_response_notes = NULL,
         client_responded_at = NULL,
@@ -1432,10 +1465,15 @@ async function saveQuoteLineBundleForPrincipal(
         p."accessUnitPrice"::numeric,
         (p."accessQuantity"::numeric * p."accessUnitPrice"::numeric),
         p."accessNotes"::text,
-        COALESCE(p."accessSnapshot", '{}'::jsonb),
+        (COALESCE(p."accessSnapshot", '{}'::jsonb) - 'subJobId') || CASE
+          WHEN ms.configuration_snapshot ? 'subJobId'
+          THEN jsonb_build_object('subJobId', ms.configuration_snapshot -> 'subJobId')
+          ELSE '{}'::jsonb
+        END,
         'pending', NULL, NULL, false, now(), now()
       FROM payload p
       CROSS JOIN target_quote tq
+      CROSS JOIN main_saved ms
       WHERE p."accessEnabled" AND p."accessId" IS NOT NULL
       ON CONFLICT (id) DO UPDATE SET
         product_name = EXCLUDED.product_name,
@@ -1444,7 +1482,11 @@ async function saveQuoteLineBundleForPrincipal(
         unit_price = EXCLUDED.unit_price,
         line_total = EXCLUDED.line_total,
         notes = EXCLUDED.notes,
-        configuration_snapshot = EXCLUDED.configuration_snapshot,
+        configuration_snapshot = (EXCLUDED.configuration_snapshot - 'quoteLineTitleOverride') || CASE
+          WHEN ql.configuration_snapshot ? 'quoteLineTitleOverride'
+          THEN jsonb_build_object('quoteLineTitleOverride', ql.configuration_snapshot -> 'quoteLineTitleOverride')
+          ELSE '{}'::jsonb
+        END,
         client_response_status = 'pending',
         client_response_notes = NULL,
         client_responded_at = NULL,

@@ -1374,45 +1374,47 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                       <strong style={{ color: "#1e40af", fontSize: 15 }}>{section.title}</strong>
                     </div> : null}
                     <QuoteLineVisibility lineId={line.id}>
-                    <details
-                      id={`quote-line-${line.id}`}
-                      data-production-manager-auto-refresh-protected="true"
-                      open={focusLine === line.id ? true : undefined}
-                      style={{
-                        border: focusLine === line.id ? "2px solid #fb923c" : "1px solid #dfe7f2",
-                        borderRadius: 18,
-                        padding: 0,
-                        background: focusLine === line.id ? "#fffaf5" : "#fbfdff",
-                        overflow: "hidden",
-                        scrollMarginTop: 18,
-                        boxShadow: focusLine === line.id ? "0 0 0 4px rgba(251,146,60,0.10)" : "none"
-                      }}
-                    >
-                      <summary style={{ listStyle: "none", cursor: "pointer", padding: 14 }}>
-                        <div style={{ display: "grid", gap: 10 }}>
-                          <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
-                            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                              <span style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}><QuoteLineLabelEditor
-                                quoteId={selectedQuote.id}
-                                lineId={line.id}
-                                productName={line.productName}
-                                initialOverride={quoteLineTitleOverride(line.configurationSnapshot)}
-                                canEdit={selectedQuote.status !== "deleted" && selectedQuote.status !== "accepted"}
-                              /></span>
-                              {surveyReference ? <span style={{ borderRadius: 999, padding: "4px 8px", fontSize: 11, fontWeight: 950, background: surveyNeedsConfig ? "#fff7ed" : "#eef4ff", color: surveyNeedsConfig ? "#c2410c" : "#3538cd" }}>{surveyNeedsConfig ? "Survey line · needs pricing" : "Survey linked"}</span> : null}
-                              {line.clientResponseStatus !== "pending" ? (
-                                <span style={{
-                                  borderRadius: 999,
-                                  padding: "4px 8px",
-                                  fontSize: 11,
-                                  fontWeight: 950,
-                                  background: line.clientResponseStatus === "approved" ? "#dcfae6" : line.clientResponseStatus === "cancelled" ? "#fee4e2" : "#ffedd5",
-                                  color: line.clientResponseStatus === "approved" ? "#067647" : line.clientResponseStatus === "cancelled" ? "#b42318" : "#c2410c"
-                                }}>
-                                  {line.clientResponseStatus === "approved" ? "Client approved" : line.clientResponseStatus === "cancelled" ? "Client cancelled" : "Changes requested"}
-                                </span>
-                              ) : null}
-                            </div>
+                    <div style={{
+                      border: focusLine === line.id ? "2px solid #fb923c" : "1px solid #dfe7f2",
+                      borderRadius: 18,
+                      background: focusLine === line.id ? "#fffaf5" : "#fbfdff",
+                      overflow: "hidden",
+                      scrollMarginTop: 18,
+                      boxShadow: focusLine === line.id ? "0 0 0 4px rgba(251,146,60,0.10)" : "none"
+                    }}>
+                      {/* Keep editable controls OUTSIDE native <summary>.
+                          Key presses in an input inside <summary> can toggle <details>. */}
+                      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", padding: "14px 14px 0" }}>
+                        <span style={{ textDecoration: line.clientResponseStatus === "cancelled" ? "line-through" : "none" }}><QuoteLineLabelEditor
+                          quoteId={selectedQuote.id}
+                          lineId={line.id}
+                          productName={line.productName}
+                          initialOverride={quoteLineTitleOverride(line.configurationSnapshot)}
+                          canEdit={selectedQuote.status !== "deleted" && selectedQuote.status !== "accepted"}
+                        /></span>
+                        {surveyReference ? <span style={{ borderRadius: 999, padding: "4px 8px", fontSize: 11, fontWeight: 950, background: surveyNeedsConfig ? "#fff7ed" : "#eef4ff", color: surveyNeedsConfig ? "#c2410c" : "#3538cd" }}>{surveyNeedsConfig ? "Survey line · needs pricing" : "Survey linked"}</span> : null}
+                        {line.clientResponseStatus !== "pending" ? (
+                          <span style={{
+                            borderRadius: 999,
+                            padding: "4px 8px",
+                            fontSize: 11,
+                            fontWeight: 950,
+                            background: line.clientResponseStatus === "approved" ? "#dcfae6" : line.clientResponseStatus === "cancelled" ? "#fee4e2" : "#ffedd5",
+                            color: line.clientResponseStatus === "approved" ? "#067647" : line.clientResponseStatus === "cancelled" ? "#b42318" : "#c2410c"
+                          }}>
+                            {line.clientResponseStatus === "approved" ? "Client approved" : line.clientResponseStatus === "cancelled" ? "Client cancelled" : "Changes requested"}
+                          </span>
+                        ) : null}
+                      </div>
+                      <details
+                        id={`quote-line-${line.id}`}
+                        data-production-manager-auto-refresh-protected="true"
+                        open={focusLine === line.id ? true : undefined}
+                        style={{ border: 0, background: "transparent", overflow: "hidden" }}
+                      >
+                        <summary style={{ listStyle: "none", cursor: "pointer", padding: "9px 14px 14px" }}>
+                          <div style={{ display: "grid", gap: 10 }}>
+                            <div style={{ display: "grid", gap: 4, minWidth: 260 }}>
                             {lineSummaryItems.length ? (
                               <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
                                 {lineSummaryItems.map((item, index) => (
@@ -1542,7 +1544,8 @@ export default async function QuotesPage({ searchParams }: PageProps) {
                         />
 
                       </div>
-                    </details>
+                      </details>
+                    </div>
                     </QuoteLineVisibility>
                     {showSectionTotal && section ? <div aria-label={`${section.title} sub quote total`} style={{ display: "flex", justifyContent: "flex-end", flexWrap: "wrap", gap: 12, alignItems: "center", padding: "11px 14px", background: "#f1f5f9", border: "1px solid #cbd5e1", borderRadius: 12, color: "#0f172a", fontSize: 13, fontVariantNumeric: "tabular-nums" }}>
                       <strong>{section.title} — Sub Job total</strong>

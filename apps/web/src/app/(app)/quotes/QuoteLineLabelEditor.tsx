@@ -50,14 +50,7 @@ export function QuoteLineLabelEditor({ quoteId, lineId, productName, initialOver
 
   return <span style={{ display: "inline-flex", gap: 7, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
     {editing ? (
-      <span onClick={(event) => {
-        // This editor lives inside a native <summary>. Stopping propagation alone does
-        // not cancel the browser's default open/close action for the parent <details>.
-        event.preventDefault();
-        event.stopPropagation();
-      }}
-        onKeyDown={(event) => event.stopPropagation()}
-        style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <span style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <input autoFocus aria-label={`Display name for ${productName}`} value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {

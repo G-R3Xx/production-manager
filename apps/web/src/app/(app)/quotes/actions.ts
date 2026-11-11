@@ -625,11 +625,14 @@ export async function saveQuoteLineFastAction(formData: FormData): Promise<FastQ
     const unitPrice = String(formData.get("unitPrice") ?? "0").trim();
     const configurationSnapshot = jsonObject(formData.get("configurationSnapshot"));
     const sectionValue = String(formData.get("subJobId") ?? "").trim();
-    if (sectionValue && !validUuidOrNull(sectionValue)) {
+    if (!editingLineId && sectionValue && !validUuidOrNull(sectionValue)) {
       return { ok: false, quoteId, lineId: editingLineId, message: "", error: "Invalid sub job selection.", serverElapsedMs: Date.now() - startedAt, authElapsedMs, dbElapsedMs };
     }
-    // Preserve section on edits and only use explicit, well-formed IDs.
-    if (sectionValue) configurationSnapshot.subJobId = sectionValue;
+    // Never let an edit's hidden form value move an existing line. The
+    // database retains its saved section, even when the edited builder had a
+    // stale or missing selection. Explicit Move uses a separate action.
+    if (editingLineId) delete configurationSnapshot.subJobId;
+    else if (sectionValue) configurationSnapshot.subJobId = sectionValue;
     else delete configurationSnapshot.subJobId;
 
     if (!validUuidOrNull(quoteId)) {

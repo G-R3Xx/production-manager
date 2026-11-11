@@ -36,8 +36,8 @@ const func = server.match(/export async function updateQuoteLineTitleOverrideFor
 assert.ok(func, 'Tenant-scoped label update exists');
 for(const part of ['qd.tenant_id = $1::uuid', 'ql.quote_id = $2::uuid', 'ql.id = $3::uuid', 'qd.status NOT IN', "jsonb_set(", "'quoteLineTitleOverride'", 'updated_at = now()']) assert.ok(func.includes(part), part);
 assert.doesNotMatch(func, /SET\s+product_name|SET\s+unit_price|line_total\s*=/i, 'Rename must not alter pricing or product identity');
-assert.ok(server.includes('configuration_snapshot = EXCLUDED.configuration_snapshot || CASE'), 'Bundle re-edit retains overridden title');
-assert.ok(server.includes('configuration_snapshot = COALESCE($9::jsonb, ql.configuration_snapshot) || CASE'), 'Direct line re-edit retains overridden title');
+assert.match(server, /EXCLUDED\.configuration_snapshot - 'subJobId' - 'quoteLineTitleOverride'[\s\S]*?WHEN ql\.configuration_snapshot \? 'quoteLineTitleOverride'/, 'Bundle re-edit retains overridden title and section');
+assert.match(server, /COALESCE\(\$9::jsonb, ql\.configuration_snapshot, '\{\}'::jsonb\)[\s\S]*?- 'subJobId' - 'quoteLineTitleOverride'[\s\S]*?WHEN ql\.configuration_snapshot \? 'quoteLineTitleOverride'/, 'Direct line re-edit retains overridden title and section');
 
 const api = 'apps/web/src/app/api/quotes/line/title/route.ts';
 const ui = 'apps/web/src/app/(app)/quotes/QuoteLineLabelEditor.tsx';
