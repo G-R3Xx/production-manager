@@ -50,7 +50,12 @@ export function QuoteLineLabelEditor({ quoteId, lineId, productName, initialOver
 
   return <span style={{ display: "inline-flex", gap: 7, flexWrap: "wrap", alignItems: "center", minWidth: 0 }}>
     {editing ? (
-      <span onClick={(event) => event.stopPropagation()}
+      <span onClick={(event) => {
+        // This editor lives inside a native <summary>. Stopping propagation alone does
+        // not cancel the browser's default open/close action for the parent <details>.
+        event.preventDefault();
+        event.stopPropagation();
+      }}
         onKeyDown={(event) => event.stopPropagation()}
         style={{ display: "inline-flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
         <input autoFocus aria-label={`Display name for ${productName}`} value={draft}
@@ -61,10 +66,10 @@ export function QuoteLineLabelEditor({ quoteId, lineId, productName, initialOver
           }}
           maxLength={QUOTE_LINE_TITLE_MAX_LENGTH}
           style={{ minHeight: 32, width: "min(350px, 75vw)", border: "1px solid #93c5fd", borderRadius: 8, padding: "5px 9px" }} />
-        <button type="button" onClick={() => void save(draft)} disabled={saving} style={{ minHeight: 32, borderRadius: 8, padding: "4px 9px", border: 0, background: "#155eef", color: "#fff", fontWeight: 750 }}>{saving ? "Saving…" : "Save name"}</button>
-        <button type="button" disabled={saving} onClick={() => { setEditing(false); setDraft(override ?? productName); setError(""); }}
+        <button type="button" onClick={(event) => { event.preventDefault(); event.stopPropagation(); void save(draft); }} disabled={saving} style={{ minHeight: 32, borderRadius: 8, padding: "4px 9px", border: 0, background: "#155eef", color: "#fff", fontWeight: 750 }}>{saving ? "Saving…" : "Save name"}</button>
+        <button type="button" disabled={saving} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setEditing(false); setDraft(override ?? productName); setError(""); }}
           style={{ minHeight: 32, borderRadius: 8, padding: "4px 9px", border: "1px solid #cbd5e1", background: "#fff" }}>Cancel</button>
-        {override ? <button type="button" disabled={saving} onClick={() => void save("")}
+        {override ? <button type="button" disabled={saving} onClick={(event) => { event.preventDefault(); event.stopPropagation(); void save(""); }}
           style={{ minHeight: 32, borderRadius: 8, padding: "4px 9px", border: "1px solid #cbd5e1", background: "#fff" }}>Reset</button> : null}
       </span>
     ) : <>
