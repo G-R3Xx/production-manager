@@ -15,7 +15,7 @@ type AppLayoutProps = {
 
 export const preferredRegion = "syd1";
 
-const APP_VERSION = "V26.11.11.03";
+const APP_VERSION = "V26.11.11.04";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", emoji: "⌂" },
